@@ -381,12 +381,12 @@ where
         ret.column_mut(col).copy_from(tmp_nout);
         for (j, s_j) in tmp_nsens.iter().enumerate() {
             let mut col_v = ret_sens[j].column_mut(col);
-            tmp_nparams.set_index(j, Eqn::T::one());
+            tmp_nparams.set_index(j, 0, Eqn::T::one());
             out.jac_mul_inplace(tmp_nstates, t, s_j, tmp_nout);
             col_v.copy_from(&*tmp_nout);
             out.sens_mul_inplace(tmp_nstates, t, tmp_nparams, tmp_nout);
             col_v.add_assign(&*tmp_nout);
-            tmp_nparams.set_index(j, Eqn::T::zero());
+            tmp_nparams.set_index(j, 0, Eqn::T::zero());
         }
     } else {
         ret.column_mut(col).copy_from(tmp_nstates);
@@ -414,12 +414,12 @@ pub(crate) fn write_state_sens_out<Eqn>(
                 break;
             }
             let mut col_v = ret_sens[j].column_mut(col);
-            tmp_nparams.set_index(j, Eqn::T::one());
+            tmp_nparams.set_index(j, 0, Eqn::T::one());
             out.jac_mul_inplace(state.y, state.t, state_sens, tmp_nout);
             col_v.copy_from(&*tmp_nout);
             out.sens_mul_inplace(state.y, state.t, tmp_nparams, tmp_nout);
             col_v.add_assign(&*tmp_nout);
-            tmp_nparams.set_index(j, Eqn::T::zero());
+            tmp_nparams.set_index(j, 0, Eqn::T::zero());
         }
     } else {
         for (sens, state_sens) in ret_sens.iter_mut().zip(state.s.iter()) {

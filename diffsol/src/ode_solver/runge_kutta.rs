@@ -128,7 +128,7 @@ where
         for i in 0..s {
             let mut row = Vec::with_capacity(i);
             for j in 0..i {
-                row.push(tableau.a().get_index(i, j));
+                row.push(tableau.a().get_index(i, j, 0));
             }
             a_rows.push(Eqn::V::from_vec(row, ctx.clone()));
         }
@@ -235,14 +235,14 @@ where
         let s = tableau.s();
         for i in 0..s {
             for j in i..s {
-                if tableau.a().get_index(i, j) != Eqn::T::zero() {
+                if tableau.a().get_index(i, j, 0) != Eqn::T::zero() {
                     return Err(ode_solver_error!(
                         InvalidTableau,
                         format!(
                             "Invalid tableau, expected a(i, j) = 0 for i >= j, but found a({}, {}) = {}",
                             i,
                             j,
-                            tableau.a().get_index(i, j)
+                            tableau.a().get_index(i, j, 0)
                         )
                     ));
                 }
@@ -251,7 +251,7 @@ where
 
         // check last row of a is the same as b
         for i in 0..s {
-            if tableau.a().get_index(s - 1, i) != tableau.b().get_index(i) {
+            if tableau.a().get_index(s - 1, i, 0) != tableau.b().get_index(i, 0) {
                 return Err(ode_solver_error!(
                     InvalidTableau,
                     "Invalid tableau, expected a(s-1, i) = b(i)"
@@ -260,7 +260,7 @@ where
         }
 
         // check that last c is 1
-        if tableau.c().get_index(s - 1) != Eqn::T::one() {
+        if tableau.c().get_index(s - 1, 0) != Eqn::T::one() {
             return Err(ode_solver_error!(
                 InvalidTableau,
                 "Invalid tableau, expected c(s-1) = 1"
@@ -268,7 +268,7 @@ where
         }
 
         // check that first c is 0
-        if tableau.c().get_index(0) != Eqn::T::zero() {
+        if tableau.c().get_index(0, 0) != Eqn::T::zero() {
             return Err(ode_solver_error!(
                 InvalidTableau,
                 "Invalid tableau, expected c(0) = 0"
@@ -278,7 +278,7 @@ where
     }
 
     pub(crate) fn skip_first_stage(&self) -> bool {
-        self.tableau.a().get_index(0, 0) == Eqn::T::zero()
+        self.tableau.a().get_index(0, 0, 0) == Eqn::T::zero()
     }
 
     pub(crate) fn check_sdirk_rk(tableau: &Tableau<M>) -> Result<(), DiffsolError> {
@@ -286,7 +286,7 @@ where
         let s = tableau.s();
         for i in 0..s {
             for j in (i + 1)..s {
-                if tableau.a().get_index(i, j) != Eqn::T::zero() {
+                if tableau.a().get_index(i, j, 0) != Eqn::T::zero() {
                     return Err(ode_solver_error!(
                         InvalidTableau,
                         "Invalid tableau, expected a(i, j) = 0 for i > j"
@@ -294,10 +294,10 @@ where
                 }
             }
         }
-        let gamma = tableau.a().get_index(1, 1);
+        let gamma = tableau.a().get_index(1, 1, 0);
         //check that for i = 1..s-1, a(i, i) = gamma
         for i in 1..tableau.s() {
-            if tableau.a().get_index(i, i) != gamma {
+            if tableau.a().get_index(i, i, 0) != gamma {
                 return Err(ode_solver_error!(
                     InvalidTableau,
                     format!("Invalid tableau, expected a(i, i) = gamma = {gamma} for i = 1..s-1")
@@ -308,17 +308,17 @@ where
         // if a(0, 0) = 0, then we're a ESDIRK method
         // otherwise, error
         let zero = Eqn::T::zero();
-        if tableau.a().get_index(0, 0) != zero && tableau.a().get_index(0, 0) != gamma {
+        if tableau.a().get_index(0, 0, 0) != zero && tableau.a().get_index(0, 0, 0) != gamma {
             return Err(ode_solver_error!(
                 InvalidTableau,
                 "Invalid tableau, expected a(0, 0) = 0 or a(0, 0) = gamma"
             ));
         }
-        let is_sdirk = tableau.a().get_index(0, 0) == gamma;
+        let is_sdirk = tableau.a().get_index(0, 0, 0) == gamma;
 
         // check last row of a is the same as b
         for i in 0..s {
-            if tableau.a().get_index(s - 1, i) != tableau.b().get_index(i) {
+            if tableau.a().get_index(s - 1, i, 0) != tableau.b().get_index(i, 0) {
                 return Err(ode_solver_error!(
                     InvalidTableau,
                     "Invalid tableau, expected a(s-1, i) = b(i)"
@@ -327,7 +327,7 @@ where
         }
 
         // check that last c is 1
-        if tableau.c().get_index(s - 1) != Eqn::T::one() {
+        if tableau.c().get_index(s - 1, 0) != Eqn::T::one() {
             return Err(ode_solver_error!(
                 InvalidTableau,
                 "Invalid tableau, expected c(s-1) = 1"
@@ -335,7 +335,7 @@ where
         }
 
         // check that the first c is 0 for esdirk methods
-        if !is_sdirk && tableau.c().get_index(0) != Eqn::T::zero() {
+        if !is_sdirk && tableau.c().get_index(0, 0) != Eqn::T::zero() {
             return Err(ode_solver_error!(
                 InvalidTableau,
                 "Invalid tableau, expected c(0) = 0 for esdirk methods"
@@ -515,7 +515,7 @@ where
         h: Eqn::T,
         augmented_eqn: Option<&mut impl AugmentedOdeEquations<Eqn>>,
     ) {
-        let t = self.state.t + self.tableau.c().get_index(i) * h;
+        let t = self.state.t + self.tableau.c().get_index(i, 0) * h;
 
         // main equation
         let integrate_main_eqn = augmented_eqn
@@ -595,8 +595,8 @@ where
         } else if i == 1 {
             hdy.copy_from_view(&diff.column(i - 1));
         } else {
-            let c = (tableau.c().get_index(i) - tableau.c().get_index(i - 2))
-                / (tableau.c().get_index(i - 1) - tableau.c().get_index(i - 2));
+            let c = (tableau.c().get_index(i, 0) - tableau.c().get_index(i - 2, 0))
+                / (tableau.c().get_index(i - 1, 0) - tableau.c().get_index(i - 2, 0));
             // dy = c1  + c * (c1 - c2)
             hdy.copy_from_view(&diff.column(i - 1));
             hdy.axpy_v(-c, &diff.column(i - 2), Eqn::T::one() + c);
@@ -616,7 +616,7 @@ where
         Eqn: OdeEquationsImplicit,
         AugEqn: AugmentedOdeEquationsImplicit<Eqn>,
     {
-        let t = self.state.t + self.tableau.c().get_index(i) * h;
+        let t = self.state.t + self.tableau.c().get_index(i, 0) * h;
         // main equation
         if let Some(op) = op {
             op.set_phi(
@@ -1320,7 +1320,7 @@ mod tests {
     fn make_invalid_explicit_tableau() -> Tableau<M> {
         let base = Tableau::<M>::tsit45(Default::default());
         let mut a = base.a().clone();
-        a.set_index(0, 0, 1.0);
+        a.set_index(0, 0, 0, 1.0);
         Tableau::new(
             a,
             base.b().clone(),
@@ -1334,7 +1334,7 @@ mod tests {
     fn make_invalid_sdirk_tableau() -> Tableau<M> {
         let base = Tableau::<M>::tr_bdf2(Default::default());
         let mut a = base.a().clone();
-        a.set_index(0, 0, 0.25);
+        a.set_index(0, 0, 0, 0.25);
         Tableau::new(
             a,
             base.b().clone(),

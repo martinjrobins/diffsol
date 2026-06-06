@@ -662,7 +662,7 @@ where
         self.problem
             .sens_atol
             .as_ref()
-            .and_then(|value| (value.len() > 0).then(|| value.get_index(0).to_f64().unwrap()))
+            .and_then(|value| (value.len() > 0).then(|| value.get_index(0, 0).to_f64().unwrap()))
     }
 
     fn set_out_rtol(&mut self, out_rtol: Option<f64>) {
@@ -688,7 +688,7 @@ where
         self.problem
             .out_atol
             .as_ref()
-            .and_then(|value| (value.len() > 0).then(|| value.get_index(0).to_f64().unwrap()))
+            .and_then(|value| (value.len() > 0).then(|| value.get_index(0, 0).to_f64().unwrap()))
     }
 
     fn set_param_rtol(&mut self, param_rtol: Option<f64>) {
@@ -713,7 +713,7 @@ where
         self.problem
             .param_atol
             .as_ref()
-            .and_then(|value| (value.len() > 0).then(|| value.get_index(0).to_f64().unwrap()))
+            .and_then(|value| (value.len() > 0).then(|| value.get_index(0, 0).to_f64().unwrap()))
     }
 
     generate_ic_option_accessors! {
@@ -1343,7 +1343,7 @@ mod tests {
         solve.setup_problem(&[2.0]).unwrap();
         let mut params = solve.problem.context().vector_zeros(1);
         solve.problem.eqn.get_params(&mut params);
-        assert_eq!(params.get_index(0), 2.0);
+        assert_eq!(params.get_index(0, 0), 2.0);
     }
 
     #[cfg(feature = "diffsl-llvm")]
@@ -1356,6 +1356,6 @@ mod tests {
         solve.setup_problem(&[2.0]).unwrap();
         let mut params = solve.problem.context().vector_zeros(1);
         solve.problem.eqn.get_params(&mut params);
-        assert_eq!(params.get_index(0), 2.0);
+        assert_eq!(params.get_index(0, 0), 2.0);
     }
 }

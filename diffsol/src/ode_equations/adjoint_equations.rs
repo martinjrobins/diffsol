@@ -51,7 +51,7 @@ where
         let x = <Eqn::V as Vector>::zeros(eqn.rhs().nstates(), ctx.clone());
         let mut col = <Eqn::V as Vector>::zeros(max_index, ctx.clone());
         let index = 0;
-        col.set_index(0, Eqn::T::one());
+        col.set_index(0, 0, Eqn::T::one());
         Self {
             eqn,
             t0,
@@ -133,9 +133,9 @@ where
     }
 
     pub fn set_index(&mut self, index: usize) {
-        self.col.set_index(self.index, Eqn::T::zero());
+        self.col.set_index(self.index, 0, Eqn::T::zero());
         self.index = index;
-        self.col.set_index(self.index, Eqn::T::one());
+        self.col.set_index(self.index, 0, Eqn::T::one());
     }
 }
 
@@ -883,8 +883,8 @@ mod tests {
         let adjoint = adj_eqn.rhs.jacobian(&state.y, state.t);
         assert_eq!(adjoint.nrows(), 2);
         assert_eq!(adjoint.ncols(), 2);
-        assert_eq!(adjoint.get_index(0, 0), 0.1);
-        assert_eq!(adjoint.get_index(1, 1), 0.1);
+        assert_eq!(adjoint.get_index(0, 0, 0), 0.1);
+        assert_eq!(adjoint.get_index(1, 1, 0), 0.1);
 
         // g_x = |1 2|
         //       |3 4|

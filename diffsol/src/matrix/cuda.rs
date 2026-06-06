@@ -673,7 +673,7 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
     }
 
     fn get_index(&self, i: IndexType, j: IndexType) -> Self::T {
-        self.get_index(i, j)
+        self.get_index(i, j, 0)
     }
 
     fn gemm(&mut self, alpha: Self::T, a: &Self, b: &Self, beta: Self::T) {
@@ -718,7 +718,7 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
     }
 
     fn set_index(&mut self, i: IndexType, j: IndexType, value: Self::T) {
-        self.set_index(i, j, value);
+        self.set_index(i, j, 0, value);
     }
 
     fn column(&self, i: usize) -> <Self::V as Vector>::View<'_> {
@@ -980,16 +980,16 @@ mod tests {
         let mat = CudaMat::from_vec(2, 2, data.clone(), ctx.clone());
         assert_eq!(mat.nrows(), 2);
         assert_eq!(mat.ncols(), 2);
-        assert_eq!(mat.get_index(0, 0), 1.0);
-        assert_eq!(mat.get_index(1, 1), 4.0);
+        assert_eq!(mat.get_index(0, 0, 0), 1.0);
+        assert_eq!(mat.get_index(1, 1, 0), 4.0);
     }
 
     #[test]
     fn test_cudamat_set_index() {
         let ctx = CudaContext::default();
         let mut mat = CudaMat::zeros(2, 2, ctx.clone());
-        mat.set_index(0, 0, 5.0);
-        assert_eq!(mat.get_index(0, 0), 5.0);
+        mat.set_index(0, 0, 0, 5.0);
+        assert_eq!(mat.get_index(0, 0, 0), 5.0);
     }
 
     #[test]
@@ -1022,10 +1022,10 @@ mod tests {
         // Check the result
         // [ 1, 3 ] *  [ 5, 7 ] = [ 23, 31 ]
         // [ 2, 4 ]    [ 6, 8 ]   [ 34, 46 ]
-        assert_eq!(c.get_index(0, 0), 23.0);
-        assert_eq!(c.get_index(1, 1), 46.0);
-        assert_eq!(c.get_index(0, 1), 31.0);
-        assert_eq!(c.get_index(1, 0), 34.0);
+        assert_eq!(c.get_index(0, 0, 0), 23.0);
+        assert_eq!(c.get_index(1, 1, 0), 46.0);
+        assert_eq!(c.get_index(0, 1, 0), 31.0);
+        assert_eq!(c.get_index(1, 0, 0), 34.0);
     }
 
     #[test]
@@ -1033,8 +1033,8 @@ mod tests {
         let ctx = CudaContext::default();
         let triplets = vec![(0, 0, 1.0), (1, 1, 2.0)];
         let mat = CudaMat::try_from_triplets(2, 2, triplets, ctx.clone()).unwrap();
-        assert_eq!(mat.get_index(0, 0), 1.0);
-        assert_eq!(mat.get_index(1, 1), 2.0);
+        assert_eq!(mat.get_index(0, 0, 0), 1.0);
+        assert_eq!(mat.get_index(1, 1, 0), 2.0);
     }
 
     #[test]
@@ -1047,10 +1047,10 @@ mod tests {
         // Check the result
         // [ 5, 7 ] + 2 * [ 1, 1 ] = [ 7, 9 ]
         // [ 6, 8 ]       [ 1, 1 ] = [ 8, 10 ]
-        assert_eq!(mat.get_index(0, 0), 7.0);
-        assert_eq!(mat.get_index(1, 1), 10.0);
-        assert_eq!(mat.get_index(0, 1), 9.0);
-        assert_eq!(mat.get_index(1, 0), 8.0);
+        assert_eq!(mat.get_index(0, 0, 0), 7.0);
+        assert_eq!(mat.get_index(1, 1, 0), 10.0);
+        assert_eq!(mat.get_index(0, 1, 0), 9.0);
+        assert_eq!(mat.get_index(1, 0, 0), 8.0);
     }
 
     #[test]
@@ -1068,8 +1068,8 @@ mod tests {
         let ctx = CudaContext::default();
         let mat = CudaMat::from_vec(2, 2, vec![1.0, 2.0, 3.0, 4.0], ctx.clone());
         let scaled_mat = mat * Scale(2.0);
-        assert_eq!(scaled_mat.get_index(0, 0), 2.0);
-        assert_eq!(scaled_mat.get_index(1, 1), 8.0);
+        assert_eq!(scaled_mat.get_index(0, 0, 0), 2.0);
+        assert_eq!(scaled_mat.get_index(1, 1, 0), 8.0);
     }
 
     #[test]
@@ -1078,8 +1078,8 @@ mod tests {
         let mut mat = CudaMat::from_vec(2, 2, vec![1.0, 2.0, 3.0, 4.0], ctx.clone());
         let mut mat_mut = mat.columns_mut(0, 2);
         mat_mut *= Scale(2.0);
-        assert_eq!(mat.get_index(0, 0), 2.0);
-        assert_eq!(mat.get_index(1, 1), 8.0);
+        assert_eq!(mat.get_index(0, 0, 0), 2.0);
+        assert_eq!(mat.get_index(1, 1, 0), 8.0);
     }
 
     #[test]
@@ -1088,8 +1088,8 @@ mod tests {
         let mat1 = CudaMat::from_vec(2, 2, vec![1.0, 2.0, 3.0, 4.0], ctx.clone());
         let mat2 = CudaMat::from_vec(2, 2, vec![5.0, 6.0, 7.0, 8.0], ctx.clone());
         let result = mat1 + &mat2;
-        assert_eq!(result.get_index(0, 0), 6.0);
-        assert_eq!(result.get_index(1, 1), 12.0);
+        assert_eq!(result.get_index(0, 0, 0), 6.0);
+        assert_eq!(result.get_index(1, 1, 0), 12.0);
     }
 
     #[test]
@@ -1098,8 +1098,8 @@ mod tests {
         let mut mat1 = CudaMat::from_vec(2, 2, vec![1.0, 2.0, 3.0, 4.0], ctx.clone());
         let mat2 = CudaMat::from_vec(2, 2, vec![5.0, 6.0, 7.0, 8.0], ctx.clone());
         mat1 += &mat2;
-        assert_eq!(mat1.get_index(0, 0), 6.0);
-        assert_eq!(mat1.get_index(1, 1), 12.0);
+        assert_eq!(mat1.get_index(0, 0, 0), 6.0);
+        assert_eq!(mat1.get_index(1, 1, 0), 12.0);
     }
 
     #[test]
@@ -1108,8 +1108,8 @@ mod tests {
         let mat1 = CudaMat::from_vec(2, 2, vec![5.0, 6.0, 7.0, 8.0], ctx.clone());
         let mat2 = CudaMat::from_vec(2, 2, vec![1.0, 2.0, 3.0, 4.0], ctx.clone());
         let result = mat1 - &mat2;
-        assert_eq!(result.get_index(0, 0), 4.0);
-        assert_eq!(result.get_index(1, 1), 4.0);
+        assert_eq!(result.get_index(0, 0, 0), 4.0);
+        assert_eq!(result.get_index(1, 1, 0), 4.0);
     }
 
     #[test]
@@ -1118,8 +1118,8 @@ mod tests {
         let mut mat1 = CudaMat::from_vec(2, 2, vec![5.0, 6.0, 7.0, 8.0], ctx.clone());
         let mat2 = CudaMat::from_vec(2, 2, vec![1.0, 2.0, 3.0, 4.0], ctx.clone());
         mat1 -= &mat2;
-        assert_eq!(mat1.get_index(0, 0), 4.0);
-        assert_eq!(mat1.get_index(1, 1), 4.0);
+        assert_eq!(mat1.get_index(0, 0, 0), 4.0);
+        assert_eq!(mat1.get_index(1, 1, 0), 4.0);
     }
 
     #[test]
@@ -1128,8 +1128,8 @@ mod tests {
         let mat1 = CudaMat::from_vec(2, 2, vec![1.0, 2.0, 3.0, 4.0], ctx.clone());
         let mut mat2 = CudaMat::zeros(2, 2, ctx.clone());
         mat2.copy_from(&mat1);
-        assert_eq!(mat2.get_index(0, 0), 1.0);
-        assert_eq!(mat2.get_index(1, 1), 4.0);
+        assert_eq!(mat2.get_index(0, 0, 0), 1.0);
+        assert_eq!(mat2.get_index(1, 1, 0), 4.0);
     }
 
     #[test]
@@ -1147,10 +1147,10 @@ mod tests {
         let mut mat2 = CudaMat::zeros(2, 2, ctx.clone());
         let indices = CudaIndex::from_vec(vec![0, 1, 3, 4], ctx.clone());
         mat2.gather(&mat1, &indices);
-        assert_eq!(mat2.get_index(0, 0), 1.0);
-        assert_eq!(mat2.get_index(0, 1), 4.0);
-        assert_eq!(mat2.get_index(1, 1), 5.0);
-        assert_eq!(mat2.get_index(1, 0), 2.0);
+        assert_eq!(mat2.get_index(0, 0, 0), 1.0);
+        assert_eq!(mat2.get_index(0, 1, 0), 4.0);
+        assert_eq!(mat2.get_index(1, 1, 0), 5.0);
+        assert_eq!(mat2.get_index(1, 0, 0), 2.0);
     }
 
     #[test]
@@ -1161,8 +1161,8 @@ mod tests {
         let src_indices = CudaIndex::from_vec(vec![0, 1], ctx.clone());
         let data = CudaVec::from_vec(vec![5.0, 6.0], ctx.clone());
         mat.set_data_with_indices(&dst_indices, &src_indices, &data);
-        assert_eq!(mat.get_index(0, 0), 5.0);
-        assert_eq!(mat.get_index(1, 1), 6.0);
+        assert_eq!(mat.get_index(0, 0, 0), 5.0);
+        assert_eq!(mat.get_index(1, 1, 0), 6.0);
     }
 
     #[test]
@@ -1180,8 +1180,8 @@ mod tests {
         let mut mat = CudaMat::zeros(2, 2, ctx.clone());
         let vec = CudaVec::from_vec(vec![5.0, 6.0], ctx.clone());
         mat.set_column(1, &vec);
-        assert_eq!(mat.get_index(0, 1), 5.0);
-        assert_eq!(mat.get_index(1, 1), 6.0);
+        assert_eq!(mat.get_index(0, 1, 0), 5.0);
+        assert_eq!(mat.get_index(1, 1, 0), 6.0);
     }
 
     #[test]
@@ -1194,22 +1194,22 @@ mod tests {
         let mat_copy = mat_ref.into_owned();
         assert_eq!(mat_copy.nrows(), 2);
         assert_eq!(mat_copy.ncols(), 2);
-        assert_eq!(mat_copy.get_index(0, 0), 1.0);
-        assert_eq!(mat_copy.get_index(1, 1), 4.0);
+        assert_eq!(mat_copy.get_index(0, 0, 0), 1.0);
+        assert_eq!(mat_copy.get_index(1, 1, 0), 4.0);
         let mat_ref = mat.columns_mut(0, 2);
         assert_eq!(mat_ref.nrows(), 2);
         assert_eq!(mat_ref.ncols(), 2);
         let mat_copy = mat_ref.into_owned();
         assert_eq!(mat_copy.nrows(), 2);
         assert_eq!(mat_copy.ncols(), 2);
-        assert_eq!(mat_copy.get_index(0, 0), 1.0);
-        assert_eq!(mat_copy.get_index(1, 1), 4.0);
+        assert_eq!(mat_copy.get_index(0, 0, 0), 1.0);
+        assert_eq!(mat_copy.get_index(1, 1, 0), 4.0);
 
         // Check that the original matrix is unchanged
         assert_eq!(mat.nrows(), 2);
         assert_eq!(mat.ncols(), 2);
-        assert_eq!(mat.get_index(0, 0), 1.0);
-        assert_eq!(mat.get_index(1, 1), 4.0);
+        assert_eq!(mat.get_index(0, 0, 0), 1.0);
+        assert_eq!(mat.get_index(1, 1, 0), 4.0);
     }
 
     #[test]
@@ -1225,14 +1225,14 @@ mod tests {
         assert_eq!(cols.nrows(), 2);
         assert_eq!(cols.ncols(), 2);
         let cols = cols.into_owned();
-        assert_eq!(cols.get_index(0, 0), 3.0);
-        assert_eq!(cols.get_index(1, 1), 6.0);
+        assert_eq!(cols.get_index(0, 0, 0), 3.0);
+        assert_eq!(cols.get_index(1, 1, 0), 6.0);
         let cols = mat.columns_mut(1, 3);
         assert_eq!(cols.nrows(), 2);
         assert_eq!(cols.ncols(), 2);
         let cols = cols.into_owned();
-        assert_eq!(cols.get_index(0, 0), 3.0);
-        assert_eq!(cols.get_index(1, 1), 6.0);
+        assert_eq!(cols.get_index(0, 0, 0), 3.0);
+        assert_eq!(cols.get_index(1, 1, 0), 6.0);
     }
 
     #[test]
@@ -1242,17 +1242,17 @@ mod tests {
         mat.resize_cols(3);
         assert_eq!(mat.nrows(), 2);
         assert_eq!(mat.ncols(), 3);
-        assert_eq!(mat.get_index(0, 0), 1.0);
-        assert_eq!(mat.get_index(0, 1), 2.0);
-        assert_eq!(mat.get_index(1, 0), 3.0);
-        assert_eq!(mat.get_index(1, 1), 4.0);
-        assert_eq!(mat.get_index(0, 2), 0.0);
-        assert_eq!(mat.get_index(1, 2), 0.0);
+        assert_eq!(mat.get_index(0, 0, 0), 1.0);
+        assert_eq!(mat.get_index(0, 1, 0), 2.0);
+        assert_eq!(mat.get_index(1, 0, 0), 3.0);
+        assert_eq!(mat.get_index(1, 1, 0), 4.0);
+        assert_eq!(mat.get_index(0, 2, 0), 0.0);
+        assert_eq!(mat.get_index(1, 2, 0), 0.0);
 
         mat.resize_cols(1);
         assert_eq!(mat.nrows(), 2);
         assert_eq!(mat.ncols(), 1);
-        assert_eq!(mat.get_index(0, 0), 1.0);
-        assert_eq!(mat.get_index(1, 0), 3.0);
+        assert_eq!(mat.get_index(0, 0, 0), 1.0);
+        assert_eq!(mat.get_index(1, 0, 0), 3.0);
     }
 }

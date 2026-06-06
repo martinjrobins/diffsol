@@ -23,34 +23,34 @@ pub fn logistic_problem_adjoint_no_out<M: MatrixHost + 'static>() -> (
         .p([r, k, y0])
         .rhs_adjoint_implicit(
             |x: &M::V, p: &M::V, _t: M::T, y: &mut M::V| {
-                let r = p.get_index(0);
-                let k = p.get_index(1);
-                let u = x.get_index(0);
+                let r = p.get_index(0, 0);
+                let k = p.get_index(1, 0);
+                let u = x.get_index(0, 0);
                 y[0] = r * u * (M::T::one() - u / k);
             },
             |x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V| {
-                let r = p.get_index(0);
-                let k = p.get_index(1);
-                let u = x.get_index(0);
+                let r = p.get_index(0, 0);
+                let k = p.get_index(1, 0);
+                let u = x.get_index(0, 0);
                 y[0] = r * (M::T::one() - M::T::from_f64(2.0).unwrap() * u / k) * v[0];
             },
             |x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V| {
-                let r = p.get_index(0);
-                let k = p.get_index(1);
-                let u = x.get_index(0);
+                let r = p.get_index(0, 0);
+                let k = p.get_index(1, 0);
+                let u = x.get_index(0, 0);
                 y[0] = -r * (M::T::one() - M::T::from_f64(2.0).unwrap() * u / k) * v[0];
             },
             |x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V| {
-                let r = p.get_index(0);
-                let k = p.get_index(1);
-                let u = x.get_index(0);
+                let r = p.get_index(0, 0);
+                let k = p.get_index(1, 0);
+                let u = x.get_index(0, 0);
                 y[0] = -u * (M::T::one() - u / k) * v[0];
                 y[1] = -(r * u * u / (k * k) * v[0]);
                 y[2] = M::T::zero();
             },
         )
         .init_adjoint(
-            |p: &M::V, _t: M::T, y: &mut M::V| y[0] = p.get_index(2),
+            |p: &M::V, _t: M::T, y: &mut M::V| y[0] = p.get_index(2, 0),
             |_p: &M::V, _t: M::T, v: &M::V, y: &mut M::V| {
                 y[0] = M::T::zero();
                 y[1] = M::T::zero();

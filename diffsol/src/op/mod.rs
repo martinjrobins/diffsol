@@ -313,7 +313,7 @@ mod tests {
     impl ForwardingOp {
         fn new() -> Self {
             Self {
-                ctx: NalgebraContext,
+                ctx: NalgebraContext::default(),
                 stats: RefCell::new(OpStatistics::new()),
             }
         }
@@ -436,14 +436,14 @@ mod tests {
     #[test]
     fn parameterised_op_and_reference_forwarding_delegate_to_inner_operator() {
         let op = ForwardingOp::new();
-        let p = crate::NalgebraVec::from_vec(vec![1.0, 2.0], NalgebraContext);
+        let p = crate::NalgebraVec::from_vec(vec![1.0, 2.0], NalgebraContext::default());
         let pop = ParameterisedOp::new(&op, &p);
         assert_eq!(pop.nstates(), 2);
         assert_eq!(pop.nout(), 2);
         assert_eq!(pop.nparams(), 2);
 
-        let x = crate::NalgebraVec::from_vec(vec![3.0, 4.0], NalgebraContext);
-        let mut y = crate::NalgebraVec::zeros(2, NalgebraContext);
+        let x = crate::NalgebraVec::from_vec(vec![3.0, 4.0], NalgebraContext::default());
+        let mut y = crate::NalgebraVec::zeros(2, NalgebraContext::default());
         NonLinearOp::call_inplace(&&op, &x, 0.0, &mut y);
         y.assert_eq_st(&x, 1e-12);
 
@@ -454,10 +454,10 @@ mod tests {
         y.assert_eq_st(&x, 1e-12);
 
         NonLinearOpSens::sens_mul_inplace(&&op, &x, 0.0, &x, &mut y);
-        y.assert_eq_st(&crate::NalgebraVec::zeros(2, NalgebraContext), 1e-12);
+        y.assert_eq_st(&crate::NalgebraVec::zeros(2, NalgebraContext::default()), 1e-12);
 
         NonLinearOpSensAdjoint::sens_transpose_mul_inplace(&&op, &x, 0.0, &x, &mut y);
-        y.assert_eq_st(&crate::NalgebraVec::zeros(2, NalgebraContext), 1e-12);
+        y.assert_eq_st(&crate::NalgebraVec::zeros(2, NalgebraContext::default()), 1e-12);
 
         op.gemv_inplace(&x, 0.0, 0.0, &mut y);
         y.assert_eq_st(&x, 1e-12);
@@ -465,10 +465,10 @@ mod tests {
         op.gemv_transpose_inplace(&x, 0.0, 0.0, &mut y);
         y.assert_eq_st(&x, 1e-12);
 
-        let mut y_const = crate::NalgebraVec::zeros(2, NalgebraContext);
+        let mut y_const = crate::NalgebraVec::zeros(2, NalgebraContext::default());
         <&ForwardingOp as ConstantOp>::call_inplace(&&op, 0.0, &mut y_const);
         y_const.assert_eq_st(
-            &crate::NalgebraVec::from_vec(vec![1.0, 2.0], NalgebraContext),
+            &crate::NalgebraVec::from_vec(vec![1.0, 2.0], NalgebraContext::default()),
             1e-12,
         );
 

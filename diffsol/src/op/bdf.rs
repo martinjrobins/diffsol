@@ -364,9 +364,9 @@ mod tests {
         // J = M - c * f'(y) = |1 0| - 0.1 * |-0.1 0| = |1.01 0|
         //                     |0 1|         |0 -0.1|   |0 1.01|
         let jac = bdf_callable.jacobian(&y, t);
-        assert_eq!(jac.get_index(0, 0), 1.01);
-        assert_eq!(jac.get_index(0, 1), 0.0);
-        assert_eq!(jac.get_index(1, 0), 0.0);
-        assert_eq!(jac.get_index(1, 1), 1.01);
+        assert_eq!(jac.get_index(0, 0, 0), 1.01);
+        assert_eq!(jac.get_index(0, 1, 0), 0.0);
+        assert_eq!(jac.get_index(1, 0, 0), 0.0);
+        assert_eq!(jac.get_index(1, 1, 0), 1.01);
     }
 }

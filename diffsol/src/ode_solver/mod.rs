@@ -161,7 +161,7 @@ mod tests {
         h.axpy(h_base, &p_0, Eqn::T::one());
         let p_base = p_0.clone();
         for i in 0..nparams {
-            p_0.set_index(i, p_base.get_index(i) + h.get_index(i));
+            p_0.set_index(i, 0, p_base.get_index(i, 0) + h.get_index(i, 0));
             problem.eqn.set_params(&p_0);
             let g_pos = {
                 let mut s = problem.bdf::<LS>().unwrap();
@@ -170,7 +170,7 @@ mod tests {
                 s.state().g.clone()
             };
 
-            p_0.set_index(i, p_base.get_index(i) - h.get_index(i));
+            p_0.set_index(i, 0, p_base.get_index(i, 0) - h.get_index(i, 0));
             problem.eqn.set_params(&p_0);
             let g_neg = {
                 let mut s = problem.bdf::<LS>().unwrap();
@@ -178,11 +178,11 @@ mod tests {
                 while s.step().unwrap() != OdeSolverStopReason::TstopReached {}
                 s.state().g.clone()
             };
-            p_0.set_index(i, p_base.get_index(i));
+            p_0.set_index(i, 0, p_base.get_index(i, 0));
 
-            let delta = (g_pos - g_neg) / Scale(Eqn::T::from_f64(2.).unwrap() * h.get_index(i));
+            let delta = (g_pos - g_neg) / Scale(Eqn::T::from_f64(2.).unwrap() * h.get_index(i, 0));
             for j in 0..nout {
-                dgdp.set_index(i, j, delta.get_index(j));
+                dgdp.set_index(i, j, 0, delta.get_index(j, 0));
             }
         }
         problem.eqn.set_params(&p_base);
@@ -201,10 +201,10 @@ mod tests {
             let data_j = data.column(j);
             let delta = soln_j - data_j;
             let norm2 = delta.norm(2);
-            ret.set_index(0, ret.get_index(0) + norm2 * norm2);
+            ret.set_index(0, 0, ret.get_index(0, 0) + norm2 * norm2);
             let norm4 = delta.norm(4);
             let norm4_sq = norm4 * norm4;
-            ret.set_index(1, ret.get_index(1) + norm4_sq * norm4_sq);
+            ret.set_index(1, 0, ret.get_index(1, 0) + norm4_sq * norm4_sq);
         }
         ret
     }
@@ -269,7 +269,7 @@ mod tests {
         };
 
         for i in 0..nparams {
-            p_0.set_index(i, p_base.get_index(i) + h.get_index(i));
+            p_0.set_index(i, 0, p_base.get_index(i, 0) + h.get_index(i, 0));
             problem.eqn.set_params(&p_0);
             let g_pos = {
                 let mut s = problem.bdf::<LS>().unwrap();
@@ -277,7 +277,7 @@ mod tests {
                 sum_squares(&v, &data)
             };
 
-            p_0.set_index(i, p_base.get_index(i) - h.get_index(i));
+            p_0.set_index(i, 0, p_base.get_index(i, 0) - h.get_index(i, 0));
             problem.eqn.set_params(&p_0);
             let g_neg = {
                 let mut s = problem.bdf::<LS>().unwrap();
@@ -285,11 +285,11 @@ mod tests {
                 sum_squares(&v, &data)
             };
 
-            p_0.set_index(i, p_base.get_index(i));
+            p_0.set_index(i, 0, p_base.get_index(i, 0));
 
-            let delta = (g_pos - g_neg) / Scale(Eqn::T::from_f64(2.).unwrap() * h.get_index(i));
+            let delta = (g_pos - g_neg) / Scale(Eqn::T::from_f64(2.).unwrap() * h.get_index(i, 0));
             for j in 0..nout {
-                dgdp.set_index(i, j, delta.get_index(j));
+                dgdp.set_index(i, j, 0, delta.get_index(j, 0));
             }
         }
         problem.eqn.set_params(&p_base);
@@ -406,7 +406,7 @@ mod tests {
         );
 
         for i in 0..nparams {
-            p_0.set_index(i, p_base.get_index(i) + h.get_index(i));
+            p_0.set_index(i, 0, p_base.get_index(i, 0) + h.get_index(i, 0));
             problem.eqn.set_params(&p_0);
             let g_pos = {
                 let v = solve_dense_with_single_reset_root::<Eqn, _, _>(
@@ -419,7 +419,7 @@ mod tests {
                 sum_squares(&v, &data)
             };
 
-            p_0.set_index(i, p_base.get_index(i) - h.get_index(i));
+            p_0.set_index(i, 0, p_base.get_index(i, 0) - h.get_index(i, 0));
             problem.eqn.set_params(&p_0);
             let g_neg = {
                 let v = solve_dense_with_single_reset_root::<Eqn, _, _>(
@@ -432,11 +432,11 @@ mod tests {
                 sum_squares(&v, &data)
             };
 
-            p_0.set_index(i, p_base.get_index(i));
+            p_0.set_index(i, 0, p_base.get_index(i, 0));
 
-            let delta = (g_pos - g_neg) / Scale(Eqn::T::from_f64(2.).unwrap() * h.get_index(i));
+            let delta = (g_pos - g_neg) / Scale(Eqn::T::from_f64(2.).unwrap() * h.get_index(i, 0));
             for j in 0..nout {
-                dgdp.set_index(i, j, delta.get_index(j));
+                dgdp.set_index(i, j, 0, delta.get_index(j, 0));
             }
         }
         problem.eqn.set_params(&p_base);
@@ -899,9 +899,9 @@ mod tests {
             .assert_eq_st(state.as_ref().y, M::T::from_f64(1e-9).unwrap());
         s.state_mut()
             .y
-            .set_index(0, M::T::from_f64(std::f64::consts::PI).unwrap());
+            .set_index(0, 0, M::T::from_f64(std::f64::consts::PI).unwrap());
         assert_eq!(
-            s.state_mut().y.get_index(0),
+            s.state_mut().y.get_index(0, 0),
             M::T::from_f64(std::f64::consts::PI).unwrap()
         );
     }
@@ -951,14 +951,14 @@ mod tests {
                     let mut y = solver.interpolate(t).unwrap();
 
                     // update the velocity of the ball
-                    y.set_index(1, y.get_index(1) * -e);
+                    y.set_index(1, 0, y.get_index(1, 0) * -e);
 
                     // make sure the ball is above the ground
-                    y.set_index(0, y.get_index(0).max(f64::EPSILON));
+                    y.set_index(0, 0, y.get_index(0, 0).max(f64::EPSILON));
 
                     // set the state to the updated state
                     solver.state_mut().y.copy_from(&y);
-                    solver.state_mut().dy.set_index(0, y.get_index(1));
+                    solver.state_mut().dy.set_index(0, 0, y.get_index(1, 0));
                     *solver.state_mut().t = t;
 
                     break;
@@ -973,8 +973,8 @@ mod tests {
         let mut t = vec![];
         for _ in 0..3 {
             let ret = solver.step();
-            x.push(solver.state().y.get_index(0));
-            v.push(solver.state().y.get_index(1));
+            x.push(solver.state().y.get_index(0, 0));
+            v.push(solver.state().y.get_index(1, 0));
             t.push(solver.state().t);
             match ret {
                 Ok(OdeSolverStopReason::InternalTimestep) => (),
@@ -1017,7 +1017,7 @@ mod tests {
                 solver2.step().unwrap();
                 let time_error = (solver1.state().t - solver2.state().t).abs()
                     / (solver1.state().t.abs() * solver1.problem().rtol
-                        + solver1.problem().atol.get_index(0));
+                        + solver1.problem().atol.get_index(0, 0));
                 assert!(
                     time_error < M::T::from_f64(20.0).unwrap(),
                     "time_error: {} at t = {}",
@@ -1143,7 +1143,7 @@ mod tests {
         let (ys, ts, stop_reason) = solver.solve(final_time).unwrap();
         assert_eq!(stop_reason, OdeSolverStopReason::TstopReached);
         let t_last = *ts.last().unwrap();
-        let time_tol = soln.rtol * final_time.abs() + soln.atol.get_index(0);
+        let time_tol = soln.rtol * final_time.abs() + soln.atol.get_index(0, 0);
         assert!(
             (t_last - final_time).abs() < Eqn::T::from_f64(30.0).unwrap() * time_tol,
             "expected solve() to reach final_time ≈ {:?}, got {:?}",
@@ -1158,7 +1158,7 @@ mod tests {
         );
 
         let expected = &soln.solution_points[0];
-        let root_time_tol = soln.rtol * expected.t.abs() + soln.atol.get_index(0);
+        let root_time_tol = soln.rtol * expected.t.abs() + soln.atol.get_index(0, 0);
         let root_col = ts
             .iter()
             .position(|&t| (t - expected.t).abs() < Eqn::T::from_f64(30.0).unwrap() * root_time_tol)
@@ -1181,10 +1181,10 @@ mod tests {
 
         let reset_value = Eqn::T::from_f64(0.4).unwrap();
         let reset_tol = Eqn::T::from_f64(30.0).unwrap()
-            * (soln.rtol * reset_value.abs() + soln.atol.get_index(0));
+            * (soln.rtol * reset_value.abs() + soln.atol.get_index(0, 0));
         let last_reset_col = (0..ts.len())
             .rev()
-            .find(|&i| (ys.get_index(0, i) - reset_value).abs() < reset_tol)
+            .find(|&i| (ys.get_index(0, i, 0) - reset_value).abs() < reset_tol)
             .expect("expected solve() output to include at least one reset state");
         let final_time_f64 = final_time.to_f64().unwrap();
         let last_reset_time_f64 = ts[last_reset_col].to_f64().unwrap();
@@ -1224,15 +1224,15 @@ mod tests {
         assert_eq!(probe_stop_reason, OdeSolverStopReason::TstopReached);
 
         let reset_time_tol =
-            Eqn::T::from_f64(30.0).unwrap() * (soln.rtol * t_stop.abs() + soln.atol.get_index(0));
+            Eqn::T::from_f64(30.0).unwrap() * (soln.rtol * t_stop.abs() + soln.atol.get_index(0, 0));
         let post_event_dt = Eqn::T::from_f64(1e-6).unwrap();
         let reset_value = Eqn::T::from_f64(0.4).unwrap();
         let reset_value_tol = Eqn::T::from_f64(30.0).unwrap()
-            * (soln.rtol * reset_value.abs() + soln.atol.get_index(0));
+            * (soln.rtol * reset_value.abs() + soln.atol.get_index(0, 0));
         let reset_col = (0..probe_ts.len())
             .find(|&i| {
                 (probe_ts[i] - t_stop).abs() < reset_time_tol
-                    && (probe_ys.get_index(0, i) - reset_value).abs() < reset_value_tol
+                    && (probe_ys.get_index(0, i, 0) - reset_value).abs() < reset_value_tol
             })
             .expect("expected solve() probe output to contain the second-root reset state");
         let t_event = probe_ts[reset_col];
@@ -1244,7 +1244,7 @@ mod tests {
             ret.ncols() == t_eval.len(),
             "expected solve_dense() to fill all requested evaluation times"
         );
-        let time_tol = soln.rtol * final_time.abs() + soln.atol.get_index(0);
+        let time_tol = soln.rtol * final_time.abs() + soln.atol.get_index(0, 0);
         assert!(
             (solver.state().t - final_time).abs() < Eqn::T::from_f64(30.0).unwrap() * time_tol,
             "expected solver state at final_time ≈ {:?}, got {:?}",
@@ -1386,7 +1386,7 @@ mod tests {
             final_forward_state.as_ref().g,
             expected_out.state,
         );
-        let time_tol = soln.rtol * expected_out.t.abs() + soln.atol.get_index(0);
+        let time_tol = soln.rtol * expected_out.t.abs() + soln.atol.get_index(0, 0);
         assert!(
             (t_second_root - expected_out.t).abs() < Eqn::T::from_f64(30.0).unwrap() * time_tol,
             "expected second root time ≈ {:?}, got {:?}",
@@ -1453,7 +1453,7 @@ mod tests {
         let expected_grad = Eqn::V::from_vec(
             sens_points
                 .iter()
-                .map(|pts| pts[0].state.get_index(0))
+                .map(|pts| pts[0].state.get_index(0, 0))
                 .collect(),
             ctx.clone(),
         );
@@ -1532,7 +1532,7 @@ mod tests {
         let final_forward_state = checkpointers[1].last_checkpoint().clone();
         let t_second_root = final_forward_state.as_ref().t;
 
-        let time_tol = soln.rtol * expected_out.t.abs() + soln.atol.get_index(0);
+        let time_tol = soln.rtol * expected_out.t.abs() + soln.atol.get_index(0, 0);
         assert!(
             (t_second_root - expected_out.t).abs() < Eqn::T::from_f64(30.0).unwrap() * time_tol,
             "expected second root time ≈ {:?}, got {:?}",
@@ -1663,7 +1663,7 @@ mod tests {
             final_forward_state.as_ref().g,
             expected_out.state,
         );
-        let time_tol = soln.rtol * expected_out.t.abs() + soln.atol.get_index(0);
+        let time_tol = soln.rtol * expected_out.t.abs() + soln.atol.get_index(0, 0);
         assert!(
             (t_second_root - expected_out.t).abs() < Eqn::T::from_f64(30.0).unwrap() * time_tol,
             "expected terminal root time ≈ {:?}, got {:?}",
@@ -1692,7 +1692,7 @@ mod tests {
         let expected_grad = Eqn::V::from_vec(
             sens_points
                 .iter()
-                .map(|pts| pts[0].state.get_index(0))
+                .map(|pts| pts[0].state.get_index(0, 0))
                 .collect(),
             ctx.clone(),
         );
@@ -1798,7 +1798,7 @@ mod tests {
         let problem = terminal_forward_solver.problem();
         let final_forward_state = terminal_forward_solver.state_clone();
         let t_second_root = final_forward_state.as_ref().t;
-        let time_tol = soln.rtol * expected_out.t.abs() + soln.atol.get_index(0);
+        let time_tol = soln.rtol * expected_out.t.abs() + soln.atol.get_index(0, 0);
         assert!(
             (t_second_root - expected_out.t).abs() < Eqn::T::from_f64(30.0).unwrap() * time_tol,
             "expected terminal root time ≈ {:?}, got {:?}",

@@ -29,10 +29,10 @@ pub trait ConstantOpSens: ConstantOp {
         let mut v = Self::V::zeros(self.nparams(), self.context().clone());
         let mut col = Self::V::zeros(self.nout(), self.context().clone());
         for j in 0..self.nparams() {
-            v.set_index(j, Self::T::one());
+            v.set_index(j, 0, Self::T::one());
             self.sens_mul_inplace(t, &v, &mut col);
             y.set_column(j, &col);
-            v.set_index(j, Self::T::zero());
+            v.set_index(j, 0, Self::T::zero());
         }
     }
 
@@ -78,10 +78,10 @@ pub trait ConstantOpSensAdjoint: ConstantOp {
         let mut v = Self::V::zeros(self.nstates(), self.context().clone());
         let mut col = Self::V::zeros(self.nout(), self.context().clone());
         for j in 0..self.nstates() {
-            v.set_index(j, Self::T::one());
+            v.set_index(j, 0, Self::T::one());
             self.sens_transpose_mul_inplace(t, &v, &mut col);
             y.set_column(j, &col);
-            v.set_index(j, Self::T::zero());
+            v.set_index(j, 0, Self::T::zero());
         }
     }
 
@@ -106,7 +106,7 @@ mod tests {
     impl FakeConstantOp {
         fn new() -> Self {
             Self {
-                ctx: NalgebraContext,
+                ctx: NalgebraContext::default(),
             }
         }
     }
@@ -141,8 +141,8 @@ mod tests {
         fn sens_mul_inplace(&self, _t: Self::T, v: &Self::V, y: &mut Self::V) {
             y.copy_from(&Self::V::from_vec(
                 vec![
-                    v.get_index(0) + 2.0 * v.get_index(1),
-                    3.0 * v.get_index(0) - v.get_index(1),
+                    v.get_index(0, 0) + 2.0 * v.get_index(1, 0),
+                    3.0 * v.get_index(0, 0) - v.get_index(1, 0),
                 ],
                 self.ctx,
             ));
@@ -153,8 +153,8 @@ mod tests {
         fn sens_transpose_mul_inplace(&self, _t: Self::T, v: &Self::V, y: &mut Self::V) {
             y.copy_from(&Self::V::from_vec(
                 vec![
-                    -v.get_index(0) - 3.0 * v.get_index(1),
-                    -2.0 * v.get_index(0) + v.get_index(1),
+                    -v.get_index(0, 0) - 3.0 * v.get_index(1, 0),
+                    -2.0 * v.get_index(0, 0) + v.get_index(1, 0),
                 ],
                 self.ctx,
             ));
@@ -166,34 +166,34 @@ mod tests {
         let op = FakeConstantOp::new();
         let value = op.call(0.25);
         value.assert_eq_st(
-            &crate::NalgebraVec::from_vec(vec![1.25, 1.75], NalgebraContext),
+            &crate::NalgebraVec::from_vec(vec![1.25, 1.75], NalgebraContext::default()),
             1e-12,
         );
 
         let sens = op.sens(0.0);
-        assert_eq!(sens.get_index(0, 0), 1.0);
-        assert_eq!(sens.get_index(1, 0), 3.0);
-        assert_eq!(sens.get_index(0, 1), 2.0);
-        assert_eq!(sens.get_index(1, 1), -1.0);
+        assert_eq!(sens.get_index(0, 0, 0), 1.0);
+        assert_eq!(sens.get_index(1, 0, 0), 3.0);
+        assert_eq!(sens.get_index(0, 1, 0), 2.0);
+        assert_eq!(sens.get_index(1, 1, 0), -1.0);
 
-        let mut sens_inplace = M::zeros(2, 2, NalgebraContext);
+        let mut sens_inplace = M::zeros(2, 2, NalgebraContext::default());
         op.sens_inplace(0.0, &mut sens_inplace);
-        assert_eq!(sens_inplace.get_index(0, 0), 1.0);
-        assert_eq!(sens_inplace.get_index(1, 0), 3.0);
-        assert_eq!(sens_inplace.get_index(0, 1), 2.0);
-        assert_eq!(sens_inplace.get_index(1, 1), -1.0);
+        assert_eq!(sens_inplace.get_index(0, 0, 0), 1.0);
+        assert_eq!(sens_inplace.get_index(1, 0, 0), 3.0);
+        assert_eq!(sens_inplace.get_index(0, 1, 0), 2.0);
+        assert_eq!(sens_inplace.get_index(1, 1, 0), -1.0);
 
         let sens_adj = op.sens_adjoint(0.0);
-        assert_eq!(sens_adj.get_index(0, 0), -1.0);
-        assert_eq!(sens_adj.get_index(1, 0), -2.0);
-        assert_eq!(sens_adj.get_index(0, 1), -3.0);
-        assert_eq!(sens_adj.get_index(1, 1), 1.0);
+        assert_eq!(sens_adj.get_index(0, 0, 0), -1.0);
+        assert_eq!(sens_adj.get_index(1, 0, 0), -2.0);
+        assert_eq!(sens_adj.get_index(0, 1, 0), -3.0);
+        assert_eq!(sens_adj.get_index(1, 1, 0), 1.0);
 
-        let mut sens_adj_inplace = M::zeros(2, 2, NalgebraContext);
+        let mut sens_adj_inplace = M::zeros(2, 2, NalgebraContext::default());
         op.sens_adjoint_inplace(0.0, &mut sens_adj_inplace);
-        assert_eq!(sens_adj_inplace.get_index(0, 0), -1.0);
-        assert_eq!(sens_adj_inplace.get_index(1, 0), -2.0);
-        assert_eq!(sens_adj_inplace.get_index(0, 1), -3.0);
-        assert_eq!(sens_adj_inplace.get_index(1, 1), 1.0);
+        assert_eq!(sens_adj_inplace.get_index(0, 0, 0), -1.0);
+        assert_eq!(sens_adj_inplace.get_index(1, 0, 0), -2.0);
+        assert_eq!(sens_adj_inplace.get_index(0, 1, 0), -3.0);
+        assert_eq!(sens_adj_inplace.get_index(1, 1, 0), 1.0);
     }
 }

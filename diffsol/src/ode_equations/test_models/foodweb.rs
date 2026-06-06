@@ -1132,11 +1132,11 @@ mod tests {
             let fdiff = (yplus - yminus) * Scale(1.0 / (2.0 * h));
             for j in 0..jac.nrows() {
                 assert!(
-                    (jac.get_index(j, i) - fdiff[j]).abs() < 1e-1,
+                    (jac.get_index(j, i, 0) - fdiff[j]).abs() < 1e-1,
                     "jac[{}, {}] = {} (expect {})",
                     j,
                     i,
-                    jac.get_index(j, i),
+                    jac.get_index(j, i, 0),
                     fdiff[j]
                 );
             }
@@ -1202,12 +1202,12 @@ mod tests {
                     j / NUM_SPECIES
                 };
                 assert!(
-                    (jac.get_index(j, i) - jac_diffsl.get_index(j_diffsl, i_diffsl)).abs() < 1e-3,
+                    (jac.get_index(j, i, 0) - jac_diffsl.get_index(j_diffsl, i_diffsl, 0)).abs() < 1e-3,
                     "jac[{}, {}] = {} (expect {})",
                     j,
                     i,
-                    jac.get_index(j, i),
-                    jac_diffsl.get_index(j_diffsl, i_diffsl)
+                    jac.get_index(j, i, 0),
+                    jac_diffsl.get_index(j_diffsl, i_diffsl, 0)
                 );
             }
         }
@@ -1222,9 +1222,9 @@ mod tests {
         for i in 0..mass.ncols() {
             for j in 0..mass.nrows() {
                 if i == j && i % NUM_SPECIES < NPREY {
-                    assert_eq!(mass.get_index(i, j), 1.0);
+                    assert_eq!(mass.get_index(i, j, 0), 1.0);
                 } else {
-                    assert_eq!(mass.get_index(i, j), 0.0);
+                    assert_eq!(mass.get_index(i, j, 0), 0.0);
                 }
             }
         }

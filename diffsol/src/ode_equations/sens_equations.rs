@@ -33,9 +33,9 @@ where
         }
     }
     pub fn set_param_index(&mut self, index: usize) {
-        self.tmp.set_index(self.index, Eqn::T::zero());
+        self.tmp.set_index(self.index, 0, Eqn::T::zero());
         self.index = index;
-        self.tmp.set_index(self.index, Eqn::T::one());
+        self.tmp.set_index(self.index, 0, Eqn::T::one());
     }
 }
 
@@ -401,8 +401,8 @@ mod tests {
         let sens = sens_eqn.rhs.sens.borrow();
         assert_eq!(sens.nrows(), 2);
         assert_eq!(sens.ncols(), 2);
-        assert_eq!(sens.get_index(0, 0), -1.0);
-        assert_eq!(sens.get_index(1, 0), -1.0);
+        assert_eq!(sens.get_index(0, 0, 0), -1.0);
+        assert_eq!(sens.get_index(1, 0, 0), -1.0);
 
         // F(s, t)_i = J * s_i + S_i
         // J = |-a 0|
@@ -445,9 +445,9 @@ mod tests {
         let sens = sens_eqn.rhs.sens.borrow();
         assert_eq!(sens.nrows(), 3);
         assert_eq!(sens.ncols(), 1);
-        assert_eq!(sens.get_index(0, 0), -1.0);
-        assert_eq!(sens.get_index(1, 0), -1.0);
-        assert_eq!(sens.get_index(2, 0), 0.0);
+        assert_eq!(sens.get_index(0, 0, 0), -1.0);
+        assert_eq!(sens.get_index(1, 0, 0), -1.0);
+        assert_eq!(sens.get_index(2, 0, 0), 0.0);
         sens_eqn.rhs.y.borrow().assert_eq_st(&state.y, 1e-10);
 
         // F(s, t)_i = J * s_i + S_i
@@ -492,14 +492,14 @@ mod tests {
         let sens = sens_eqn.rhs.sens.borrow();
         assert_eq!(sens.nrows(), 3);
         assert_eq!(sens.ncols(), 3);
-        assert_eq!(sens.get_index(0, 0), -state.y[0]);
-        assert_eq!(sens.get_index(0, 1), state.y[1] * state.y[2]);
-        assert_eq!(sens.get_index(0, 2), 0.0);
-        assert_eq!(sens.get_index(1, 0), state.y[0]);
-        assert_eq!(sens.get_index(1, 1), -state.y[1] * state.y[2]);
-        assert_eq!(sens.get_index(1, 2), -state.y[1] * state.y[1]);
-        assert_eq!(sens.get_index(2, 0), 0.0);
-        assert_eq!(sens.get_index(2, 1), 0.0);
-        assert_eq!(sens.get_index(2, 2), 0.0);
+        assert_eq!(sens.get_index(0, 0, 0), -state.y[0]);
+        assert_eq!(sens.get_index(0, 1, 0), state.y[1] * state.y[2]);
+        assert_eq!(sens.get_index(0, 2, 0), 0.0);
+        assert_eq!(sens.get_index(1, 0, 0), state.y[0]);
+        assert_eq!(sens.get_index(1, 1, 0), -state.y[1] * state.y[2]);
+        assert_eq!(sens.get_index(1, 2, 0), -state.y[1] * state.y[1]);
+        assert_eq!(sens.get_index(2, 0, 0), 0.0);
+        assert_eq!(sens.get_index(2, 1, 0), 0.0);
+        assert_eq!(sens.get_index(2, 2, 0), 0.0);
     }
 }

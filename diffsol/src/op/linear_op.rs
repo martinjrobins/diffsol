@@ -41,10 +41,10 @@ pub trait LinearOp: Op {
         let mut v = Self::V::zeros(self.nstates(), self.context().clone());
         let mut col = Self::V::zeros(self.nout(), self.context().clone());
         for j in 0..self.nstates() {
-            v.set_index(j, Self::T::one());
+            v.set_index(j, 0, Self::T::one());
             self.call_inplace(&v, t, &mut col);
             y.set_column(j, &col);
-            v.set_index(j, Self::T::zero());
+            v.set_index(j, 0, Self::T::zero());
         }
     }
 
@@ -75,10 +75,10 @@ pub trait LinearOpTranspose: LinearOp {
         let mut v = Self::V::zeros(self.nstates(), self.context().clone());
         let mut col = Self::V::zeros(self.nout(), self.context().clone());
         for j in 0..self.nstates() {
-            v.set_index(j, Self::T::one());
+            v.set_index(j, 0, Self::T::one());
             self.call_transpose_inplace(&v, t, &mut col);
             y.set_column(j, &col);
-            v.set_index(j, Self::T::zero());
+            v.set_index(j, 0, Self::T::zero());
         }
     }
     fn transpose_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
@@ -113,10 +113,10 @@ pub trait LinearOpSens: LinearOp {
         let mut v = Self::V::zeros(self.nparams(), self.context().clone());
         let mut col = Self::V::zeros(self.nout(), self.context().clone());
         for j in 0..self.nparams() {
-            v.set_index(j, Self::T::one());
+            v.set_index(j, 0, Self::T::one());
             self.sens_mul_inplace(x, t, &v, &mut col);
             y.set_column(j, &col);
-            v.set_index(j, Self::T::zero());
+            v.set_index(j, 0, Self::T::zero());
         }
     }
 
@@ -172,10 +172,10 @@ mod tests {
         fn gemv_inplace(&self, x: &Self::V, _t: Self::T, beta: Self::T, y: &mut Self::V) {
             let out = Self::V::from_vec(
                 vec![
-                    2.0 * x.get_index(0) + 3.0 * x.get_index(1),
-                    -x.get_index(0) + 4.0 * x.get_index(1),
+                    2.0 * x.get_index(0, 0) + 3.0 * x.get_index(1, 0),
+                    -x.get_index(0, 0) + 4.0 * x.get_index(1, 0),
                 ],
-                NalgebraContext,
+                NalgebraContext::default(),
             );
             y.axpy(1.0, &out, beta);
         }
@@ -185,10 +185,10 @@ mod tests {
         fn gemv_transpose_inplace(&self, x: &Self::V, _t: Self::T, beta: Self::T, y: &mut Self::V) {
             let out = Self::V::from_vec(
                 vec![
-                    2.0 * x.get_index(0) - x.get_index(1),
-                    3.0 * x.get_index(0) + 4.0 * x.get_index(1),
+                    2.0 * x.get_index(0, 0) - x.get_index(1, 0),
+                    3.0 * x.get_index(0, 0) + 4.0 * x.get_index(1, 0),
                 ],
-                NalgebraContext,
+                NalgebraContext::default(),
             );
             y.axpy(1.0, &out, beta);
         }
@@ -198,10 +198,10 @@ mod tests {
         fn sens_mul_inplace(&self, _x: &Self::V, _t: Self::T, v: &Self::V, y: &mut Self::V) {
             y.copy_from(&Self::V::from_vec(
                 vec![
-                    v.get_index(0) + 2.0 * v.get_index(1),
-                    3.0 * v.get_index(0) + 4.0 * v.get_index(1),
+                    v.get_index(0, 0) + 2.0 * v.get_index(1, 0),
+                    3.0 * v.get_index(0, 0) + 4.0 * v.get_index(1, 0),
                 ],
-                NalgebraContext,
+                NalgebraContext::default(),
             ));
         }
     }
@@ -209,46 +209,46 @@ mod tests {
     #[test]
     fn linear_op_default_helpers_construct_expected_outputs() {
         let op = FakeLinearOp {
-            ctx: NalgebraContext,
+            ctx: NalgebraContext::default(),
         };
-        let x = crate::NalgebraVec::from_vec(vec![1.0, 2.0], NalgebraContext);
-        let v = crate::NalgebraVec::from_vec(vec![3.0, -1.0], NalgebraContext);
-        let mut y = crate::NalgebraVec::from_vec(vec![1.0, 1.0], NalgebraContext);
+        let x = crate::NalgebraVec::from_vec(vec![1.0, 2.0], NalgebraContext::default());
+        let v = crate::NalgebraVec::from_vec(vec![3.0, -1.0], NalgebraContext::default());
+        let mut y = crate::NalgebraVec::from_vec(vec![1.0, 1.0], NalgebraContext::default());
 
         op.call_inplace(&x, 0.0, &mut y);
         y.assert_eq_st(
-            &crate::NalgebraVec::from_vec(vec![8.0, 7.0], NalgebraContext),
+            &crate::NalgebraVec::from_vec(vec![8.0, 7.0], NalgebraContext::default()),
             1e-12,
         );
 
         let matrix = op.matrix(0.0);
-        assert_eq!(matrix.get_index(0, 0), 2.0);
-        assert_eq!(matrix.get_index(1, 0), -1.0);
-        assert_eq!(matrix.get_index(0, 1), 3.0);
-        assert_eq!(matrix.get_index(1, 1), 4.0);
+        assert_eq!(matrix.get_index(0, 0, 0), 2.0);
+        assert_eq!(matrix.get_index(1, 0, 0), -1.0);
+        assert_eq!(matrix.get_index(0, 1, 0), 3.0);
+        assert_eq!(matrix.get_index(1, 1, 0), 4.0);
 
-        let mut transpose = M::zeros(2, 2, NalgebraContext);
+        let mut transpose = M::zeros(2, 2, NalgebraContext::default());
         op.transpose_inplace(0.0, &mut transpose);
-        assert_eq!(transpose.get_index(0, 0), 2.0);
-        assert_eq!(transpose.get_index(1, 0), 3.0);
-        assert_eq!(transpose.get_index(0, 1), -1.0);
-        assert_eq!(transpose.get_index(1, 1), 4.0);
+        assert_eq!(transpose.get_index(0, 0, 0), 2.0);
+        assert_eq!(transpose.get_index(1, 0, 0), 3.0);
+        assert_eq!(transpose.get_index(0, 1, 0), -1.0);
+        assert_eq!(transpose.get_index(1, 1, 0), 4.0);
 
-        let mut transpose_call = crate::NalgebraVec::zeros(2, NalgebraContext);
+        let mut transpose_call = crate::NalgebraVec::zeros(2, NalgebraContext::default());
         op.call_transpose_inplace(&x, 0.0, &mut transpose_call);
         transpose_call.assert_eq_st(
-            &crate::NalgebraVec::from_vec(vec![0.0, 11.0], NalgebraContext),
+            &crate::NalgebraVec::from_vec(vec![0.0, 11.0], NalgebraContext::default()),
             1e-12,
         );
 
         let sens = op.sens(&x, 0.0);
-        assert_eq!(sens.get_index(0, 0), 1.0);
-        assert_eq!(sens.get_index(1, 0), 3.0);
-        assert_eq!(sens.get_index(0, 1), 2.0);
-        assert_eq!(sens.get_index(1, 1), 4.0);
+        assert_eq!(sens.get_index(0, 0, 0), 1.0);
+        assert_eq!(sens.get_index(1, 0, 0), 3.0);
+        assert_eq!(sens.get_index(0, 1, 0), 2.0);
+        assert_eq!(sens.get_index(1, 1, 0), 4.0);
 
         op.sens_mul(&x, 0.0, &v).assert_eq_st(
-            &crate::NalgebraVec::from_vec(vec![1.0, 5.0], NalgebraContext),
+            &crate::NalgebraVec::from_vec(vec![1.0, 5.0], NalgebraContext::default()),
             1e-12,
         );
     }

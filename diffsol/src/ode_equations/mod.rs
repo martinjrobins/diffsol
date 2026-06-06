@@ -731,10 +731,10 @@ mod tests {
         jac_rhs_y.assert_eq_st(&expect_jac_rhs_y, 1e-10);
         assert!(problem.eqn.mass().is_none());
         let jac = problem.eqn.rhs().jacobian(&y, 0.0);
-        assert_eq!(jac.get_index(0, 0), -0.1);
-        assert_eq!(jac.get_index(1, 1), -0.1);
-        assert_eq!(jac.get_index(0, 1), 0.0);
-        assert_eq!(jac.get_index(1, 0), 0.0);
+        assert_eq!(jac.get_index(0, 0, 0), -0.1);
+        assert_eq!(jac.get_index(1, 1, 0), -0.1);
+        assert_eq!(jac.get_index(0, 1, 0), 0.0);
+        assert_eq!(jac.get_index(1, 0, 0), 0.0);
     }
 
     #[test]
@@ -748,25 +748,25 @@ mod tests {
         let expect_jac_rhs_y = problem.context().vector_from_vec(vec![-0.1, -0.1, 0.0]);
         jac_rhs_y.assert_eq_st(&expect_jac_rhs_y, 1e-10);
         let mass = problem.eqn.mass().unwrap().matrix(0.0);
-        assert_eq!(mass.get_index(0, 0), 1.);
-        assert_eq!(mass.get_index(1, 1), 1.);
-        assert_eq!(mass.get_index(2, 2), 0.);
-        assert_eq!(mass.get_index(0, 1), 0.);
-        assert_eq!(mass.get_index(1, 0), 0.);
-        assert_eq!(mass.get_index(0, 2), 0.);
-        assert_eq!(mass.get_index(2, 0), 0.);
-        assert_eq!(mass.get_index(1, 2), 0.);
-        assert_eq!(mass.get_index(2, 1), 0.);
+        assert_eq!(mass.get_index(0, 0, 0), 1.);
+        assert_eq!(mass.get_index(1, 1, 0), 1.);
+        assert_eq!(mass.get_index(2, 2, 0), 0.);
+        assert_eq!(mass.get_index(0, 1, 0), 0.);
+        assert_eq!(mass.get_index(1, 0, 0), 0.);
+        assert_eq!(mass.get_index(0, 2, 0), 0.);
+        assert_eq!(mass.get_index(2, 0, 0), 0.);
+        assert_eq!(mass.get_index(1, 2, 0), 0.);
+        assert_eq!(mass.get_index(2, 1, 0), 0.);
         let jac = problem.eqn.rhs().jacobian(&y, 0.0);
-        assert_eq!(jac.get_index(0, 0), -0.1);
-        assert_eq!(jac.get_index(1, 1), -0.1);
-        assert_eq!(jac.get_index(2, 2), 1.0);
-        assert_eq!(jac.get_index(0, 1), 0.0);
-        assert_eq!(jac.get_index(1, 0), 0.0);
-        assert_eq!(jac.get_index(0, 2), 0.0);
-        assert_eq!(jac.get_index(2, 0), 0.0);
-        assert_eq!(jac.get_index(1, 2), 0.0);
-        assert_eq!(jac.get_index(2, 1), -1.0);
+        assert_eq!(jac.get_index(0, 0, 0), -0.1);
+        assert_eq!(jac.get_index(1, 1, 0), -0.1);
+        assert_eq!(jac.get_index(2, 2, 0), 1.0);
+        assert_eq!(jac.get_index(0, 1, 0), 0.0);
+        assert_eq!(jac.get_index(1, 0, 0), 0.0);
+        assert_eq!(jac.get_index(0, 2, 0), 0.0);
+        assert_eq!(jac.get_index(2, 0, 0), 0.0);
+        assert_eq!(jac.get_index(1, 2, 0), 0.0);
+        assert_eq!(jac.get_index(2, 1, 0), -1.0);
     }
 
     #[test]
@@ -847,7 +847,7 @@ mod tests {
         let no_aug = NoAug::<FakeEqn> {
             _phantom: std::marker::PhantomData,
         };
-        let mut v = crate::NalgebraVec::zeros(0, NalgebraContext);
+        let mut v = crate::NalgebraVec::zeros(0, NalgebraContext::default());
         assert!(catch_unwind(AssertUnwindSafe(|| no_aug.nout())).is_err());
         assert!(catch_unwind(AssertUnwindSafe(|| no_aug.nparams())).is_err());
         assert!(catch_unwind(AssertUnwindSafe(|| no_aug.nstates())).is_err());

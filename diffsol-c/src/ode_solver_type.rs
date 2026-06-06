@@ -773,7 +773,7 @@ mod tests {
         assert_eq!(soln.ts, t_eval);
         for (i, &t) in t_eval.iter().enumerate() {
             assert_close(
-                soln.ys.get_index(0, i),
+                soln.ys.get_index(0, i, 0),
                 expected(t),
                 5e-4,
                 &format!("solution[{i}]"),
@@ -798,7 +798,7 @@ mod tests {
                 .unwrap();
             assert_close(*soln.ts.last().unwrap(), 1.0, 5e-4, "solve final time");
             assert_close(
-                soln.ys.get_index(0, soln.ts.len() - 1),
+                soln.ys.get_index(0, soln.ts.len() - 1, 0),
                 logistic_state(LOGISTIC_X0, 2.0, 1.0),
                 5e-4,
                 "solve final value",
@@ -831,7 +831,7 @@ mod tests {
                 .unwrap();
             assert_close(*soln.ts.last().unwrap(), 2.0, 5e-4, "hybrid final time");
             assert_close(
-                soln.ys.get_index(0, soln.ts.len() - 1),
+                soln.ys.get_index(0, soln.ts.len() - 1, 0),
                 hybrid_logistic_state(2.0, 2.0),
                 5e-4,
                 "hybrid final value",
@@ -918,7 +918,7 @@ mod tests {
             "direct hybrid restart final time",
         );
         assert_close(
-            soln.ys.get_index(0, soln.ts.len() - 1),
+            soln.ys.get_index(0, soln.ts.len() - 1, 0),
             hybrid_logistic_state(2.0, 2.0),
             5e-4,
             "direct hybrid restart final value",
@@ -949,7 +949,7 @@ mod tests {
                 .unwrap();
             for (i, &t) in t_eval.iter().enumerate() {
                 assert_close(
-                    soln.y_sens[0].get_index(0, i),
+                    soln.y_sens[0].get_index(0, i, 0),
                     logistic_state_dr(LOGISTIC_X0, 2.0, t),
                     5e-4,
                     &format!("fwd_sens[{i}]"),
@@ -965,7 +965,7 @@ mod tests {
                 .unwrap();
             for (i, &t) in t_eval.iter().enumerate() {
                 assert_close(
-                    soln.y_sens[0].get_index(0, i),
+                    soln.y_sens[0].get_index(0, i, 0),
                     hybrid_logistic_state_dr(2.0, t),
                     5e-4,
                     &format!("hybrid_fwd_sens[{i}]"),
@@ -992,7 +992,7 @@ mod tests {
                 .unwrap();
             for (i, &t) in t_eval.iter().enumerate() {
                 assert_close(
-                    soln.y_sens[0].get_index(0, i),
+                    soln.y_sens[0].get_index(0, i, 0),
                     logistic_state_dr(LOGISTIC_X0, 2.0, t),
                     5e-4,
                     &format!("lu fwd_sens[{i}]"),
@@ -1024,7 +1024,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(gradient.len(), 1);
-        assert!(gradient[0].get_index(0).is_finite());
+        assert!(gradient[0].get_index(0, 0).is_finite());
     }
 
     #[cfg(feature = "diffsl-llvm")]
@@ -1044,13 +1044,13 @@ mod tests {
                 .unwrap();
             for (i, &t) in t_eval.iter().enumerate() {
                 assert_close(
-                    soln.ys.get_index(0, i),
+                    soln.ys.get_index(0, i, 0),
                     hybrid_logistic_state(2.0, t),
                     5e-4,
                     &format!("direct hybrid value[{i}]"),
                 );
                 assert_close(
-                    soln.y_sens[0].get_index(0, i),
+                    soln.y_sens[0].get_index(0, i, 0),
                     hybrid_logistic_state_dr(2.0, t),
                     5e-4,
                     &format!("direct hybrid fwd sens[{i}]"),
@@ -1086,7 +1086,7 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(gradient.len(), 1);
-            assert!(gradient[0].get_index(0).is_finite());
+            assert!(gradient[0].get_index(0, 0).is_finite());
         }
 
         let mut problem = build_problem::<diffsol::LlvmModule>(logistic_diffsl_code());
@@ -1113,7 +1113,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(gradient.len(), 1);
-        assert!(gradient[0].get_index(0).is_finite());
+        assert!(gradient[0].get_index(0, 0).is_finite());
     }
 
     #[cfg(feature = "diffsl-llvm")]
@@ -1147,7 +1147,7 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(gradient.len(), 1);
-            assert!(gradient[0].get_index(0).is_finite());
+            assert!(gradient[0].get_index(0, 0).is_finite());
         }
     }
 

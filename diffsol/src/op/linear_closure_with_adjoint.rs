@@ -193,10 +193,10 @@ mod tests {
     fn forward(x: &V, p: &V, _t: f64, beta: f64, y: &mut V) {
         let out = V::from_vec(
             vec![
-                p.get_index(0) * x.get_index(0),
-                x.get_index(0) + p.get_index(1) * x.get_index(1),
+                p.get_index(0, 0) * x.get_index(0, 0),
+                x.get_index(0, 0) + p.get_index(1, 0) * x.get_index(1, 0),
             ],
-            NalgebraContext,
+            NalgebraContext::default(),
         );
         y.axpy(1.0, &out, beta);
     }
@@ -204,10 +204,10 @@ mod tests {
     fn adjoint(x: &V, p: &V, _t: f64, beta: f64, y: &mut V) {
         let out = V::from_vec(
             vec![
-                p.get_index(0) * x.get_index(0) + x.get_index(1),
-                p.get_index(1) * x.get_index(1),
+                p.get_index(0, 0) * x.get_index(0, 0) + x.get_index(1, 0),
+                p.get_index(1, 0) * x.get_index(1, 0),
             ],
-            NalgebraContext,
+            NalgebraContext::default(),
         );
         y.axpy(1.0, &out, beta);
     }
@@ -215,7 +215,7 @@ mod tests {
     type TestFn = fn(&V, &V, f64, f64, &mut V);
 
     fn make_op() -> LinearClosureWithAdjoint<M, TestFn, TestFn> {
-        LinearClosureWithAdjoint::new(forward, adjoint, 2, 2, 2, NalgebraContext)
+        LinearClosureWithAdjoint::new(forward, adjoint, 2, 2, 2, NalgebraContext::default())
     }
 
     #[test]
@@ -225,8 +225,8 @@ mod tests {
         op.set_nout(2);
         op.set_nparams(2);
 
-        let y0 = V::from_vec(vec![1.0, 1.0], NalgebraContext);
-        let p = V::from_vec(vec![2.0, 3.0], NalgebraContext);
+        let y0 = V::from_vec(vec![1.0, 1.0], NalgebraContext::default());
+        let p = V::from_vec(vec![2.0, 3.0], NalgebraContext::default());
         BuilderOp::calculate_sparsity(&mut op, &y0, 0.0, &p);
 
         assert_eq!(op.nstates(), 2);
@@ -235,24 +235,24 @@ mod tests {
 
         let pop = crate::ParameterisedOp::new(&op, &p);
         let matrix = pop.matrix(0.0);
-        assert_eq!(matrix.get_index(0, 0), 2.0);
-        assert_eq!(matrix.get_index(1, 0), 1.0);
-        assert_eq!(matrix.get_index(0, 1), 0.0);
-        assert_eq!(matrix.get_index(1, 1), 3.0);
+        assert_eq!(matrix.get_index(0, 0, 0), 2.0);
+        assert_eq!(matrix.get_index(1, 0, 0), 1.0);
+        assert_eq!(matrix.get_index(0, 1, 0), 0.0);
+        assert_eq!(matrix.get_index(1, 1, 0), 3.0);
         assert!(pop.sparsity().is_some());
 
-        let mut transpose = M::zeros(2, 2, NalgebraContext);
+        let mut transpose = M::zeros(2, 2, NalgebraContext::default());
         pop.transpose_inplace(0.0, &mut transpose);
-        assert_eq!(transpose.get_index(0, 0), 2.0);
-        assert_eq!(transpose.get_index(1, 0), 0.0);
-        assert_eq!(transpose.get_index(0, 1), 0.0);
-        assert_eq!(transpose.get_index(1, 1), 3.0);
+        assert_eq!(transpose.get_index(0, 0, 0), 2.0);
+        assert_eq!(transpose.get_index(1, 0, 0), 0.0);
+        assert_eq!(transpose.get_index(0, 1, 0), 0.0);
+        assert_eq!(transpose.get_index(1, 1, 0), 3.0);
         assert!(pop.transpose_sparsity().is_some());
 
-        let x = V::from_vec(vec![4.0, 5.0], NalgebraContext);
-        let mut y = V::from_vec(vec![1.0, 1.0], NalgebraContext);
+        let x = V::from_vec(vec![4.0, 5.0], NalgebraContext::default());
+        let mut y = V::from_vec(vec![1.0, 1.0], NalgebraContext::default());
         pop.gemv_inplace(&x, 0.0, 0.5, &mut y);
-        y.assert_eq_st(&V::from_vec(vec![8.5, 19.5], NalgebraContext), 1e-12);
+        y.assert_eq_st(&V::from_vec(vec![8.5, 19.5], NalgebraContext::default()), 1e-12);
 
         let stats = pop.statistics();
         assert!(stats.number_of_calls >= 1);

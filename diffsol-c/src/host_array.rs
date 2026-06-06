@@ -30,7 +30,7 @@ where
                 "all vector columns must have the same length"
             );
             for row in 0..nrows {
-                owner.push(column.get_index(row));
+                owner.push(column.get_index(row, 0));
             }
         }
         let ptr = owner.as_mut_ptr() as *mut u8;

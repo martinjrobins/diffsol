@@ -365,7 +365,7 @@ pub fn exponential_decay_with_algebraic_problem_diffsl<
 }
 
 fn exponential_decay_with_algebraic_reset_init<M: Matrix>(p: &M::V, _t: M::T, y: &mut M::V) {
-    y.fill(p.get_index(1));
+    y.fill(p.get_index(1, 0));
 }
 
 fn exponential_decay_with_algebraic_reset_init_sens<M: Matrix>(
@@ -374,7 +374,7 @@ fn exponential_decay_with_algebraic_reset_init_sens<M: Matrix>(
     v: &M::V,
     y: &mut M::V,
 ) {
-    y.fill(v.get_index(1));
+    y.fill(v.get_index(1, 0));
 }
 
 #[allow(clippy::type_complexity)]

@@ -1631,7 +1631,7 @@ mod tests {
         let mut params = problem.context().vector_zeros(problem.eqn.nparams());
         problem.eqn.get_params(&mut params);
         assert_eq!(params.len(), 1);
-        assert_eq!(params.get_index(0), M::T::zero());
+        assert_eq!(params.get_index(0, 0), M::T::zero());
     }
 
     #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]

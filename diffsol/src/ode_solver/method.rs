@@ -1467,13 +1467,13 @@ mod test {
 
         assert_eq!(stop_reason, OdeSolverStopReason::TstopReached);
         assert!(checkpointers.len() > 1);
-        let time_tol = soln.rtol * final_time.abs() + soln.atol.get_index(0);
+        let time_tol = soln.rtol * final_time.abs() + soln.atol.get_index(0, 0);
         let t_last = *ts.last().unwrap();
         assert!((t_last - final_time).abs() < 30.0 * time_tol);
         assert!((s.state().t - final_time).abs() < 30.0 * time_tol);
 
         let reset_time = soln.solution_points[0].t;
-        let reset_time_tol = 30.0 * (soln.rtol * reset_time.abs() + soln.atol.get_index(0));
+        let reset_time_tol = 30.0 * (soln.rtol * reset_time.abs() + soln.atol.get_index(0, 0));
         let reset_col = ts
             .iter()
             .position(|&t| (t - reset_time).abs() < reset_time_tol)
@@ -1499,7 +1499,7 @@ mod test {
         assert_eq!(stop_reason, OdeSolverStopReason::TstopReached);
         assert!(checkpointers.len() > 1);
         assert_eq!(ys.ncols(), t_eval.len());
-        let time_tol = soln.rtol * final_time.abs() + soln.atol.get_index(0);
+        let time_tol = soln.rtol * final_time.abs() + soln.atol.get_index(0, 0);
         assert!((s.state().t - final_time).abs() < 30.0 * time_tol);
 
         let expected_post_reset_value = 0.4 * (-0.1 * post_event_dt).exp();
@@ -1543,11 +1543,11 @@ mod test {
         let fd_eps = 1e-6;
 
         for iparam in 0..nparams {
-            let p_nom_i = p_nom.get_index(iparam);
+            let p_nom_i = p_nom.get_index(iparam, 0);
             let h = fd_eps * (1.0 + p_nom_i.abs());
 
             let mut p = p_nom.clone();
-            p.set_index(iparam, p_nom_i + h);
+            p.set_index(iparam, 0, p_nom_i + h);
             problem.eqn.set_params(&p);
             let y_plus = {
                 let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
@@ -1556,7 +1556,7 @@ mod test {
                 ret_p
             };
 
-            p.set_index(iparam, p_nom_i - h);
+            p.set_index(iparam, 0, p_nom_i - h);
             problem.eqn.set_params(&p);
             let y_minus = {
                 let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
@@ -1607,11 +1607,11 @@ mod test {
         let fd_eps = 1e-6;
 
         for iparam in 0..nparams {
-            let p_nom_i = p_nom.get_index(iparam);
+            let p_nom_i = p_nom.get_index(iparam, 0);
             let h = fd_eps * (1.0 + p_nom_i.abs());
 
             let mut p = p_nom.clone();
-            p.set_index(iparam, p_nom_i + h);
+            p.set_index(iparam, 0, p_nom_i + h);
             problem.eqn.set_params(&p);
             let y_plus = {
                 let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
@@ -1620,7 +1620,7 @@ mod test {
                 ret_p
             };
 
-            p.set_index(iparam, p_nom_i - h);
+            p.set_index(iparam, 0, p_nom_i - h);
             problem.eqn.set_params(&p);
             let y_minus = {
                 let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();

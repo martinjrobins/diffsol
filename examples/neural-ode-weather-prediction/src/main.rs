@@ -438,7 +438,7 @@ fn train_one_round(
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // load data
-    let ctx = NalgebraContext;
+    let ctx = NalgebraContext::default();
     let file = File::open(format!("{BASE_DATA_DIR}MonthlyDelhiClimate.csv"))?;
     let mut reader = ReaderBuilder::new().has_headers(true).from_reader(file);
     let nrows = reader.records().count();

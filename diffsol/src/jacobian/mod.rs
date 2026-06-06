@@ -27,16 +27,16 @@ macro_rules! gen_find_non_zeros_nonlinear {
             let mut col = F::V::zeros(op.$nrows(), op.context().clone());
             let mut triplets = Vec::with_capacity(op.nstates());
             for j in 0..op.$ncols() {
-                v.set_index(j, F::T::NAN);
+                v.set_index(j, 0, F::T::NAN);
                 op.$op_fn(x, t, &v, &mut col);
                 for i in 0..op.nout() {
-                    if col.get_index(i).is_nan() {
+                    if col.get_index(i, 0).is_nan() {
                         triplets.push((i, j));
                     }
-                    col.set_index(i, F::T::zero());
+                    col.set_index(i, 0, F::T::zero());
                 }
                 col.fill(F::T::zero());
-                v.set_index(j, F::T::zero());
+                v.set_index(j, 0, F::T::zero());
             }
             triplets
         }
@@ -83,13 +83,13 @@ macro_rules! gen_find_non_zeros_linear {
             let mut col = F::V::zeros(op.nout(), op.context().clone());
             let mut triplets = Vec::with_capacity(op.nstates());
             for j in 0..op.nstates() {
-                v.set_index(j, F::T::NAN);
+                v.set_index(j, 0, F::T::NAN);
                 op.$op_fn(&v, t, &mut col);
                 for i in 0..op.nout() {
-                    if col.get_index(i).is_nan() {
+                    if col.get_index(i, 0).is_nan() {
                         triplets.push((i, j));
                     }
-                    col.set_index(i, F::T::zero());
+                    col.set_index(i, 0, F::T::zero());
                 }
                 // OR:
                 //col.clone_as_vec().into_iter().for_each(|v| {
@@ -97,7 +97,7 @@ macro_rules! gen_find_non_zeros_linear {
                 //        triplets.push((0, 0));
                 //    }
                 //});
-                v.set_index(j, F::T::zero());
+                v.set_index(j, 0, F::T::zero());
             }
             triplets
         }
@@ -386,7 +386,7 @@ mod tests {
         let nout = nrows;
         let f = move |x: &M::V, y: &mut M::V| {
             for (i, j, v) in triplets {
-                y.set_index(*i, y.get_index(*i) + x.get_index(*j) * *v);
+                y.set_index(*i, 0, y.get_index(*i, 0) + x.get_index(*j, 0) * *v);
             }
         };
         let mut ret = Closure::new(
@@ -420,7 +420,7 @@ mod tests {
         let nout = nrows;
         let f = move |x: &M::V, y: &mut M::V| {
             for (i, j, v) in triplets {
-                y.set_index(*i, y.get_index(*i) + x.get_index(*j) * *v);
+                y.set_index(*i, 0, y.get_index(*i, 0) + x.get_index(*j, 0) * *v);
             }
         };
         let mut ret = LinearClosure::new(

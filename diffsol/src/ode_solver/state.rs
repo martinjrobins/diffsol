@@ -357,7 +357,7 @@ impl<V: Vector> StateRefMut<'_, V> {
 
         let mut root_flow = V::zeros(nroots, ctx.clone());
         root_op.jac_mul_inplace(&y_before, t, &f_minus, &mut root_flow);
-        let denom = root_flow.get_index(root_idx) + root_t.get_index(root_idx);
+        let denom = root_flow.get_index(root_idx, 0) + root_t.get_index(root_idx, 0);
         let denom_tol = V::T::from_f64(100.0).unwrap() * V::T::EPSILON;
         if denom.abs() <= denom_tol {
             return Err(ode_solver_error!(
@@ -373,7 +373,7 @@ impl<V: Vector> StateRefMut<'_, V> {
         let mut root_sens = V::zeros(nroots, ctx);
         let mut s_plus = Vec::with_capacity(nparams);
         for (j, s_j_before) in s_before.iter().enumerate() {
-            basis.set_index(j, V::T::one());
+            basis.set_index(j, 0, V::T::one());
 
             reset_op.jac_mul_inplace(&y_before, t, s_j_before, &mut reset_jac_s);
             reset_op.sens_mul_inplace(&y_before, t, &basis, &mut reset_sens);
@@ -381,7 +381,7 @@ impl<V: Vector> StateRefMut<'_, V> {
             root_op.jac_mul_inplace(&y_before, t, s_j_before, &mut root_jac_s);
             root_op.sens_mul_inplace(&y_before, t, &basis, &mut root_sens);
 
-            let numerator = root_jac_s.get_index(root_idx) + root_sens.get_index(root_idx);
+            let numerator = root_jac_s.get_index(root_idx, 0) + root_sens.get_index(root_idx, 0);
             let tau_p = -numerator / denom;
 
             let mut s_j_plus = reset_jac_s.clone();
@@ -389,7 +389,7 @@ impl<V: Vector> StateRefMut<'_, V> {
             s_j_plus.axpy(tau_p, &correction_dir, V::T::one());
             s_plus.push(s_j_plus);
 
-            basis.set_index(j, V::T::zero());
+            basis.set_index(j, 0, V::T::zero());
         }
 
         for (dst, src) in self.s.iter_mut().zip(s_plus.iter()) {
@@ -452,7 +452,7 @@ impl<V: Vector> StateRefMut<'_, V> {
 
         let mut root_flow = V::zeros(nroots, ctx.clone());
         root_op.jac_mul_inplace(&y_before, t, &f_minus, &mut root_flow);
-        let denom = root_flow.get_index(root_idx) + root_t.get_index(root_idx);
+        let denom = root_flow.get_index(root_idx, 0) + root_t.get_index(root_idx, 0);
         let denom_tol = V::T::from_f64(100.0).unwrap() * V::T::EPSILON;
         if denom.abs() <= denom_tol {
             return Err(ode_solver_error!(
@@ -468,7 +468,7 @@ impl<V: Vector> StateRefMut<'_, V> {
         let mut root_sens = V::zeros(nroots, ctx);
         let mut s_plus = Vec::with_capacity(nparams);
         for (j, s_j_before) in s_before.iter().enumerate() {
-            basis.set_index(j, V::T::one());
+            basis.set_index(j, 0, V::T::one());
 
             reset_op.jac_mul_inplace(&y_before, t, s_j_before, &mut reset_jac_s);
             reset_op.sens_mul_inplace(&y_before, t, &basis, &mut reset_sens);
@@ -476,7 +476,7 @@ impl<V: Vector> StateRefMut<'_, V> {
             root_op.jac_mul_inplace(&y_before, t, s_j_before, &mut root_jac_s);
             root_op.sens_mul_inplace(&y_before, t, &basis, &mut root_sens);
 
-            let numerator = root_jac_s.get_index(root_idx) + root_sens.get_index(root_idx);
+            let numerator = root_jac_s.get_index(root_idx, 0) + root_sens.get_index(root_idx, 0);
             let tau_p = -numerator / denom;
 
             let mut s_j_plus = reset_jac_s.clone();
@@ -484,7 +484,7 @@ impl<V: Vector> StateRefMut<'_, V> {
             s_j_plus.axpy(tau_p, &correction_dir, V::T::one());
             s_plus.push(s_j_plus);
 
-            basis.set_index(j, V::T::zero());
+            basis.set_index(j, 0, V::T::zero());
         }
 
         for (dst, src) in self.s.iter_mut().zip(s_plus.iter()) {
@@ -586,7 +586,7 @@ impl<V: Vector> StateRefMut<'_, V> {
 
         let mut root_flow = V::zeros(nroots, ctx.clone());
         root_op.jac_mul_inplace(y_minus, t_event, f_minus, &mut root_flow);
-        let denom = root_flow.get_index(root_idx) + root_t.get_index(root_idx);
+        let denom = root_flow.get_index(root_idx, 0) + root_t.get_index(root_idx, 0);
         let denom_tol = V::T::from_f64(100.0).unwrap() * V::T::EPSILON;
         if denom.abs() <= denom_tol {
             return Err(ode_solver_error!(
@@ -619,10 +619,10 @@ impl<V: Vector> StateRefMut<'_, V> {
                 let lambda_i = &self.s[i];
                 let mut alpha_num = V::T::zero();
                 for j in 0..nstates {
-                    alpha_num += lambda_i.get_index(j) * correction_dir.get_index(j);
+                    alpha_num += lambda_i.get_index(j, 0) * correction_dir.get_index(j, 0);
                 }
                 if let (Some(l_minus), Some(l_plus)) = (&l_minus, &l_plus) {
-                    alpha_num += l_minus.get_index(i) - l_plus.get_index(i);
+                    alpha_num += l_minus.get_index(i, 0) - l_plus.get_index(i, 0);
                 }
                 alpha_num / denom
             };
@@ -638,10 +638,10 @@ impl<V: Vector> StateRefMut<'_, V> {
                 );
             }
 
-            root_basis.set_index(root_idx, alpha);
+            root_basis.set_index(root_idx, 0, alpha);
             root_op.jac_transpose_mul_inplace(y_minus, t_event, &root_basis, &mut root_adj);
             root_op.sens_transpose_mul_inplace(y_minus, t_event, &root_basis, &mut root_sens_adj);
-            root_basis.set_index(root_idx, V::T::zero());
+            root_basis.set_index(root_idx, 0, V::T::zero());
 
             self.s[i].copy_from(&root_adj);
             self.s[i].axpy(-V::T::one(), &reset_adj, V::T::one());
@@ -714,7 +714,7 @@ impl<V: Vector> StateRefMut<'_, V> {
         let root_t = root_op.time_derive(forward.y, forward.t);
         let mut root_flow = V::zeros(nroots, ctx.clone());
         root_op.jac_mul_inplace(forward.y, forward.t, forward.dy, &mut root_flow);
-        let denom = root_flow.get_index(root_idx) + root_t.get_index(root_idx);
+        let denom = root_flow.get_index(root_idx, 0) + root_t.get_index(root_idx, 0);
         let denom_tol = V::T::from_f64(100.0).unwrap() * V::T::EPSILON;
         if denom.abs() <= denom_tol {
             return Err(ode_solver_error!(
@@ -729,10 +729,10 @@ impl<V: Vector> StateRefMut<'_, V> {
         let mut lambda_corr = V::zeros(nstates, ctx.clone());
         let mut q_corr = V::zeros(nparams, ctx.clone());
         for i in 0..nout {
-            root_basis.set_index(root_idx, out.get_index(i) / denom);
+            root_basis.set_index(root_idx, 0, out.get_index(i, 0) / denom);
             root_op.jac_transpose_mul_inplace(forward.y, forward.t, &root_basis, &mut lambda_corr);
             root_op.sens_transpose_mul_inplace(forward.y, forward.t, &root_basis, &mut q_corr);
-            root_basis.set_index(root_idx, V::T::zero());
+            root_basis.set_index(root_idx, 0, V::T::zero());
             self.s[i] += &lambda_corr;
             self.sg[i] += &q_corr;
         }
@@ -1785,8 +1785,8 @@ mod test {
 
     #[test]
     fn parameterised_op_time_derive_uses_finite_difference() {
-        let p = TestVec::from_vec(vec![1.0, -2.0], crate::NalgebraContext);
-        let x = TestVec::from_vec(vec![2.0], crate::NalgebraContext);
+        let p = TestVec::from_vec(vec![1.0, -2.0], crate::NalgebraContext::default());
+        let x = TestVec::from_vec(vec![2.0], crate::NalgebraContext::default());
         let t = 3.0;
 
         let reset = ClosureWithSens::<TestMat, _, _, _>::new(
@@ -1800,7 +1800,7 @@ mod test {
             1,
             2,
             1,
-            crate::NalgebraContext,
+            crate::NalgebraContext::default(),
         );
         let reset = ParameterisedOp::new(&reset, &p);
 
@@ -1815,7 +1815,7 @@ mod test {
             1,
             2,
             1,
-            crate::NalgebraContext,
+            crate::NalgebraContext::default(),
         );
         let root = ParameterisedOp::new(&root, &p);
 
@@ -1857,7 +1857,7 @@ mod test {
             2,
         );
         let forward_problem = scalar_problem(0.25);
-        let p = TestVec::from_vec(vec![1.2, -0.7], crate::NalgebraContext);
+        let p = TestVec::from_vec(vec![1.2, -0.7], crate::NalgebraContext::default());
         problem.eqn.set_params(&p);
         let mut state = make_adjoint_state(
             &problem,
@@ -1927,7 +1927,7 @@ mod test {
             2,
         );
         let forward_problem = scalar_problem(0.25);
-        let p = TestVec::from_vec(vec![1.2, -0.7], crate::NalgebraContext);
+        let p = TestVec::from_vec(vec![1.2, -0.7], crate::NalgebraContext::default());
         problem.eqn.set_params(&p);
         let mut state_root0 = make_adjoint_state(
             &problem,
@@ -1997,7 +1997,7 @@ mod test {
             1,
         );
         let forward_problem = scalar_problem(0.1);
-        let p = TestVec::from_vec(vec![1.0, -2.0], crate::NalgebraContext);
+        let p = TestVec::from_vec(vec![1.0, -2.0], crate::NalgebraContext::default());
         problem.eqn.set_params(&p);
         let mut state = make_adjoint_state(
             &problem,
@@ -2059,7 +2059,7 @@ mod test {
             2,
         );
         let forward_problem = scalar_problem(0.25);
-        let p = TestVec::from_vec(vec![1.0, -2.0], crate::NalgebraContext);
+        let p = TestVec::from_vec(vec![1.0, -2.0], crate::NalgebraContext::default());
         problem.eqn.set_params(&p);
         let mut state = make_adjoint_state(
             &problem,
@@ -2101,7 +2101,7 @@ mod test {
             1,
         );
         let forward_problem = scalar_problem(0.0);
-        let p = TestVec::from_vec(vec![1.0, -2.0], crate::NalgebraContext);
+        let p = TestVec::from_vec(vec![1.0, -2.0], crate::NalgebraContext::default());
         problem.eqn.set_params(&p);
         let mut state = make_adjoint_state(
             &problem,
@@ -2175,17 +2175,17 @@ mod test {
             )
             .build()
             .unwrap();
-        let p = TestVec::from_vec(vec![1.0, -2.0], crate::NalgebraContext);
+        let p = TestVec::from_vec(vec![1.0, -2.0], crate::NalgebraContext::default());
         problem.eqn.set_params(&p);
         let common = StateCommon {
-            y: TestVec::zeros(1, crate::NalgebraContext),
-            dy: TestVec::zeros(1, crate::NalgebraContext),
-            g: TestVec::zeros(0, crate::NalgebraContext),
-            dg: TestVec::zeros(0, crate::NalgebraContext),
-            s: vec![TestVec::zeros(1, crate::NalgebraContext)],
-            ds: vec![TestVec::zeros(1, crate::NalgebraContext)],
-            sg: vec![TestVec::zeros(2, crate::NalgebraContext)],
-            dsg: vec![TestVec::zeros(2, crate::NalgebraContext)],
+            y: TestVec::zeros(1, crate::NalgebraContext::default()),
+            dy: TestVec::zeros(1, crate::NalgebraContext::default()),
+            g: TestVec::zeros(0, crate::NalgebraContext::default()),
+            dg: TestVec::zeros(0, crate::NalgebraContext::default()),
+            s: vec![TestVec::zeros(1, crate::NalgebraContext::default())],
+            ds: vec![TestVec::zeros(1, crate::NalgebraContext::default())],
+            sg: vec![TestVec::zeros(2, crate::NalgebraContext::default())],
+            dsg: vec![TestVec::zeros(2, crate::NalgebraContext::default())],
             t: 0.0,
             h: 0.0,
         };

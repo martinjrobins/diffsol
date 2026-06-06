@@ -38,6 +38,7 @@ impl CudaGlobalContext {
 #[derive(Clone, Debug)]
 pub struct CudaContext {
     pub(crate) stream: Arc<CudaStream>,
+    pub(crate) nbatch: usize,
 }
 
 impl CudaContext {
@@ -84,19 +85,19 @@ impl CudaContext {
     }
 
     /// Creates a new CudaContext with the given ordinal and creates a new non-default stream.
-    pub fn new_with_stream(ordinal: usize) -> Result<Self, DiffsolError> {
+    pub fn new_with_stream(ordinal: usize, nbatch: usize) -> Result<Self, DiffsolError> {
         let (device, _module) = Self::get_device_and_module(ordinal)?;
         let stream = device
             .new_stream()
             .map_err(|e| cuda_error!(Other, format!("Failed to create new stream: {}", e)))?;
-        Ok(Self { stream })
+        Ok(Self { stream, nbatch })
     }
 
     /// Creates a new CudaContext with the given ordinal (uses default stream).
     pub fn new(ordinal: usize) -> Result<Self, DiffsolError> {
         let (device, _module) = Self::get_device_and_module(ordinal)?;
         let stream = device.default_stream();
-        Ok(Self { stream })
+        Ok(Self { stream, nbatch: 1 })
     }
 
     pub(crate) fn function<T: ScalarCuda>(&self, kernel_name: &str) -> CudaFunction {

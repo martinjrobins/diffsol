@@ -185,11 +185,11 @@ pub trait Vector:
     /// Get a mutable reference to the inner representation of the vector.
     fn inner_mut(&mut self) -> &mut Self::Inner;
 
-    /// Set the value at the specified index to `value`.
-    fn set_index(&mut self, index: IndexType, value: Self::T);
+    /// Set the value at the specified batch and index to `value`.
+    fn set_index(&mut self, index: IndexType, b: usize, value: Self::T);
 
-    /// Get the value at the specified index.
-    fn get_index(&self, index: IndexType) -> Self::T;
+    /// Get the value at the specified batch and index.
+    fn get_index(&self, index: IndexType, b: usize) -> Self::T;
 
     /// Compute the $\ell_k$ norm: $(\sum_i |x_i|^k)^{1/k}$
     fn norm(&self, k: i32) -> Self::T;
@@ -451,7 +451,7 @@ mod tests {
 
     #[test]
     fn vector_common_for_references_and_default_helpers_work() {
-        let mut v = NalgebraVec::from_vec(vec![1.0, 2.0], NalgebraContext);
+        let mut v = NalgebraVec::from_vec(vec![1.0, 2.0], NalgebraContext::default());
         assert_eq!(<NalgebraVec<f64> as VectorCommon>::inner(&v).len(), 2);
         assert_eq!(<&NalgebraVec<f64> as VectorCommon>::inner(&&v).len(), 2);
         assert_eq!(
@@ -459,32 +459,32 @@ mod tests {
             2
         );
 
-        let empty = NalgebraVec::<f64>::zeros(0, NalgebraContext);
+        let empty = NalgebraVec::<f64>::zeros(0, NalgebraContext::default());
         assert!(empty.is_empty());
 
-        let non_empty = NalgebraVec::<f64>::zeros(2, NalgebraContext);
+        let non_empty = NalgebraVec::<f64>::zeros(2, NalgebraContext::default());
         assert!(!non_empty.is_empty());
         assert_eq!(non_empty.clone_as_vec(), vec![0.0, 0.0]);
     }
 
     #[test]
     fn vector_assert_eq_panics_for_length_mismatch() {
-        let left = NalgebraVec::from_vec(vec![1.0, 2.0], NalgebraContext);
-        let right = NalgebraVec::from_vec(vec![1.0], NalgebraContext);
-        let tol = NalgebraVec::from_vec(vec![0.0, 0.0], NalgebraContext);
+        let left = NalgebraVec::from_vec(vec![1.0, 2.0], NalgebraContext::default());
+        let right = NalgebraVec::from_vec(vec![1.0], NalgebraContext::default());
+        let tol = NalgebraVec::from_vec(vec![0.0, 0.0], NalgebraContext::default());
         assert!(catch_unwind(AssertUnwindSafe(|| left.assert_eq(&right, &tol))).is_err());
     }
 
     #[test]
     fn vector_assert_helpers_cover_success_and_failure_paths() {
-        let left = NalgebraVec::from_vec(vec![1.0, 2.0, 3.0], NalgebraContext);
-        let right = NalgebraVec::from_vec(vec![1.0, 2.0, 3.0], NalgebraContext);
-        let tol = NalgebraVec::from_vec(vec![0.0, 0.0, 0.0], NalgebraContext);
+        let left = NalgebraVec::from_vec(vec![1.0, 2.0, 3.0], NalgebraContext::default());
+        let right = NalgebraVec::from_vec(vec![1.0, 2.0, 3.0], NalgebraContext::default());
+        let tol = NalgebraVec::from_vec(vec![0.0, 0.0, 0.0], NalgebraContext::default());
         left.assert_eq(&right, &tol);
         left.assert_eq_st(&right, 0.0);
         left.assert_eq_norm(&right, &tol, 1e-6, 1.0);
 
-        let perturbed = NalgebraVec::from_vec(vec![1.1, 2.0, 3.0], NalgebraContext);
+        let perturbed = NalgebraVec::from_vec(vec![1.1, 2.0, 3.0], NalgebraContext::default());
         assert!(catch_unwind(AssertUnwindSafe(
             || left.assert_eq_norm(&perturbed, &tol, 1e-6, 0.01)
         ))

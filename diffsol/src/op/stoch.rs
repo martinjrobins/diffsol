@@ -44,9 +44,9 @@ pub trait StochOp: Op {
 
         for i in 0..self.nprocess() {
             if i != 0 {
-                d_w.set_index(i - 1, Self::T::one());
+                d_w.set_index(i - 1, 0, Self::T::one());
             }
-            d_w.set_index(i, Self::T::NAN);
+            d_w.set_index(i, 0, Self::T::NAN);
             self.process_inplace(&x, &d_w, t, &mut y);
 
             // if any of the y[j] j != i has nans, it is other
@@ -212,7 +212,7 @@ mod test {
     #[test]
     fn test_additive() {
         let op = TestAdditive {
-            ctx: NalgebraContext,
+            ctx: NalgebraContext::default(),
         };
         assert_eq!(op.kind(), StochOpKind::Additive);
     }
@@ -220,7 +220,7 @@ mod test {
     #[test]
     fn test_diagonal() {
         let op = TestDiagonal {
-            ctx: NalgebraContext,
+            ctx: NalgebraContext::default(),
         };
         assert_eq!(op.kind(), StochOpKind::Diagonal);
     }
@@ -228,7 +228,7 @@ mod test {
     #[test]
     fn test_scalar() {
         let op = TestScalar {
-            ctx: NalgebraContext,
+            ctx: NalgebraContext::default(),
         };
         assert_eq!(op.kind(), StochOpKind::Scalar);
     }
@@ -236,7 +236,7 @@ mod test {
     #[test]
     fn test_other() {
         let op = TestOther {
-            ctx: NalgebraContext,
+            ctx: NalgebraContext::default(),
         };
         assert_eq!(op.kind(), StochOpKind::Other);
     }

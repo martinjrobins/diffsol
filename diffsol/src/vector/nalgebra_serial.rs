@@ -31,12 +31,29 @@ pub struct NalgebraVecMut<'a, T: NalgebraScalar> {
     pub(crate) context: NalgebraContext,
 }
 
+impl<T: NalgebraScalar> NalgebraVec<T> {
+    fn nbatch(&self) -> usize {
+        self.context.nbatch
+    }
+
+    fn nstates(&self) -> IndexType {
+        self.data.len() / self.nbatch()
+    }
+
+    fn flat_index(&self, i: IndexType, b: usize) -> usize {
+        i * self.nbatch() + b
+    }
+}
+
 impl<T: NalgebraScalar> From<DVector<T>> for NalgebraVec<T> {
     fn from(data: DVector<T>) -> Self {
-        Self {
-            data,
-            context: NalgebraContext,
-        }
+        let context = NalgebraContext::default();
+        assert_eq!(
+            data.len() % context.nbatch,
+            0,
+            "DVector length must be divisible by nbatch"
+        );
+        Self { data, context }
     }
 }
 
@@ -324,18 +341,28 @@ impl<'a, T: NalgebraScalar> VectorView<'a> for NalgebraVecRef<'a, T> {
         }
     }
     fn squared_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: Self::T) -> Self::T {
-        let mut acc = T::zero();
-        if y.len() != self.data.len() || y.len() != atol.len() {
+        let nbatch = self.context.nbatch;
+        let nstates = self.data.len() / nbatch;
+        if y.nstates() != nstates || atol.nstates() != nstates {
             panic!("Vector lengths do not match");
         }
-        for i in 0..self.data.len() {
-            let yi = unsafe { y.data.get_unchecked(i) };
-            let ai = unsafe { atol.data.get_unchecked(i) };
-            let xi = unsafe { self.data.get_unchecked(i) };
-            let term = *xi / (yi.abs() * rtol + *ai);
-            acc += term * term;
+        let mut max_norm = T::zero();
+        for b in 0..nbatch {
+            let mut batch_acc = T::zero();
+            for i in 0..nstates {
+                let flat_idx = i * nbatch + b;
+                let yi = unsafe { y.data.get_unchecked(flat_idx) };
+                let ai = unsafe { atol.data.get_unchecked(flat_idx) };
+                let xi = unsafe { self.data.get_unchecked(flat_idx) };
+                let term = *xi / (yi.abs() * rtol + *ai);
+                batch_acc += term * term;
+            }
+            batch_acc /= Self::T::from_f64(nstates as f64).unwrap();
+            if batch_acc > max_norm {
+                max_norm = batch_acc;
+            }
         }
-        acc / Self::T::from_f64(self.data.len() as f64).unwrap()
+        max_norm
     }
 }
 
@@ -368,7 +395,7 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
     type ViewMut<'a> = NalgebraVecMut<'a, T>;
     type Index = NalgebraIndex;
     fn len(&self) -> IndexType {
-        self.data.len()
+        self.nstates()
     }
     fn inner_mut(&mut self) -> &mut Self::Inner {
         &mut self.data
@@ -377,27 +404,71 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
         &self.context
     }
     fn norm(&self, k: i32) -> Self::T {
-        self.data.apply_norm(&LpNorm(k))
+        let nbatch = self.nbatch();
+        let nstates = self.nstates();
+        if nbatch == 1 {
+            return self.data.apply_norm(&LpNorm(k));
+        }
+        let mut max_norm = T::zero();
+        for b in 0..nbatch {
+            let mut batch_norm = T::zero();
+            match k {
+                1 => {
+                    for i in 0..nstates {
+                        batch_norm += unsafe { *self.data.get_unchecked(self.flat_index(i, b)) }.abs();
+                    }
+                }
+                2 => {
+                    for i in 0..nstates {
+                        let v = unsafe { *self.data.get_unchecked(self.flat_index(i, b)) };
+                        batch_norm += v * v;
+                    }
+                    batch_norm = Scalar::sqrt(batch_norm);
+                }
+                _ => {
+                    for i in 0..nstates {
+                        let v = unsafe { *self.data.get_unchecked(self.flat_index(i, b)) };
+                        batch_norm += v.pow(k);
+                    }
+                    batch_norm = num_traits::Pow::pow(batch_norm, T::one() / T::from_f64(k as f64).unwrap());
+                }
+            }
+            if batch_norm > max_norm {
+                max_norm = batch_norm;
+            }
+        }
+        max_norm
     }
-    fn get_index(&self, index: IndexType) -> Self::T {
-        self.data[index]
+    fn get_index(&self, index: IndexType, b: usize) -> Self::T {
+        self.data[self.flat_index(index, b)]
     }
-    fn set_index(&mut self, index: IndexType, value: Self::T) {
-        self.data[index] = value;
+    fn set_index(&mut self, index: IndexType, b: usize, value: Self::T) {
+        let idx = self.flat_index(index, b);
+        self.data[idx] = value;
     }
     fn squared_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T {
-        let mut acc = T::zero();
+        let nbatch = self.nbatch();
+        let nstates = self.nstates();
         if y.len() != self.len() || y.len() != atol.len() {
             panic!("Vector lengths do not match");
         }
-        for i in 0..self.len() {
-            let yi = unsafe { y.data.get_unchecked(i) };
-            let ai = unsafe { atol.data.get_unchecked(i) };
-            let xi = unsafe { self.data.get_unchecked(i) };
-            let term = *xi / (yi.abs() * rtol + *ai);
-            acc += term * term;
+        let mut max_norm = T::zero();
+        for b in 0..nbatch {
+            let mut batch_acc = T::zero();
+            for i in 0..nstates {
+                let flat_idx = self.flat_index(i, b);
+                let yi = unsafe { y.data.get_unchecked(flat_idx) };
+                let ai = unsafe { atol.data.get_unchecked(flat_idx) };
+                let xi = unsafe { self.data.get_unchecked(flat_idx) };
+                let term = *xi / (yi.abs() * rtol + *ai);
+                batch_acc += term * term;
+            }
+            batch_acc /= Self::T::from_f64(nstates as f64).unwrap();
+            if batch_acc > max_norm {
+                max_norm = batch_acc;
+            }
         }
-        acc / Self::T::from_f64(self.len() as f64).unwrap()
+        max_norm
     }
     fn as_view(&self) -> Self::View<'_> {
         Self::View {
@@ -421,14 +492,19 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
         self.data.copy_from(&other.data);
     }
     fn from_element(nstates: usize, value: T, ctx: Self::C) -> Self {
-        let data = DVector::from_element(nstates, value);
+        let nbatch = ctx.nbatch;
+        let data = DVector::from_element(nstates * nbatch, value);
         Self { data, context: ctx }
     }
     fn from_vec(vec: Vec<T>, ctx: Self::C) -> Self {
+        let nbatch = ctx.nbatch;
+        assert!(vec.len() % nbatch == 0, "vec length {} must be divisible by nbatch {}", vec.len(), nbatch);
         let data = DVector::from_vec(vec);
         Self { data, context: ctx }
     }
     fn from_slice(slice: &[T], ctx: Self::C) -> Self {
+        let nbatch = ctx.nbatch;
+        assert!(slice.len() % nbatch == 0, "slice length {} must be divisible by nbatch {}", slice.len(), nbatch);
         let data = DVector::from_column_slice(slice);
         Self { data, context: ctx }
     }
@@ -436,7 +512,8 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
         self.data.iter().copied().collect()
     }
     fn zeros(nstates: usize, ctx: Self::C) -> Self {
-        let data = DVector::zeros(nstates);
+        let nbatch = ctx.nbatch;
+        let data = DVector::zeros(nstates * nbatch);
         Self { data, context: ctx }
     }
     fn axpy(&mut self, alpha: T, x: &Self, beta: T) {
@@ -453,21 +530,26 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
     }
 
     fn root_finding(&self, g1: &Self) -> (bool, Self::T, i32) {
+        let nbatch = self.nbatch();
+        let nstates = self.nstates();
         let mut max_frac = T::zero();
         let mut max_frac_index = -1;
         let mut found_root = false;
         assert_eq!(self.len(), g1.len(), "Vector lengths do not match");
-        for i in 0..self.len() {
-            let g0 = unsafe { *self.data.get_unchecked(i) };
-            let g1 = unsafe { *g1.data.get_unchecked(i) };
-            if g1 == T::zero() {
-                found_root = true;
-            }
-            if g0 * g1 < T::zero() {
-                let frac = (g1 / (g1 - g0)).abs();
-                if frac > max_frac {
-                    max_frac = frac;
-                    max_frac_index = i as i32;
+        for b in 0..nbatch {
+            for i in 0..nstates {
+                let flat_idx = self.flat_index(i, b);
+                let g0 = unsafe { *self.data.get_unchecked(flat_idx) };
+                let g1 = unsafe { *g1.data.get_unchecked(flat_idx) };
+                if g1 == T::zero() {
+                    found_root = true;
+                }
+                if g0 * g1 < T::zero() {
+                    let frac = (g1 / (g1 - g0)).abs();
+                    if frac > max_frac {
+                        max_frac = frac;
+                        max_frac_index = i as i32;
+                    }
                 }
             }
         }
@@ -487,14 +569,14 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
     }
 
     fn gather(&mut self, other: &Self, indices: &Self::Index) {
-        assert_eq!(self.len(), indices.len(), "Vector lengths do not match");
+        assert_eq!(self.data.len(), indices.len(), "Vector lengths do not match");
         for (s, o) in self.data.iter_mut().zip(indices.data.iter()) {
             *s = other[*o];
         }
     }
 
     fn scatter(&self, indices: &Self::Index, other: &mut Self) {
-        assert_eq!(self.len(), indices.len(), "Vector lengths do not match");
+        assert_eq!(self.data.len(), indices.len(), "Vector lengths do not match");
         for (s, o) in self.data.iter().zip(indices.data.iter()) {
             other[*o] = *s;
         }

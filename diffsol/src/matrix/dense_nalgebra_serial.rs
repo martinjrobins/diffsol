@@ -175,11 +175,47 @@ impl<'a, T: NalgebraScalar> MatrixView<'a> for NalgebraMatRef<'a, T> {
         beta: Self::T,
         y: &mut Self::V,
     ) {
-        y.data.gemv(alpha, &self.data, &x.data, beta);
+        let nbatch = self.context.nbatch;
+        let nstates = self.data.nrows();
+        if nbatch == 1 {
+            y.data.gemv(alpha, &self.data, &x.data, beta);
+        } else {
+            y.data *= beta;
+            for b in 0..nbatch {
+                for i in 0..nstates {
+                    unsafe {
+                        let mut sum = T::zero();
+                        for j in 0..self.data.ncols() {
+                            sum += *self.data.get_unchecked((i, j))
+                                * *x.data.get_unchecked(j * nbatch + b);
+                        }
+                        *y.data.get_unchecked_mut(i * nbatch + b) += alpha * sum;
+                    }
+                }
+            }
+        }
     }
 
     fn gemv_o(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
-        y.data.gemv(alpha, &self.data, &x.data, beta);
+        let nbatch = self.context.nbatch;
+        let nstates = self.data.nrows();
+        if nbatch == 1 {
+            y.data.gemv(alpha, &self.data, &x.data, beta);
+        } else {
+            y.data *= beta;
+            for b in 0..nbatch {
+                for i in 0..nstates {
+                    unsafe {
+                        let mut sum = T::zero();
+                        for j in 0..self.data.ncols() {
+                            sum += *self.data.get_unchecked((i, j))
+                                * *x.data.get_unchecked(j * nbatch + b);
+                        }
+                        *y.data.get_unchecked_mut(i * nbatch + b) += alpha * sum;
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -293,7 +329,25 @@ impl<T: NalgebraScalar> Matrix for NalgebraMat<T> {
     }
 
     fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
-        y.data.gemv(alpha, &self.data, &x.data, beta);
+        let nbatch = self.context.nbatch;
+        let nstates = self.data.nrows();
+        if nbatch == 1 {
+            y.data.gemv(alpha, &self.data, &x.data, beta);
+        } else {
+            y.data *= beta;
+            for b in 0..nbatch {
+                for i in 0..nstates {
+                    unsafe {
+                        let mut sum = T::zero();
+                        for j in 0..self.data.ncols() {
+                            sum += *self.data.get_unchecked((i, j))
+                                * *x.data.get_unchecked(j * nbatch + b);
+                        }
+                        *y.data.get_unchecked_mut(i * nbatch + b) += alpha * sum;
+                    }
+                }
+            }
+        }
     }
     fn copy_from(&mut self, other: &Self) {
         self.data.copy_from(&other.data);
@@ -331,7 +385,7 @@ impl<T: NalgebraScalar> DenseMatrix for NalgebraMat<T> {
         self.data.resize_horizontally_mut(ncols, Self::T::zero());
     }
 
-    fn get_index(&self, i: IndexType, j: IndexType) -> Self::T {
+    fn get_index(&self, i: IndexType, j: IndexType, _b: usize) -> Self::T {
         self.data[(i, j)]
     }
 
@@ -356,7 +410,7 @@ impl<T: NalgebraScalar> DenseMatrix for NalgebraMat<T> {
         }
     }
 
-    fn set_index(&mut self, i: IndexType, j: IndexType, value: Self::T) {
+    fn set_index(&mut self, i: IndexType, j: IndexType, _b: usize, value: Self::T) {
         self.data[(i, j)] = value;
     }
 

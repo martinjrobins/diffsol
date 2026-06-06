@@ -381,11 +381,11 @@ pub trait DenseMatrix:
     /// Get a mutable vector view of column `i`.
     fn column_mut(&mut self, i: IndexType) -> <Self::V as Vector>::ViewMut<'_>;
 
-    /// Set the value at the given row and column indices.
-    fn set_index(&mut self, i: IndexType, j: IndexType, value: Self::T);
+    /// Set the value at the given row and column indices for the given batch.
+    fn set_index(&mut self, i: IndexType, j: IndexType, b: usize, value: Self::T);
 
-    /// Get the value at the given row and column indices.
-    fn get_index(&self, i: IndexType, j: IndexType) -> Self::T;
+    /// Get the value at the given row and column indices for the given batch.
+    fn get_index(&self, i: IndexType, j: IndexType, b: usize) -> Self::T;
 
     /// Perform matrix-matrix multiplication using GEMM, allocating a new matrix for the result.
     fn mat_mul(&self, b: &Self) -> Self {
@@ -457,47 +457,47 @@ mod tests {
         // M = [1 2]
         //     [3 4]
         let mut a = M::zeros(2, 2, Default::default());
-        a.set_index(0, 0, M::T::one());
-        a.set_index(0, 1, M::T::from_f64(2.0).unwrap());
-        a.set_index(1, 0, M::T::from_f64(3.0).unwrap());
-        a.set_index(1, 1, M::T::from_f64(4.0).unwrap());
+        a.set_index(0, 0, 0, M::T::one());
+        a.set_index(0, 1, 0, M::T::from_f64(2.0).unwrap());
+        a.set_index(1, 0, 0, M::T::from_f64(3.0).unwrap());
+        a.set_index(1, 1, 0, M::T::from_f64(4.0).unwrap());
 
         // op is M(:, 1) = 2 * M(:, 0) + M(:, 1)
         a.column_axpy(M::T::from_f64(2.0).unwrap(), 0, 1);
         // M = [1 4]
         //     [3 10]
-        assert_eq!(a.get_index(0, 0), M::T::one());
-        assert_eq!(a.get_index(0, 1), M::T::from_f64(4.0).unwrap());
-        assert_eq!(a.get_index(1, 0), M::T::from_f64(3.0).unwrap());
-        assert_eq!(a.get_index(1, 1), M::T::from_f64(10.0).unwrap());
+        assert_eq!(a.get_index(0, 0, 0), M::T::one());
+        assert_eq!(a.get_index(0, 1, 0), M::T::from_f64(4.0).unwrap());
+        assert_eq!(a.get_index(1, 0, 0), M::T::from_f64(3.0).unwrap());
+        assert_eq!(a.get_index(1, 1, 0), M::T::from_f64(10.0).unwrap());
     }
 
     pub fn test_resize_cols<M: DenseMatrix>() {
         let mut a = M::zeros(2, 2, Default::default());
-        a.set_index(0, 0, M::T::one());
-        a.set_index(0, 1, M::T::from_f64(2.0).unwrap());
-        a.set_index(1, 0, M::T::from_f64(3.0).unwrap());
-        a.set_index(1, 1, M::T::from_f64(4.0).unwrap());
+        a.set_index(0, 0, 0, M::T::one());
+        a.set_index(0, 1, 0, M::T::from_f64(2.0).unwrap());
+        a.set_index(1, 0, 0, M::T::from_f64(3.0).unwrap());
+        a.set_index(1, 1, 0, M::T::from_f64(4.0).unwrap());
 
         a.resize_cols(3);
         assert_eq!(a.ncols(), 3);
         assert_eq!(a.nrows(), 2);
-        assert_eq!(a.get_index(0, 0), M::T::one());
-        assert_eq!(a.get_index(0, 1), M::T::from_f64(2.0).unwrap());
-        assert_eq!(a.get_index(1, 0), M::T::from_f64(3.0).unwrap());
-        assert_eq!(a.get_index(1, 1), M::T::from_f64(4.0).unwrap());
+        assert_eq!(a.get_index(0, 0, 0), M::T::one());
+        assert_eq!(a.get_index(0, 1, 0), M::T::from_f64(2.0).unwrap());
+        assert_eq!(a.get_index(1, 0, 0), M::T::from_f64(3.0).unwrap());
+        assert_eq!(a.get_index(1, 1, 0), M::T::from_f64(4.0).unwrap());
 
-        a.set_index(0, 2, M::T::from_f64(5.0).unwrap());
-        a.set_index(1, 2, M::T::from_f64(6.0).unwrap());
-        assert_eq!(a.get_index(0, 2), M::T::from_f64(5.0).unwrap());
-        assert_eq!(a.get_index(1, 2), M::T::from_f64(6.0).unwrap());
+        a.set_index(0, 2, 0, M::T::from_f64(5.0).unwrap());
+        a.set_index(1, 2, 0, M::T::from_f64(6.0).unwrap());
+        assert_eq!(a.get_index(0, 2, 0), M::T::from_f64(5.0).unwrap());
+        assert_eq!(a.get_index(1, 2, 0), M::T::from_f64(6.0).unwrap());
 
         a.resize_cols(2);
         assert_eq!(a.ncols(), 2);
         assert_eq!(a.nrows(), 2);
-        assert_eq!(a.get_index(0, 0), M::T::one());
-        assert_eq!(a.get_index(0, 1), M::T::from_f64(2.0).unwrap());
-        assert_eq!(a.get_index(1, 0), M::T::from_f64(3.0).unwrap());
-        assert_eq!(a.get_index(1, 1), M::T::from_f64(4.0).unwrap());
+        assert_eq!(a.get_index(0, 0, 0), M::T::one());
+        assert_eq!(a.get_index(0, 1, 0), M::T::from_f64(2.0).unwrap());
+        assert_eq!(a.get_index(1, 0, 0), M::T::from_f64(3.0).unwrap());
+        assert_eq!(a.get_index(1, 1, 0), M::T::from_f64(4.0).unwrap());
     }
 }

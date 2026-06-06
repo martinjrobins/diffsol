@@ -197,14 +197,14 @@ mod tests {
         //                   = |0 -1 0|
         //     (0,    dg/dv) = |0 0 1|
         let jac = initop.jacobian(&du_v, t);
-        assert_eq!(jac.get_index(0, 0), -1.0);
-        assert_eq!(jac.get_index(0, 1), 0.0);
-        assert_eq!(jac.get_index(0, 2), 0.0);
-        assert_eq!(jac.get_index(1, 0), 0.0);
-        assert_eq!(jac.get_index(1, 1), -1.0);
-        assert_eq!(jac.get_index(1, 2), 0.0);
-        assert_eq!(jac.get_index(2, 0), 0.0);
-        assert_eq!(jac.get_index(2, 1), 0.0);
-        assert_eq!(jac.get_index(2, 2), 1.0);
+        assert_eq!(jac.get_index(0, 0, 0), -1.0);
+        assert_eq!(jac.get_index(0, 1, 0), 0.0);
+        assert_eq!(jac.get_index(0, 2, 0), 0.0);
+        assert_eq!(jac.get_index(1, 0, 0), 0.0);
+        assert_eq!(jac.get_index(1, 1, 0), -1.0);
+        assert_eq!(jac.get_index(1, 2, 0), 0.0);
+        assert_eq!(jac.get_index(2, 0, 0), 0.0);
+        assert_eq!(jac.get_index(2, 1, 0), 0.0);
+        assert_eq!(jac.get_index(2, 2, 0), 1.0);
     }
 }

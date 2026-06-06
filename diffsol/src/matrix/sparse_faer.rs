@@ -317,11 +317,35 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
         }
     }
     fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
-        let tmp = Self::V {
-            data: &self.data * &x.data,
-            context: self.context,
-        };
-        y.axpy(alpha, &tmp, beta);
+        let nbatch = self.context.nbatch;
+        let nstates = self.nrows();
+        *y *= Scale(beta);
+        if nbatch == 1 {
+            let tmp = Self::V {
+                data: &self.data * &x.data,
+                context: self.context,
+            };
+            y.axpy(alpha, &tmp, T::one());
+        } else {
+            let row_idx = self.data.row_idx();
+            let vals = self.data.val();
+            for b in 0..nbatch {
+                for i in 0..nstates {
+                    unsafe {
+                        let mut sum = T::zero();
+                        for j in 0..self.ncols() {
+                            for k in self.data.col_range(j) {
+                                if row_idx[k] == i {
+                                    sum += vals[k] * *x.data.get_unchecked(j * nbatch + b);
+                                    break;
+                                }
+                            }
+                        }
+                        y.data[i * nbatch + b] += alpha * sum;
+                    }
+                }
+            }
+        }
     }
     fn zeros(nrows: IndexType, ncols: IndexType, ctx: Self::C) -> Self {
         Self {

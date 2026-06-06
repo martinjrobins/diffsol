@@ -34,16 +34,19 @@ pub struct FaerVecMut<'a, T: FaerScalar> {
     pub(crate) context: FaerContext,
 }
 
-impl<T: FaerScalar> From<Col<T>> for FaerVec<T> {
-    fn from(data: Col<T>) -> Self {
-        Self {
-            data,
-            context: FaerContext::default(),
-        }
-    }
-}
-
 impl<T: FaerScalar> FaerVec<T> {
+    fn nbatch(&self) -> usize {
+        self.context.nbatch
+    }
+
+    fn nstates(&self) -> IndexType {
+        self.data.nrows() / self.nbatch()
+    }
+
+    fn flat_index(&self, i: IndexType, b: usize) -> usize {
+        i * self.nbatch() + b
+    }
+
     pub fn check_for_nan(&self, label: &str) -> bool {
         for i in 0..self.data.nrows() {
             if unsafe { self.data.get_unchecked(i) }.is_nan() {
@@ -52,6 +55,19 @@ impl<T: FaerScalar> FaerVec<T> {
             }
         }
         false
+    }
+}
+
+impl<T: FaerScalar> From<Col<T>> for FaerVec<T> {
+    fn from(data: Col<T>) -> Self {
+        let nrows = data.nrows();
+        let context = FaerContext::default();
+        assert_eq!(
+            nrows % context.nbatch,
+            0,
+            "Col length must be divisible by nbatch"
+        );
+        Self { data, context }
     }
 }
 
@@ -200,40 +216,83 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
         &mut self.data
     }
     fn len(&self) -> IndexType {
-        self.data.nrows()
+        self.nstates()
     }
-    fn get_index(&self, index: IndexType) -> Self::T {
-        self.data[index]
+    fn get_index(&self, index: IndexType, b: usize) -> Self::T {
+        self.data[self.flat_index(index, b)]
     }
-    fn set_index(&mut self, index: IndexType, value: Self::T) {
-        self.data[index] = value;
+    fn set_index(&mut self, index: IndexType, b: usize, value: Self::T) {
+        let idx = self.flat_index(index, b);
+        self.data[idx] = value;
     }
     fn norm(&self, k: i32) -> T {
-        match k {
-            1 => self.data.norm_l1(),
-            2 => self.data.norm_l2(),
-            _ => self
-                .data
-                .iter()
-                .fold(T::zero(), |acc, x| acc + x.pow(k))
-                .pow(T::one() / T::from_f64(k as f64).unwrap()),
+        let nbatch = self.nbatch();
+        let nstates = self.nstates();
+        if nbatch == 1 {
+            return match k {
+                1 => self.data.norm_l1(),
+                2 => self.data.norm_l2(),
+                _ => self
+                    .data
+                    .iter()
+                    .fold(T::zero(), |acc, x| acc + x.pow(k))
+                    .pow(T::one() / T::from_f64(k as f64).unwrap()),
+            };
         }
+        let mut max_norm = T::zero();
+        for b in 0..nbatch {
+            let mut batch_norm = T::zero();
+            match k {
+                1 => {
+                    for i in 0..nstates {
+                        batch_norm += unsafe { *self.data.get_unchecked(self.flat_index(i, b)) }.abs();
+                    }
+                }
+                2 => {
+                    for i in 0..nstates {
+                        let v = unsafe { *self.data.get_unchecked(self.flat_index(i, b)) };
+                        batch_norm += v * v;
+                    }
+                    batch_norm = batch_norm.sqrt();
+                }
+                _ => {
+                    for i in 0..nstates {
+                        let v = unsafe { *self.data.get_unchecked(self.flat_index(i, b)) };
+                        batch_norm += v.pow(k);
+                    }
+                    batch_norm = batch_norm.pow(T::one() / T::from_f64(k as f64).unwrap());
+                }
+            }
+            if batch_norm > max_norm {
+                max_norm = batch_norm;
+            }
+        }
+        max_norm
     }
 
     fn squared_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T {
-        let mut acc = T::zero();
+        let nbatch = self.nbatch();
+        let nstates = self.nstates();
         if y.len() != self.len() || y.len() != atol.len() {
             panic!("Vector lengths do not match");
         }
-        for i in 0..self.len() {
-            let yi = unsafe { y.data.get_unchecked(i) };
-            let ai = unsafe { atol.data.get_unchecked(i) };
-            let xi = unsafe { self.data.get_unchecked(i) };
-            let denom = yi.abs() * rtol + *ai;
-            let term = *xi / denom;
-            acc += term * term;
+        let mut max_norm = T::zero();
+        for b in 0..nbatch {
+            let mut batch_acc = T::zero();
+            for i in 0..nstates {
+                let yi = unsafe { y.data.get_unchecked(y.flat_index(i, b)) };
+                let ai = unsafe { atol.data.get_unchecked(atol.flat_index(i, b)) };
+                let xi = unsafe { self.data.get_unchecked(self.flat_index(i, b)) };
+                let denom = yi.abs() * rtol + *ai;
+                let term = *xi / denom;
+                batch_acc += term * term;
+            }
+            batch_acc /= Self::T::from_f64(nstates as f64).unwrap();
+            if batch_acc > max_norm {
+                max_norm = batch_acc;
+            }
         }
-        acc / Self::T::from_f64(self.len() as f64).unwrap()
+        max_norm
     }
     fn as_view(&self) -> Self::View<'_> {
         FaerVecRef {
@@ -257,14 +316,19 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
         self.data.iter_mut().for_each(|s| *s = value);
     }
     fn from_element(nstates: usize, value: Self::T, ctx: Self::C) -> Self {
-        let data = Col::from_fn(nstates, |_| value);
+        let nbatch = ctx.nbatch;
+        let data = Col::from_fn(nstates * nbatch, |_| value);
         FaerVec { data, context: ctx }
     }
     fn from_vec(vec: Vec<Self::T>, ctx: Self::C) -> Self {
+        let nbatch = ctx.nbatch;
+        assert!(vec.len() % nbatch == 0, "vec length {} must be divisible by nbatch {}", vec.len(), nbatch);
         let data = Col::from_fn(vec.len(), |i| vec[i]);
         FaerVec { data, context: ctx }
     }
     fn from_slice(slice: &[Self::T], ctx: Self::C) -> Self {
+        let nbatch = ctx.nbatch;
+        assert!(slice.len() % nbatch == 0, "slice length {} must be divisible by nbatch {}", slice.len(), nbatch);
         let data = Col::from_fn(slice.len(), |i| slice[i]);
         FaerVec { data, context: ctx }
     }
@@ -289,21 +353,26 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
     }
 
     fn root_finding(&self, g1: &Self) -> (bool, Self::T, i32) {
+        let nbatch = self.nbatch();
+        let nstates = self.nstates();
         let mut max_frac = T::zero();
         let mut max_frac_index = -1;
         let mut found_root = false;
         assert_eq!(self.len(), g1.len(), "Vector lengths do not match");
-        for i in 0..self.len() {
-            let g0 = unsafe { *self.data.get_unchecked(i) };
-            let g1 = unsafe { *g1.data.get_unchecked(i) };
-            if g1 == T::zero() {
-                found_root = true;
-            }
-            if g0 * g1 < T::zero() {
-                let frac = (g1 / (g1 - g0)).abs();
-                if frac > max_frac {
-                    max_frac = frac;
-                    max_frac_index = i as i32;
+        for b in 0..nbatch {
+            for i in 0..nstates {
+                let flat_idx = self.flat_index(i, b);
+                let g0 = unsafe { *self.data.get_unchecked(flat_idx) };
+                let g1 = unsafe { *g1.data.get_unchecked(flat_idx) };
+                if g1 == T::zero() {
+                    found_root = true;
+                }
+                if g0 * g1 < T::zero() {
+                    let frac = (g1 / (g1 - g0)).abs();
+                    if frac > max_frac {
+                        max_frac = frac;
+                        max_frac_index = i as i32;
+                    }
                 }
             }
         }
@@ -323,7 +392,7 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
     }
 
     fn gather(&mut self, other: &Self, indices: &Self::Index) {
-        assert_eq!(self.len(), indices.len(), "Vector lengths do not match");
+        assert_eq!(self.data.nrows(), indices.len(), "Vector lengths do not match");
         for (s, o) in self.data.iter_mut().zip(indices.data.iter()) {
             *s = other[*o];
         }
@@ -371,19 +440,29 @@ impl<'a, T: FaerScalar> VectorView<'a> for FaerVecRef<'a, T> {
         }
     }
     fn squared_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: Self::T) -> Self::T {
-        let mut acc = T::zero();
-        if y.len() != self.data.nrows() || y.data.nrows() != atol.data.nrows() {
+        let nbatch = self.context.nbatch;
+        let nstates = self.data.nrows() / nbatch;
+        if y.nstates() != nstates || atol.nstates() != nstates {
             panic!("Vector lengths do not match");
         }
-        for i in 0..self.data.nrows() {
-            let yi = unsafe { y.data.get_unchecked(i) };
-            let ai = unsafe { atol.data.get_unchecked(i) };
-            let xi = unsafe { self.data.get_unchecked(i) };
-            let denom = yi.abs() * rtol + *ai;
-            let term = *xi / denom;
-            acc += term * term;
+        let mut max_norm = T::zero();
+        for b in 0..nbatch {
+            let mut batch_acc = T::zero();
+            for i in 0..nstates {
+                let flat_idx = i * nbatch + b;
+                let yi = unsafe { y.data.get_unchecked(flat_idx) };
+                let ai = unsafe { atol.data.get_unchecked(flat_idx) };
+                let xi = unsafe { self.data.get_unchecked(flat_idx) };
+                let denom = yi.abs() * rtol + *ai;
+                let term = *xi / denom;
+                batch_acc += term * term;
+            }
+            batch_acc /= Self::T::from_f64(nstates as f64).unwrap();
+            if batch_acc > max_norm {
+                max_norm = batch_acc;
+            }
         }
-        acc / Self::T::from_f64(self.data.nrows() as f64).unwrap()
+        max_norm
     }
 }
 

@@ -69,8 +69,8 @@ fn App() -> Html {
         .y_axis(Axis::new().title("population".into()));
     plot.set_layout(layout);
 
-    let a_str = format!("{}", params.get_index(0));
-    let b_str = format!("{}", params.get_index(1));
+    let a_str = format!("{}", params.get_index(0, 0));
+    let b_str = format!("{}", params.get_index(1, 0));
 
     html! {
         <div>

@@ -61,7 +61,7 @@ pub fn main() {
         let mut solver = problem.bdf::<LS>().unwrap();
         let (checkpoints, integrated_output, _output_times, _stop_reason) =
             solver.solve_with_checkpointing(final_time, None).unwrap();
-        let auc = integrated_output.get_index(0, integrated_output.ncols() - 1);
+        let auc = integrated_output.get_index(0, integrated_output.ncols() - 1, 0);
 
         let adjoint_solver = problem
             .bdf_solver_adjoint::<LS, _>(checkpoints, Some(solver), None)
@@ -71,7 +71,7 @@ pub fn main() {
             .unwrap();
 
         aucs.push(auc);
-        auc_grads.push(adjoint_state.as_ref().sg[0].get_index(0));
+        auc_grads.push(adjoint_state.as_ref().sg[0].get_index(0, 0));
     }
 
     let mut plot = Plot::new();

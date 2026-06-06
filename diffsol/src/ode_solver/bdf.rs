@@ -2307,9 +2307,9 @@ mod test {
         let y0 = problem.eqn.init().call(0.0);
         let mut p = problem.context().vector_zeros(2);
         problem.eqn.get_params(&mut p);
-        let k = p.get_index(0);
+        let k = p.get_index(0, 0);
         let target = 0.6_f64;
-        let t_root = -((target / y0.get_index(0)).ln()) / k;
+        let t_root = -((target / y0.get_index(0, 0)).ln()) / k;
         let expected = y0.clone() * scale(f64::exp(-k * t_root));
         y.assert_eq_norm(&expected, &problem.atol, problem.rtol, 15.0);
 

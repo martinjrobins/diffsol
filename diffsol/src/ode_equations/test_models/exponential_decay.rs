@@ -12,7 +12,7 @@ use std::ops::MulAssign;
 // dy/dt = -ay (p = [a, y0])
 fn exponential_decay<M: Matrix>(x: &M::V, p: &M::V, _t: M::T, y: &mut M::V) {
     y.copy_from(x);
-    y.mul_assign(scale(-p.get_index(0)));
+    y.mul_assign(scale(-p.get_index(0, 0)));
 }
 
 // mass matrix is identity
@@ -48,7 +48,7 @@ fn exponential_decay_sens_transpose<M: MatrixHost>(
 // Jv = -av
 fn exponential_decay_jacobian<M: Matrix>(_x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
     y.copy_from(v);
-    y.mul_assign(scale(-p.get_index(0)));
+    y.mul_assign(scale(-p.get_index(0, 0)));
 }
 
 // -J^Tv = av
@@ -64,7 +64,7 @@ fn exponential_decay_jacobian_adjoint<M: MatrixHost>(
 }
 
 fn exponential_decay_init<M: Matrix>(p: &M::V, _t: M::T, y: &mut M::V) {
-    y.fill(p.get_index(1));
+    y.fill(p.get_index(1, 0));
 }
 
 // dy0/dp = | 0 1 |
@@ -461,9 +461,9 @@ fn exponential_decay_root_single_half_sens_adj<M: MatrixHost>(
 }
 
 fn exponential_decay_reset_y_plus_2r<M: Matrix>(x: &M::V, p: &M::V, _t: M::T, y: &mut M::V) {
-    let increment = M::T::from_f64(2.0).unwrap() * p.get_index(1);
+    let increment = M::T::from_f64(2.0).unwrap() * p.get_index(1, 0);
     for i in 0..x.len() {
-        y.set_index(i, x.get_index(i) + increment);
+        y.set_index(i, 0, x.get_index(i, 0) + increment);
     }
 }
 
@@ -744,9 +744,9 @@ pub fn exponential_decay_problem_sens_with_out<M: MatrixHost + 'static>(
 
 fn exponential_decay_two_root<M: MatrixHost>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
     // index 0: reset trigger (y[0] = 0.6)
-    y.set_index(0, x.get_index(0) - M::T::from_f64(0.6).unwrap());
+    y.set_index(0, 0, x.get_index(0, 0) - M::T::from_f64(0.6).unwrap());
     // index 1: stopping condition (y[0] = 0.3)
-    y.set_index(1, x.get_index(0) - M::T::from_f64(0.3).unwrap());
+    y.set_index(1, 0, x.get_index(0, 0) - M::T::from_f64(0.3).unwrap());
 }
 
 fn exponential_decay_reset<M: Matrix>(_x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
@@ -847,7 +847,7 @@ pub(crate) fn exponential_decay_reset_y_plus_2<M: Matrix>(
 ) {
     // R(y) = y + 2  (component-wise)
     for i in 0..x.len() {
-        y.set_index(i, x.get_index(i) + M::T::from_f64(2.0).unwrap());
+        y.set_index(i, 0, x.get_index(i, 0) + M::T::from_f64(2.0).unwrap());
     }
 }
 
@@ -869,9 +869,9 @@ pub(crate) fn exponential_decay_root_0_6_and_2_0<M: Matrix>(
     y: &mut M::V,
 ) {
     // Root 0: y[0] = 0.6  (reset trigger)
-    y.set_index(0, x.get_index(0) - M::T::from_f64(0.6).unwrap());
+    y.set_index(0, 0, x.get_index(0, 0) - M::T::from_f64(0.6).unwrap());
     // Root 1: y[0] = 2.0  (stop; fires after reset when y decays from 2.6 to 2.0)
-    y.set_index(1, x.get_index(0) - M::T::from_f64(2.0).unwrap());
+    y.set_index(1, 0, x.get_index(0, 0) - M::T::from_f64(2.0).unwrap());
 }
 
 pub(crate) fn exponential_decay_root_0_6_and_2_0_jac<M: Matrix>(
@@ -881,8 +881,8 @@ pub(crate) fn exponential_decay_root_0_6_and_2_0_jac<M: Matrix>(
     v: &M::V,
     y: &mut M::V,
 ) {
-    y.set_index(0, v.get_index(0));
-    y.set_index(1, v.get_index(0));
+    y.set_index(0, 0, v.get_index(0, 0));
+    y.set_index(1, 0, v.get_index(0, 0));
 }
 
 pub(crate) fn exponential_decay_root_0_6_and_2_0_sens<M: Matrix>(
@@ -1019,8 +1019,8 @@ fn exponential_decay_two_root_jac<M: Matrix>(
     v: &M::V,
     y: &mut M::V,
 ) {
-    y.set_index(0, v.get_index(0));
-    y.set_index(1, v.get_index(0));
+    y.set_index(0, 0, v.get_index(0, 0));
+    y.set_index(1, 0, v.get_index(0, 0));
 }
 
 fn exponential_decay_two_root_sens<M: Matrix>(

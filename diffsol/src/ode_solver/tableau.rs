@@ -71,7 +71,7 @@ impl<M: DenseMatrix> Tableau<M> {
         );
         let mut d = M::V::zeros(3, ctx.clone());
         for i in 0..3 {
-            d.set_index(i, b.get_index(i) - b_hat.get_index(i));
+            d.set_index(i, 0, b.get_index(i, 0) - b_hat.get_index(i, 0));
         }
 
         let beta = M::from_vec(
@@ -125,10 +125,10 @@ impl<M: DenseMatrix> Tableau<M> {
 
         let b = M::V::from_vec(
             vec![
-                a.get_index(3, 0),
-                a.get_index(3, 1),
-                a.get_index(3, 2),
-                a.get_index(3, 3),
+                a.get_index(3, 0, 0),
+                a.get_index(3, 1, 0),
+                a.get_index(3, 2, 0),
+                a.get_index(3, 3, 0),
             ],
             ctx.clone(),
         );
@@ -205,25 +205,25 @@ impl<M: DenseMatrix> Tableau<M> {
         // [ c[5] -  c[1] - c[2] - c[3] - c[4], -12.92096931784711, 8.159367898576159, -0.071584973281401, -0.02826905039406838, 0.0, 0.0 ],
         // [ b[0], b[1], b[2], b[3], b[4], b[5], 0.0 ]
         let mut a = M::zeros(7, 7, ctx.clone());
-        a.set_index(2, 1, M::T::from_f64(0.335_480_655_492_357).unwrap());
-        a.set_index(3, 1, M::T::from_f64(-6.359448489975075).unwrap());
-        a.set_index(4, 1, M::T::from_f64(-11.74888356406283).unwrap());
-        a.set_index(5, 1, M::T::from_f64(-12.92096931784711).unwrap());
-        a.set_index(3, 2, M::T::from_f64(4.362295432869581).unwrap());
-        a.set_index(4, 2, M::T::from_f64(7.495539342889836).unwrap());
-        a.set_index(5, 2, M::T::from_f64(8.159367898576159).unwrap());
-        a.set_index(4, 3, M::T::from_f64(-0.09249506636175525).unwrap());
-        a.set_index(5, 3, M::T::from_f64(-0.071_584_973_281_401).unwrap());
-        a.set_index(5, 4, M::T::from_f64(-0.02826905039406838).unwrap());
+        a.set_index(2, 1, 0, M::T::from_f64(0.335_480_655_492_357).unwrap());
+        a.set_index(3, 1, 0, M::T::from_f64(-6.359448489975075).unwrap());
+        a.set_index(4, 1, 0, M::T::from_f64(-11.74888356406283).unwrap());
+        a.set_index(5, 1, 0, M::T::from_f64(-12.92096931784711).unwrap());
+        a.set_index(3, 2, 0, M::T::from_f64(4.362295432869581).unwrap());
+        a.set_index(4, 2, 0, M::T::from_f64(7.495539342889836).unwrap());
+        a.set_index(5, 2, 0, M::T::from_f64(8.159367898576159).unwrap());
+        a.set_index(4, 3, 0, M::T::from_f64(-0.09249506636175525).unwrap());
+        a.set_index(5, 3, 0, M::T::from_f64(-0.071_584_973_281_401).unwrap());
+        a.set_index(5, 4, 0, M::T::from_f64(-0.02826905039406838).unwrap());
         for i in 1..7 {
             let mut a_sum = M::T::zero();
             for j in 1..i {
-                a_sum += a.get_index(i, j);
+                a_sum += a.get_index(i, j, 0);
             }
-            a.set_index(i, 0, c.get_index(i) - a_sum);
+            a.set_index(i, 0, 0, c.get_index(i, 0) - a_sum);
         }
         for j in 0..6 {
-            a.set_index(6, j, b.get_index(j));
+            a.set_index(6, j, 0, b.get_index(j, 0));
         }
 
         // b0 = -1.05308849772902*t**4 + 2.91325546182191*t**3 - 2.76370619727483*t**2 + 1.0*t

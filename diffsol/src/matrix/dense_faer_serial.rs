@@ -116,15 +116,32 @@ impl<'a, T: FaerScalar> MatrixView<'a> for FaerMatRef<'a, T> {
     }
 
     fn gemv_o(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
+        let nbatch = self.context.nbatch;
+        let nstates = self.data.nrows();
         y.mul_assign(Scale(beta));
-        matmul(
-            y.data.as_mut(),
-            Accum::Add,
-            self.data.as_ref(),
-            x.data.as_ref(),
-            alpha,
-            get_global_parallelism(),
-        );
+        if nbatch == 1 {
+            matmul(
+                y.data.as_mut(),
+                Accum::Add,
+                self.data.as_ref(),
+                x.data.as_ref(),
+                alpha,
+                get_global_parallelism(),
+            );
+        } else {
+            for b in 0..nbatch {
+                for i in 0..nstates {
+                    unsafe {
+                        let mut sum = Self::T::zero();
+                        for j in 0..self.data.ncols() {
+                            sum += *self.data.get_unchecked(i, j)
+                                * *x.data.get_unchecked(j * nbatch + b);
+                        }
+                        y.data[i * nbatch + b] += alpha * sum;
+                    }
+                }
+            }
+        }
     }
     fn gemv_v(
         &self,
@@ -133,15 +150,32 @@ impl<'a, T: FaerScalar> MatrixView<'a> for FaerMatRef<'a, T> {
         beta: Self::T,
         y: &mut Self::V,
     ) {
+        let nbatch = self.context.nbatch;
+        let nstates = self.data.nrows();
         y.mul_assign(Scale(beta));
-        matmul(
-            y.data.as_mut(),
-            Accum::Add,
-            self.data.as_ref(),
-            x.data.as_ref(),
-            alpha,
-            get_global_parallelism(),
-        );
+        if nbatch == 1 {
+            matmul(
+                y.data.as_mut(),
+                Accum::Add,
+                self.data.as_ref(),
+                x.data.as_ref(),
+                alpha,
+                get_global_parallelism(),
+            );
+        } else {
+            for b in 0..nbatch {
+                for i in 0..nstates {
+                    unsafe {
+                        let mut sum = Self::T::zero();
+                        for j in 0..self.data.ncols() {
+                            sum += *self.data.get_unchecked(i, j)
+                                * *x.data.get_unchecked(j * nbatch + b);
+                        }
+                        y.data[i * nbatch + b] += alpha * sum;
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -197,7 +231,7 @@ impl<T: FaerScalar> DenseMatrix for FaerMat<T> {
         self.data.resize_with(nrows, ncols, |_, _| T::zero());
     }
 
-    fn get_index(&self, i: IndexType, j: IndexType) -> Self::T {
+    fn get_index(&self, i: IndexType, j: IndexType, _b: usize) -> Self::T {
         self.data[(i, j)]
     }
 
@@ -228,7 +262,7 @@ impl<T: FaerScalar> DenseMatrix for FaerMat<T> {
         }
     }
 
-    fn set_index(&mut self, i: IndexType, j: IndexType, value: Self::T) {
+    fn set_index(&mut self, i: IndexType, j: IndexType, _b: usize, value: Self::T) {
         self.data[(i, j)] = value;
     }
 
@@ -327,15 +361,32 @@ impl<T: FaerScalar> Matrix for FaerMat<T> {
         })
     }
     fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
+        let nbatch = self.context.nbatch;
+        let nstates = self.nrows();
         y.mul_assign(Scale(beta));
-        matmul(
-            y.data.as_mut(),
-            Accum::Add,
-            self.data.as_ref(),
-            x.data.as_ref(),
-            alpha,
-            get_global_parallelism(),
-        );
+        if nbatch == 1 {
+            matmul(
+                y.data.as_mut(),
+                Accum::Add,
+                self.data.as_ref(),
+                x.data.as_ref(),
+                alpha,
+                get_global_parallelism(),
+            );
+        } else {
+            for b in 0..nbatch {
+                for i in 0..nstates {
+                    unsafe {
+                        let mut sum = Self::T::zero();
+                        for j in 0..self.ncols() {
+                            sum += *self.data.get_unchecked(i, j)
+                                * *x.data.get_unchecked(j * nbatch + b);
+                        }
+                        y.data[i * nbatch + b] += alpha * sum;
+                    }
+                }
+            }
+        }
     }
     fn zeros(nrows: IndexType, ncols: IndexType, ctx: Self::C) -> Self {
         let data = Mat::zeros(nrows, ncols);
