@@ -89,3 +89,10 @@ where
         (self.op.func)(x, self.p, t, y)
     }
 }
+
+#[cfg_attr(feature = "nightly", feature(autodiff))]
+impl<M, F> NonLinearOpJacobian for ParameterisedOp<'_, ClosureNoJac<M, F>> {
+    fn jac_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
+        
+    }
+}

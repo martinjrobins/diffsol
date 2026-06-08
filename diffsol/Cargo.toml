@@ -32,6 +32,7 @@ diffsl-llvm18 = ["diffsl/llvm18-1", "diffsl", "diffsl-llvm"]
 diffsl-llvm19 = ["diffsl/llvm19-1", "diffsl", "diffsl-llvm"]
 diffsl-llvm20 = ["diffsl/llvm20-1", "diffsl", "diffsl-llvm"]
 diffsl-llvm21 = ["diffsl/llvm21-1", "diffsl", "diffsl-llvm"]
+nightly = []
 
 [dependencies]
 nalgebra = { workspace = true }
