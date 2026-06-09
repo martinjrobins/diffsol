@@ -1,0 +1,9 @@
+[package]
+name = "autodiff-nalgebra-crash"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "MRE: autodiff crashes on nalgebra DVector operations"
+
+[dependencies]
+nalgebra = { workspace = true }

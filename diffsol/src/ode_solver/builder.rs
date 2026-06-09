@@ -4,10 +4,13 @@ use crate::{
     ode_solver_error,
     op::{linear_closure_with_adjoint::LinearClosureWithAdjoint, BuilderOp},
     Closure, ClosureNoJac, ClosureWithAdjoint, ClosureWithSens, ConstantClosure,
-    ConstantClosureWithAdjoint, ConstantClosureWithSens, ConstantOp, InitialConditionSolverOptions,
-    LinearClosure, LinearOp, Matrix, NonLinearOp, OdeEquations, OdeSolverOptions, OdeSolverProblem,
-    Op, ParameterisedOp, Scalar, UnitCallable, Vector,
+    ConstantClosureWithAdjoint, ConstantClosureWithSens, ConstantOp,
+    InitialConditionSolverOptions, LinearClosure, LinearOp, Matrix, NonLinearOp, OdeEquations,
+    OdeSolverOptions, OdeSolverProblem, Op, ParameterisedOp, Scalar, UnitCallable, Vector,
 };
+
+#[cfg(feature = "autodiff")]
+use crate::{ClosureAutodiff, ConstantAutodiff, ConstantClosureAutodiff, NonLinearAutodiff};
 
 #[cfg(feature = "diffsl")]
 use diffsl::execution::scalar::Scalar as DiffSlScalar;
@@ -322,6 +325,106 @@ where
             root: self.root,
             out: self.out,
 
+            reset: self.reset,
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+            ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
+        }
+    }
+
+    /// Set the right-hand side of the ODE for adjoint sensitivity analysis,
+    /// using a [`NonLinearAutodiff`] implementation.
+    ///
+    /// The user implements [`NonLinearAutodiff::rhs`]. With the `autodiff` feature
+    /// enabled, the derivative methods `rhs_jvp`, `rhs_vjp`, and `rhs_sens_vjp` are
+    /// automatically generated via `std::autodiff`.
+    ///
+    /// # Example
+    /// ```ignore
+    /// #![feature(autodiff)]
+    /// use diffsol::{NonLinearAutodiff, ClosureAutodiff, NalgebraMat};
+    /// type M = NalgebraMat<f64>;
+    ///
+    /// struct Logistic;
+    /// impl NonLinearAutodiff<M> for Logistic {
+    ///     type T = f64;
+    ///     fn rhs(&self, x: f64, p: &[f64]) -> f64 {
+    ///         p[0] * x * (1.0 - x / p[1])
+    ///     }
+    /// }
+    ///
+    /// let rhs = ClosureAutodiff::new(Logistic, 0, 0, 0, Default::default());
+    /// let problem = OdeBuilder::<M>::new()
+    ///     .rhs_autodiff(rhs)
+    ///     .build();
+    /// ```
+    #[cfg(feature = "autodiff")]
+    pub fn rhs_autodiff<T>(
+        self,
+        rhs: ClosureAutodiff<M, T>,
+    ) -> OdeBuilder<M, ClosureAutodiff<M, T>, Init, Mass, Root, Out, Reset>
+    where
+        T: NonLinearAutodiff<M>,
+    {
+        OdeBuilder::<M, ClosureAutodiff<M, T>, Init, Mass, Root, Out, Reset> {
+            rhs: Some(rhs),
+            init: self.init,
+            mass: self.mass,
+            root: self.root,
+            out: self.out,
+            reset: self.reset,
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+            ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
+        }
+    }
+
+    /// Set the initial condition of the ODE for adjoint sensitivity analysis,
+    /// using a [`ConstantAutodiff`] implementation.
+    ///
+    /// The user implements [`ConstantAutodiff::init`]. With the `autodiff` feature
+    /// enabled, the derivative method `init_sens_vjp` is automatically generated
+    /// via `std::autodiff`.
+    #[cfg(feature = "autodiff")]
+    pub fn init_autodiff<T>(
+        self,
+        init: ConstantClosureAutodiff<M, T>,
+    ) -> OdeBuilder<M, Rhs, ConstantClosureAutodiff<M, T>, Mass, Root, Out, Reset>
+    where
+        T: ConstantAutodiff<M>,
+    {
+        OdeBuilder::<M, Rhs, ConstantClosureAutodiff<M, T>, Mass, Root, Out, Reset> {
+            rhs: self.rhs,
+            init: Some(init),
+            mass: self.mass,
+            root: self.root,
+            out: self.out,
             reset: self.reset,
             t0: self.t0,
             h0: self.h0,
