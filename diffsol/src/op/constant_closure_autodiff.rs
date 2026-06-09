@@ -1,25 +1,22 @@
 use std::marker::PhantomData;
 
-use num_traits::Zero;
+use crate::{Matrix, Op, Vector};
 
-use crate::{ConstantAutodiff, ConstantOp, ConstantOpSensAdjoint, Matrix, Op, Vector};
+use super::BuilderOp;
 
-use super::{BuilderOp, ParameterisedOp};
-
-/// An [`Op`] wrapping a [`ConstantAutodiff`] implementation.
-///
-/// Extracts slices from vector types and passes them to the trait's slice-based
-/// functions.
-pub struct ConstantClosureAutodiff<M: Matrix, T: ConstantAutodiff<M>> {
+/// An [`Op`] wrapping a user-provided initial-condition closure with `std::autodiff` support.
+pub struct ConstantClosureAutodiff<M: Matrix, F> {
+    func: F,
     nout: usize,
     nparams: usize,
     ctx: M::C,
-    _phantom: PhantomData<(M, T)>,
+    _phantom: PhantomData<M>,
 }
 
-impl<M: Matrix, T: ConstantAutodiff<M>> ConstantClosureAutodiff<M, T> {
-    pub fn new(nout: usize, nparams: usize, ctx: M::C) -> Self {
+impl<M: Matrix, F> ConstantClosureAutodiff<M, F> {
+    pub fn new(func: F, nout: usize, nparams: usize, ctx: M::C) -> Self {
         Self {
+            func,
             nout,
             nparams,
             ctx,
@@ -28,7 +25,7 @@ impl<M: Matrix, T: ConstantAutodiff<M>> ConstantClosureAutodiff<M, T> {
     }
 }
 
-impl<M: Matrix, T: ConstantAutodiff<M>> BuilderOp for ConstantClosureAutodiff<M, T> {
+impl<M: Matrix, F> BuilderOp for ConstantClosureAutodiff<M, F> {
     fn calculate_sparsity(&mut self, _y0: &Self::V, _t0: Self::T, _p: &Self::V) {}
     fn set_nstates(&mut self, _nstates: usize) {}
     fn set_nout(&mut self, nout: usize) {
@@ -39,7 +36,7 @@ impl<M: Matrix, T: ConstantAutodiff<M>> BuilderOp for ConstantClosureAutodiff<M,
     }
 }
 
-impl<M: Matrix, T: ConstantAutodiff<M>> Op for ConstantClosureAutodiff<M, T> {
+impl<M: Matrix, F> Op for ConstantClosureAutodiff<M, F> {
     type V = M::V;
     type T = M::T;
     type M = M;
@@ -62,28 +59,44 @@ fn to_vec<V: Vector>(v: &V, n: usize) -> Vec<V::T> {
     (0..n).map(|i| v.get_index(i)).collect()
 }
 
-impl<M: Matrix, T: ConstantAutodiff<M, T = M::T>> ConstantOp
-    for ParameterisedOp<'_, ConstantClosureAutodiff<M, T>>
-{
-    fn call_inplace(&self, _t: Self::T, y: &mut Self::V) {
-        let p_slice = to_vec(self.p, self.op.nparams);
-        let mut y_slice = vec![M::T::zero(); self.op.nout];
-        T::init_inplace(&p_slice, &mut y_slice);
-        y.set_index(0, y_slice[0]);
-    }
-}
+#[cfg(feature = "autodiff")]
+mod autodiff_impl {
+    use super::*;
+    use crate::{ConstantOp, ConstantOpSensAdjoint, ParameterisedOp, VectorIndex};
+    use num_traits::Zero;
+    use std::autodiff::autodiff_reverse;
 
-impl<M: Matrix, T: ConstantAutodiff<M, T = M::T>> ConstantOpSensAdjoint
-    for ParameterisedOp<'_, ConstantClosureAutodiff<M, T>>
-{
-    fn sens_transpose_mul_inplace(&self, _t: Self::T, v: &Self::V, y: &mut Self::V) {
-        let p_slice = to_vec(self.p, self.op.nparams);
-        let mut dp = vec![M::T::zero(); self.op.nparams];
-        let mut y_slice = vec![M::T::zero(); self.op.nout];
-        let mut dy = vec![v.get_index(0); self.op.nout];
-        T::init_sens_vjp_inplace(&p_slice, &mut dp, &mut y_slice, &mut dy);
-        for i in 0..self.op.nparams {
-            y.set_index(i, -dp[i]);
+    impl<M: Matrix, F: Fn(&[M::T], &mut [M::T])> ConstantClosureAutodiff<M, F> {
+        #[autodiff_reverse(call_sens_vjp, Const, Duplicated, Duplicated)]
+        pub fn call_func(&self, p: &[M::T], y: &mut [M::T]) {
+            (self.func)(p, y)
+        }
+    }
+
+    impl<M: Matrix, F: Fn(&[M::T], &mut [M::T])> ConstantOp
+        for ParameterisedOp<'_, ConstantClosureAutodiff<M, F>>
+    {
+        fn call_inplace(&self, _t: Self::T, y: &mut Self::V) {
+            let p_slice = to_vec(self.p, self.p.len());
+            let mut y_slice = vec![M::T::zero(); self.op.nout];
+            self.op.call_func(&p_slice, &mut y_slice);
+            y.set_index(0, y_slice[0]);
+        }
+    }
+
+    impl<M: Matrix, F: Fn(&[M::T], &mut [M::T])> ConstantOpSensAdjoint
+        for ParameterisedOp<'_, ConstantClosureAutodiff<M, F>>
+    {
+        fn sens_transpose_mul_inplace(&self, _t: Self::T, v: &Self::V, y: &mut Self::V) {
+            let p_slice = to_vec(self.p, self.p.len());
+            let mut dp = vec![M::T::zero(); self.p.len()];
+            let mut y_slice = vec![M::T::zero(); self.op.nout];
+            let mut dy = vec![v.get_index(0); self.op.nout];
+            self.op
+                .call_sens_vjp(&p_slice, &mut dp, &mut y_slice, &mut dy);
+            for i in 0..self.p.len() {
+                y.set_index(i, -dp[i]);
+            }
         }
     }
 }

@@ -468,9 +468,7 @@ pub use op::{
 };
 #[cfg(feature = "autodiff")]
 pub use op::{
-    closure_autodiff::ClosureAutodiff, constant_autodiff::ConstantAutodiff,
-    constant_closure_autodiff::ConstantClosureAutodiff,
-    nonlinear_autodiff::NonLinearAutodiff,
+    closure_autodiff::ClosureAutodiff, constant_closure_autodiff::ConstantClosureAutodiff,
 };
 use op::{
     closure_no_jac::ClosureNoJac, closure_with_sens::ClosureWithSens,

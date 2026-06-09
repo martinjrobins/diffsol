@@ -10,7 +10,7 @@ use crate::{
 };
 
 #[cfg(feature = "autodiff")]
-use crate::{ClosureAutodiff, ConstantAutodiff, ConstantClosureAutodiff, NonLinearAutodiff};
+use crate::{ClosureAutodiff, ConstantClosureAutodiff};
 
 #[cfg(feature = "diffsl")]
 use diffsl::execution::scalar::Scalar as DiffSlScalar;
@@ -346,41 +346,40 @@ where
     }
 
     /// Set the right-hand side of the ODE for adjoint sensitivity analysis,
-    /// using a [`NonLinearAutodiff`] implementation.
+    /// using automatic differentiation via `std::autodiff`.
     ///
-    /// The user implements [`NonLinearAutodiff::rhs`]. With the `autodiff` feature
-    /// enabled, the derivative methods `rhs_jvp`, `rhs_vjp`, and `rhs_sens_vjp` are
-    /// automatically generated via `std::autodiff`.
+    /// With the `autodiff` feature enabled, the given closure is automatically
+    /// differentiated to generate Jacobian-vector products, vector-Jacobian
+    /// products, and parameter sensitivities.
     ///
     /// # Example
     /// ```ignore
-    /// #![feature(autodiff)]
-    /// use diffsol::{NonLinearAutodiff, ClosureAutodiff, NalgebraMat};
-    /// type M = NalgebraMat<f64>;
+    /// type M = diffsol::NalgebraMat<f64>;
     ///
-    /// struct Logistic;
-    /// impl NonLinearAutodiff<M> for Logistic {
-    ///     type T = f64;
-    ///     fn rhs(&self, x: f64, p: &[f64]) -> f64 {
-    ///         p[0] * x * (1.0 - x / p[1])
-    ///     }
-    /// }
-    ///
-    /// let rhs = ClosureAutodiff::new(Logistic, 0, 0, 0, Default::default());
-    /// let problem = OdeBuilder::<M>::new()
-    ///     .rhs_autodiff(rhs)
+    /// let problem = diffsol::OdeBuilder::<M>::new()
+    ///     .rhs_autodiff(|x: &[f64], p: &[f64], y: &mut [f64]| {
+    ///         y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]);
+    ///     })
+    ///     .p([1.0, 10.0])
     ///     .build();
     /// ```
     #[cfg(feature = "autodiff")]
-    pub fn rhs_autodiff<T>(
+    pub fn rhs_autodiff<F>(
         self,
-        rhs: ClosureAutodiff<M, T>,
-    ) -> OdeBuilder<M, ClosureAutodiff<M, T>, Init, Mass, Root, Out, Reset>
+        func: F,
+    ) -> OdeBuilder<M, ClosureAutodiff<M, F>, Init, Mass, Root, Out, Reset>
     where
-        T: NonLinearAutodiff<M>,
+        F: Fn(&[M::T], &[M::T], &mut [M::T]),
     {
-        OdeBuilder::<M, ClosureAutodiff<M, T>, Init, Mass, Root, Out, Reset> {
-            rhs: Some(rhs),
+        let nstates = 0;
+        OdeBuilder::<M, ClosureAutodiff<M, F>, Init, Mass, Root, Out, Reset> {
+            rhs: Some(ClosureAutodiff::new(
+                func,
+                nstates,
+                nstates,
+                nstates,
+                self.ctx.clone(),
+            )),
             init: self.init,
             mass: self.mass,
             root: self.root,
@@ -406,22 +405,22 @@ where
     }
 
     /// Set the initial condition of the ODE for adjoint sensitivity analysis,
-    /// using a [`ConstantAutodiff`] implementation.
+    /// using automatic differentiation via `std::autodiff`.
     ///
-    /// The user implements [`ConstantAutodiff::init`]. With the `autodiff` feature
-    /// enabled, the derivative method `init_sens_vjp` is automatically generated
-    /// via `std::autodiff`.
+    /// With the `autodiff` feature enabled, the given closure is automatically
+    /// differentiated to generate parameter sensitivity operations.
     #[cfg(feature = "autodiff")]
-    pub fn init_autodiff<T>(
+    pub fn init_autodiff<F>(
         self,
-        init: ConstantClosureAutodiff<M, T>,
-    ) -> OdeBuilder<M, Rhs, ConstantClosureAutodiff<M, T>, Mass, Root, Out, Reset>
+        func: F,
+        nstates: usize,
+    ) -> OdeBuilder<M, Rhs, ConstantClosureAutodiff<M, F>, Mass, Root, Out, Reset>
     where
-        T: ConstantAutodiff<M>,
+        F: Fn(&[M::T], &mut [M::T]),
     {
-        OdeBuilder::<M, Rhs, ConstantClosureAutodiff<M, T>, Mass, Root, Out, Reset> {
+        OdeBuilder::<M, Rhs, ConstantClosureAutodiff<M, F>, Mass, Root, Out, Reset> {
             rhs: self.rhs,
-            init: Some(init),
+            init: Some(ConstantClosureAutodiff::new(func, nstates, 0, self.ctx.clone())),
             mass: self.mass,
             root: self.root,
             out: self.out,

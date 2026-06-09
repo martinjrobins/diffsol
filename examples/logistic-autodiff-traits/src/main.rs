@@ -1,54 +1,33 @@
 use diffsol::{
-    AdjointOdeSolverMethod, ClosureAutodiff, ConstantAutodiff, ConstantClosureAutodiff,
-    DenseMatrix, Matrix, NalgebraContext, NalgebraLU, NalgebraMat, NalgebraVec, NonLinearAutodiff,
-    OdeBuilder, OdeEquationsImplicit, OdeSolverMethod,
-    OdeSolverState, Op, VectorCommon,
+    AdjointOdeSolverMethod, DenseMatrix, Matrix, NalgebraContext, NalgebraLU, NalgebraMat,
+    NalgebraVec, OdeBuilder, OdeEquationsImplicit, OdeSolverMethod, OdeSolverState, Op,
+    VectorCommon,
 };
 
 type M = NalgebraMat<f64>;
-type V = NalgebraVec<f64>;
-type T = f64;
 type LS = NalgebraLU<f64>;
 type C = NalgebraContext;
 
-struct Logistic;
-
-impl NonLinearAutodiff<M> for Logistic {
-    type T = f64;
-
-    fn rhs_inplace(x: &[f64], p: &[f64], y: &mut [f64]) {
-        y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]);
-    }
-}
-
-impl ConstantAutodiff<M> for Logistic {
-    type T = f64;
-
-    fn init_inplace(p: &[f64], y: &mut [f64]) {
-        y[0] = p[2];
-    }
-}
-
 fn main() {
-    println!("=== Logistic ODE with NonLinearAutodiff trait ===\n");
+    println!("=== Logistic ODE with rhs_autodiff ===\n");
 
     let r_val = 1.0;
     let k_val = 1.0;
     let y0_val = 0.1;
     let t_final = 5.0;
 
-    let rhs_op = ClosureAutodiff::<M, Logistic>::new(0, 0, 0, C::default());
-    let init_op = ConstantClosureAutodiff::<M, Logistic>::new(1, 3, C::default());
-
     let problem = OdeBuilder::<M>::new()
         .p([r_val, k_val, y0_val])
-        .rhs_autodiff(rhs_op)
-        .init_autodiff(init_op)
+        .rhs_autodiff(|x: &[f64], p: &[f64], y: &mut [f64]| {
+            y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]);
+        })
+        .init_autodiff(|p: &[f64], y: &mut [f64]| {
+            y[0] = p[2];
+        }, 1)
         .build()
         .unwrap();
 
     let mut solver = problem.bdf::<LS>().unwrap();
-
     let (checkpointing, _soln, _times, _stop_reason) =
         solver.solve_with_checkpointing(t_final, None).unwrap();
 
@@ -62,7 +41,6 @@ fn main() {
     let adjoint_solver = problem
         .bdf_solver_adjoint::<LS, _>(checkpointing, Some(solver), Some(1))
         .unwrap();
-
     let (final_state, _) = adjoint_solver
         .solve_adjoint_backwards_pass(&[t_final], &[&dgdu])
         .unwrap();
@@ -81,35 +59,29 @@ fn main() {
     println!("\nFinite difference verification (eps = 1e-6):");
     let eps = 1e-6;
 
-    let y_base = {
-        let p = OdeBuilder::<M>::new()
-            .p([r_val, k_val, y0_val])
-            .rhs_autodiff(ClosureAutodiff::<M, Logistic>::new(0, 0, 0, C::default()))
-            .init_autodiff(ConstantClosureAutodiff::<M, Logistic>::new(1, 3, C::default()))
-            .build()
-            .unwrap();
-        let mut solver = p.bdf::<LS>().unwrap();
-        while solver.state().t <= t_final {
-            solver.step().unwrap();
-        }
-        solver.interpolate(t_final).unwrap().inner()[0]
-    };
+    let y_base = solve_forward(r_val, k_val, y0_val, t_final);
 
     for (i, name) in [(0usize, "dy/dr"), (1, "dy/dk"), (2, "dy/dy0")] {
         let mut params = [r_val, k_val, y0_val];
         params[i] += eps;
-        let p = OdeBuilder::<M>::new()
-            .p(params)
-            .rhs_autodiff(ClosureAutodiff::<M, Logistic>::new(0, 0, 0, C::default()))
-            .init_autodiff(ConstantClosureAutodiff::<M, Logistic>::new(1, 3, C::default()))
-            .build()
-            .unwrap();
-        let mut solver = p.bdf::<LS>().unwrap();
-        while solver.state().t <= t_final {
-            solver.step().unwrap();
-        }
-        let y_perturb = solver.interpolate(t_final).unwrap().inner()[0];
+        let y_perturb = solve_forward(params[0], params[1], params[2], t_final);
         let fd = (y_perturb - y_base) / eps;
         println!("  {} = {:.6} (adjoint: {:.6})", name, fd, adjoint_grad[i]);
     }
+}
+
+fn solve_forward(r: f64, k: f64, y0: f64, t_final: f64) -> f64 {
+    let p = OdeBuilder::<M>::new()
+        .p([r, k, y0])
+        .rhs_autodiff(|x: &[f64], p: &[f64], y: &mut [f64]| {
+            y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]);
+        })
+        .init_autodiff(|p: &[f64], y: &mut [f64]| y[0] = p[2], 1)
+        .build()
+        .unwrap();
+    let mut solver = p.bdf::<LS>().unwrap();
+    while solver.state().t <= t_final {
+        solver.step().unwrap();
+    }
+    solver.interpolate(t_final).unwrap().inner()[0]
 }
