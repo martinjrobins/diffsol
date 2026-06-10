@@ -9,10 +9,14 @@ use serde::Serialize;
 
 pub mod bdf;
 pub mod closure;
+#[cfg(feature = "autodiff")]
+pub mod closure_autodiff;
 pub mod closure_no_jac;
 pub mod closure_with_adjoint;
 pub mod closure_with_sens;
 pub mod constant_closure;
+#[cfg(feature = "autodiff")]
+pub mod constant_closure_autodiff;
 pub mod constant_closure_with_adjoint;
 pub mod constant_closure_with_sens;
 pub mod constant_op;

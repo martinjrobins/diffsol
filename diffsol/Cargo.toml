@@ -15,6 +15,7 @@ readme = "../README.md"
 default = ["nalgebra", "faer"]
 faer = []
 nalgebra = []
+autodiff = []
 cuda = ["dep:cudarc"]
 sundials = ["suitesparse_sys", "bindgen", "cc"]
 suitesparse = ["suitesparse_sys"]

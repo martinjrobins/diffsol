@@ -9,6 +9,9 @@ use crate::{
     Op, ParameterisedOp, Scalar, UnitCallable, Vector,
 };
 
+#[cfg(feature = "autodiff")]
+use crate::{ClosureAutodiff, ConstantClosureAutodiff};
+
 #[cfg(feature = "diffsl")]
 use diffsl::execution::scalar::Scalar as DiffSlScalar;
 
@@ -322,6 +325,116 @@ where
             root: self.root,
             out: self.out,
 
+            reset: self.reset,
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+            ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
+        }
+    }
+
+    /// Set the right-hand side of the ODE for adjoint sensitivity analysis,
+    /// using automatic differentiation via `std::autodiff`.
+    ///
+    /// With the `autodiff` feature enabled, the given closure is automatically
+    /// differentiated to generate Jacobian-vector products, vector-Jacobian
+    /// products, and parameter sensitivities.
+    ///
+    /// Compile in release mode to avoid Enzyme crashes with nalgebra types:
+    /// ```bash
+    /// CARGO_PROFILE_RELEASE_LTO=fat RUSTFLAGS="-Z autodiff=Enable" \
+    ///   cargo +nightly run --release --features autodiff
+    /// ```
+    ///
+    /// # Example
+    /// ```ignore
+    /// type M = diffsol::NalgebraMat<f64>;
+    ///
+    /// let problem = diffsol::OdeBuilder::<M>::new()
+    ///     .rhs_autodiff(|x: &M::V, p: &M::V, y: &mut M::V| {
+    ///         y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]);
+    ///     })
+    ///     .p([1.0, 10.0])
+    ///     .build();
+    /// ```
+    #[cfg(feature = "autodiff")]
+    pub fn rhs_autodiff<F>(
+        self,
+        func: F,
+    ) -> OdeBuilder<M, ClosureAutodiff<M, F>, Init, Mass, Root, Out, Reset>
+    where
+        F: Fn(&M::V, &M::V, &mut M::V),
+    {
+        let nstates = 0;
+        OdeBuilder::<M, ClosureAutodiff<M, F>, Init, Mass, Root, Out, Reset> {
+            rhs: Some(ClosureAutodiff::new(
+                func,
+                nstates,
+                nstates,
+                nstates,
+                self.ctx.clone(),
+            )),
+            init: self.init,
+            mass: self.mass,
+            root: self.root,
+            out: self.out,
+            reset: self.reset,
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+            ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
+        }
+    }
+
+    /// Set the initial condition of the ODE for adjoint sensitivity analysis,
+    /// using automatic differentiation via `std::autodiff`.
+    ///
+    /// With the `autodiff` feature enabled, the given closure is automatically
+    /// differentiated to generate parameter sensitivity operations.
+    #[cfg(feature = "autodiff")]
+    pub fn init_autodiff<F>(
+        self,
+        func: F,
+        nstates: usize,
+    ) -> OdeBuilder<M, Rhs, ConstantClosureAutodiff<M, F>, Mass, Root, Out, Reset>
+    where
+        F: Fn(&M::V, &mut M::V),
+    {
+        OdeBuilder::<M, Rhs, ConstantClosureAutodiff<M, F>, Mass, Root, Out, Reset> {
+            rhs: self.rhs,
+            init: Some(ConstantClosureAutodiff::new(
+                func,
+                nstates,
+                0,
+                self.ctx.clone(),
+            )),
+            mass: self.mass,
+            root: self.root,
+            out: self.out,
             reset: self.reset,
             t0: self.t0,
             h0: self.h0,
@@ -1441,6 +1554,7 @@ where
         rhs.set_nparams(nparams);
 
         init.set_nout(nstates);
+        init.set_nstates(nstates);
         init.set_nparams(nparams);
 
         if let Some(ref mut mass) = mass {
