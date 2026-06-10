@@ -3,8 +3,11 @@ name = "logistic-autodiff"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "Example demonstrating std::autodiff for automatic differentiation with diffsol ODE solvers"
+description = "Example showing trait-based autodiff with diffsol ODE solvers"
 
 [dependencies]
 diffsol = { path = "../../diffsol" }
 nalgebra = { workspace = true }
+
+[features]
+autodiff = ["diffsol/autodiff"]

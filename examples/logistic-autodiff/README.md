@@ -1,14 +1,15 @@
 # logistic-autodiff
 
-Demonstrates using `std::autodiff` to generate derivative functions for diffsol's implicit BDF solver and adjoint sensitivity analysis.
+Demonstrates the `rhs_autodiff` and `init_autodiff` builder methods from diffsol.
+The user passes closures directly to the builder — `std::autodiff` handles the
+gradients automatically.
 
 ## Build
 
-Requires nightly Rust and `lto = "fat"`:
+Requires nightly Rust, the `autodiff` feature, `lto = "fat"`, and **release mode**
+to avoid Enzyme crashes on nalgebra types:
 
 ```bash
-CARGO_PROFILE_DEV_LTO=fat RUSTFLAGS="-Z autodiff=Enable" \
-  cargo +nightly run -p logistic-autodiff -j1
+CARGO_PROFILE_RELEASE_LTO=fat RUSTFLAGS="-Z autodiff=Enable" \
+  cargo +nightly run -p logistic-autodiff --features autodiff --release -j1
 ```
-
-The `-j1` limits parallelism to avoid OOM during fat LTO codegen.
