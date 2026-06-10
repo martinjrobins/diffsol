@@ -64,7 +64,9 @@ fn part_a_implicit_solver() {
 }
 
 fn part_b_adjoint() {
-    println!("\n=== Part (b): Adjoint sensitivity analysis with autodiff-generated derivatives ===");
+    println!(
+        "\n=== Part (b): Adjoint sensitivity analysis with autodiff-generated derivatives ==="
+    );
 
     let r_val = 1.0;
     let k_val = 1.0;
@@ -113,7 +115,11 @@ fn part_b_adjoint() {
         solver.solve_with_checkpointing(t_final, None).unwrap();
 
     let y_final = solver.interpolate(t_final).unwrap();
-    println!("\n  Forward solution at t={}: y = {:.6}", t_final, y_final.inner()[0]);
+    println!(
+        "\n  Forward solution at t={}: y = {:.6}",
+        t_final,
+        y_final.inner()[0]
+    );
 
     let ctx = *problem.eqn().context();
     let mut dgdu = NalgebraMat::<f64>::zeros(1, 1, ctx);

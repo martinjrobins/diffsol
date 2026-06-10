@@ -461,8 +461,7 @@ pub use op::nonlinear_op::{
 };
 pub use op::stoch::{StochOp, StochOpKind};
 pub use op::{
-    closure::Closure, closure_with_adjoint::ClosureWithAdjoint,
-    constant_closure::ConstantClosure,
+    closure::Closure, closure_with_adjoint::ClosureWithAdjoint, constant_closure::ConstantClosure,
     constant_closure_with_adjoint::ConstantClosureWithAdjoint, linear_closure::LinearClosure,
     matrix::MatrixOp, unit::UnitCallable, BuilderOp, Op, ParameterisedOp,
 };

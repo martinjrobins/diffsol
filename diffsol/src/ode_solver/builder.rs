@@ -4,9 +4,9 @@ use crate::{
     ode_solver_error,
     op::{linear_closure_with_adjoint::LinearClosureWithAdjoint, BuilderOp},
     Closure, ClosureNoJac, ClosureWithAdjoint, ClosureWithSens, ConstantClosure,
-    ConstantClosureWithAdjoint, ConstantClosureWithSens, ConstantOp,
-    InitialConditionSolverOptions, LinearClosure, LinearOp, Matrix, NonLinearOp, OdeEquations,
-    OdeSolverOptions, OdeSolverProblem, Op, ParameterisedOp, Scalar, UnitCallable, Vector,
+    ConstantClosureWithAdjoint, ConstantClosureWithSens, ConstantOp, InitialConditionSolverOptions,
+    LinearClosure, LinearOp, Matrix, NonLinearOp, OdeEquations, OdeSolverOptions, OdeSolverProblem,
+    Op, ParameterisedOp, Scalar, UnitCallable, Vector,
 };
 
 #[cfg(feature = "autodiff")]
@@ -352,12 +352,18 @@ where
     /// differentiated to generate Jacobian-vector products, vector-Jacobian
     /// products, and parameter sensitivities.
     ///
+    /// Compile in release mode to avoid Enzyme crashes with nalgebra types:
+    /// ```bash
+    /// CARGO_PROFILE_RELEASE_LTO=fat RUSTFLAGS="-Z autodiff=Enable" \
+    ///   cargo +nightly run --release --features autodiff
+    /// ```
+    ///
     /// # Example
     /// ```ignore
     /// type M = diffsol::NalgebraMat<f64>;
     ///
     /// let problem = diffsol::OdeBuilder::<M>::new()
-    ///     .rhs_autodiff(|x: &[f64], p: &[f64], y: &mut [f64]| {
+    ///     .rhs_autodiff(|x: &M::V, p: &M::V, y: &mut M::V| {
     ///         y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]);
     ///     })
     ///     .p([1.0, 10.0])
@@ -369,7 +375,7 @@ where
         func: F,
     ) -> OdeBuilder<M, ClosureAutodiff<M, F>, Init, Mass, Root, Out, Reset>
     where
-        F: Fn(&[M::T], &[M::T], &mut [M::T]),
+        F: Fn(&M::V, &M::V, &mut M::V),
     {
         let nstates = 0;
         OdeBuilder::<M, ClosureAutodiff<M, F>, Init, Mass, Root, Out, Reset> {
@@ -416,11 +422,16 @@ where
         nstates: usize,
     ) -> OdeBuilder<M, Rhs, ConstantClosureAutodiff<M, F>, Mass, Root, Out, Reset>
     where
-        F: Fn(&[M::T], &mut [M::T]),
+        F: Fn(&M::V, &mut M::V),
     {
         OdeBuilder::<M, Rhs, ConstantClosureAutodiff<M, F>, Mass, Root, Out, Reset> {
             rhs: self.rhs,
-            init: Some(ConstantClosureAutodiff::new(func, nstates, 0, self.ctx.clone())),
+            init: Some(ConstantClosureAutodiff::new(
+                func,
+                nstates,
+                0,
+                self.ctx.clone(),
+            )),
             mass: self.mass,
             root: self.root,
             out: self.out,
@@ -1543,6 +1554,7 @@ where
         rhs.set_nparams(nparams);
 
         init.set_nout(nstates);
+        init.set_nstates(nstates);
         init.set_nparams(nparams);
 
         if let Some(ref mut mass) = mass {

@@ -8,9 +8,9 @@ fn logistic_rhs(x: &DVector<f64>, p: &DVector<f64>, y: &mut DVector<f64>) {
     y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]);
 }
 
-#[autodiff_forward(   rhs_jvp,   Dual, Const, Dual)]
-#[autodiff_reverse(   rhs_vjp,   Duplicated, Const, Duplicated)]
-#[autodiff_reverse(   rhs_sens,  Const, Duplicated, Duplicated)]
+#[autodiff_forward(rhs_jvp, Dual, Const, Dual)]
+#[autodiff_reverse(rhs_vjp, Duplicated, Const, Duplicated)]
+#[autodiff_reverse(rhs_sens, Const, Duplicated, Duplicated)]
 fn _autodiff_logistic(x: &DVector<f64>, p: &DVector<f64>, y: &mut DVector<f64>) {
     logistic_rhs(x, p, y)
 }
@@ -22,7 +22,7 @@ fn main() {
     let mut y = DVector::from_vec(vec![0.0]);
     let mut dy = DVector::from_vec(vec![0.0]);
     let mut dx = v.clone();
-    let mut dp = DVector::from_vec(vec![0.0, 0.0]);
+    let mut dp = DVector::from_vec(vec![1.0, 0.0]);
 
     // These calls force Enzyme to differentiate through DVector's internal
     // VecStorage pointer arithmetic, which crashes the Enzyme backend:
