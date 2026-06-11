@@ -106,7 +106,7 @@ mod tests {
     impl FakeConstantOp {
         fn new() -> Self {
             Self {
-                ctx: NalgebraContext,
+                ctx: NalgebraContext::default(),
             }
         }
     }
@@ -166,7 +166,7 @@ mod tests {
         let op = FakeConstantOp::new();
         let value = op.call(0.25);
         value.assert_eq_st(
-            &crate::NalgebraVec::from_vec(vec![1.25, 1.75], NalgebraContext),
+            &crate::NalgebraVec::from_vec(vec![1.25, 1.75], NalgebraContext::default()),
             1e-12,
         );
 
@@ -176,7 +176,7 @@ mod tests {
         assert_eq!(sens.get_index(0, 1), 2.0);
         assert_eq!(sens.get_index(1, 1), -1.0);
 
-        let mut sens_inplace = M::zeros(2, 2, NalgebraContext);
+        let mut sens_inplace = M::zeros(2, 2, NalgebraContext::default());
         op.sens_inplace(0.0, &mut sens_inplace);
         assert_eq!(sens_inplace.get_index(0, 0), 1.0);
         assert_eq!(sens_inplace.get_index(1, 0), 3.0);
@@ -189,7 +189,7 @@ mod tests {
         assert_eq!(sens_adj.get_index(0, 1), -3.0);
         assert_eq!(sens_adj.get_index(1, 1), 1.0);
 
-        let mut sens_adj_inplace = M::zeros(2, 2, NalgebraContext);
+        let mut sens_adj_inplace = M::zeros(2, 2, NalgebraContext::default());
         op.sens_adjoint_inplace(0.0, &mut sens_adj_inplace);
         assert_eq!(sens_adj_inplace.get_index(0, 0), -1.0);
         assert_eq!(sens_adj_inplace.get_index(1, 0), -2.0);

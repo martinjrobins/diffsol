@@ -174,7 +174,7 @@ mod tests {
     fn test_root() {
         type V = NalgebraVec<f64>;
         type M = NalgebraMat<f64>;
-        let ctx = NalgebraContext;
+        let ctx = NalgebraContext::default();
         let interpolate_inplace = |t: f64, y: &mut V| -> Result<(), DiffsolError> {
             y[0] = t;
             Ok(())

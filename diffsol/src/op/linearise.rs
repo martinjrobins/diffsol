@@ -125,7 +125,7 @@ mod tests {
                     x.get_index(0) * v.get_index(0) + v.get_index(1),
                     2.0 * v.get_index(0) + x.get_index(1) * v.get_index(1),
                 ],
-                NalgebraContext,
+                NalgebraContext::default(),
             ));
         }
     }
@@ -133,7 +133,7 @@ mod tests {
     #[test]
     fn linearised_op_tracks_state_and_uses_jacobian_helpers() {
         let callable = Rc::new(FakeJacOp {
-            ctx: NalgebraContext,
+            ctx: NalgebraContext::default(),
         });
         let mut op = LinearisedOp::new(callable);
         assert_eq!(op.nstates(), 2);
@@ -142,26 +142,26 @@ mod tests {
         assert!(!op.x_is_set());
         assert!(op.sparsity().is_none());
 
-        let x0 = crate::NalgebraVec::from_vec(vec![3.0, 4.0], NalgebraContext);
+        let x0 = crate::NalgebraVec::from_vec(vec![3.0, 4.0], NalgebraContext::default());
         op.set_x(&x0);
         assert!(op.x_is_set());
 
-        let v = crate::NalgebraVec::from_vec(vec![5.0, 6.0], NalgebraContext);
-        let mut y = crate::NalgebraVec::zeros(2, NalgebraContext);
+        let v = crate::NalgebraVec::from_vec(vec![5.0, 6.0], NalgebraContext::default());
+        let mut y = crate::NalgebraVec::zeros(2, NalgebraContext::default());
         op.call_inplace(&v, 0.0, &mut y);
         y.assert_eq_st(
-            &crate::NalgebraVec::from_vec(vec![21.0, 34.0], NalgebraContext),
+            &crate::NalgebraVec::from_vec(vec![21.0, 34.0], NalgebraContext::default()),
             1e-12,
         );
 
-        y = crate::NalgebraVec::from_vec(vec![1.0, 2.0], NalgebraContext);
+        y = crate::NalgebraVec::from_vec(vec![1.0, 2.0], NalgebraContext::default());
         op.gemv_inplace(&v, 0.0, 0.5, &mut y);
         y.assert_eq_st(
-            &crate::NalgebraVec::from_vec(vec![21.5, 35.0], NalgebraContext),
+            &crate::NalgebraVec::from_vec(vec![21.5, 35.0], NalgebraContext::default()),
             1e-12,
         );
 
-        let mut matrix = M::zeros(2, 2, NalgebraContext);
+        let mut matrix = M::zeros(2, 2, NalgebraContext::default());
         op.matrix_inplace(0.0, &mut matrix);
         assert_eq!(matrix.get_index(0, 0), 3.0);
         assert_eq!(matrix.get_index(1, 0), 2.0);

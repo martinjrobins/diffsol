@@ -199,8 +199,15 @@ pub trait Vector:
     /// This norm is used by ODE solvers for adaptive error control.
     fn squared_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T;
 
-    /// Get the length (number of elements) in this vector.
+    /// Get the per-batch length (number of states) in this vector.
+    /// For batched vectors, this returns `nstates`, not `nstates * nbatch`.
     fn len(&self) -> IndexType;
+
+    /// Get the total number of elements stored, including all batches.
+    /// Returns `self.len() * self.context().nbatch()`.
+    fn total_len(&self) -> IndexType {
+        self.len() * self.context().nbatch()
+    }
 
     /// Check if the vector is empty.
     fn is_empty(&self) -> bool {
@@ -275,7 +282,7 @@ pub trait Vector:
 
     /// Assert that this vector equals `other` within a scalar tolerance `tol`.
     fn assert_eq_st(&self, other: &Self, tol: Self::T) {
-        let tol = vec![tol; self.len()];
+        let tol = vec![tol; self.total_len()];
         Self::assert_eq_vec(self.clone_as_vec(), other.clone_as_vec(), tol);
     }
 
@@ -376,82 +383,175 @@ pub trait DefaultDenseMatrix: Vector {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::panic::{catch_unwind, AssertUnwindSafe};
 
-    use super::{Vector, VectorCommon};
+    use super::{Vector, VectorCommon, VectorIndex};
     use crate::context::nalgebra::NalgebraContext;
     use crate::vector::nalgebra_serial::NalgebraVec;
+    use crate::Context;
     use num_traits::FromPrimitive;
 
+    fn f<V: Vector>(x: f64) -> V::T {
+        V::T::from_f64(x).unwrap()
+    }
+
+    fn fv<V: Vector>(xs: &[f64]) -> Vec<V::T> {
+        xs.iter().map(|&x| f::<V>(x)).collect()
+    }
+
     pub fn test_root_finding<V: Vector>() {
-        let g0 = V::from_vec(
-            vec![
-                V::T::from_f64(1.0).unwrap(),
-                V::T::from_f64(-2.0).unwrap(),
-                V::T::from_f64(3.0).unwrap(),
-            ],
-            Default::default(),
-        );
-        let g1 = V::from_vec(
-            vec![
-                V::T::from_f64(1.0).unwrap(),
-                V::T::from_f64(2.0).unwrap(),
-                V::T::from_f64(3.0).unwrap(),
-            ],
-            Default::default(),
-        );
+        let g0 = V::from_vec(fv::<V>(&[1.0, -2.0, 3.0]), Default::default());
+        let g1 = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0]), Default::default());
         let (found_root, max_frac, max_frac_index) = g0.root_finding(&g1);
         assert!(!found_root);
-        assert_eq!(max_frac, V::T::from_f64(0.5).unwrap());
+        assert_eq!(max_frac, f::<V>(0.5));
         assert_eq!(max_frac_index, 1);
 
-        let g0 = V::from_vec(
-            vec![
-                V::T::from_f64(1.0).unwrap(),
-                V::T::from_f64(-2.0).unwrap(),
-                V::T::from_f64(3.0).unwrap(),
-            ],
-            Default::default(),
-        );
-        let g1 = V::from_vec(
-            vec![
-                V::T::from_f64(1.0).unwrap(),
-                V::T::from_f64(2.0).unwrap(),
-                V::T::from_f64(0.0).unwrap(),
-            ],
-            Default::default(),
-        );
+        let g0 = V::from_vec(fv::<V>(&[1.0, -2.0, 3.0]), Default::default());
+        let g1 = V::from_vec(fv::<V>(&[1.0, 2.0, 0.0]), Default::default());
         let (found_root, max_frac, max_frac_index) = g0.root_finding(&g1);
         assert!(found_root);
-        assert_eq!(max_frac, V::T::from_f64(0.5).unwrap());
+        assert_eq!(max_frac, f::<V>(0.5));
         assert_eq!(max_frac_index, 1);
 
-        let g0 = V::from_vec(
-            vec![
-                V::T::from_f64(1.0).unwrap(),
-                V::T::from_f64(-2.0).unwrap(),
-                V::T::from_f64(3.0).unwrap(),
-            ],
-            Default::default(),
-        );
-        let g1 = V::from_vec(
-            vec![
-                V::T::from_f64(1.0).unwrap(),
-                V::T::from_f64(-2.0).unwrap(),
-                V::T::from_f64(3.0).unwrap(),
-            ],
-            Default::default(),
-        );
+        let g0 = V::from_vec(fv::<V>(&[1.0, -2.0, 3.0]), Default::default());
+        let g1 = V::from_vec(fv::<V>(&[1.0, -2.0, 3.0]), Default::default());
         let (found_root, max_frac, max_frac_index) = g0.root_finding(&g1);
         assert!(!found_root);
-        assert_eq!(max_frac, V::T::from_f64(0.0).unwrap());
+        assert_eq!(max_frac, f::<V>(0.0));
         assert_eq!(max_frac_index, -1);
+    }
+
+    pub fn test_from_slice<V: Vector>() {
+        let slice = fv::<V>(&[1.0, 2.0, 3.0]);
+        let v = V::from_slice(&slice, Default::default());
+        assert_eq!(v.clone_as_vec(), slice);
+    }
+
+    pub fn test_batched_len_and_total_len<V: Vector>(ctx: V::C) {
+        let nbatch = ctx.nbatch();
+        assert!(nbatch > 1);
+        let v = V::zeros(4, ctx);
+        assert_eq!(v.len(), 4);
+        assert_eq!(v.total_len(), 4 * nbatch);
+    }
+
+    pub fn test_batched_from_vec<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let v = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]), ctx);
+        assert_eq!(v.len(), 3);
+        assert_eq!(v.total_len(), 6);
+        assert_eq!(v.clone_as_vec(), fv::<V>(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]));
+    }
+
+    pub fn test_batched_from_vec_bad_length<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let _v = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0]), ctx);
+    }
+
+    pub fn test_batched_from_element<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 3);
+        let v = V::from_element(2, f::<V>(5.0), ctx);
+        assert_eq!(v.len(), 2);
+        assert_eq!(v.clone_as_vec(), fv::<V>(&[5.0, 5.0, 5.0, 5.0, 5.0, 5.0]));
+    }
+
+    pub fn test_batched_axpy<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let mut y = V::from_vec(fv::<V>(&[1.0, 2.0, 10.0, 20.0]), ctx.clone());
+        let x = V::from_vec(fv::<V>(&[3.0, 4.0, 30.0, 40.0]), ctx);
+        y.axpy(f::<V>(2.0), &x, f::<V>(1.0));
+        assert_eq!(y.clone_as_vec(), fv::<V>(&[7.0, 10.0, 70.0, 100.0]));
+    }
+
+    pub fn test_batched_add<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let a = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0]), ctx.clone());
+        let b = V::from_vec(fv::<V>(&[10.0, 20.0, 30.0, 40.0]), ctx);
+        let c = a + b;
+        assert_eq!(c.len(), 2);
+        assert_eq!(c.clone_as_vec(), fv::<V>(&[11.0, 22.0, 33.0, 44.0]));
+    }
+
+    pub fn test_batched_norm_max_across_batches<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let v = V::from_vec(fv::<V>(&[1.0, 0.0, 0.0, 3.0]), ctx);
+        let norm = v.norm(2);
+        let diff = norm - f::<V>(3.0);
+        assert!(num_traits::abs(diff) < f::<V>(1e-12));
+    }
+
+    pub fn test_batched_squared_norm<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let x = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0]), ctx.clone());
+        let y = V::from_vec(fv::<V>(&[1.0, 1.0, 1.0, 1.0]), ctx);
+        let atol = V::from_vec(fv::<V>(&[1.0, 1.0]), V::C::default());
+        let rtol = f::<V>(0.0);
+        let norm = x.squared_norm(&y, &atol, rtol);
+        let batch1 = (f::<V>(3.0) * f::<V>(3.0) + f::<V>(4.0) * f::<V>(4.0)) / f::<V>(2.0);
+        let diff = norm - batch1;
+        assert!(num_traits::abs(diff) < f::<V>(1e-12));
+    }
+
+    pub fn test_batched_set_index<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 3);
+        let mut v = V::zeros(2, ctx);
+        v.set_index(0, f::<V>(42.0));
+        assert_eq!(
+            v.clone_as_vec(),
+            fv::<V>(&[42.0, 0.0, 42.0, 0.0, 42.0, 0.0])
+        );
+    }
+
+    pub fn test_batched_get_index_panics<V: Vector>(ctx: V::C) {
+        assert!(ctx.nbatch() > 1);
+        let v = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0]), ctx);
+        let _val = v.get_index(0);
+    }
+
+    pub fn test_batched_fill<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let mut v = V::zeros(3, ctx);
+        v.fill(f::<V>(7.0));
+        assert_eq!(v.clone_as_vec(), fv::<V>(&[7.0, 7.0, 7.0, 7.0, 7.0, 7.0]));
+    }
+
+    pub fn test_batched_component_mul<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let mut a = V::from_vec(fv::<V>(&[2.0, 3.0, 4.0, 5.0]), ctx.clone());
+        let b = V::from_vec(fv::<V>(&[10.0, 20.0, 30.0, 40.0]), ctx);
+        a.component_mul_assign(&b);
+        assert_eq!(a.clone_as_vec(), fv::<V>(&[20.0, 60.0, 120.0, 200.0]));
+    }
+
+    pub fn test_batched_assign_at_indices<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let mut v = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]), ctx);
+        let indices = V::Index::from_vec(vec![0, 2], Default::default());
+        v.assign_at_indices(&indices, f::<V>(0.0));
+        assert_eq!(v.clone_as_vec(), fv::<V>(&[0.0, 2.0, 0.0, 0.0, 5.0, 0.0]));
+    }
+
+    pub fn test_batched_root_finding_consistent<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let g0 = V::from_vec(fv::<V>(&[1.0, -1.0, 1.0, -1.0]), ctx.clone());
+        let g1 = V::from_vec(fv::<V>(&[-1.0, 1.0, -1.0, 1.0]), ctx);
+        let (found, _frac, idx) = g0.root_finding(&g1);
+        assert!(!found);
+        assert!(idx >= 0);
+    }
+
+    pub fn test_batched_root_finding_inconsistent<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let g0 = V::from_vec(fv::<V>(&[1.0, 1.0, 1.0, -1.0]), ctx.clone());
+        let g1 = V::from_vec(fv::<V>(&[-1.0, 1.0, 1.0, 1.0]), ctx);
+        let _result = g0.root_finding(&g1);
     }
 
     #[test]
     fn vector_common_for_references_and_default_helpers_work() {
-        let mut v = NalgebraVec::from_vec(vec![1.0, 2.0], NalgebraContext);
+        let mut v = NalgebraVec::from_vec(vec![1.0, 2.0], NalgebraContext::default());
         assert_eq!(<NalgebraVec<f64> as VectorCommon>::inner(&v).len(), 2);
         assert_eq!(<&NalgebraVec<f64> as VectorCommon>::inner(&&v).len(), 2);
         assert_eq!(
@@ -459,32 +559,32 @@ mod tests {
             2
         );
 
-        let empty = NalgebraVec::<f64>::zeros(0, NalgebraContext);
+        let empty = NalgebraVec::<f64>::zeros(0, NalgebraContext::default());
         assert!(empty.is_empty());
 
-        let non_empty = NalgebraVec::<f64>::zeros(2, NalgebraContext);
+        let non_empty = NalgebraVec::<f64>::zeros(2, NalgebraContext::default());
         assert!(!non_empty.is_empty());
         assert_eq!(non_empty.clone_as_vec(), vec![0.0, 0.0]);
     }
 
     #[test]
     fn vector_assert_eq_panics_for_length_mismatch() {
-        let left = NalgebraVec::from_vec(vec![1.0, 2.0], NalgebraContext);
-        let right = NalgebraVec::from_vec(vec![1.0], NalgebraContext);
-        let tol = NalgebraVec::from_vec(vec![0.0, 0.0], NalgebraContext);
+        let left = NalgebraVec::from_vec(vec![1.0, 2.0], NalgebraContext::default());
+        let right = NalgebraVec::from_vec(vec![1.0], NalgebraContext::default());
+        let tol = NalgebraVec::from_vec(vec![0.0, 0.0], NalgebraContext::default());
         assert!(catch_unwind(AssertUnwindSafe(|| left.assert_eq(&right, &tol))).is_err());
     }
 
     #[test]
     fn vector_assert_helpers_cover_success_and_failure_paths() {
-        let left = NalgebraVec::from_vec(vec![1.0, 2.0, 3.0], NalgebraContext);
-        let right = NalgebraVec::from_vec(vec![1.0, 2.0, 3.0], NalgebraContext);
-        let tol = NalgebraVec::from_vec(vec![0.0, 0.0, 0.0], NalgebraContext);
+        let left = NalgebraVec::from_vec(vec![1.0, 2.0, 3.0], NalgebraContext::default());
+        let right = NalgebraVec::from_vec(vec![1.0, 2.0, 3.0], NalgebraContext::default());
+        let tol = NalgebraVec::from_vec(vec![0.0, 0.0, 0.0], NalgebraContext::default());
         left.assert_eq(&right, &tol);
         left.assert_eq_st(&right, 0.0);
         left.assert_eq_norm(&right, &tol, 1e-6, 1.0);
 
-        let perturbed = NalgebraVec::from_vec(vec![1.1, 2.0, 3.0], NalgebraContext);
+        let perturbed = NalgebraVec::from_vec(vec![1.1, 2.0, 3.0], NalgebraContext::default());
         assert!(catch_unwind(AssertUnwindSafe(
             || left.assert_eq_norm(&perturbed, &tol, 1e-6, 0.01)
         ))
@@ -531,3 +631,84 @@ mod tests {
         .is_err());
     }
 }
+
+#[cfg(test)]
+macro_rules! generate_vector_tests {
+    ($suffix:ident, $V:ty, $ctx2:expr, $ctx3:expr) => {
+        paste::paste! {
+            #[test]
+            fn [<test_root_finding_ $suffix>]() {
+                $crate::vector::tests::test_root_finding::<$V>();
+            }
+            #[test]
+            fn [<test_from_slice_ $suffix>]() {
+                $crate::vector::tests::test_from_slice::<$V>();
+            }
+            #[test]
+            fn [<test_batched_len_and_total_len_ $suffix>]() {
+                $crate::vector::tests::test_batched_len_and_total_len::<$V>($ctx3);
+            }
+            #[test]
+            fn [<test_batched_from_vec_ $suffix>]() {
+                $crate::vector::tests::test_batched_from_vec::<$V>($ctx2);
+            }
+            #[test]
+            #[should_panic(expected = "divisible by nbatch")]
+            fn [<test_batched_from_vec_bad_length_ $suffix>]() {
+                $crate::vector::tests::test_batched_from_vec_bad_length::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_from_element_ $suffix>]() {
+                $crate::vector::tests::test_batched_from_element::<$V>($ctx3);
+            }
+            #[test]
+            fn [<test_batched_axpy_ $suffix>]() {
+                $crate::vector::tests::test_batched_axpy::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_add_ $suffix>]() {
+                $crate::vector::tests::test_batched_add::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_norm_max_across_batches_ $suffix>]() {
+                $crate::vector::tests::test_batched_norm_max_across_batches::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_squared_norm_ $suffix>]() {
+                $crate::vector::tests::test_batched_squared_norm::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_set_index_ $suffix>]() {
+                $crate::vector::tests::test_batched_set_index::<$V>($ctx3);
+            }
+            #[test]
+            #[should_panic(expected = "not supported for batched")]
+            fn [<test_batched_get_index_panics_ $suffix>]() {
+                $crate::vector::tests::test_batched_get_index_panics::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_fill_ $suffix>]() {
+                $crate::vector::tests::test_batched_fill::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_component_mul_ $suffix>]() {
+                $crate::vector::tests::test_batched_component_mul::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_assign_at_indices_ $suffix>]() {
+                $crate::vector::tests::test_batched_assign_at_indices::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_root_finding_consistent_ $suffix>]() {
+                $crate::vector::tests::test_batched_root_finding_consistent::<$V>($ctx2);
+            }
+            #[test]
+            #[should_panic(expected = "differ across batches")]
+            fn [<test_batched_root_finding_inconsistent_ $suffix>]() {
+                $crate::vector::tests::test_batched_root_finding_inconsistent::<$V>($ctx2);
+            }
+        }
+    };
+}
+#[cfg(test)]
+pub(crate) use generate_vector_tests;

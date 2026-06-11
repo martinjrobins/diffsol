@@ -847,7 +847,7 @@ mod tests {
         let no_aug = NoAug::<FakeEqn> {
             _phantom: std::marker::PhantomData,
         };
-        let mut v = crate::NalgebraVec::zeros(0, NalgebraContext);
+        let mut v = crate::NalgebraVec::zeros(0, NalgebraContext::default());
         assert!(catch_unwind(AssertUnwindSafe(|| no_aug.nout())).is_err());
         assert!(catch_unwind(AssertUnwindSafe(|| no_aug.nparams())).is_err());
         assert!(catch_unwind(AssertUnwindSafe(|| no_aug.nstates())).is_err());
