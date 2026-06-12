@@ -1,9 +1,10 @@
 use crate::{
     ode_solver::problem::OdeSolverSolution,
     scalar::{scale, Scalar},
-    ConstantOp, Matrix, MatrixHost, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens,
-    NonLinearOpSensAdjoint, NonLinearOpTimePartial, OdeBuilder, OdeEquations, OdeEquationsImplicit,
-    OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeSolverProblem, Op, Vector,
+    ConstantOp, Context, Matrix, MatrixHost, NonLinearOpAdjoint, NonLinearOpJacobian,
+    NonLinearOpSens, NonLinearOpSensAdjoint, NonLinearOpTimePartial, OdeBuilder, OdeEquations,
+    OdeEquationsImplicit, OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeSolverProblem,
+    Op, Vector, VectorView, VectorViewMut,
 };
 use num_traits::{FromPrimitive, One, Zero};
 use std::ops::MulAssign;
@@ -12,7 +13,11 @@ use std::ops::MulAssign;
 // dy/dt = -ay (p = [a, y0])
 fn exponential_decay<M: Matrix>(x: &M::V, p: &M::V, _t: M::T, y: &mut M::V) {
     y.copy_from(x);
-    y.mul_assign(scale(-p.get_index(0)));
+    let nbatch = y.context().nbatch();
+    for b in 0..nbatch {
+        let k = p.get_batch(b).get_index(0);
+        y.get_batch_mut(b).mul_assign(scale(-k));
+    }
 }
 
 // mass matrix is identity
@@ -48,7 +53,11 @@ fn exponential_decay_sens_transpose<M: MatrixHost>(
 // Jv = -av
 fn exponential_decay_jacobian<M: Matrix>(_x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
     y.copy_from(v);
-    y.mul_assign(scale(-p.get_index(0)));
+    let nbatch = y.context().nbatch();
+    for b in 0..nbatch {
+        let k = p.get_batch(b).get_index(0);
+        y.get_batch_mut(b).mul_assign(scale(-k));
+    }
 }
 
 // -J^Tv = av
@@ -64,7 +73,14 @@ fn exponential_decay_jacobian_adjoint<M: MatrixHost>(
 }
 
 fn exponential_decay_init<M: Matrix>(p: &M::V, _t: M::T, y: &mut M::V) {
-    y.fill(p.get_index(1));
+    let nstates = y.len();
+    let nbatch = y.context().nbatch();
+    let ctx1 = y.context().clone_with_nbatch(1);
+    for b in 0..nbatch {
+        let y0 = p.get_batch(b).get_index(1);
+        let val = M::V::from_element(nstates, y0, ctx1.clone());
+        y.get_batch_mut(b).copy_from(&val);
+    }
 }
 
 // dy0/dp = | 0 1 |
@@ -261,6 +277,50 @@ pub fn exponential_decay_problem<M: Matrix + 'static>(
         let t = M::T::from_f64(i as f64).unwrap();
         let y0: M::V = problem.eqn.init().call(M::T::zero());
         let y = y0.clone() * scale((-p[0] * t).exp());
+        soln.push(y, t);
+    }
+    (problem, soln)
+}
+
+#[allow(clippy::type_complexity)]
+pub fn exponential_decay_problem_batched<M: Matrix + 'static>(
+    nbatch: usize,
+) -> (
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
+    OdeSolverSolution<M::V>,
+) {
+    let ctx = M::C::default().clone_with_nbatch(nbatch);
+    let mut p_f64 = Vec::new();
+    for b in 0..nbatch {
+        let k = 0.1 * (b + 1) as f64;
+        let y0 = (b + 1) as f64;
+        p_f64.push(k);
+        p_f64.push(y0);
+    }
+    let problem = OdeBuilder::<M>::new()
+        .h0(1.0)
+        .context(ctx.clone())
+        .p(p_f64.clone())
+        .rhs_implicit(exponential_decay::<M>, exponential_decay_jacobian::<M>)
+        .init(exponential_decay_init::<M>, 2)
+        .build()
+        .unwrap();
+    let mut soln = OdeSolverSolution {
+        atol: problem.atol.clone(),
+        rtol: problem.rtol,
+        ..Default::default()
+    };
+    for i in 0..10 {
+        let t = M::T::from_f64(i as f64).unwrap();
+        let mut y_data = Vec::new();
+        for b in 0..nbatch {
+            let k = M::T::from_f64(p_f64[b * 2]).unwrap();
+            let y0 = M::T::from_f64(p_f64[b * 2 + 1]).unwrap();
+            let val = y0 * (-k * t).exp();
+            y_data.push(val);
+            y_data.push(val);
+        }
+        let y = M::V::from_vec(y_data, ctx.clone());
         soln.push(y, t);
     }
     (problem, soln)
