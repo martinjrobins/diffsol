@@ -384,18 +384,21 @@ impl<'a, T: NalgebraScalar> VectorView<'a> for NalgebraVecRef<'a, T> {
         if y.len() != nstates || atol.len() != nstates {
             panic!("Vector lengths do not match");
         }
+        let nstates_t = Self::T::from_f64(nstates as f64).unwrap();
         let mut max_norm = T::zero();
         for b in 0..nbatch {
-            let mut acc = T::zero();
             let atol_b = if atol_nbatch > 1 { b } else { 0 };
-            for i in 0..nstates {
-                let xi = self.data[(i, b)];
-                let yi = y.data[(i, b)];
-                let ai = atol.data[(i, atol_b)];
-                let term = xi / (yi.abs() * rtol + ai);
-                acc += term * term;
-            }
-            let norm = acc / Self::T::from_f64(nstates as f64).unwrap();
+            let acc = self
+                .data
+                .column(b)
+                .iter()
+                .zip(y.data.column(b).iter())
+                .zip(atol.data.column(atol_b).iter())
+                .fold(T::zero(), |acc, ((xi, yi), ai)| {
+                    let term = *xi / (yi.abs() * rtol + *ai);
+                    acc + term * term
+                });
+            let norm = acc / nstates_t;
             if norm > max_norm {
                 max_norm = norm;
             }
@@ -519,21 +522,21 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
         if y.len() != nstates || atol.len() != nstates {
             panic!("Vector lengths do not match");
         }
+        let nstates_t = Self::T::from_f64(nstates as f64).unwrap();
         let mut max_norm = T::zero();
-        let self_slice = self.data.as_slice();
-        let y_slice = y.data.as_slice();
-        let atol_slice = atol.data.as_slice();
         for b in 0..nbatch {
-            let mut acc = T::zero();
             let atol_b = if atol_nbatch > 1 { b } else { 0 };
-            for i in 0..nstates {
-                let xi = unsafe { self_slice.get_unchecked(b * nstates + i) };
-                let yi = unsafe { y_slice.get_unchecked(b * nstates + i) };
-                let ai = unsafe { atol_slice.get_unchecked(atol_b * nstates + i) };
-                let term = *xi / (yi.abs() * rtol + *ai);
-                acc += term * term;
-            }
-            let norm = acc / Self::T::from_f64(nstates as f64).unwrap();
+            let acc = self
+                .data
+                .column(b)
+                .iter()
+                .zip(y.data.column(b).iter())
+                .zip(atol.data.column(atol_b).iter())
+                .fold(T::zero(), |acc, ((xi, yi), ai)| {
+                    let term = *xi / (yi.abs() * rtol + *ai);
+                    acc + term * term
+                });
+            let norm = acc / nstates_t;
             if norm > max_norm {
                 max_norm = norm;
             }
