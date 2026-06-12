@@ -4,8 +4,8 @@ use std::{cell::Ref, fmt::Display};
 
 use crate::{
     error::{DiffsolError, OdeSolverError},
-    AugmentedOdeEquationsImplicit, Convergence, DefaultDenseMatrix, DefaultSolver, NoAug, StateRef,
-    StateRefMut,
+    AugmentedOdeEquationsImplicit, Context, Convergence, DefaultDenseMatrix, DefaultSolver, NoAug,
+    StateRef, StateRefMut,
 };
 
 use num_traits::{abs, FromPrimitive, One, Pow, Signed, ToPrimitive, Zero};
@@ -446,6 +446,7 @@ where
         //found using factor = 1, which corresponds to R with a constant step size
         let ncols = order + 1;
         let nrows = order + 1;
+        let solver_ctx = ctx.clone_with_nbatch(1);
         let mut r = vec![M::T::zero(); ncols * nrows];
 
         // r[0, 0:order] = 1
@@ -463,7 +464,7 @@ where
             }
         }
 
-        M::from_vec(order + 1, order + 1, r, ctx)
+        M::from_vec(order + 1, order + 1, r, solver_ctx)
     }
 
     fn _jacobian_updates(&mut self, c: Eqn::T, state: SolverState) {
@@ -1596,7 +1597,8 @@ mod test {
             dydt_y2::dydt_y2_problem,
             exponential_decay::{
                 exponential_decay_problem, exponential_decay_problem_adjoint,
-                exponential_decay_problem_sens, exponential_decay_problem_with_root,
+                exponential_decay_problem_batched, exponential_decay_problem_sens,
+                exponential_decay_problem_with_root,
                 exponential_decay_with_single_reset_root_problem_adjoint,
                 negative_exponential_decay_problem,
             },
@@ -2296,6 +2298,13 @@ mod test {
         let (problem, soln) = exponential_decay_problem::<M>(false);
         let mut s = problem.bdf::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, true, false);
+    }
+
+    #[test]
+    fn test_bdf_nalgebra_exponential_decay_batched() {
+        let (problem, soln) = exponential_decay_problem_batched::<M>(2);
+        let mut s = problem.bdf::<LS>().unwrap();
+        test_ode_solver(&mut s, soln, None, false, false);
     }
 
     #[test]

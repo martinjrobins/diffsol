@@ -957,7 +957,8 @@ mod tests {
         let adjoint = adj_eqn.rhs.jacobian(&state.y, state.t);
         assert_eq!(adjoint.nrows(), 2);
         assert_eq!(adjoint.ncols(), 2);
-        for (i, j, v) in adjoint.triplet_iter() {
+        let (idx, vals) = adjoint.triplet_iter();
+        for ((i, j), v) in idx.zip(vals) {
             if i == j {
                 assert_eq!(v, 0.1);
             } else {

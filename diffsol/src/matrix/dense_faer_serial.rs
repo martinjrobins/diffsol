@@ -306,19 +306,29 @@ impl<T: FaerScalar> Matrix for FaerMat<T> {
         v.add_assign(&self.column(j));
     }
 
-    fn triplet_iter(&self) -> impl Iterator<Item = (IndexType, IndexType, Self::T)> {
-        (0..self.ncols())
-            .flat_map(move |j| (0..self.nrows()).map(move |i| (i, j, self.data[(i, j)])))
+    fn triplet_iter(
+        &self,
+    ) -> (
+        impl Iterator<Item = (IndexType, IndexType)> + '_,
+        impl Iterator<Item = Self::T> + '_,
+    ) {
+        let ncols = self.ncols();
+        let nrows = self.nrows();
+        let indices = (0..ncols).flat_map(move |j| (0..nrows).map(move |i| (i, j)));
+        let values = (0..ncols).flat_map(move |j| (0..nrows).map(move |i| self.data[(i, j)]));
+        (indices, values)
     }
 
     fn try_from_triplets(
         nrows: IndexType,
         ncols: IndexType,
-        triplets: Vec<(IndexType, IndexType, T)>,
+        indices: Vec<(IndexType, IndexType)>,
+        values: Vec<T>,
         ctx: Self::C,
     ) -> Result<Self, DiffsolError> {
+        assert_eq!(indices.len(), values.len());
         let mut m = Mat::zeros(nrows, ncols);
-        for (i, j, v) in triplets {
+        for (&(i, j), v) in indices.iter().zip(values) {
             m[(i, j)] = v;
         }
         Ok(Self {
@@ -396,15 +406,57 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_zeros() {
+        super::super::tests::test_zeros::<FaerMat<f64>>();
+    }
+    #[test]
+    fn test_from_vec() {
+        super::super::tests::test_from_vec::<FaerMat<f64>>();
+    }
+    #[test]
+    fn test_from_diagonal() {
+        super::super::tests::test_from_diagonal::<FaerMat<f64>>();
+    }
+    #[test]
+    fn test_gemv() {
+        super::super::tests::test_gemv::<FaerMat<f64>>();
+    }
+    #[test]
+    fn test_gemm() {
+        super::super::tests::test_gemm::<FaerMat<f64>>();
+    }
+    #[test]
+    fn test_mat_mul() {
+        super::super::tests::test_mat_mul::<FaerMat<f64>>();
+    }
+    #[test]
+    fn test_columns_view() {
+        super::super::tests::test_columns_view::<FaerMat<f64>>();
+    }
+    #[test]
+    fn test_column_view() {
+        super::super::tests::test_column_view::<FaerMat<f64>>();
+    }
+    #[test]
+    fn test_set_column() {
+        super::super::tests::test_set_column::<FaerMat<f64>>();
+    }
+    #[test]
+    fn test_copy_from() {
+        super::super::tests::test_copy_from::<FaerMat<f64>>();
+    }
+    #[test]
+    fn test_scale_add_and_assign() {
+        super::super::tests::test_scale_add_and_assign::<FaerMat<f64>>();
+    }
+    #[test]
     fn test_column_axpy() {
         super::super::tests::test_column_axpy::<FaerMat<f64>>();
     }
-
     #[test]
     fn test_partition_indices_by_zero_diagonal() {
         super::super::tests::test_partition_indices_by_zero_diagonal::<FaerMat<f64>>();
     }
-
     #[test]
     fn test_resize_cols() {
         super::super::tests::test_resize_cols::<FaerMat<f64>>();

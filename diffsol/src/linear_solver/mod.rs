@@ -61,7 +61,8 @@ pub mod tests {
         op::{closure::Closure, ParameterisedOp},
         scalar::scale,
         vector::VectorRef,
-        FaerMat, FaerVec, LinearSolver, Matrix, NalgebraVec, NonLinearOpJacobian, Op, Vector,
+        Context, FaerMat, FaerVec, LinearSolver, Matrix, NalgebraContext, NalgebraVec,
+        NonLinearOpJacobian, Op, Vector,
     };
     use num_traits::{FromPrimitive, One, Zero};
 
@@ -144,6 +145,33 @@ pub mod tests {
         let s = NalgebraLU::default();
         test_linear_solver(s, op, rtol, &atol, solns);
     }
+
+    #[test]
+    fn test_lu_nalgebra_batched() {
+        let ctx = NalgebraContext::with_nbatch(2);
+        let nstates = 2;
+        let nbatch = ctx.nbatch();
+
+        let diagonal = NalgebraVec::from_element(nstates, 2.0_f64, ctx);
+        let mat = NalgebraMat::from_diagonal(&diagonal);
+
+        let mut lus = Vec::new();
+        for b in 0..nbatch {
+            let sub = mat.data.columns(b * nstates, nstates).into_owned();
+            lus.push(sub.lu());
+        }
+
+        let mut b = NalgebraVec::from_vec(vec![2.0, 4.0, 6.0, 8.0], ctx);
+        for b_idx in 0..nbatch {
+            let lu = &lus[b_idx];
+            let mut col = b.data.column_mut(b_idx);
+            assert!(lu.solve_mut(&mut col));
+        }
+
+        let expected = NalgebraVec::from_vec(vec![1.0, 2.0, 3.0, 4.0], ctx);
+        b.assert_eq_st(&expected, 1e-10);
+    }
+
     #[test]
     fn test_lu_faer() {
         let (op, rtol, atol, solns) = linear_problem::<FaerMat<f64>>();

@@ -1,4 +1,4 @@
-use crate::{vector::VectorIndex, IndexType, Matrix};
+use crate::{vector::VectorIndex, Context, IndexType, Matrix};
 
 pub(crate) struct CscBlock {
     pub(crate) nrows: IndexType,
@@ -242,49 +242,72 @@ where
     {
         panic!("Matrices must have the same shape");
     }
-    let mut triplets = Vec::new();
-    let indices = indices.clone_as_vec();
+    let nbatch = ul.context().nbatch();
+
+    let indices_vec = indices.clone_as_vec();
     let mut cat = vec![false; n];
-    indices.iter().for_each(|&i| cat[i] = true);
+    indices_vec.iter().for_each(|&i| cat[i] = true);
     let ni = cat.len();
-    let mut upper_indices = Vec::with_capacity(n);
-    let mut lower_indices = Vec::with_capacity(n);
     let mut upper_indices_short = Vec::with_capacity(n - ni);
     let mut lower_indices_short = Vec::with_capacity(ni);
-    let mut upper_acc = 0;
-    let mut lower_acc = 0;
     for (i, c) in cat.iter().enumerate() {
-        lower_indices.push(lower_acc);
-        upper_indices.push(upper_acc);
         if *c {
             lower_indices_short.push(i);
-            lower_acc += 1;
         } else {
             upper_indices_short.push(i);
-            upper_acc += 1;
         }
     }
-    for (i, j, v) in ul.triplet_iter() {
-        let ii = upper_indices_short[i];
-        let jj = upper_indices_short[j];
-        triplets.push((ii, jj, v));
+
+    let (ul_idx, ul_val) = ul.triplet_iter();
+    let (ur_idx, ur_val) = ur.triplet_iter();
+    let (ll_idx, ll_val) = ll.triplet_iter();
+    let (lr_idx, lr_val) = lr.triplet_iter();
+
+    let ul_indices: Vec<_> = ul_idx
+        .map(|(i, j)| (upper_indices_short[i], upper_indices_short[j]))
+        .collect();
+    let ur_indices: Vec<_> = ur_idx
+        .map(|(i, j)| (upper_indices_short[i], lower_indices_short[j]))
+        .collect();
+    let ll_indices: Vec<_> = ll_idx
+        .map(|(i, j)| (lower_indices_short[i], upper_indices_short[j]))
+        .collect();
+    let lr_indices: Vec<_> = lr_idx
+        .map(|(i, j)| (lower_indices_short[i], lower_indices_short[j]))
+        .collect();
+
+    let ul_vals: Vec<_> = ul_val.collect();
+    let ur_vals: Vec<_> = ur_val.collect();
+    let ll_vals: Vec<_> = ll_val.collect();
+    let lr_vals: Vec<_> = lr_val.collect();
+
+    let ul_nnz = ul_indices.len();
+    let ur_nnz = ur_indices.len();
+    let ll_nnz = ll_indices.len();
+    let lr_nnz = lr_indices.len();
+
+    let mut combined_indices = ul_indices;
+    combined_indices.extend(ur_indices);
+    combined_indices.extend(ll_indices);
+    combined_indices.extend(lr_indices);
+
+    let total_nnz = combined_indices.len();
+    let mut combined_values = Vec::with_capacity(total_nnz * nbatch);
+    for b in 0..nbatch {
+        combined_values.extend_from_slice(&ul_vals[b * ul_nnz..(b + 1) * ul_nnz]);
+        combined_values.extend_from_slice(&ur_vals[b * ur_nnz..(b + 1) * ur_nnz]);
+        combined_values.extend_from_slice(&ll_vals[b * ll_nnz..(b + 1) * ll_nnz]);
+        combined_values.extend_from_slice(&lr_vals[b * lr_nnz..(b + 1) * lr_nnz]);
     }
-    for (i, j, v) in ur.triplet_iter() {
-        let ii = upper_indices_short[i];
-        let jj = lower_indices_short[j];
-        triplets.push((ii, jj, v));
-    }
-    for (i, j, v) in ll.triplet_iter() {
-        let ii = lower_indices_short[i];
-        let jj = upper_indices_short[j];
-        triplets.push((ii, jj, v));
-    }
-    for (i, j, v) in lr.triplet_iter() {
-        let ii = lower_indices_short[i];
-        let jj = lower_indices_short[j];
-        triplets.push((ii, jj, v));
-    }
-    M::try_from_triplets(n, m, triplets, ul.context().clone()).unwrap()
+
+    M::try_from_triplets(
+        n,
+        m,
+        combined_indices,
+        combined_values,
+        ul.context().clone(),
+    )
+    .unwrap()
 }
 
 #[cfg(test)]
@@ -292,6 +315,25 @@ mod tests {
     use super::*;
     use crate::{FaerMat, FaerSparseMat, NalgebraMat, Vector};
     use num_traits::FromPrimitive;
+
+    fn split_triplets<T: Copy>(triplets: &[(usize, usize, T)]) -> (Vec<(usize, usize)>, Vec<T>) {
+        let indices = triplets.iter().map(|&(i, j, _)| (i, j)).collect();
+        let values = triplets.iter().map(|&(_, _, v)| v).collect();
+        (indices, values)
+    }
+
+    fn assert_triplets_eq<M: Matrix>(m: &M, expected: &[(usize, usize, f64)]) {
+        let (idx, vals) = m.triplet_iter();
+        let actual_idx: Vec<_> = idx.collect();
+        let actual_vals: Vec<_> = vals.collect();
+        let exp_idx: Vec<_> = expected.iter().map(|&(i, j, _)| (i, j)).collect();
+        let exp_vals: Vec<_> = expected
+            .iter()
+            .map(|&(_, _, v)| M::T::from_f64(v).unwrap())
+            .collect();
+        assert_eq!(actual_idx, exp_idx);
+        assert_eq!(actual_vals, exp_vals);
+    }
 
     #[test]
     fn test_split_combine_faer_sparse() {
@@ -309,7 +351,7 @@ mod tests {
     }
 
     fn test_split_combine<M: Matrix>() {
-        let triplets = vec![
+        let triplets: Vec<(usize, usize, f64)> = vec![
             (0, 0, 1.0),
             (1, 0, 5.0),
             (2, 0, 9.0),
@@ -327,59 +369,23 @@ mod tests {
             (2, 3, 12.0),
             (3, 3, 16.0),
         ];
-        let triplets = triplets
-            .iter()
-            .map(|(i, j, v)| (*i, *j, M::T::from_f64(*v).unwrap()))
-            .collect::<Vec<_>>();
-        let m = M::try_from_triplets(4, 4, triplets.clone(), Default::default()).unwrap();
-        let indices = <M::V as Vector>::Index::from_vec(vec![0, 2], Default::default());
+        let (indices, values) = split_triplets(&triplets);
+        let values: Vec<M::T> = values.iter().map(|v| M::T::from_f64(*v).unwrap()).collect();
+        let m = M::try_from_triplets(4, 4, indices, values, Default::default()).unwrap();
+        let alg_indices = <M::V as Vector>::Index::from_vec(vec![0, 2], Default::default());
 
-        let [(ul, _ul_idx), (ur, _ur_idx), (ll, _ll_idx), (lr, _lr_idx)] = m.split(&indices);
-        let ul_triplets = [(0, 0, 6.0), (1, 0, 14.0), (0, 1, 8.0), (1, 1, 16.0)];
-        let ur_triplets = [(0, 0, 5.0), (1, 0, 13.0), (0, 1, 7.0), (1, 1, 15.0)];
-        let ll_triplets = [(0, 0, 2.0), (1, 0, 10.0), (0, 1, 4.0), (1, 1, 12.0)];
-        let lr_triplets = [(0, 0, 1.0), (1, 0, 9.0), (0, 1, 3.0), (1, 1, 11.0)];
-        let ul_triplets = ul_triplets
-            .iter()
-            .map(|(i, j, v)| (*i, *j, M::T::from_f64(*v).unwrap()))
-            .collect::<Vec<_>>();
-        let ur_triplets = ur_triplets
-            .iter()
-            .map(|(i, j, v)| (*i, *j, M::T::from_f64(*v).unwrap()))
-            .collect::<Vec<_>>();
-        let ll_triplets = ll_triplets
-            .iter()
-            .map(|(i, j, v)| (*i, *j, M::T::from_f64(*v).unwrap()))
-            .collect::<Vec<_>>();
-        let lr_triplets = lr_triplets
-            .iter()
-            .map(|(i, j, v)| (*i, *j, M::T::from_f64(*v).unwrap()))
-            .collect::<Vec<_>>();
-        assert_eq!(ul_triplets, ul.triplet_iter().collect::<Vec<_>>());
-        assert_eq!(ur_triplets, ur.triplet_iter().collect::<Vec<_>>());
-        assert_eq!(ll_triplets, ll.triplet_iter().collect::<Vec<_>>());
-        assert_eq!(lr_triplets, lr.triplet_iter().collect::<Vec<_>>());
+        let [(ul, _), (ur, _), (ll, _), (lr, _)] = m.split(&alg_indices);
+        assert_triplets_eq::<M>(&ul, &[(0, 0, 6.0), (1, 0, 14.0), (0, 1, 8.0), (1, 1, 16.0)]);
+        assert_triplets_eq::<M>(&ur, &[(0, 0, 5.0), (1, 0, 13.0), (0, 1, 7.0), (1, 1, 15.0)]);
+        assert_triplets_eq::<M>(&ll, &[(0, 0, 2.0), (1, 0, 10.0), (0, 1, 4.0), (1, 1, 12.0)]);
+        assert_triplets_eq::<M>(&lr, &[(0, 0, 1.0), (1, 0, 9.0), (0, 1, 3.0), (1, 1, 11.0)]);
 
-        let mat = M::combine(&ul, &ur, &ll, &lr, &indices);
-        assert_eq!(triplets, mat.triplet_iter().collect::<Vec<_>>());
+        let mat = M::combine(&ul, &ur, &ll, &lr, &alg_indices);
+        assert_triplets_eq::<M>(&mat, &triplets);
 
-        let indices = <M::V as Vector>::Index::from_vec(vec![2], Default::default());
+        let alg_indices = <M::V as Vector>::Index::from_vec(vec![2], Default::default());
 
-        let [(ul, _ul_idx), (ur, _ur_idx), (ll, _ll_idx), (lr, _lr_idx)] = m.split(&indices);
-        let ul_triplets = [
-            (0, 0, 1.0),
-            (1, 0, 5.0),
-            (2, 0, 13.0),
-            (0, 1, 2.0),
-            (1, 1, 6.0),
-            (2, 1, 14.0),
-            (0, 2, 4.0),
-            (1, 2, 8.0),
-            (2, 2, 16.0),
-        ];
-        let ur_triplets = [(0, 0, 3.0), (1, 0, 7.0), (2, 0, 15.0)];
-        let ll_triplets = [(0, 0, 9.0), (0, 1, 10.0), (0, 2, 12.0)];
-        let lr_triplets = [(0, 0, 11.0)];
+        let [(ul, _), (ur, _), (ll, _), (lr, _)] = m.split(&alg_indices);
         assert_eq!(ul.nrows(), 3);
         assert_eq!(ul.ncols(), 3);
         assert_eq!(ur.nrows(), 3);
@@ -389,28 +395,25 @@ mod tests {
         assert_eq!(lr.nrows(), 1);
         assert_eq!(lr.ncols(), 1);
 
-        let ul_triplets = ul_triplets
-            .iter()
-            .map(|(i, j, v)| (*i, *j, M::T::from_f64(*v).unwrap()))
-            .collect::<Vec<_>>();
-        let ur_triplets = ur_triplets
-            .iter()
-            .map(|(i, j, v)| (*i, *j, M::T::from_f64(*v).unwrap()))
-            .collect::<Vec<_>>();
-        let ll_triplets = ll_triplets
-            .iter()
-            .map(|(i, j, v)| (*i, *j, M::T::from_f64(*v).unwrap()))
-            .collect::<Vec<_>>();
-        let lr_triplets = lr_triplets
-            .iter()
-            .map(|(i, j, v)| (*i, *j, M::T::from_f64(*v).unwrap()))
-            .collect::<Vec<_>>();
-        assert_eq!(ul_triplets, ul.triplet_iter().collect::<Vec<_>>());
-        assert_eq!(ur_triplets, ur.triplet_iter().collect::<Vec<_>>());
-        assert_eq!(ll_triplets, ll.triplet_iter().collect::<Vec<_>>());
-        assert_eq!(lr_triplets, lr.triplet_iter().collect::<Vec<_>>());
+        assert_triplets_eq::<M>(
+            &ul,
+            &[
+                (0, 0, 1.0),
+                (1, 0, 5.0),
+                (2, 0, 13.0),
+                (0, 1, 2.0),
+                (1, 1, 6.0),
+                (2, 1, 14.0),
+                (0, 2, 4.0),
+                (1, 2, 8.0),
+                (2, 2, 16.0),
+            ],
+        );
+        assert_triplets_eq::<M>(&ur, &[(0, 0, 3.0), (1, 0, 7.0), (2, 0, 15.0)]);
+        assert_triplets_eq::<M>(&ll, &[(0, 0, 9.0), (0, 1, 10.0), (0, 2, 12.0)]);
+        assert_triplets_eq::<M>(&lr, &[(0, 0, 11.0)]);
 
-        let mat = M::combine(&ul, &ur, &ll, &lr, &indices);
-        assert_eq!(triplets, mat.triplet_iter().collect::<Vec<_>>());
+        let mat = M::combine(&ul, &ur, &ll, &lr, &alg_indices);
+        assert_triplets_eq::<M>(&mat, &triplets);
     }
 }

@@ -37,9 +37,10 @@ where
     let u0 = problem.eqn.init().call(0.0);
     let diffop = FoodWebDiff::<M, NX>::new(&u0, 0.0);
     let diff = diffop.jacobian(&u0, 0.0);
-    let diff_diffsl = diff
-        .triplet_iter()
-        .map(|(i, j, v)| format!("            ({i}, {j}): {v}"))
+    let (diff_idx, diff_vals) = diff.triplet_iter();
+    let diff_diffsl = diff_idx
+        .zip(diff_vals)
+        .map(|((i, j), v)| format!("            ({i}, {j}): {v}"))
         .collect::<Vec<_>>()
         .join(",\n");
 

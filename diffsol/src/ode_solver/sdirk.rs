@@ -568,8 +568,9 @@ mod test {
         ode_equations::test_models::{
             exponential_decay::{
                 exponential_decay_problem, exponential_decay_problem_adjoint,
-                exponential_decay_problem_sens, exponential_decay_problem_with_mass,
-                exponential_decay_problem_with_root, negative_exponential_decay_problem,
+                exponential_decay_problem_batched, exponential_decay_problem_sens,
+                exponential_decay_problem_with_mass, exponential_decay_problem_with_root,
+                negative_exponential_decay_problem,
             },
             exponential_decay_with_algebraic::{
                 exponential_decay_with_algebraic_adjoint_problem,
@@ -930,6 +931,13 @@ mod test {
         let (problem, soln) = exponential_decay_problem::<M>(false);
         let mut s = problem.tr_bdf2::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, true, false);
+    }
+
+    #[test]
+    fn test_tr_bdf2_nalgebra_exponential_decay_batched() {
+        let (problem, soln) = exponential_decay_problem_batched::<M>(2);
+        let mut s = problem.tr_bdf2::<LS>().unwrap();
+        test_ode_solver(&mut s, soln, None, false, false);
     }
 
     #[test]

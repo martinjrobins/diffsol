@@ -9,7 +9,7 @@ use crate::RkState;
 use crate::RootFinder;
 use crate::Tableau;
 use crate::{
-    ode_solver_error, AugmentedOdeEquations, Convergence, DefaultDenseMatrix, DenseMatrix,
+    ode_solver_error, AugmentedOdeEquations, Context, Convergence, DefaultDenseMatrix, DenseMatrix,
     MatrixView, NonLinearOp, NonLinearSolver, OdeEquations, OdeSolverProblem, OdeSolverState, Op,
     Scalar, Vector, VectorViewMut,
 };
@@ -125,12 +125,13 @@ where
         let s = tableau.s();
         let mut a_rows = Vec::with_capacity(s);
         let ctx = problem.context();
+        let solver_ctx = ctx.clone_with_nbatch(1);
         for i in 0..s {
             let mut row = Vec::with_capacity(i);
             for j in 0..i {
                 row.push(tableau.a().get_index(i, j));
             }
-            a_rows.push(Eqn::V::from_vec(row, ctx.clone()));
+            a_rows.push(Eqn::V::from_vec(row, solver_ctx.clone()));
         }
 
         state.set_problem(problem)?;

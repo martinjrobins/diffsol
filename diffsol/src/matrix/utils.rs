@@ -10,7 +10,7 @@ macro_rules! impl_matrix_common {
                 self.data.nrows()
             }
             fn ncols(&self) -> IndexType {
-                self.data.ncols()
+                self.data.ncols() / crate::Context::nbatch(&self.context)
             }
             fn inner(&self) -> &Self::Inner {
                 &self.data
@@ -28,7 +28,7 @@ macro_rules! impl_matrix_common {
                 self.data.nrows()
             }
             fn ncols(&self) -> IndexType {
-                self.data.ncols()
+                self.data.ncols() / crate::Context::nbatch(&self.context)
             }
             fn inner(&self) -> &Self::Inner {
                 &self.data
@@ -51,7 +51,7 @@ macro_rules! impl_matrix_common_ref {
                 self.data.nrows()
             }
             fn ncols(&self) -> IndexType {
-                self.data.ncols()
+                self.data.ncols() / crate::Context::nbatch(&self.context)
             }
             fn inner(&self) -> &Self::Inner {
                 &self.data
@@ -69,7 +69,7 @@ macro_rules! impl_matrix_common_ref {
                 self.data.nrows()
             }
             fn ncols(&self) -> IndexType {
-                self.data.ncols()
+                self.data.ncols() / crate::Context::nbatch(&self.context)
             }
             fn inner(&self) -> &Self::Inner {
                 &self.data

@@ -1785,8 +1785,8 @@ mod test {
 
     #[test]
     fn parameterised_op_time_derive_uses_finite_difference() {
-        let p = TestVec::from_vec(vec![1.0, -2.0], crate::NalgebraContext);
-        let x = TestVec::from_vec(vec![2.0], crate::NalgebraContext);
+        let p = TestVec::from_vec(vec![1.0, -2.0], crate::NalgebraContext::default());
+        let x = TestVec::from_vec(vec![2.0], crate::NalgebraContext::default());
         let t = 3.0;
 
         let reset = ClosureWithSens::<TestMat, _, _, _>::new(
@@ -1800,7 +1800,7 @@ mod test {
             1,
             2,
             1,
-            crate::NalgebraContext,
+            crate::NalgebraContext::default(),
         );
         let reset = ParameterisedOp::new(&reset, &p);
 
@@ -1815,7 +1815,7 @@ mod test {
             1,
             2,
             1,
-            crate::NalgebraContext,
+            crate::NalgebraContext::default(),
         );
         let root = ParameterisedOp::new(&root, &p);
 
@@ -1857,7 +1857,7 @@ mod test {
             2,
         );
         let forward_problem = scalar_problem(0.25);
-        let p = TestVec::from_vec(vec![1.2, -0.7], crate::NalgebraContext);
+        let p = TestVec::from_vec(vec![1.2, -0.7], crate::NalgebraContext::default());
         problem.eqn.set_params(&p);
         let mut state = make_adjoint_state(
             &problem,
@@ -1927,7 +1927,7 @@ mod test {
             2,
         );
         let forward_problem = scalar_problem(0.25);
-        let p = TestVec::from_vec(vec![1.2, -0.7], crate::NalgebraContext);
+        let p = TestVec::from_vec(vec![1.2, -0.7], crate::NalgebraContext::default());
         problem.eqn.set_params(&p);
         let mut state_root0 = make_adjoint_state(
             &problem,
@@ -1997,7 +1997,7 @@ mod test {
             1,
         );
         let forward_problem = scalar_problem(0.1);
-        let p = TestVec::from_vec(vec![1.0, -2.0], crate::NalgebraContext);
+        let p = TestVec::from_vec(vec![1.0, -2.0], crate::NalgebraContext::default());
         problem.eqn.set_params(&p);
         let mut state = make_adjoint_state(
             &problem,
@@ -2059,7 +2059,7 @@ mod test {
             2,
         );
         let forward_problem = scalar_problem(0.25);
-        let p = TestVec::from_vec(vec![1.0, -2.0], crate::NalgebraContext);
+        let p = TestVec::from_vec(vec![1.0, -2.0], crate::NalgebraContext::default());
         problem.eqn.set_params(&p);
         let mut state = make_adjoint_state(
             &problem,
@@ -2101,7 +2101,7 @@ mod test {
             1,
         );
         let forward_problem = scalar_problem(0.0);
-        let p = TestVec::from_vec(vec![1.0, -2.0], crate::NalgebraContext);
+        let p = TestVec::from_vec(vec![1.0, -2.0], crate::NalgebraContext::default());
         problem.eqn.set_params(&p);
         let mut state = make_adjoint_state(
             &problem,
@@ -2175,17 +2175,17 @@ mod test {
             )
             .build()
             .unwrap();
-        let p = TestVec::from_vec(vec![1.0, -2.0], crate::NalgebraContext);
+        let p = TestVec::from_vec(vec![1.0, -2.0], crate::NalgebraContext::default());
         problem.eqn.set_params(&p);
         let common = StateCommon {
-            y: TestVec::zeros(1, crate::NalgebraContext),
-            dy: TestVec::zeros(1, crate::NalgebraContext),
-            g: TestVec::zeros(0, crate::NalgebraContext),
-            dg: TestVec::zeros(0, crate::NalgebraContext),
-            s: vec![TestVec::zeros(1, crate::NalgebraContext)],
-            ds: vec![TestVec::zeros(1, crate::NalgebraContext)],
-            sg: vec![TestVec::zeros(2, crate::NalgebraContext)],
-            dsg: vec![TestVec::zeros(2, crate::NalgebraContext)],
+            y: TestVec::zeros(1, crate::NalgebraContext::default()),
+            dy: TestVec::zeros(1, crate::NalgebraContext::default()),
+            g: TestVec::zeros(0, crate::NalgebraContext::default()),
+            dg: TestVec::zeros(0, crate::NalgebraContext::default()),
+            s: vec![TestVec::zeros(1, crate::NalgebraContext::default())],
+            ds: vec![TestVec::zeros(1, crate::NalgebraContext::default())],
+            sg: vec![TestVec::zeros(2, crate::NalgebraContext::default())],
+            dsg: vec![TestVec::zeros(2, crate::NalgebraContext::default())],
             t: 0.0,
             h: 0.0,
         };

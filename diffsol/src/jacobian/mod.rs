@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use crate::{
     LinearOp, LinearOpTranspose, Matrix, MatrixSparsity, NonLinearOp, NonLinearOpAdjoint,
     NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, Scalar, Vector, VectorIndex,
+    VectorView,
 };
 use num_traits::{One, Zero};
 
@@ -15,9 +16,6 @@ pub mod greedy_coloring;
 macro_rules! gen_find_non_zeros_nonlinear {
     ($name:ident, $op_fn:ident, $op_trait:ident, $nrows:ident, $ncols:ident) => {
         /// Find the non-zero entries of the $name matrix of a non-linear operator.
-        /// TODO: This function is not efficient for non-host vectors and could be part of the Vector trait
-        ///       to allow for more efficient implementations. It's ok for now since this is only used once
-        ///       during the setup phase.
         pub fn $name<F: NonLinearOp + $op_trait + ?Sized>(
             op: &F,
             x: &F::V,
@@ -29,11 +27,13 @@ macro_rules! gen_find_non_zeros_nonlinear {
             for j in 0..op.$ncols() {
                 v.set_index(j, F::T::NAN);
                 op.$op_fn(x, t, &v, &mut col);
-                for i in 0..op.nout() {
-                    if col.get_index(i).is_nan() {
-                        triplets.push((i, j));
+                {
+                    let col_b0 = col.get_batch(0);
+                    for i in 0..op.$nrows() {
+                        if col_b0.get_index(i).is_nan() {
+                            triplets.push((i, j));
+                        }
                     }
-                    col.set_index(i, F::T::zero());
                 }
                 col.fill(F::T::zero());
                 v.set_index(j, F::T::zero());
@@ -74,10 +74,7 @@ gen_find_non_zeros_nonlinear!(
 
 macro_rules! gen_find_non_zeros_linear {
     ($name:ident, $op_fn:ident $(, $op_trait:tt )?) => {
-        /// Find the non-zero entries of the $name matrix of a non-linear operator.
-        /// TODO: This function is not efficient for non-host vectors and could be part of the Vector trait
-        ///       to allow for more efficient implementations. It's ok for now since this is only used once
-        ///       during the setup phase.
+        /// Find the non-zero entries of the matrix of a linear operator.
         pub fn $name<F: LinearOp + ?Sized $(+ $op_trait)?>(op: &F, t: F::T) -> Vec<(usize, usize)> {
             let mut v = F::V::zeros(op.nstates(), op.context().clone());
             let mut col = F::V::zeros(op.nout(), op.context().clone());
@@ -85,18 +82,15 @@ macro_rules! gen_find_non_zeros_linear {
             for j in 0..op.nstates() {
                 v.set_index(j, F::T::NAN);
                 op.$op_fn(&v, t, &mut col);
-                for i in 0..op.nout() {
-                    if col.get_index(i).is_nan() {
-                        triplets.push((i, j));
+                {
+                    let col_b0 = col.get_batch(0);
+                    for i in 0..op.nout() {
+                        if col_b0.get_index(i).is_nan() {
+                            triplets.push((i, j));
+                        }
                     }
-                    col.set_index(i, F::T::zero());
                 }
-                // OR:
-                //col.clone_as_vec().into_iter().for_each(|v| {
-                //    if v.is_nan() {
-                //        triplets.push((0, 0));
-                //    }
-                //});
+                col.fill(F::T::zero());
                 v.set_index(j, F::T::zero());
             }
             triplets

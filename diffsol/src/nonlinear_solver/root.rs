@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use crate::{
     error::DiffsolError,
     scalar::{IndexType, Scalar},
-    NonLinearOp, Vector,
+    NonLinearOp, Vector, VectorView,
 };
 
 use num_traits::{abs, FromPrimitive, One, Zero};
@@ -43,10 +43,11 @@ impl<V: Vector> RootFinder<V> {
     ///
     /// We find the root of a function using the method proposed by Sundials [docs](https://sundials.readthedocs.io/en/latest/cvode/Mathematics_link.html#rootfinding)
     fn find_zero_index(g: &V) -> usize {
+        let g_b0 = g.get_batch(0);
         let mut min_idx = 0usize;
-        let mut min_val = abs(g.get_index(0));
+        let mut min_val = abs(g_b0.get_index(0));
         for i in 1..g.len() {
-            let v = abs(g.get_index(i));
+            let v = abs(g_b0.get_index(i));
             if v < min_val {
                 min_val = v;
                 min_idx = i;
@@ -98,9 +99,9 @@ impl<V: Vector> RootFinder<V> {
         let five = V::T::from_f64(5.0).unwrap();
         let pntone = V::T::from_f64(0.1).unwrap();
         while abs(t1 - t0) > tol {
-            let mut t_mid = t1
-                - (t1 - t0) * g1.get_index(imax)
-                    / (g1.get_index(imax) - alpha * g0.get_index(imax));
+            let g1_val = g1.get_batch(0).get_index(imax);
+            let g0_val = g0.get_batch(0).get_index(imax);
+            let mut t_mid = t1 - (t1 - t0) * g1_val / (g1_val - alpha * g0_val);
 
             // adjust t_mid away from the boundaries
             if abs(t_mid - t0) < half * tol {
@@ -174,7 +175,7 @@ mod tests {
     fn test_root() {
         type V = NalgebraVec<f64>;
         type M = NalgebraMat<f64>;
-        let ctx = NalgebraContext;
+        let ctx = NalgebraContext::default();
         let interpolate_inplace = |t: f64, y: &mut V| -> Result<(), DiffsolError> {
             y[0] = t;
             Ok(())

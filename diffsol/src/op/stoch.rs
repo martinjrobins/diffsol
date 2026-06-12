@@ -212,7 +212,7 @@ mod test {
     #[test]
     fn test_additive() {
         let op = TestAdditive {
-            ctx: NalgebraContext,
+            ctx: NalgebraContext::default(),
         };
         assert_eq!(op.kind(), StochOpKind::Additive);
     }
@@ -220,7 +220,7 @@ mod test {
     #[test]
     fn test_diagonal() {
         let op = TestDiagonal {
-            ctx: NalgebraContext,
+            ctx: NalgebraContext::default(),
         };
         assert_eq!(op.kind(), StochOpKind::Diagonal);
     }
@@ -228,7 +228,7 @@ mod test {
     #[test]
     fn test_scalar() {
         let op = TestScalar {
-            ctx: NalgebraContext,
+            ctx: NalgebraContext::default(),
         };
         assert_eq!(op.kind(), StochOpKind::Scalar);
     }
@@ -236,7 +236,7 @@ mod test {
     #[test]
     fn test_other() {
         let op = TestOther {
-            ctx: NalgebraContext,
+            ctx: NalgebraContext::default(),
         };
         assert_eq!(op.kind(), StochOpKind::Other);
     }
