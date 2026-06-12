@@ -557,6 +557,119 @@ pub(crate) mod tests {
         let _result = g0.root_finding(&g1);
     }
 
+    // --- Broadcasting tests ---
+
+    pub fn test_batched_axpy_broadcast<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        // self has nbatch=2, x has nbatch=1
+        let mut y = V::from_vec(fv::<V>(&[1.0, 2.0, 10.0, 20.0]), ctx);
+        let x = V::from_vec(fv::<V>(&[3.0, 4.0]), V::C::default());
+        y.axpy(f::<V>(2.0), &x, f::<V>(1.0));
+        // batch0: [1+6, 2+8]=[7,10], batch1: [10+6, 20+8]=[16,28]
+        assert_eq!(y.clone_as_vec(), fv::<V>(&[7.0, 10.0, 16.0, 28.0]));
+    }
+
+    pub fn test_batched_copy_from_broadcast<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let mut y = V::zeros(2, ctx);
+        let x = V::from_vec(fv::<V>(&[5.0, 7.0]), V::C::default());
+        y.copy_from(&x);
+        // both batches get [5, 7]
+        assert_eq!(y.clone_as_vec(), fv::<V>(&[5.0, 7.0, 5.0, 7.0]));
+    }
+
+    pub fn test_batched_component_div<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let mut a = V::from_vec(fv::<V>(&[6.0, 8.0, 12.0, 20.0]), ctx.clone());
+        let b = V::from_vec(fv::<V>(&[2.0, 4.0, 3.0, 5.0]), ctx);
+        a.component_div_assign(&b);
+        assert_eq!(a.clone_as_vec(), fv::<V>(&[3.0, 2.0, 4.0, 4.0]));
+    }
+
+    pub fn test_batched_component_mul_broadcast<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let mut a = V::from_vec(fv::<V>(&[2.0, 3.0, 4.0, 5.0]), ctx);
+        let b = V::from_vec(fv::<V>(&[10.0, 20.0]), V::C::default());
+        a.component_mul_assign(&b);
+        // batch0: [20, 60], batch1: [40, 100]
+        assert_eq!(a.clone_as_vec(), fv::<V>(&[20.0, 60.0, 40.0, 100.0]));
+    }
+
+    pub fn test_batched_component_div_broadcast<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let mut a = V::from_vec(fv::<V>(&[6.0, 8.0, 12.0, 20.0]), ctx);
+        let b = V::from_vec(fv::<V>(&[2.0, 4.0]), V::C::default());
+        a.component_div_assign(&b);
+        // batch0: [3, 2], batch1: [6, 5]
+        assert_eq!(a.clone_as_vec(), fv::<V>(&[3.0, 2.0, 6.0, 5.0]));
+    }
+
+    pub fn test_batched_add_assign_broadcast<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let mut a = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0]), ctx);
+        let b = V::from_vec(fv::<V>(&[10.0, 20.0]), V::C::default());
+        a += &b;
+        assert_eq!(a.clone_as_vec(), fv::<V>(&[11.0, 22.0, 13.0, 24.0]));
+    }
+
+    pub fn test_batched_sub_assign_broadcast<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let mut a = V::from_vec(fv::<V>(&[10.0, 20.0, 30.0, 40.0]), ctx);
+        let b = V::from_vec(fv::<V>(&[1.0, 2.0]), V::C::default());
+        a -= &b;
+        assert_eq!(a.clone_as_vec(), fv::<V>(&[9.0, 18.0, 29.0, 38.0]));
+    }
+
+    pub fn test_batched_sub<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let a = V::from_vec(fv::<V>(&[10.0, 20.0, 30.0, 40.0]), ctx.clone());
+        let b = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0]), ctx);
+        let c = a - b;
+        assert_eq!(c.clone_as_vec(), fv::<V>(&[9.0, 18.0, 27.0, 36.0]));
+    }
+
+    pub fn test_batched_sub_assign<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let mut a = V::from_vec(fv::<V>(&[10.0, 20.0, 30.0, 40.0]), ctx.clone());
+        let b = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0]), ctx);
+        a -= b;
+        assert_eq!(a.clone_as_vec(), fv::<V>(&[9.0, 18.0, 27.0, 36.0]));
+    }
+
+    // --- Incompatible batch tests ---
+
+    pub fn test_batched_axpy_incompatible<V: Vector>(ctx2: V::C, ctx3: V::C) {
+        assert_eq!(ctx2.nbatch(), 2);
+        assert_eq!(ctx3.nbatch(), 3);
+        let mut y = V::zeros(2, ctx2);
+        let x = V::zeros(2, ctx3);
+        y.axpy(f::<V>(1.0), &x, f::<V>(1.0));
+    }
+
+    pub fn test_batched_copy_from_incompatible<V: Vector>(ctx2: V::C, ctx3: V::C) {
+        assert_eq!(ctx2.nbatch(), 2);
+        assert_eq!(ctx3.nbatch(), 3);
+        let mut y = V::zeros(2, ctx2);
+        let x = V::zeros(2, ctx3);
+        y.copy_from(&x);
+    }
+
+    pub fn test_batched_add_assign_incompatible<V: Vector>(ctx2: V::C, ctx3: V::C) {
+        assert_eq!(ctx2.nbatch(), 2);
+        assert_eq!(ctx3.nbatch(), 3);
+        let mut a = V::zeros(2, ctx2);
+        let b = V::zeros(2, ctx3);
+        a += &b;
+    }
+
+    pub fn test_batched_component_mul_incompatible<V: Vector>(ctx2: V::C, ctx3: V::C) {
+        assert_eq!(ctx2.nbatch(), 2);
+        assert_eq!(ctx3.nbatch(), 3);
+        let mut a = V::zeros(2, ctx2);
+        let b = V::zeros(2, ctx3);
+        a.component_mul_assign(&b);
+    }
+
     #[test]
     fn vector_common_for_references_and_default_helpers_work() {
         let mut v = NalgebraVec::from_vec(vec![1.0, 2.0], NalgebraContext::default());
@@ -714,6 +827,62 @@ macro_rules! generate_vector_tests {
             #[should_panic(expected = "differ across batches")]
             fn [<test_batched_root_finding_inconsistent_ $suffix>]() {
                 $crate::vector::tests::test_batched_root_finding_inconsistent::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_axpy_broadcast_ $suffix>]() {
+                $crate::vector::tests::test_batched_axpy_broadcast::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_copy_from_broadcast_ $suffix>]() {
+                $crate::vector::tests::test_batched_copy_from_broadcast::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_component_div_ $suffix>]() {
+                $crate::vector::tests::test_batched_component_div::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_component_mul_broadcast_ $suffix>]() {
+                $crate::vector::tests::test_batched_component_mul_broadcast::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_component_div_broadcast_ $suffix>]() {
+                $crate::vector::tests::test_batched_component_div_broadcast::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_add_assign_broadcast_ $suffix>]() {
+                $crate::vector::tests::test_batched_add_assign_broadcast::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_sub_assign_broadcast_ $suffix>]() {
+                $crate::vector::tests::test_batched_sub_assign_broadcast::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_sub_ $suffix>]() {
+                $crate::vector::tests::test_batched_sub::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_sub_assign_ $suffix>]() {
+                $crate::vector::tests::test_batched_sub_assign::<$V>($ctx2);
+            }
+            #[test]
+            #[should_panic(expected = "incompatible nbatch")]
+            fn [<test_batched_axpy_incompatible_ $suffix>]() {
+                $crate::vector::tests::test_batched_axpy_incompatible::<$V>($ctx2, $ctx3);
+            }
+            #[test]
+            #[should_panic(expected = "incompatible nbatch")]
+            fn [<test_batched_copy_from_incompatible_ $suffix>]() {
+                $crate::vector::tests::test_batched_copy_from_incompatible::<$V>($ctx2, $ctx3);
+            }
+            #[test]
+            #[should_panic(expected = "incompatible nbatch")]
+            fn [<test_batched_add_assign_incompatible_ $suffix>]() {
+                $crate::vector::tests::test_batched_add_assign_incompatible::<$V>($ctx2, $ctx3);
+            }
+            #[test]
+            #[should_panic(expected = "incompatible nbatch")]
+            fn [<test_batched_component_mul_incompatible_ $suffix>]() {
+                $crate::vector::tests::test_batched_component_mul_incompatible::<$V>($ctx2, $ctx3);
             }
         }
     };

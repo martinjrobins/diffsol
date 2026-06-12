@@ -396,15 +396,57 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_zeros() {
+        super::super::tests::test_zeros::<FaerMat<f64>>();
+    }
+    #[test]
+    fn test_from_vec() {
+        super::super::tests::test_from_vec::<FaerMat<f64>>();
+    }
+    #[test]
+    fn test_from_diagonal() {
+        super::super::tests::test_from_diagonal::<FaerMat<f64>>();
+    }
+    #[test]
+    fn test_gemv() {
+        super::super::tests::test_gemv::<FaerMat<f64>>();
+    }
+    #[test]
+    fn test_gemm() {
+        super::super::tests::test_gemm::<FaerMat<f64>>();
+    }
+    #[test]
+    fn test_mat_mul() {
+        super::super::tests::test_mat_mul::<FaerMat<f64>>();
+    }
+    #[test]
+    fn test_columns_view() {
+        super::super::tests::test_columns_view::<FaerMat<f64>>();
+    }
+    #[test]
+    fn test_column_view() {
+        super::super::tests::test_column_view::<FaerMat<f64>>();
+    }
+    #[test]
+    fn test_set_column() {
+        super::super::tests::test_set_column::<FaerMat<f64>>();
+    }
+    #[test]
+    fn test_copy_from() {
+        super::super::tests::test_copy_from::<FaerMat<f64>>();
+    }
+    #[test]
+    fn test_scale_add_and_assign() {
+        super::super::tests::test_scale_add_and_assign::<FaerMat<f64>>();
+    }
+    #[test]
     fn test_column_axpy() {
         super::super::tests::test_column_axpy::<FaerMat<f64>>();
     }
-
     #[test]
     fn test_partition_indices_by_zero_diagonal() {
         super::super::tests::test_partition_indices_by_zero_diagonal::<FaerMat<f64>>();
     }
-
     #[test]
     fn test_resize_cols() {
         super::super::tests::test_resize_cols::<FaerMat<f64>>();

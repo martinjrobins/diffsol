@@ -22,6 +22,15 @@ pub trait Context: Clone + Default {
         1
     }
     fn clone_with_nbatch(&self, nbatch: usize) -> Self;
+    fn assert_compatible_nbatch(&self, other_nbatch: usize, op: &str) {
+        let self_nbatch = self.nbatch();
+        if self_nbatch != other_nbatch && self_nbatch != 1 && other_nbatch != 1 {
+            panic!(
+                "incompatible nbatch in {}: lhs={}, rhs={}",
+                op, self_nbatch, other_nbatch
+            );
+        }
+    }
     fn vector_from_element<V: Vector<C = Self>>(&self, len: usize, value: V::T) -> V {
         V::from_element(len, value, self.clone())
     }

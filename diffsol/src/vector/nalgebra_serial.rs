@@ -114,33 +114,75 @@ impl_div_scalar!(NalgebraVec<T>, NalgebraVec<T>, T);
 impl_mul_assign_scalar!(NalgebraVecMut<'a, T>, T);
 impl_mul_assign_scalar!(NalgebraVec<T>, T);
 
-impl_sub_assign!(NalgebraVec<T>, NalgebraVec<T>, NalgebraScalar);
-impl_sub_assign!(NalgebraVec<T>, &NalgebraVec<T>, NalgebraScalar);
-impl_sub_assign!(NalgebraVec<T>, NalgebraVecRef<'_, T>, NalgebraScalar);
-impl_sub_assign!(NalgebraVec<T>, &NalgebraVecRef<'_, T>, NalgebraScalar);
+macro_rules! impl_nalgebra_sub_assign {
+    ($lhs:ty, $rhs:ty) => {
+        impl<T: NalgebraScalar> SubAssign<$rhs> for $lhs {
+            fn sub_assign(&mut self, rhs: $rhs) {
+                let self_ncols = self.data.ncols();
+                let rhs_ncols = rhs.data.ncols();
+                if self_ncols == rhs_ncols {
+                    self.data -= &rhs.data;
+                } else if rhs_ncols == 1 {
+                    let rhs_col = rhs.data.column(0);
+                    for b in 0..self_ncols {
+                        let mut col = self.data.column_mut(b);
+                        col -= &rhs_col;
+                    }
+                } else {
+                    panic!(
+                        "incompatible nbatch in sub_assign: self={}, rhs={}",
+                        self_ncols, rhs_ncols
+                    );
+                }
+            }
+        }
+    };
+}
 
-impl_sub_assign!(NalgebraVecMut<'_, T>, NalgebraVec<T>, NalgebraScalar);
-impl_sub_assign!(NalgebraVecMut<'_, T>, &NalgebraVec<T>, NalgebraScalar);
-impl_sub_assign!(NalgebraVecMut<'_, T>, NalgebraVecRef<'_, T>, NalgebraScalar);
-impl_sub_assign!(
-    NalgebraVecMut<'_, T>,
-    &NalgebraVecRef<'_, T>,
-    NalgebraScalar
-);
+macro_rules! impl_nalgebra_add_assign {
+    ($lhs:ty, $rhs:ty) => {
+        impl<T: NalgebraScalar> AddAssign<$rhs> for $lhs {
+            fn add_assign(&mut self, rhs: $rhs) {
+                let self_ncols = self.data.ncols();
+                let rhs_ncols = rhs.data.ncols();
+                if self_ncols == rhs_ncols {
+                    self.data += &rhs.data;
+                } else if rhs_ncols == 1 {
+                    let rhs_col = rhs.data.column(0);
+                    for b in 0..self_ncols {
+                        let mut col = self.data.column_mut(b);
+                        col += &rhs_col;
+                    }
+                } else {
+                    panic!(
+                        "incompatible nbatch in add_assign: self={}, rhs={}",
+                        self_ncols, rhs_ncols
+                    );
+                }
+            }
+        }
+    };
+}
 
-impl_add_assign!(NalgebraVec<T>, NalgebraVec<T>, NalgebraScalar);
-impl_add_assign!(NalgebraVec<T>, &NalgebraVec<T>, NalgebraScalar);
-impl_add_assign!(NalgebraVec<T>, NalgebraVecRef<'_, T>, NalgebraScalar);
-impl_add_assign!(NalgebraVec<T>, &NalgebraVecRef<'_, T>, NalgebraScalar);
+impl_nalgebra_sub_assign!(NalgebraVec<T>, NalgebraVec<T>);
+impl_nalgebra_sub_assign!(NalgebraVec<T>, &NalgebraVec<T>);
+impl_nalgebra_sub_assign!(NalgebraVec<T>, NalgebraVecRef<'_, T>);
+impl_nalgebra_sub_assign!(NalgebraVec<T>, &NalgebraVecRef<'_, T>);
 
-impl_add_assign!(NalgebraVecMut<'_, T>, NalgebraVec<T>, NalgebraScalar);
-impl_add_assign!(NalgebraVecMut<'_, T>, &NalgebraVec<T>, NalgebraScalar);
-impl_add_assign!(NalgebraVecMut<'_, T>, NalgebraVecRef<'_, T>, NalgebraScalar);
-impl_add_assign!(
-    NalgebraVecMut<'_, T>,
-    &NalgebraVecRef<'_, T>,
-    NalgebraScalar
-);
+impl_nalgebra_sub_assign!(NalgebraVecMut<'_, T>, NalgebraVec<T>);
+impl_nalgebra_sub_assign!(NalgebraVecMut<'_, T>, &NalgebraVec<T>);
+impl_nalgebra_sub_assign!(NalgebraVecMut<'_, T>, NalgebraVecRef<'_, T>);
+impl_nalgebra_sub_assign!(NalgebraVecMut<'_, T>, &NalgebraVecRef<'_, T>);
+
+impl_nalgebra_add_assign!(NalgebraVec<T>, NalgebraVec<T>);
+impl_nalgebra_add_assign!(NalgebraVec<T>, &NalgebraVec<T>);
+impl_nalgebra_add_assign!(NalgebraVec<T>, NalgebraVecRef<'_, T>);
+impl_nalgebra_add_assign!(NalgebraVec<T>, &NalgebraVecRef<'_, T>);
+
+impl_nalgebra_add_assign!(NalgebraVecMut<'_, T>, NalgebraVec<T>);
+impl_nalgebra_add_assign!(NalgebraVecMut<'_, T>, &NalgebraVec<T>);
+impl_nalgebra_add_assign!(NalgebraVecMut<'_, T>, NalgebraVecRef<'_, T>);
+impl_nalgebra_add_assign!(NalgebraVecMut<'_, T>, &NalgebraVecRef<'_, T>);
 
 impl_sub_both_ref!(
     &NalgebraVec<T>,
@@ -367,14 +409,56 @@ impl<'a, T: NalgebraScalar> VectorViewMut<'a> for NalgebraVecMut<'a, T> {
     type View = NalgebraVecRef<'a, T>;
     type Index = NalgebraIndex;
     fn copy_from(&mut self, other: &Self::Owned) {
-        self.data.copy_from(&other.data);
+        let self_ncols = self.data.ncols();
+        let other_ncols = other.data.ncols();
+        if self_ncols == other_ncols {
+            self.data.copy_from(&other.data);
+        } else if other_ncols == 1 {
+            let src = other.data.column(0);
+            for b in 0..self_ncols {
+                self.data.column_mut(b).copy_from(&src);
+            }
+        } else {
+            panic!(
+                "incompatible nbatch in VectorViewMut::copy_from: self={}, other={}",
+                self_ncols, other_ncols
+            );
+        }
     }
     fn copy_from_view(&mut self, other: &Self::View) {
-        self.data.copy_from(&other.data);
+        let self_ncols = self.data.ncols();
+        let other_ncols = other.data.ncols();
+        if self_ncols == other_ncols {
+            self.data.copy_from(&other.data);
+        } else if other_ncols == 1 {
+            let src = other.data.column(0);
+            for b in 0..self_ncols {
+                self.data.column_mut(b).copy_from(&src);
+            }
+        } else {
+            panic!(
+                "incompatible nbatch in VectorViewMut::copy_from_view: self={}, other={}",
+                self_ncols, other_ncols
+            );
+        }
     }
     fn axpy(&mut self, alpha: Self::T, x: &Self::Owned, beta: Self::T) {
-        for (si, xi) in self.data.iter_mut().zip(x.data.iter()) {
-            *si = *si * beta + *xi * alpha;
+        let self_ncols = self.data.ncols();
+        let x_ncols = x.data.ncols();
+        if self_ncols == x_ncols {
+            for b in 0..self_ncols {
+                self.data.column_mut(b).axpy(alpha, &x.data.column(b), beta);
+            }
+        } else if x_ncols == 1 {
+            let x_col = x.data.column(0);
+            for b in 0..self_ncols {
+                self.data.column_mut(b).axpy(alpha, &x_col, beta);
+            }
+        } else {
+            panic!(
+                "incompatible nbatch in VectorViewMut::axpy: self={}, x={}",
+                self_ncols, x_ncols
+            );
         }
     }
 }
@@ -481,13 +565,41 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
         }
     }
     fn copy_from(&mut self, other: &Self) {
-        self.data.copy_from(&other.data);
+        let self_ncols = self.data.ncols();
+        let other_ncols = other.data.ncols();
+        if self_ncols == other_ncols {
+            self.data.copy_from(&other.data);
+        } else if other_ncols == 1 {
+            let src = other.data.column(0);
+            for b in 0..self_ncols {
+                self.data.column_mut(b).copy_from(&src);
+            }
+        } else {
+            panic!(
+                "incompatible nbatch in copy_from: self={}, other={}",
+                self_ncols, other_ncols
+            );
+        }
     }
     fn fill(&mut self, value: Self::T) {
-        self.data.iter_mut().for_each(|x: &mut _| *x = value);
+        self.data.fill(value);
     }
     fn copy_from_view(&mut self, other: &Self::View<'_>) {
-        self.data.copy_from(&other.data);
+        let self_ncols = self.data.ncols();
+        let other_ncols = other.data.ncols();
+        if self_ncols == other_ncols {
+            self.data.copy_from(&other.data);
+        } else if other_ncols == 1 {
+            let src = other.data.column(0);
+            for b in 0..self_ncols {
+                self.data.column_mut(b).copy_from(&src);
+            }
+        } else {
+            panic!(
+                "incompatible nbatch in copy_from_view: self={}, other={}",
+                self_ncols, other_ncols
+            );
+        }
     }
     fn from_element(nstates: usize, value: T, ctx: Self::C) -> Self {
         let data = DMatrix::from_element(nstates, ctx.nbatch(), value);
@@ -525,20 +637,76 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
         Self { data, context: ctx }
     }
     fn axpy(&mut self, alpha: T, x: &Self, beta: T) {
-        for (si, xi) in self.data.iter_mut().zip(x.data.iter()) {
-            *si = *si * beta + *xi * alpha;
+        let self_ncols = self.data.ncols();
+        let x_ncols = x.data.ncols();
+        if self_ncols == x_ncols {
+            for b in 0..self_ncols {
+                self.data.column_mut(b).axpy(alpha, &x.data.column(b), beta);
+            }
+        } else if x_ncols == 1 {
+            let x_col = x.data.column(0);
+            for b in 0..self_ncols {
+                self.data.column_mut(b).axpy(alpha, &x_col, beta);
+            }
+        } else {
+            panic!(
+                "incompatible nbatch in axpy: self={}, x={}",
+                self_ncols, x_ncols
+            );
         }
     }
     fn axpy_v(&mut self, alpha: Self::T, x: &Self::View<'_>, beta: Self::T) {
-        for (si, xi) in self.data.iter_mut().zip(x.data.iter()) {
-            *si = *si * beta + *xi * alpha;
+        let self_ncols = self.data.ncols();
+        let x_ncols = x.data.ncols();
+        if self_ncols == x_ncols {
+            for b in 0..self_ncols {
+                self.data.column_mut(b).axpy(alpha, &x.data.column(b), beta);
+            }
+        } else if x_ncols == 1 {
+            let x_col = x.data.column(0);
+            for b in 0..self_ncols {
+                self.data.column_mut(b).axpy(alpha, &x_col, beta);
+            }
+        } else {
+            panic!(
+                "incompatible nbatch in axpy_v: self={}, x={}",
+                self_ncols, x_ncols
+            );
         }
     }
     fn component_div_assign(&mut self, other: &Self) {
-        self.data.component_div_assign(&other.data);
+        let self_ncols = self.data.ncols();
+        let other_ncols = other.data.ncols();
+        if self_ncols == other_ncols {
+            self.data.component_div_assign(&other.data);
+        } else if other_ncols == 1 {
+            let other_col = other.data.column(0);
+            for b in 0..self_ncols {
+                self.data.column_mut(b).component_div_assign(&other_col);
+            }
+        } else {
+            panic!(
+                "incompatible nbatch in component_div_assign: self={}, other={}",
+                self_ncols, other_ncols
+            );
+        }
     }
     fn component_mul_assign(&mut self, other: &Self) {
-        self.data.component_mul_assign(&other.data);
+        let self_ncols = self.data.ncols();
+        let other_ncols = other.data.ncols();
+        if self_ncols == other_ncols {
+            self.data.component_mul_assign(&other.data);
+        } else if other_ncols == 1 {
+            let other_col = other.data.column(0);
+            for b in 0..self_ncols {
+                self.data.column_mut(b).component_mul_assign(&other_col);
+            }
+        } else {
+            panic!(
+                "incompatible nbatch in component_mul_assign: self={}, other={}",
+                self_ncols, other_ncols
+            );
+        }
     }
 
     fn root_finding(&self, g1: &Self) -> (bool, Self::T, i32) {

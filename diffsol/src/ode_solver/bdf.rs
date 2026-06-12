@@ -446,7 +446,7 @@ where
         //found using factor = 1, which corresponds to R with a constant step size
         let ncols = order + 1;
         let nrows = order + 1;
-        let nbatch = ctx.nbatch();
+        let solver_ctx = ctx.clone_with_nbatch(1);
         let mut r = vec![M::T::zero(); ncols * nrows];
 
         // r[0, 0:order] = 1
@@ -464,8 +464,7 @@ where
             }
         }
 
-        let r = r.repeat(nbatch);
-        M::from_vec(order + 1, order + 1, r, ctx)
+        M::from_vec(order + 1, order + 1, r, solver_ctx)
     }
 
     fn _jacobian_updates(&mut self, c: Eqn::T, state: SolverState) {
