@@ -741,7 +741,7 @@ where
         let mut y0 = M::V::zeros(n, M::C::default());
         let t0 = self.problem.t0;
         self.problem.eqn.init().call_inplace(t0, &mut y0);
-        Ok((*y0.inner()).clone().to_host_array())
+        Ok(y0.clone_as_vec().to_host_array())
     }
 
     fn rhs(&mut self, params: &[f64], t: f64, y: &[f64]) -> Result<HostArray, DiffsolRtError> {
@@ -757,7 +757,7 @@ where
             .eqn
             .rhs()
             .call_inplace(&y_vec, M::T::from_f64(t).unwrap(), &mut dydt);
-        Ok((*dydt.inner()).clone().to_host_array())
+        Ok(dydt.clone_as_vec().to_host_array())
     }
 
     fn rhs_jac_mul(
@@ -787,7 +787,7 @@ where
             &v_vec,
             &mut dydt,
         );
-        Ok((*dydt.inner()).clone().to_host_array())
+        Ok(dydt.clone_as_vec().to_host_array())
     }
 
     fn solve(
@@ -893,7 +893,7 @@ where
         self.problem.integrate_out = integrate_out;
         let (integral, gradient) = result?;
         Ok((
-            (*integral.inner()).clone().to_host_array(),
+            integral.clone_as_vec().to_host_array(),
             gradient.to_host_array(),
         ))
     }

@@ -36,11 +36,10 @@ impl<T: NalgebraScalar> LinearSolver<NalgebraMat<T>> for LU<T> {
             return Err(linear_solver_error!(LuNotInitialized))?;
         }
         let nbatch = state.context().nbatch();
-        let nstates = state.len();
         for b in 0..nbatch {
             let lu = &self.lu[b];
-            let mut view = state.data.rows_mut(b * nstates, nstates);
-            match lu.solve_mut(&mut view) {
+            let mut col = state.data.column_mut(b);
+            match lu.solve_mut(&mut col) {
                 true => {}
                 false => return Err(linear_solver_error!(LuSolveFailed))?,
             }
@@ -57,10 +56,10 @@ impl<T: NalgebraScalar> LinearSolver<NalgebraMat<T>> for LU<T> {
         let matrix = self.matrix.as_mut().expect("Matrix not set");
         op.jacobian_inplace(x, t, matrix);
         let nbatch = matrix.context.nbatch();
-        let nrows = matrix.nrows();
+        let ncols = matrix.ncols();
         self.lu.clear();
         for b in 0..nbatch {
-            let sub = matrix.data.rows(b * nrows, nrows).into_owned();
+            let sub = matrix.data.columns(b * ncols, ncols).into_owned();
             self.lu.push(sub.lu());
         }
     }

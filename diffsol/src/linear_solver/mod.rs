@@ -157,15 +157,15 @@ pub mod tests {
 
         let mut lus = Vec::new();
         for b in 0..nbatch {
-            let sub = mat.data.rows(b * nstates, nstates).into_owned();
+            let sub = mat.data.columns(b * nstates, nstates).into_owned();
             lus.push(sub.lu());
         }
 
         let mut b = NalgebraVec::from_vec(vec![2.0, 4.0, 6.0, 8.0], ctx);
         for b_idx in 0..nbatch {
             let lu = &lus[b_idx];
-            let mut view = b.data.rows_mut(b_idx * nstates, nstates);
-            assert!(lu.solve_mut(&mut view));
+            let mut col = b.data.column_mut(b_idx);
+            assert!(lu.solve_mut(&mut col));
         }
 
         let expected = NalgebraVec::from_vec(vec![1.0, 2.0, 3.0, 4.0], ctx);
