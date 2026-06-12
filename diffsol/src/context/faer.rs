@@ -32,4 +32,10 @@ impl crate::Context for FaerContext {
     fn nbatch(&self) -> usize {
         self.nbatch
     }
+    fn clone_with_nbatch(&self, nbatch: usize) -> Self {
+        Self {
+            par: self.par,
+            nbatch,
+        }
+    }
 }

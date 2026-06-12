@@ -143,6 +143,8 @@ pub trait VectorView<'a>:
     + Mul<Scale<Self::T>, Output = Self::Owned>
 {
     type Owned;
+    /// Get the value at the specified index (panics if nbatch > 1).
+    fn get_index(&self, index: IndexType) -> Self::T;
     /// Compute the squared weighted norm: sum_i ((self_i) / (|y_i| * rtol + atol_i))^2
     ///
     /// This is commonly used for error control in ODE solvers.
@@ -230,6 +232,12 @@ pub trait Vector:
 
     /// Create a mutable view of this vector.
     fn as_view_mut(&mut self) -> Self::ViewMut<'_>;
+
+    /// Get an immutable view of a single batch (with nbatch=1 context).
+    fn get_batch(&self, batch: usize) -> Self::View<'_>;
+
+    /// Get a mutable view of a single batch (with nbatch=1 context).
+    fn get_batch_mut(&mut self, batch: usize) -> Self::ViewMut<'_>;
 
     /// Copy all values from `other` into this vector.
     fn copy_from(&mut self, other: &Self);

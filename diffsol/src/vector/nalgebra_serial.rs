@@ -321,6 +321,14 @@ impl VectorIndex for NalgebraIndex {
 impl<'a, T: NalgebraScalar> VectorView<'a> for NalgebraVecRef<'a, T> {
     type Owned = NalgebraVec<T>;
 
+    fn get_index(&self, index: IndexType) -> Self::T {
+        assert!(
+            self.context.nbatch() == 1,
+            "get_index is not supported for batched vector views (nbatch > 1)"
+        );
+        self.data[(index, 0)]
+    }
+
     fn into_owned(self) -> Self::Owned {
         Self::Owned {
             data: self.data.into_owned(),
@@ -458,6 +466,18 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
         Self::ViewMut {
             data: self.data.as_view_mut(),
             context: self.context,
+        }
+    }
+    fn get_batch(&self, batch: usize) -> Self::View<'_> {
+        Self::View {
+            data: self.data.columns(batch, 1),
+            context: self.context.clone_with_nbatch(1),
+        }
+    }
+    fn get_batch_mut(&mut self, batch: usize) -> Self::ViewMut<'_> {
+        Self::ViewMut {
+            data: self.data.columns_mut(batch, 1),
+            context: self.context.clone_with_nbatch(1),
         }
     }
     fn copy_from(&mut self, other: &Self) {

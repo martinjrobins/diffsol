@@ -3,7 +3,7 @@ use std::slice;
 
 use faer::{unzip, zip, Col, ColMut, ColRef};
 
-use crate::{scalar::Scale, FaerContext, FaerScalar, IndexType, Scalar, Vector};
+use crate::{scalar::Scale, Context, FaerContext, FaerScalar, IndexType, Scalar, Vector};
 
 use crate::{FaerMat, VectorCommon, VectorHost, VectorIndex, VectorView, VectorViewMut};
 
@@ -247,6 +247,20 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
             context: self.context,
         }
     }
+    fn get_batch(&self, batch: usize) -> Self::View<'_> {
+        assert!(batch < self.context.nbatch(), "batch index out of bounds");
+        FaerVecRef {
+            data: self.data.as_ref(),
+            context: self.context.clone_with_nbatch(1),
+        }
+    }
+    fn get_batch_mut(&mut self, batch: usize) -> Self::ViewMut<'_> {
+        assert!(batch < self.context.nbatch(), "batch index out of bounds");
+        FaerVecMut {
+            data: self.data.as_mut(),
+            context: self.context.clone_with_nbatch(1),
+        }
+    }
     fn copy_from(&mut self, other: &Self) {
         self.data.copy_from(&other.data)
     }
@@ -364,6 +378,13 @@ impl VectorIndex for FaerVecIndex {
 
 impl<'a, T: FaerScalar> VectorView<'a> for FaerVecRef<'a, T> {
     type Owned = FaerVec<T>;
+    fn get_index(&self, index: IndexType) -> Self::T {
+        assert!(
+            self.context.nbatch() == 1,
+            "get_index is not supported for batched vector views (nbatch > 1)"
+        );
+        self.data[index]
+    }
     fn into_owned(self) -> FaerVec<T> {
         FaerVec {
             data: self.data.to_owned(),

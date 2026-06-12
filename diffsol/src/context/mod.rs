@@ -21,6 +21,7 @@ pub trait Context: Clone + Default {
     fn nbatch(&self) -> usize {
         1
     }
+    fn clone_with_nbatch(&self, nbatch: usize) -> Self;
     fn vector_from_element<V: Vector<C = Self>>(&self, len: usize, value: V::T) -> V {
         V::from_element(len, value, self.clone())
     }

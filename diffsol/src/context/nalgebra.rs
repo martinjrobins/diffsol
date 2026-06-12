@@ -23,4 +23,7 @@ impl crate::Context for NalgebraContext {
     fn nbatch(&self) -> usize {
         self.nbatch
     }
+    fn clone_with_nbatch(&self, nbatch: usize) -> Self {
+        Self { nbatch }
+    }
 }

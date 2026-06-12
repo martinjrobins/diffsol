@@ -132,4 +132,10 @@ impl crate::Context for CudaContext {
     fn nbatch(&self) -> usize {
         self.nbatch
     }
+    fn clone_with_nbatch(&self, nbatch: usize) -> Self {
+        Self {
+            stream: self.stream.clone(),
+            nbatch,
+        }
+    }
 }
