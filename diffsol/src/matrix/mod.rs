@@ -305,16 +305,29 @@ pub trait Matrix:
     /// The sparsity of self must be the union of the sparsity of x and y.
     fn scale_add_and_assign(&mut self, x: &Self, beta: Self::T, y: &Self);
 
-    /// Iterate over all non-zero elements in triplet format (row, column, value).
-    fn triplet_iter(&self) -> impl Iterator<Item = (IndexType, IndexType, Self::T)>;
-
-    /// Create a new matrix from a vector of triplets (row, column, value).
+    /// Iterate over structural positions and values of the matrix.
     ///
-    /// This is useful for sparse matrix construction. The sparsity pattern is inferred from the triplets.
+    /// Returns a tuple:
+    /// - First iterator: `(row, col)` pairs for each non-zero element (length `nnz`)
+    /// - Second iterator: values (length `nnz * nbatch`), laid out batch-contiguously:
+    ///   `[batch0_val0..batch0_valN, batch1_val0..batch1_valN, ...]`
+    fn triplet_iter(
+        &self,
+    ) -> (
+        impl Iterator<Item = (IndexType, IndexType)> + '_,
+        impl Iterator<Item = Self::T> + '_,
+    );
+
+    /// Create a new matrix from structural indices and values.
+    ///
+    /// - `indices`: `(row, col)` pairs for each non-zero element (length `nnz`)
+    /// - `values`: values laid out batch-contiguously (length `nnz * ctx.nbatch()`):
+    ///   `[batch0_val0..batch0_valN, batch1_val0..batch1_valN, ...]`
     fn try_from_triplets(
         nrows: IndexType,
         ncols: IndexType,
-        triplets: Vec<(IndexType, IndexType, Self::T)>,
+        indices: Vec<(IndexType, IndexType)>,
+        values: Vec<Self::T>,
         ctx: Self::C,
     ) -> Result<Self, DiffsolError>;
 }
@@ -418,36 +431,35 @@ pub(crate) mod tests {
     }
 
     pub fn test_partition_indices_by_zero_diagonal<M: Matrix>() {
-        let triplets = vec![
-            (0, 0, M::T::one()),
-            (1, 1, M::T::from_f64(2.0).unwrap()),
-            (3, 3, M::T::one()),
-        ];
-        let m = M::try_from_triplets(4, 4, triplets, Default::default()).unwrap();
+        let indices = vec![(0, 0), (1, 1), (3, 3)];
+        let values = vec![M::T::one(), M::T::from_f64(2.0).unwrap(), M::T::one()];
+        let m = M::try_from_triplets(4, 4, indices, values, Default::default()).unwrap();
         let (zero_diagonal_indices, non_zero_diagonal_indices) =
             m.partition_indices_by_zero_diagonal();
         assert_eq!(zero_diagonal_indices.clone_as_vec(), vec![2]);
         assert_eq!(non_zero_diagonal_indices.clone_as_vec(), vec![0, 1, 3]);
 
-        let triplets = vec![
-            (0, 0, M::T::one()),
-            (1, 1, M::T::from_f64(2.0).unwrap()),
-            (2, 2, M::T::zero()),
-            (3, 3, M::T::one()),
+        let indices = vec![(0, 0), (1, 1), (2, 2), (3, 3)];
+        let values = vec![
+            M::T::one(),
+            M::T::from_f64(2.0).unwrap(),
+            M::T::zero(),
+            M::T::one(),
         ];
-        let m = M::try_from_triplets(4, 4, triplets, Default::default()).unwrap();
+        let m = M::try_from_triplets(4, 4, indices, values, Default::default()).unwrap();
         let (zero_diagonal_indices, non_zero_diagonal_indices) =
             m.partition_indices_by_zero_diagonal();
         assert_eq!(zero_diagonal_indices.clone_as_vec(), vec![2]);
         assert_eq!(non_zero_diagonal_indices.clone_as_vec(), vec![0, 1, 3]);
 
-        let triplets = vec![
-            (0, 0, M::T::one()),
-            (1, 1, M::T::from_f64(2.0).unwrap()),
-            (2, 2, M::T::from_f64(3.0).unwrap()),
-            (3, 3, M::T::one()),
+        let indices = vec![(0, 0), (1, 1), (2, 2), (3, 3)];
+        let values = vec![
+            M::T::one(),
+            M::T::from_f64(2.0).unwrap(),
+            M::T::from_f64(3.0).unwrap(),
+            M::T::one(),
         ];
-        let m = M::try_from_triplets(4, 4, triplets, Default::default()).unwrap();
+        let m = M::try_from_triplets(4, 4, indices, values, Default::default()).unwrap();
         let (zero_diagonal_indices, non_zero_diagonal_indices) =
             m.partition_indices_by_zero_diagonal();
         assert_eq!(
@@ -1166,6 +1178,35 @@ pub(crate) mod tests {
             vec![f::<M>(1.0), f::<M>(3.0), f::<M>(5.0), f::<M>(7.0)]
         );
     }
+
+    pub fn test_batched_combine<M: DenseMatrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        #[rustfmt::skip]
+        let data: Vec<M::T> = vec![
+            // batch 0: 4x4 column-major (cols 0-3)
+            f::<M>(1.0), f::<M>(2.0), f::<M>(3.0), f::<M>(4.0),
+            f::<M>(5.0), f::<M>(6.0), f::<M>(7.0), f::<M>(8.0),
+            f::<M>(9.0), f::<M>(10.0), f::<M>(11.0), f::<M>(12.0),
+            f::<M>(13.0), f::<M>(14.0), f::<M>(15.0), f::<M>(16.0),
+            // batch 1: 4x4 column-major (cols 0-3)
+            f::<M>(101.0), f::<M>(102.0), f::<M>(103.0), f::<M>(104.0),
+            f::<M>(105.0), f::<M>(106.0), f::<M>(107.0), f::<M>(108.0),
+            f::<M>(109.0), f::<M>(110.0), f::<M>(111.0), f::<M>(112.0),
+            f::<M>(113.0), f::<M>(114.0), f::<M>(115.0), f::<M>(116.0),
+        ];
+        let m = M::from_vec(4, 4, data, ctx.clone());
+
+        let alg_indices = <M::V as Vector>::Index::from_vec(vec![1, 3], Default::default());
+        let [(ul, _), (ur, _), (ll, _), (lr, _)] = m.split(&alg_indices);
+
+        let recombined = M::combine(&ul, &ur, &ll, &lr, &alg_indices);
+
+        let (_orig_idx, orig_vals) = m.triplet_iter();
+        let (_recom_idx, recom_vals) = recombined.triplet_iter();
+        let orig_vals: Vec<_> = orig_vals.collect();
+        let recom_vals: Vec<_> = recom_vals.collect();
+        assert_eq!(orig_vals, recom_vals);
+    }
 }
 
 #[cfg(test)]
@@ -1275,6 +1316,10 @@ macro_rules! generate_matrix_tests {
             #[test]
             fn [<test_batched_resize_cols_ $suffix>]() {
                 $crate::matrix::tests::test_batched_resize_cols::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_combine_ $suffix>]() {
+                $crate::matrix::tests::test_batched_combine::<$M>($ctx2);
             }
             #[test]
             #[should_panic(expected = "incompatible nbatch")]

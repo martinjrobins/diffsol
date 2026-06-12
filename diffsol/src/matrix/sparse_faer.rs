@@ -287,24 +287,35 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
         }
     }
 
-    fn triplet_iter(&self) -> impl Iterator<Item = (IndexType, IndexType, Self::T)> {
-        (0..self.ncols()).flat_map(move |j| {
+    fn triplet_iter(
+        &self,
+    ) -> (
+        impl Iterator<Item = (IndexType, IndexType)> + '_,
+        impl Iterator<Item = Self::T> + '_,
+    ) {
+        let indices = (0..self.ncols()).flat_map(move |j| {
             self.data.col_range(j).map(move |i| {
                 let row = self.data.row_idx()[i];
-                (row, j, self.data.val()[i])
+                (row, j)
             })
-        })
+        });
+        let values = (0..self.ncols())
+            .flat_map(move |j| self.data.col_range(j).map(move |i| self.data.val()[i]));
+        (indices, values)
     }
 
     fn try_from_triplets(
         nrows: IndexType,
         ncols: IndexType,
-        triplets: Vec<(IndexType, IndexType, T)>,
+        indices: Vec<(IndexType, IndexType)>,
+        values: Vec<T>,
         ctx: Self::C,
     ) -> Result<Self, DiffsolError> {
-        let triplets = triplets
+        assert_eq!(indices.len(), values.len());
+        let triplets = indices
             .iter()
-            .map(|(i, j, v)| Triplet::new(*i, *j, *v))
+            .zip(values)
+            .map(|(&(i, j), v)| Triplet::new(i, j, v))
             .collect::<Vec<_>>();
         match faer::sparse::SparseColMat::try_new_from_triplets(nrows, ncols, triplets.as_slice()) {
             Ok(mat) => Ok(Self {
@@ -404,16 +415,23 @@ mod tests {
     use crate::{FaerSparseMat, Matrix};
     #[test]
     fn test_triplet_iter() {
-        let triplets = vec![(0, 0, 1.0), (1, 0, 2.0), (2, 2, 3.0), (3, 2, 4.0)];
-        let mat =
-            FaerSparseMat::<f64>::try_from_triplets(4, 3, triplets.clone(), Default::default())
-                .unwrap();
-        let mut iter = mat.triplet_iter();
-        for triplet in triplets {
-            let (i, j, val) = iter.next().unwrap();
-            assert_eq!(i, triplet.0);
-            assert_eq!(j, triplet.1);
-            assert_eq!(val, triplet.2);
+        let indices = vec![(0, 0), (1, 0), (2, 2), (3, 2)];
+        let values = vec![1.0, 2.0, 3.0, 4.0];
+        let mat = FaerSparseMat::<f64>::try_from_triplets(
+            4,
+            3,
+            indices.clone(),
+            values.clone(),
+            Default::default(),
+        )
+        .unwrap();
+        let (mut idx_iter, mut val_iter) = mat.triplet_iter();
+        for (&(ei, ej), &ev) in indices.iter().zip(values.iter()) {
+            let (i, j) = idx_iter.next().unwrap();
+            let val = val_iter.next().unwrap();
+            assert_eq!(i, ei);
+            assert_eq!(j, ej);
+            assert_eq!(val, ev);
         }
     }
 

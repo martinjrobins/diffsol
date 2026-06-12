@@ -306,19 +306,29 @@ impl<T: FaerScalar> Matrix for FaerMat<T> {
         v.add_assign(&self.column(j));
     }
 
-    fn triplet_iter(&self) -> impl Iterator<Item = (IndexType, IndexType, Self::T)> {
-        (0..self.ncols())
-            .flat_map(move |j| (0..self.nrows()).map(move |i| (i, j, self.data[(i, j)])))
+    fn triplet_iter(
+        &self,
+    ) -> (
+        impl Iterator<Item = (IndexType, IndexType)> + '_,
+        impl Iterator<Item = Self::T> + '_,
+    ) {
+        let ncols = self.ncols();
+        let nrows = self.nrows();
+        let indices = (0..ncols).flat_map(move |j| (0..nrows).map(move |i| (i, j)));
+        let values = (0..ncols).flat_map(move |j| (0..nrows).map(move |i| self.data[(i, j)]));
+        (indices, values)
     }
 
     fn try_from_triplets(
         nrows: IndexType,
         ncols: IndexType,
-        triplets: Vec<(IndexType, IndexType, T)>,
+        indices: Vec<(IndexType, IndexType)>,
+        values: Vec<T>,
         ctx: Self::C,
     ) -> Result<Self, DiffsolError> {
+        assert_eq!(indices.len(), values.len());
         let mut m = Mat::zeros(nrows, ncols);
-        for (i, j, v) in triplets {
+        for (&(i, j), v) in indices.iter().zip(values) {
             m[(i, j)] = v;
         }
         Ok(Self {

@@ -354,23 +354,36 @@ impl<T: NalgebraScalar> Matrix for NalgebraMat<T> {
         v.add_assign(&self.column(j));
     }
 
-    fn triplet_iter(&self) -> impl Iterator<Item = (IndexType, IndexType, Self::T)> {
-        let n = self.ncols();
-        let m = self.nrows();
-        (0..n).flat_map(move |j| (0..m).map(move |i| (i, j, self.data[(i, j)])))
+    fn triplet_iter(
+        &self,
+    ) -> (
+        impl Iterator<Item = (IndexType, IndexType)> + '_,
+        impl Iterator<Item = Self::T> + '_,
+    ) {
+        let ncols = self.ncols();
+        let nrows = self.nrows();
+        let nbatch = self.context.nbatch();
+        let indices = (0..ncols).flat_map(move |j| (0..nrows).map(move |i| (i, j)));
+        let values = (0..nbatch).flat_map(move |b| {
+            (0..ncols).flat_map(move |j| (0..nrows).map(move |i| self.data[(i, b * ncols + j)]))
+        });
+        (indices, values)
     }
 
     fn try_from_triplets(
         nrows: IndexType,
         ncols: IndexType,
-        triplets: Vec<(IndexType, IndexType, T)>,
+        indices: Vec<(IndexType, IndexType)>,
+        values: Vec<T>,
         ctx: Self::C,
     ) -> Result<Self, DiffsolError> {
         let nbatch = ctx.nbatch();
+        let nnz = indices.len();
+        assert_eq!(values.len(), nnz * nbatch);
         let mut m = DMatrix::zeros(nrows, ncols * nbatch);
-        for (i, j, v) in triplets {
-            for b in 0..nbatch {
-                m[(i, b * ncols + j)] = v;
+        for b in 0..nbatch {
+            for (k, &(i, j)) in indices.iter().enumerate() {
+                m[(i, b * ncols + j)] = values[b * nnz + k];
             }
         }
         Ok(Self {

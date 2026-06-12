@@ -829,28 +829,38 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
         v.add_assign(&self.column(j));
     }
 
-    fn triplet_iter(&self) -> impl Iterator<Item = (IndexType, IndexType, Self::T)> {
+    fn triplet_iter(
+        &self,
+    ) -> (
+        impl Iterator<Item = (IndexType, IndexType)> + '_,
+        impl Iterator<Item = Self::T> + '_,
+    ) {
+        let nrows = self.nrows();
+        let ncols = self.ncols();
         let data = self
             .context
             .stream
             .clone_dtoh(&self.data)
             .expect("Failed to copy data from device to host");
-        DenseMatTripletIter::new(data, self.nrows(), self.ncols())
+        let indices = (0..ncols).flat_map(move |j| (0..nrows).map(move |i| (i, j)));
+        let values = data.into_iter();
+        (indices, values)
     }
 
     fn try_from_triplets(
         nrows: IndexType,
         ncols: IndexType,
-        triplets: Vec<(IndexType, IndexType, T)>,
+        indices: Vec<(IndexType, IndexType)>,
+        values: Vec<T>,
         ctx: Self::C,
     ) -> Result<Self, DiffsolError> {
+        assert_eq!(indices.len(), values.len());
         let mut m = vec![T::zero(); nrows * ncols];
-        for (i, j, v) in triplets {
+        for (&(i, j), v) in indices.iter().zip(values) {
             if i >= nrows || j >= ncols {
                 return Err(matrix_error!(IndexOutOfBounds));
             }
-            let idx = i + j * nrows;
-            m[idx] = v;
+            m[i + j * nrows] = v;
         }
         Ok(Self::from_vec(nrows, ncols, m, ctx))
     }
@@ -1031,8 +1041,9 @@ mod tests {
     #[test]
     fn test_cudamat_try_from_triplets() {
         let ctx = CudaContext::default();
-        let triplets = vec![(0, 0, 1.0), (1, 1, 2.0)];
-        let mat = CudaMat::try_from_triplets(2, 2, triplets, ctx.clone()).unwrap();
+        let indices = vec![(0, 0), (1, 1)];
+        let values = vec![1.0, 2.0];
+        let mat = CudaMat::try_from_triplets(2, 2, indices, values, ctx.clone()).unwrap();
         assert_eq!(mat.get_index(0, 0), 1.0);
         assert_eq!(mat.get_index(1, 1), 2.0);
     }
