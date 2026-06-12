@@ -469,10 +469,28 @@ impl<T: NalgebraScalar> DenseMatrix for NalgebraMat<T> {
     }
 
     fn resize_cols(&mut self, ncols: IndexType) {
-        if ncols == self.ncols() {
+        let old_ncols = self.ncols();
+        if ncols == old_ncols {
             return;
         }
-        self.data.resize_horizontally_mut(ncols, Self::T::zero());
+        let nbatch = self.context.nbatch();
+        if nbatch == 1 {
+            self.data.resize_horizontally_mut(ncols, Self::T::zero());
+            return;
+        }
+        let nrows = self.nrows();
+        let copy_ncols = ncols.min(old_ncols);
+        let mut new_data = DMatrix::zeros(nrows, ncols * nbatch);
+        for b in 0..nbatch {
+            let old_start = b * old_ncols;
+            let new_start = b * ncols;
+            for j in 0..copy_ncols {
+                new_data
+                    .column_mut(new_start + j)
+                    .copy_from(&self.data.column(old_start + j));
+            }
+        }
+        self.data = new_data;
     }
 
     fn get_index(&self, i: IndexType, j: IndexType) -> Self::T {

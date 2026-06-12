@@ -1099,6 +1099,73 @@ pub(crate) mod tests {
         let mut c = M::zeros(2, 2, ctx2);
         c.gemm(f::<M>(1.0), &a, &b, f::<M>(0.0));
     }
+
+    pub fn test_batched_resize_cols<M: DenseMatrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        // 2x2, nbatch=2: batch0=[[1,2],[3,4]], batch1=[[5,6],[7,8]]
+        let mut a = M::from_vec(
+            2,
+            2,
+            vec![
+                f::<M>(1.0),
+                f::<M>(3.0),
+                f::<M>(2.0),
+                f::<M>(4.0),
+                f::<M>(5.0),
+                f::<M>(7.0),
+                f::<M>(6.0),
+                f::<M>(8.0),
+            ],
+            ctx.clone(),
+        );
+        // grow to 3 columns
+        a.resize_cols(3);
+        assert_eq!(a.ncols(), 3);
+        assert_eq!(a.nrows(), 2);
+        // existing data preserved per batch
+        assert_eq!(a.get_index(0, 0), f::<M>(1.0));
+        assert_eq!(a.get_index(1, 0), f::<M>(3.0));
+        assert_eq!(a.get_index(0, 1), f::<M>(2.0));
+        assert_eq!(a.get_index(1, 1), f::<M>(4.0));
+        // new column is zero
+        assert_eq!(a.get_index(0, 2), f::<M>(0.0));
+        assert_eq!(a.get_index(1, 2), f::<M>(0.0));
+        // verify via gemv that batch 1 data is intact
+        let x = M::V::from_vec(
+            vec![
+                f::<M>(1.0),
+                f::<M>(0.0),
+                f::<M>(0.0),
+                f::<M>(1.0),
+                f::<M>(0.0),
+                f::<M>(0.0),
+            ],
+            ctx.clone(),
+        );
+        let mut y = M::V::zeros(2, ctx.clone());
+        a.gemv(f::<M>(1.0), &x, f::<M>(0.0), &mut y);
+        // batch0: col0=[1,3], x=[1,0,0] → [1,3]
+        // batch1: col0=[5,7], x=[1,0,0] → [5,7]
+        assert_eq!(
+            y.clone_as_vec(),
+            vec![f::<M>(1.0), f::<M>(3.0), f::<M>(5.0), f::<M>(7.0)]
+        );
+
+        // shrink to 1 column
+        a.resize_cols(1);
+        assert_eq!(a.ncols(), 1);
+        assert_eq!(a.get_index(0, 0), f::<M>(1.0));
+        assert_eq!(a.get_index(1, 0), f::<M>(3.0));
+        // verify batch1 col0 via gemv
+        let x2 = M::V::from_vec(vec![f::<M>(1.0), f::<M>(1.0)], ctx.clone());
+        let mut y2 = M::V::zeros(2, ctx);
+        a.gemv(f::<M>(1.0), &x2, f::<M>(0.0), &mut y2);
+        // batch0: [[1],[3]] * [1] = [1,3], batch1: [[5],[7]] * [1] = [5,7]
+        assert_eq!(
+            y2.clone_as_vec(),
+            vec![f::<M>(1.0), f::<M>(3.0), f::<M>(5.0), f::<M>(7.0)]
+        );
+    }
 }
 
 #[cfg(test)]
@@ -1204,6 +1271,10 @@ macro_rules! generate_matrix_tests {
             #[test]
             fn [<test_batched_gemm_vo_broadcast_b_ $suffix>]() {
                 $crate::matrix::tests::test_batched_gemm_vo_broadcast_b::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_resize_cols_ $suffix>]() {
+                $crate::matrix::tests::test_batched_resize_cols::<$M>($ctx2);
             }
             #[test]
             #[should_panic(expected = "incompatible nbatch")]
