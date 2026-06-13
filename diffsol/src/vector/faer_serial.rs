@@ -418,6 +418,9 @@ impl<'a, T: FaerScalar> VectorViewMut<'a> for FaerVecMut<'a, T> {
     fn copy_from_view(&mut self, other: &Self::View) {
         self.data.copy_from(&other.data);
     }
+    fn set_index(&mut self, index: IndexType, value: Self::T) {
+        self.data[index] = value;
+    }
     fn axpy(&mut self, alpha: Self::T, x: &Self::Owned, beta: Self::T) {
         zip!(self.data.as_mut(), x.data.as_ref())
             .for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha);

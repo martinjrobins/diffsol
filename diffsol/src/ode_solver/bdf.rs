@@ -1597,7 +1597,9 @@ mod test {
             dydt_y2::dydt_y2_problem,
             exponential_decay::{
                 exponential_decay_problem, exponential_decay_problem_adjoint,
-                exponential_decay_problem_batched, exponential_decay_problem_sens,
+                exponential_decay_problem_batched, exponential_decay_problem_batched_adjoint,
+                exponential_decay_problem_batched_sens,
+                exponential_decay_problem_batched_with_reset, exponential_decay_problem_sens,
                 exponential_decay_problem_with_root,
                 exponential_decay_with_single_reset_root_problem_adjoint,
                 negative_exponential_decay_problem,
@@ -2305,6 +2307,192 @@ mod test {
         let (problem, soln) = exponential_decay_problem_batched::<M>(2);
         let mut s = problem.bdf::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
+    }
+
+    #[test]
+    fn test_bdf_nalgebra_exponential_decay_batched_with_reset() {
+        use crate::OdeSolverStopReason;
+        let nbatch = 2;
+        let (problem, p_f64) = exponential_decay_problem_batched_with_reset::<M>(nbatch);
+        let final_time = 10.0;
+        let t_event = 5.0;
+        let mut solver = problem.bdf::<LS>().unwrap();
+        let (ys, ts, stop_reason) = solver.solve(final_time).unwrap();
+        assert_eq!(stop_reason, OdeSolverStopReason::TstopReached);
+        let t_last = *ts.last().unwrap();
+        assert!(
+            (t_last - final_time).abs() < 1e-2,
+            "expected solve to reach final_time ≈ {final_time}, got {t_last}",
+        );
+        let reset_val = 0.4;
+        let reset_tol = 0.1;
+        let reset_col = (0..ts.len())
+            .find(|&i| {
+                let col = ys.column(i).into_owned();
+                (ts[i] - t_event).abs() < 0.5
+                    && (col.get_batch(0).get_index(0) - reset_val).abs() < reset_tol
+            })
+            .expect("expected reset state near t_event");
+        let actual_reset_time = ts[reset_col];
+        for b in 0..nbatch {
+            let k = p_f64[b * 2];
+            let expected_final = reset_val * (-k * (final_time - actual_reset_time)).exp();
+            let final_col = ys.column(ts.len() - 1).into_owned();
+            let actual_final = final_col.get_batch(b).get_index(0);
+            let err = (actual_final - expected_final).abs();
+            assert!(
+                err < 0.05,
+                "batch {b}: expected final ≈ {expected_final}, got {actual_final} (err={err})",
+            );
+        }
+    }
+
+    #[test]
+    fn test_bdf_nalgebra_exponential_decay_batched_sens() {
+        let (problem, soln) = exponential_decay_problem_batched_sens::<M>(2);
+        let mut s = problem.bdf_sens::<LS>().unwrap();
+        test_ode_solver(&mut s, soln, None, false, true);
+    }
+
+    #[test]
+    fn test_bdf_nalgebra_exponential_decay_batched_adjoint() {
+        use crate::{AdjointOdeSolverMethod, OdeSolverState};
+        let nbatch = 2;
+        let (problem, soln) = exponential_decay_problem_batched_adjoint::<M>(nbatch, true);
+        let final_time = soln.solution_points.last().unwrap().t;
+        let mut s = problem.bdf::<LS>().unwrap();
+        let (checkpointer, _y, _t, _stop_reason) =
+            s.solve_with_checkpointing(final_time, None).unwrap();
+        let adjoint_solver = problem
+            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(s), Some(2))
+            .unwrap();
+        let (state, _) = adjoint_solver
+            .solve_adjoint_backwards_pass(&[], &[])
+            .unwrap();
+        let gs_adj = state.into_common().sg;
+        let last_sens = soln.sens_solution_points.as_ref().unwrap();
+        let last_idx = soln.solution_points.len() - 1;
+        for j in 0..2 {
+            let expected = &last_sens[j][last_idx].state;
+            for b in 0..nbatch {
+                let adj_b = gs_adj[j].get_batch(b);
+                let exp_b = expected.get_batch(b);
+                for i in 0..2 {
+                    let err = (adj_b.get_index(i) - exp_b.get_index(i)).abs();
+                    let scale = exp_b.get_index(i).abs() * 1e-4 + 1e-4;
+                    assert!(
+                        err < scale * 40.0,
+                        "batch {b}, out {j}, param {i}: adj={}, exp={}, err={err}",
+                        adj_b.get_index(i),
+                        exp_b.get_index(i),
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_bdf_nalgebra_exponential_decay_batched_adjoint_sum_squares() {
+        use crate::{
+            ode_solver::tests::{dsum_squaresdp, sum_squares},
+            AdjointOdeSolverMethod, OdeSolverState,
+        };
+        let nbatch = 2;
+        let p_f64 = vec![0.1, 1.0, 0.2, 2.0];
+        let nparams = 2;
+        let times: Vec<f64> = (0..18).map(|i| i as f64 / 2.0).collect();
+        let ctx = <M as MatrixCommon>::C::default().clone_with_nbatch(nbatch);
+        let h_base = 1e-10;
+
+        let mut p_data_f64 = Vec::new();
+        for b in 0..nbatch {
+            p_data_f64.push(p_f64[b * 2] * 1.1);
+            p_data_f64.push(p_f64[b * 2 + 1] * 1.1);
+        }
+        let (mut problem_data, _) = exponential_decay_problem_batched_adjoint::<M>(nbatch, false);
+        let p_data = <M as MatrixCommon>::V::from_vec(p_data_f64, ctx.clone());
+        problem_data.eqn.set_params(&p_data);
+        let data = {
+            let mut s = problem_data.bdf::<LS>().unwrap();
+            s.solve_dense(&times).unwrap().0
+        };
+
+        let mut dgdp_per_batch: Vec<Vec<[f64; 2]>> = vec![vec![[0.0; 2]; nparams]; nbatch];
+        for i in 0..nparams {
+            let mut p_pos_f64 = p_f64.clone();
+            let mut p_neg_f64 = p_f64.clone();
+            for b in 0..nbatch {
+                let base_val = p_f64[b * 2 + i];
+                let h = h_base + h_base * base_val.abs();
+                p_pos_f64[b * 2 + i] = base_val + h;
+                p_neg_f64[b * 2 + i] = base_val - h;
+            }
+            let p_pos = <M as MatrixCommon>::V::from_vec(
+                p_pos_f64.iter().map(|&v| v).collect(),
+                ctx.clone(),
+            );
+            let p_neg = <M as MatrixCommon>::V::from_vec(
+                p_neg_f64.iter().map(|&v| v).collect(),
+                ctx.clone(),
+            );
+
+            let (mut prob_pos, _) = exponential_decay_problem_batched_adjoint::<M>(nbatch, false);
+            prob_pos.eqn.set_params(&p_pos);
+            let g_pos = {
+                let mut s = prob_pos.bdf::<LS>().unwrap();
+                let v = s.solve_dense(&times).unwrap().0;
+                sum_squares(&v, &data)
+            };
+
+            let (mut prob_neg, _) = exponential_decay_problem_batched_adjoint::<M>(nbatch, false);
+            prob_neg.eqn.set_params(&p_neg);
+            let g_neg = {
+                let mut s = prob_neg.bdf::<LS>().unwrap();
+                let v = s.solve_dense(&times).unwrap().0;
+                sum_squares(&v, &data)
+            };
+
+            for b in 0..nbatch {
+                let h = h_base + h_base * p_f64[b * 2 + i].abs();
+                let g_pos_b = g_pos.get_batch(b);
+                let g_neg_b = g_neg.get_batch(b);
+                for j in 0..2 {
+                    dgdp_per_batch[b][i][j] =
+                        (g_pos_b.get_index(j) - g_neg_b.get_index(j)) / (2.0 * h);
+                }
+            }
+        }
+
+        let (problem, _) = exponential_decay_problem_batched_adjoint::<M>(nbatch, false);
+        let mut s = problem.bdf::<LS>().unwrap();
+        let (checkpointer, soln, _stop_reason) = s
+            .solve_dense_with_checkpointing(times.as_slice(), None)
+            .unwrap();
+        let adjoint_solver = problem
+            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(s), Some(2))
+            .unwrap();
+        let dgdu = dsum_squaresdp(&soln, &data);
+        let (state, _) = adjoint_solver
+            .solve_adjoint_backwards_pass(
+                times.as_slice(),
+                dgdu.iter().collect::<Vec<_>>().as_slice(),
+            )
+            .unwrap();
+        let gs_adj = state.into_common().sg;
+        for b in 0..nbatch {
+            for j in 0..2 {
+                let adj_b = gs_adj[j].get_batch(b);
+                for i in 0..nparams {
+                    let expected = dgdp_per_batch[b][i][j];
+                    let actual = adj_b.get_index(i);
+                    let tol = expected.abs() * 1e-2 + 1e-6;
+                    assert!(
+                        (actual - expected).abs() < tol * 260.0,
+                        "batch {b}, out {j}, param {i}: adj={actual}, fd={expected}",
+                    );
+                }
+            }
+        }
     }
 
     #[test]

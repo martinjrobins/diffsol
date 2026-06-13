@@ -128,6 +128,8 @@ pub trait VectorViewMut<'a>:
     fn copy_from_view(&mut self, other: &Self::View);
     /// Compute the AXPY operation: self = alpha * x + beta * self
     fn axpy(&mut self, alpha: Self::T, x: &Self::Owned, beta: Self::T);
+    /// Set the value at the specified index (sets across all batches when nbatch > 1).
+    fn set_index(&mut self, index: IndexType, value: Self::T);
 }
 
 /// A borrowed immutable view of a vector, supporting read-only arithmetic operations.

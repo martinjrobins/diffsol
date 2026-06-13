@@ -1000,6 +1000,13 @@ impl<'a, T: ScalarCuda> VectorViewMut<'a> for CudaVecMut<'a, T> {
         let config = self.context.launch_config_1d(n, &f);
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
     }
+    fn set_index(&mut self, index: IndexType, value: Self::T) {
+        let data = vec![value];
+        self.context
+            .stream
+            .memcpy_htod(&data, &mut self.data.slice_mut(index..index + 1))
+            .expect("Failed to copy data from host to device");
+    }
     fn axpy(&mut self, alpha: Self::T, x: &Self::Owned, beta: Self::T) {
         if beta != T::one() {
             self.mul_assign(Scale(beta));
