@@ -445,6 +445,12 @@ impl<'a, T: NalgebraScalar> VectorViewMut<'a> for NalgebraVecMut<'a, T> {
             );
         }
     }
+    fn set_index(&mut self, index: IndexType, value: Self::T) {
+        let nbatch = self.context.nbatch();
+        for b in 0..nbatch {
+            self.data[(index, b)] = value;
+        }
+    }
     fn axpy(&mut self, alpha: Self::T, x: &Self::Owned, beta: Self::T) {
         let self_ncols = self.data.ncols();
         let x_ncols = x.data.ncols();

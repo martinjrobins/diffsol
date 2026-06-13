@@ -195,16 +195,23 @@ mod tests {
     where
         DM: DenseMatrix,
     {
+        let nbatch = soln.context().nbatch();
         let mut ret = DM::V::zeros(2, soln.context().clone());
         for j in 0..soln.ncols() {
             let soln_j = soln.column(j);
             let data_j = data.column(j);
             let delta = soln_j - data_j;
-            let norm2 = delta.norm(2);
-            ret.set_index(0, ret.get_index(0) + norm2 * norm2);
-            let norm4 = delta.norm(4);
-            let norm4_sq = norm4 * norm4;
-            ret.set_index(1, ret.get_index(1) + norm4_sq * norm4_sq);
+            for b in 0..nbatch {
+                let delta_b = delta.get_batch(b).into_owned();
+                let norm2 = delta_b.norm(2);
+                let norm4 = delta_b.norm(4);
+                let cur0 = ret.get_batch(b).get_index(0);
+                let cur1 = ret.get_batch(b).get_index(1);
+                ret.get_batch_mut(b).set_index(0, cur0 + norm2 * norm2);
+                let norm4_sq = norm4 * norm4;
+                ret.get_batch_mut(b)
+                    .set_index(1, cur1 + norm4_sq * norm4_sq);
+            }
         }
         ret
     }
