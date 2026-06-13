@@ -469,7 +469,10 @@ mod tests {
         let identity = FaerVecIndex::from_vec((0..nnz).collect(), Default::default());
         let data = FaerVec::from_vec(new_values.to_vec(), Default::default());
         via_set_data.set_data_with_indices(&identity, &identity, &data);
-        assert_eq!(mat.values_as_mut_slice(), via_set_data.values_as_mut_slice());
+        assert_eq!(
+            mat.values_as_mut_slice(),
+            via_set_data.values_as_mut_slice()
+        );
     }
 
     #[test]
