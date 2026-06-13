@@ -660,13 +660,18 @@ mod test {
         let (problem, soln) = exponential_decay_problem::<M>(false);
         let mut s = problem.tr_bdf2::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
-        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        insta::assert_yaml_snapshot!(s.get_statistics(), @"
         number_of_linear_solver_setups: 8
         number_of_steps: 46
         number_of_error_test_failures: 0
         number_of_nonlinear_solver_iterations: 110
         number_of_nonlinear_solver_fails: 0
-        "###);
+        number_of_linear_solver_setups_from_checkpoint: 0
+        number_of_linear_solver_setups_from_first_convergence_fail: 0
+        number_of_linear_solver_setups_from_second_convergence_fail: 0
+        number_of_linear_solver_setups_from_error_test_fail: 0
+        number_of_linear_solver_setups_from_step_success: 0
+        ");
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 112
         number_of_jac_muls: 2
@@ -680,13 +685,18 @@ mod test {
         let (problem, soln) = exponential_decay_problem_sens::<M>(false);
         let mut s = problem.tr_bdf2_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
-        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        insta::assert_yaml_snapshot!(s.get_statistics(), @"
         number_of_linear_solver_setups: 10
         number_of_steps: 74
         number_of_error_test_failures: 0
         number_of_nonlinear_solver_iterations: 515
         number_of_nonlinear_solver_fails: 0
-        "###);
+        number_of_linear_solver_setups_from_checkpoint: 0
+        number_of_linear_solver_setups_from_first_convergence_fail: 0
+        number_of_linear_solver_setups_from_second_convergence_fail: 0
+        number_of_linear_solver_setups_from_error_test_fail: 0
+        number_of_linear_solver_setups_from_step_success: 0
+        ");
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 166
         number_of_jac_muls: 357
@@ -700,13 +710,18 @@ mod test {
         let (problem, soln) = exponential_decay_problem::<M>(false);
         let mut s = problem.esdirk34::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
-        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        insta::assert_yaml_snapshot!(s.get_statistics(), @"
         number_of_linear_solver_setups: 6
         number_of_steps: 18
         number_of_error_test_failures: 0
         number_of_nonlinear_solver_iterations: 66
         number_of_nonlinear_solver_fails: 0
-        "###);
+        number_of_linear_solver_setups_from_checkpoint: 0
+        number_of_linear_solver_setups_from_first_convergence_fail: 0
+        number_of_linear_solver_setups_from_second_convergence_fail: 0
+        number_of_linear_solver_setups_from_error_test_fail: 0
+        number_of_linear_solver_setups_from_step_success: 0
+        ");
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 68
         number_of_jac_muls: 2
@@ -720,13 +735,18 @@ mod test {
         let (problem, soln) = exponential_decay_with_algebraic_problem::<M>(false);
         let mut s = problem.esdirk34::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
-        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        insta::assert_yaml_snapshot!(s.get_statistics(), @"
         number_of_linear_solver_setups: 6
         number_of_steps: 6
         number_of_error_test_failures: 0
         number_of_nonlinear_solver_iterations: 24
         number_of_nonlinear_solver_fails: 0
-        "###);
+        number_of_linear_solver_setups_from_checkpoint: 0
+        number_of_linear_solver_setups_from_first_convergence_fail: 0
+        number_of_linear_solver_setups_from_second_convergence_fail: 0
+        number_of_linear_solver_setups_from_error_test_fail: 0
+        number_of_linear_solver_setups_from_step_success: 0
+        ");
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 28
         number_of_jac_muls: 6
@@ -740,13 +760,18 @@ mod test {
         let (problem, soln) = exponential_decay_problem_sens::<M>(false);
         let mut s = problem.esdirk34_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
-        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        insta::assert_yaml_snapshot!(s.get_statistics(), @"
         number_of_linear_solver_setups: 6
         number_of_steps: 30
         number_of_error_test_failures: 0
         number_of_nonlinear_solver_iterations: 317
         number_of_nonlinear_solver_fails: 0
-        "###);
+        number_of_linear_solver_setups_from_checkpoint: 0
+        number_of_linear_solver_setups_from_first_convergence_fail: 0
+        number_of_linear_solver_setups_from_second_convergence_fail: 0
+        number_of_linear_solver_setups_from_error_test_fail: 0
+        number_of_linear_solver_setups_from_step_success: 0
+        ");
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 98
         number_of_jac_muls: 225
@@ -822,13 +847,18 @@ mod test {
         let (problem, soln) = robertson::<M>(false);
         let mut s = problem.tr_bdf2::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
-        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        insta::assert_yaml_snapshot!(s.get_statistics(), @"
         number_of_linear_solver_setups: 66
         number_of_steps: 287
         number_of_error_test_failures: 5
         number_of_nonlinear_solver_iterations: 1610
         number_of_nonlinear_solver_fails: 8
-        "###);
+        number_of_linear_solver_setups_from_checkpoint: 0
+        number_of_linear_solver_setups_from_first_convergence_fail: 0
+        number_of_linear_solver_setups_from_second_convergence_fail: 0
+        number_of_linear_solver_setups_from_error_test_fail: 0
+        number_of_linear_solver_setups_from_step_success: 0
+        ");
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 1613
         number_of_jac_muls: 36
@@ -843,13 +873,18 @@ mod test {
         problem.ode_options.max_nonlinear_solver_iterations = 10;
         let mut s = problem.tr_bdf2_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
-        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        insta::assert_yaml_snapshot!(s.get_statistics(), @"
         number_of_linear_solver_setups: 77
         number_of_steps: 286
         number_of_error_test_failures: 0
         number_of_nonlinear_solver_iterations: 4146
         number_of_nonlinear_solver_fails: 30
-        "###);
+        number_of_linear_solver_setups_from_checkpoint: 0
+        number_of_linear_solver_setups_from_first_convergence_fail: 0
+        number_of_linear_solver_setups_from_second_convergence_fail: 0
+        number_of_linear_solver_setups_from_error_test_fail: 0
+        number_of_linear_solver_setups_from_step_success: 0
+        ");
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 1303
         number_of_jac_muls: 2954
@@ -863,13 +898,18 @@ mod test {
         let (problem, soln) = robertson::<M>(false);
         let mut s = problem.esdirk34::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
-        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        insta::assert_yaml_snapshot!(s.get_statistics(), @"
         number_of_linear_solver_setups: 67
         number_of_steps: 413
         number_of_error_test_failures: 1
         number_of_nonlinear_solver_iterations: 2534
         number_of_nonlinear_solver_fails: 6
-        "###);
+        number_of_linear_solver_setups_from_checkpoint: 0
+        number_of_linear_solver_setups_from_first_convergence_fail: 0
+        number_of_linear_solver_setups_from_second_convergence_fail: 0
+        number_of_linear_solver_setups_from_error_test_fail: 0
+        number_of_linear_solver_setups_from_step_success: 0
+        ");
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 2537
         number_of_jac_muls: 39
@@ -883,13 +923,18 @@ mod test {
         let (problem, soln) = robertson_sens::<M>();
         let mut s = problem.esdirk34_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
-        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        insta::assert_yaml_snapshot!(s.get_statistics(), @"
         number_of_linear_solver_setups: 68
         number_of_steps: 333
         number_of_error_test_failures: 0
         number_of_nonlinear_solver_iterations: 6856
         number_of_nonlinear_solver_fails: 10
-        "###);
+        number_of_linear_solver_setups_from_checkpoint: 0
+        number_of_linear_solver_setups_from_first_convergence_fail: 0
+        number_of_linear_solver_setups_from_second_convergence_fail: 0
+        number_of_linear_solver_setups_from_error_test_fail: 0
+        number_of_linear_solver_setups_from_step_success: 0
+        ");
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 2272
         number_of_jac_muls: 4644
@@ -903,13 +948,18 @@ mod test {
         let (problem, soln) = robertson_ode::<M>(false, 1);
         let mut s = problem.tr_bdf2::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
-        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        insta::assert_yaml_snapshot!(s.get_statistics(), @"
         number_of_linear_solver_setups: 74
         number_of_steps: 371
         number_of_error_test_failures: 1
         number_of_nonlinear_solver_iterations: 2622
         number_of_nonlinear_solver_fails: 5
-        "###);
+        number_of_linear_solver_setups_from_checkpoint: 0
+        number_of_linear_solver_setups_from_first_convergence_fail: 0
+        number_of_linear_solver_setups_from_second_convergence_fail: 0
+        number_of_linear_solver_setups_from_error_test_fail: 0
+        number_of_linear_solver_setups_from_step_success: 0
+        ");
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 2624
         number_of_jac_muls: 30
