@@ -3,7 +3,7 @@ use super::method::AugmentedOdeSolverMethod;
 use super::runge_kutta::Rk;
 use super::sensitivities::SensitivitiesOdeSolverMethod;
 use crate::error::DiffsolError;
-use crate::ode_solver::bdf::BdfStatistics;
+use crate::ode_solver::OdeSolverStatistics;
 use crate::vector::VectorRef;
 use crate::NoAug;
 use crate::OdeEquationsImplicitSens;
@@ -138,7 +138,7 @@ where
         })
     }
 
-    pub fn get_statistics(&self) -> &BdfStatistics {
+    pub fn get_statistics(&self) -> &OdeSolverStatistics {
         self.rk.get_statistics()
     }
 }

@@ -1,6 +1,6 @@
 use log::{debug, info, trace};
+use std::cell::Ref;
 use std::ops::AddAssign;
-use std::{cell::Ref, fmt::Display};
 
 use crate::{
     error::{DiffsolError, OdeSolverError},
@@ -9,7 +9,6 @@ use crate::{
 };
 
 use num_traits::{abs, FromPrimitive, One, Pow, Signed, ToPrimitive, Zero};
-use serde::Serialize;
 
 use crate::ode_solver_error;
 use crate::{
@@ -25,39 +24,7 @@ use super::config::BdfConfig;
 use super::jacobian_update::SolverState;
 use super::method::AugmentedOdeSolverMethod;
 use super::sensitivities::SensitivitiesOdeSolverMethod;
-
-/// Solver statistics for the BDF method (the struct is also reused by the SDIRK and
-/// explicit Runge-Kutta solvers).
-///
-/// The `number_of_linear_solver_setups_from_*` fields attribute every Jacobian/LU refresh counted in
-/// [`number_of_linear_solver_setups`](Self::number_of_linear_solver_setups) to the solver
-/// condition that triggered it; when populated they sum exactly to it. Only the BDF solver
-/// populates them — they remain `0` for SDIRK / explicit RK, which do not break their setups
-/// down by cause.
-#[derive(Clone, Debug, Serialize, Default)]
-pub struct BdfStatistics {
-    pub number_of_linear_solver_setups: usize,
-    pub number_of_steps: usize,
-    pub number_of_error_test_failures: usize,
-    pub number_of_nonlinear_solver_iterations: usize,
-    pub number_of_nonlinear_solver_fails: usize,
-    /// Jacobian/LU setups triggered by checkpoint or reinitialisation.
-    pub number_of_linear_solver_setups_from_checkpoint: usize,
-    /// Jacobian/LU setups triggered by a first nonlinear convergence failure.
-    pub number_of_linear_solver_setups_from_first_convergence_fail: usize,
-    /// Jacobian/LU setups triggered by a second nonlinear convergence failure.
-    pub number_of_linear_solver_setups_from_second_convergence_fail: usize,
-    /// Jacobian/LU setups triggered by a local error test failure.
-    pub number_of_linear_solver_setups_from_error_test_fail: usize,
-    /// Jacobian/LU setups triggered by the normal step-success heuristic.
-    pub number_of_linear_solver_setups_from_step_success: usize,
-}
-
-impl Display for BdfStatistics {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", serde_json::to_string_pretty(self).unwrap())
-    }
-}
+use super::OdeSolverStatistics;
 
 impl<'a, M, Eqn, Nls, AugEqn> AugmentedOdeSolverMethod<'a, Eqn, AugEqn>
     for Bdf<'a, Eqn, Nls, M, AugEqn>
@@ -172,7 +139,7 @@ pub struct Bdf<
     alpha: Vec<Eqn::T>,
     gamma: Vec<Eqn::T>,
     error_const2: Vec<Eqn::T>,
-    statistics: BdfStatistics,
+    statistics: OdeSolverStatistics,
     state: BdfState<Eqn::V, M>,
     tstop: Option<Eqn::T>,
     root_finder: Option<RootFinder<Eqn::V>>,
@@ -226,7 +193,7 @@ where
             alpha: self.alpha.clone(),
             gamma: self.gamma.clone(),
             error_const2: self.error_const2.clone(),
-            statistics: BdfStatistics::default(),
+            statistics: OdeSolverStatistics::default(),
             state: self.state.clone(),
             tstop: self.tstop,
             root_finder: self.root_finder.clone(),
@@ -381,13 +348,13 @@ where
             alpha,
             error_const2,
             u,
-            statistics: BdfStatistics {
+            statistics: OdeSolverStatistics {
                 number_of_linear_solver_setups_from_checkpoint: if integrate_main_eqn {
                     1
                 } else {
                     0
                 },
-                ..BdfStatistics::default()
+                ..OdeSolverStatistics::default()
             },
             state,
             tstop: None,
@@ -456,7 +423,7 @@ where
         Ok(ret)
     }
 
-    pub fn get_statistics(&self) -> &BdfStatistics {
+    pub fn get_statistics(&self) -> &OdeSolverStatistics {
         &self.statistics
     }
 
@@ -530,28 +497,7 @@ where
         };
 
         if did_update {
-            match state {
-                SolverState::Checkpoint => {
-                    self.statistics
-                        .number_of_linear_solver_setups_from_checkpoint += 1;
-                }
-                SolverState::FirstConvergenceFail => {
-                    self.statistics
-                        .number_of_linear_solver_setups_from_first_convergence_fail += 1;
-                }
-                SolverState::SecondConvergenceFail => {
-                    self.statistics
-                        .number_of_linear_solver_setups_from_second_convergence_fail += 1;
-                }
-                SolverState::ErrorTestFail => {
-                    self.statistics
-                        .number_of_linear_solver_setups_from_error_test_fail += 1;
-                }
-                SolverState::StepSuccess => {
-                    self.statistics
-                        .number_of_linear_solver_setups_from_step_success += 1;
-                }
-            }
+            self.statistics.record_linear_solver_setup(state);
         }
     }
 
@@ -1608,9 +1554,7 @@ where
             }
         }
 
-        // Record the LU-setup total after the post-step (step-success) jacobian update in the
-        // order-change block above, so it includes the refresh on the final accepted step and
-        // the per-cause `number_of_linear_solver_setups_from_*` fields sum to it exactly.
+        // Record the LU-setup total after the post-step jacobian update
         if let Some(op) = self.op.as_ref() {
             self.statistics.number_of_linear_solver_setups = op.number_of_jac_evals();
         } else if let Some(s_op) = self.s_op.as_ref() {
