@@ -253,10 +253,7 @@ impl<T: FaerScalar> FaerSparseMat<T> {
     /// Direct mutable access to the CSC nonzero values array.
     ///
     /// Returns the `nnz` stored nonzero values in CSC storage order (column-major;
-    /// within a column, in ascending stored-row-index order). The index of each value
-    /// matches the data-array index used by [`set_data_with_indices`](Matrix::set_data_with_indices)
-    /// and produced by the matrix sparsity (`MatrixSparsity::get_index` / `indices`), so a
-    /// caller can write values in place without going through `set_data_with_indices`.
+    /// within a column, in ascending stored-row-index order).
     ///
     /// The sparsity pattern is fixed: this borrow can only overwrite the values of existing
     /// nonzeros, not add, remove, or reorder them (the slice length is exactly `nnz`).
@@ -431,6 +428,48 @@ mod tests {
             assert_eq!(j, triplet.1);
             assert_eq!(val, triplet.2);
         }
+    }
+
+    #[test]
+    fn test_values_as_mut_slice() {
+        use crate::{FaerVec, FaerVecIndex, Vector, VectorIndex};
+
+        // CSC data-array order: column-major, ascending row within each column.
+        let triplets = vec![
+            (0, 0, 1.0),
+            (2, 0, 2.0),
+            (1, 1, 3.0),
+            (0, 2, 4.0),
+            (2, 2, 5.0),
+        ];
+        let mut mat =
+            FaerSparseMat::<f64>::try_from_triplets(3, 3, triplets.clone(), Default::default())
+                .unwrap();
+
+        // The slice exposes exactly the nnz stored values.
+        assert_eq!(mat.values_as_mut_slice().len(), triplets.len());
+
+        // Writing through the slice overwrites values in CSC data-array order:
+        // the k-th slot is the k-th nonzero yielded by triplet_iter.
+        let new_values = [10.0, 11.0, 12.0, 13.0, 14.0];
+        mat.values_as_mut_slice().copy_from_slice(&new_values);
+        let got: Vec<(usize, usize, f64)> = mat.triplet_iter().collect();
+        let expected: Vec<(usize, usize, f64)> = triplets
+            .iter()
+            .zip(new_values.iter())
+            .map(|(&(i, j, _), &v)| (i, j, v))
+            .collect();
+        assert_eq!(got, expected);
+
+        // The slot index matches the data-array index used by set_data_with_indices:
+        // a slice fill equals a set_data_with_indices fill with identity indices.
+        let mut via_set_data =
+            FaerSparseMat::<f64>::try_from_triplets(3, 3, triplets, Default::default()).unwrap();
+        let nnz = new_values.len();
+        let identity = FaerVecIndex::from_vec((0..nnz).collect(), Default::default());
+        let data = FaerVec::from_vec(new_values.to_vec(), Default::default());
+        via_set_data.set_data_with_indices(&identity, &identity, &data);
+        assert_eq!(mat.values_as_mut_slice(), via_set_data.values_as_mut_slice());
     }
 
     #[test]
