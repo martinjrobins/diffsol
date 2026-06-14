@@ -211,6 +211,9 @@ impl<T: NalgebraScalar> Matrix for NalgebraMat<T> {
     fn context(&self) -> &Self::C {
         &self.context
     }
+    fn inner_mut(&mut self) -> &mut Self::Inner {
+        &mut self.data
+    }
 
     fn set_data_with_indices(
         &mut self,
