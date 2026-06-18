@@ -726,10 +726,6 @@ where
                 }
             }
         }
-        self.statistics.number_of_linear_solver_setups = op.map_or_else(
-            || s_op.as_ref().unwrap().number_of_jac_evals(),
-            |op| op.number_of_jac_evals(),
-        );
         Ok(())
     }
 

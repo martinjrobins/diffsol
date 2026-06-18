@@ -24,7 +24,6 @@ pub struct SdirkCallable<Eqn: OdeEquations> {
     rhs_jac: RefCell<Eqn::M>,
     mass_jac: RefCell<Eqn::M>,
     jacobian_is_stale: RefCell<bool>,
-    number_of_jac_evals: RefCell<usize>,
     sparsity: Option<<Eqn::M as Matrix>::Sparsity>,
 }
 
@@ -39,7 +38,6 @@ impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
             rhs_jac: RefCell::new(self.rhs_jac.borrow().clone()),
             mass_jac: RefCell::new(self.mass_jac.borrow().clone()),
             jacobian_is_stale: RefCell::new(*self.jacobian_is_stale.borrow()),
-            number_of_jac_evals: RefCell::new(*self.number_of_jac_evals.borrow()),
             sparsity: self.sparsity.clone(),
         }
     }
@@ -73,7 +71,6 @@ impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
         let ctx = eqn.context();
         let phi = RefCell::new(<Eqn::V as Vector>::zeros(n, ctx.clone()));
         let jacobian_is_stale = RefCell::new(false);
-        let number_of_jac_evals = RefCell::new(0);
         let tmp = RefCell::new(<Eqn::V as Vector>::zeros(n, ctx.clone()));
         let rhs_jac = RefCell::new(<Eqn::M as Matrix>::zeros(0, 0, ctx.clone()));
         let mass_jac = RefCell::new(<Eqn::M as Matrix>::zeros(0, 0, ctx.clone()));
@@ -86,7 +83,6 @@ impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
             rhs_jac,
             mass_jac,
             jacobian_is_stale,
-            number_of_jac_evals,
             tmp,
             sparsity,
         }
@@ -102,7 +98,6 @@ impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
         let h = RefCell::new(Eqn::T::zero());
         let phi = RefCell::new(<Eqn::V as Vector>::zeros(n, ctx.clone()));
         let jacobian_is_stale = RefCell::new(true);
-        let number_of_jac_evals = RefCell::new(0);
         let tmp = RefCell::new(<Eqn::V as Vector>::zeros(n, ctx.clone()));
 
         // create the mass and rhs jacobians according to the sparsity pattern
@@ -155,14 +150,10 @@ impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
             mass_jac,
             sparsity,
             jacobian_is_stale,
-            number_of_jac_evals,
             tmp,
         }
     }
 
-    pub fn number_of_jac_evals(&self) -> usize {
-        *self.number_of_jac_evals.borrow()
-    }
     pub fn set_h(&self, h: Eqn::T) {
         self.h.replace(h);
     }
@@ -302,8 +293,6 @@ impl<Eqn: OdeEquationsImplicit> NonLinearOpJacobian for SdirkCallable<Eqn> {
             );
             y.scale_add_and_assign(mass_jac.deref(), -(c * h), rhs_jac.deref());
         }
-        let number_of_jac_evals = *self.number_of_jac_evals.borrow() + 1;
-        self.number_of_jac_evals.replace(number_of_jac_evals);
     }
     fn jacobian_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
         self.sparsity.clone()

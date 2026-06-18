@@ -349,6 +349,7 @@ where
             error_const2,
             u,
             statistics: OdeSolverStatistics {
+                number_of_linear_solver_setups: if integrate_main_eqn { 1 } else { 0 },
                 number_of_linear_solver_setups_from_checkpoint: if integrate_main_eqn {
                     1
                 } else {
@@ -406,6 +407,8 @@ where
             ret.nonlinear_solver.set_problem(&bdf_callable);
             ret.nonlinear_solver
                 .reset_jacobian(&bdf_callable, &ret.state.s[0], ret.state.t);
+            ret.statistics
+                .record_linear_solver_setup(SolverState::Checkpoint);
             Some(bdf_callable)
         };
 
@@ -1552,13 +1555,6 @@ where
                 );
                 self._jacobian_updates(new_h * self.alpha[order], SolverState::StepSuccess);
             }
-        }
-
-        // Record the LU-setup total after the post-step jacobian update
-        if let Some(op) = self.op.as_ref() {
-            self.statistics.number_of_linear_solver_setups = op.number_of_jac_evals();
-        } else if let Some(s_op) = self.s_op.as_ref() {
-            self.statistics.number_of_linear_solver_setups = s_op.number_of_jac_evals();
         }
 
         // check for root within accepted step

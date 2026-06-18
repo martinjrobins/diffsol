@@ -535,11 +535,6 @@ where
 
         self.update_op_step_size(new_h);
         self.jacobian_updates(new_h, SolverState::StepSuccess);
-        let number_of_jac_evals = self.op.as_ref().map_or_else(
-            || self.s_op.as_ref().unwrap().number_of_jac_evals(),
-            |op| op.number_of_jac_evals(),
-        );
-        self.rk.statistics_mut().number_of_linear_solver_setups = number_of_jac_evals;
         self.jacobian_update.step();
         self.rk.step_accepted(h, new_h, true)
     }
