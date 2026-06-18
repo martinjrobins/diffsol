@@ -79,7 +79,7 @@ mod tests {
     use crate::{
         linear_solver::tests::{linear_problem, linear_problem_batched, test_linear_solver},
         op::ParameterisedOp,
-        Context, FaerContext, FaerMat, Op,
+        FaerContext, FaerMat, Op,
     };
 
     use super::*;

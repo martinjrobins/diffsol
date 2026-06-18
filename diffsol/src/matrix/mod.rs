@@ -952,18 +952,6 @@ pub(crate) mod tests {
 
     // --- Batched DenseMatrix-specific tests ---
 
-    pub fn test_batched_zeros<M: DenseMatrix>(ctx: M::C) {
-        assert_eq!(ctx.nbatch(), 2);
-        let a = M::zeros(2, 3, ctx);
-        assert_eq!(a.nrows(), 2);
-        assert_eq!(a.ncols(), 3);
-        for i in 0..2 {
-            for j in 0..3 {
-                assert_eq!(a.get_index(i, j), M::T::zero());
-            }
-        }
-    }
-
     pub fn test_batched_from_vec<M: DenseMatrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         // 2x2 matrix, nbatch=2: physical is 2x4
@@ -989,38 +977,6 @@ pub(crate) mod tests {
         assert_eq!(a.get_index(1, 0), f::<M>(3.0));
         assert_eq!(a.get_index(0, 1), f::<M>(2.0));
         assert_eq!(a.get_index(1, 1), f::<M>(4.0));
-    }
-
-    pub fn test_batched_gemv<M: DenseMatrix>(ctx: M::C) {
-        assert_eq!(ctx.nbatch(), 2);
-        // batch0: A=[[1,2],[3,4]], batch1: A=[[5,6],[7,8]]
-        let a = M::from_vec(
-            2,
-            2,
-            vec![
-                f::<M>(1.0),
-                f::<M>(3.0),
-                f::<M>(2.0),
-                f::<M>(4.0),
-                f::<M>(5.0),
-                f::<M>(7.0),
-                f::<M>(6.0),
-                f::<M>(8.0),
-            ],
-            ctx.clone(),
-        );
-        // batch0: x=[1,2], batch1: x=[1,1]
-        let x = M::V::from_vec(
-            vec![f::<M>(1.0), f::<M>(2.0), f::<M>(1.0), f::<M>(1.0)],
-            ctx.clone(),
-        );
-        let mut y = M::V::zeros(2, ctx);
-        a.gemv(f::<M>(1.0), &x, f::<M>(0.0), &mut y);
-        // batch0: [1+4, 3+8]=[5,11], batch1: [5+6, 7+8]=[11,15]
-        assert_eq!(
-            y.clone_as_vec(),
-            vec![f::<M>(5.0), f::<M>(11.0), f::<M>(11.0), f::<M>(15.0)]
-        );
     }
 
     pub fn test_batched_gemm<M: DenseMatrix>(ctx: M::C) {
@@ -1204,35 +1160,6 @@ pub(crate) mod tests {
     }
 
     // --- Broadcasting tests ---
-
-    pub fn test_batched_gemv_broadcast_x<M: DenseMatrix>(ctx: M::C) {
-        assert_eq!(ctx.nbatch(), 2);
-        // batch0: A=[[1,2],[3,4]], batch1: A=[[5,6],[7,8]]
-        let a = M::from_vec(
-            2,
-            2,
-            vec![
-                f::<M>(1.0),
-                f::<M>(3.0),
-                f::<M>(2.0),
-                f::<M>(4.0),
-                f::<M>(5.0),
-                f::<M>(7.0),
-                f::<M>(6.0),
-                f::<M>(8.0),
-            ],
-            ctx.clone(),
-        );
-        // x with nbatch=1: [1, 2] (broadcast to all batches)
-        let x = M::V::from_vec(vec![f::<M>(1.0), f::<M>(2.0)], Default::default());
-        let mut y = M::V::zeros(2, ctx);
-        a.gemv(f::<M>(1.0), &x, f::<M>(0.0), &mut y);
-        // batch0: [1+4, 3+8]=[5,11], batch1: [5+12, 7+16]=[17,23]
-        assert_eq!(
-            y.clone_as_vec(),
-            vec![f::<M>(5.0), f::<M>(11.0), f::<M>(17.0), f::<M>(23.0)]
-        );
-    }
 
     pub fn test_batched_gemm_broadcast_b<M: DenseMatrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);

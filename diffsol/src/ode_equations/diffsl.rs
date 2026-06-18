@@ -1366,16 +1366,22 @@ mod tests {
     use diffsl::ObjectModule;
 
     use crate::{
-        matrix::MatrixRef,
+        matrix::MatrixRef, ConstantOp, Context, DefaultDenseMatrix, DefaultSolver, Matrix,
+        NonLinearOpAdjoint, NonLinearOpSens, NonLinearOpSensAdjoint, OdeEquations, Vector,
+        VectorHost, VectorRef,
+    };
+    // Re-imports only needed for certain cfg-gated test paths.
+    // Keep as public (but unused) for those feature combinations.
+    #[allow(unused_imports)]
+    use crate::{
         op::{
             linear_op::LinearOp,
             nonlinear_op::{NonLinearOp, NonLinearOpJacobian},
         },
         scalar::Scalar,
-        ConstantOp, Context, DefaultDenseMatrix, DefaultSolver, DenseMatrix, DiffSlContext,
-        DiffsolError, Matrix, NonLinearOpAdjoint, NonLinearOpSens, NonLinearOpSensAdjoint,
-        OdeBuilder, OdeEquations, OdeSolverMethod, Vector, VectorHost, VectorRef, VectorView,
+        DenseMatrix, DiffSlContext, DiffsolError, OdeBuilder, OdeSolverMethod, VectorView,
     };
+    #[allow(unused_imports)]
     use num_traits::ToPrimitive;
 
     use super::DiffSl;

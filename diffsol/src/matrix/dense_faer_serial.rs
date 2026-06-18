@@ -6,7 +6,7 @@ use super::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
 use crate::error::DiffsolError;
 use crate::scalar::{IndexType, Scalar, Scale};
 use crate::VectorIndex;
-use crate::{Dense, DenseRef, FaerContext, FaerScalar, FaerVec, Vector, VectorViewMut};
+use crate::{Dense, DenseRef, FaerContext, FaerScalar, FaerVec, Vector};
 use crate::{FaerLU, FaerVecMut, FaerVecRef};
 
 use faer::reborrow::ReborrowMut;

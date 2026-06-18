@@ -24,7 +24,6 @@ use crate::{
     error::{DiffsolError, LinearSolverError},
     linear_solver::LinearSolver,
     linear_solver_error,
-    matrix::MatrixCommon,
     vector::Vector,
     Context, FaerSparseMat, FaerVec, Matrix, NonLinearOpJacobian,
 };
@@ -55,17 +54,12 @@ impl MatrixKLU for FaerSparseMat<f64> {
 }
 
 trait VectorKLU: Vector {
-    fn values_mut_ptr(&mut self) -> *mut f64;
     fn batch_values_mut_ptr(&mut self, batch: usize) -> *mut f64;
 }
 
 impl VectorKLU for FaerVec<f64> {
-    fn values_mut_ptr(&mut self) -> *mut f64 {
-        self.data.as_mut().as_ptr_mut()
-    }
-
     fn batch_values_mut_ptr(&mut self, batch: usize) -> *mut f64 {
-        unsafe { self.data.as_mut().ptr_at_mut(0, batch) }
+        self.data.as_mut().ptr_at_mut(0, batch)
     }
 }
 
@@ -246,7 +240,7 @@ where
     fn set_problem<C: NonLinearOpJacobian<T = M::T, V = M::V, M = M, C = M::C>>(&mut self, op: &C) {
         let ncols = op.nstates();
         let nrows = op.nout();
-        let mut matrix =
+        let matrix =
             C::M::new_from_sparsity(nrows, ncols, op.jacobian_sparsity(), op.context().clone());
         let mut klu_common = self.klu_common.borrow_mut();
         self.klu_symbolic = KluSymbolic::try_from_matrix(&matrix, klu_common.as_mut()).ok();
@@ -259,7 +253,7 @@ mod tests {
     use crate::{
         linear_solver::tests::{linear_problem, linear_problem_batched, test_linear_solver},
         op::ParameterisedOp,
-        Context, FaerContext, FaerSparseMat, Op,
+        FaerContext, FaerSparseMat, Op,
     };
 
     use super::*;

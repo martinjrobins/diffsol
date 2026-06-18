@@ -46,42 +46,6 @@ macro_rules! impl_vector_common_ref {
 }
 pub(crate) use impl_vector_common_ref;
 
-macro_rules! impl_sub_assign {
-    ($lhs:ty, $rhs:ty) => {
-        impl<T: Scalar> SubAssign<$rhs> for $lhs {
-            fn sub_assign(&mut self, rhs: $rhs) {
-                self.data -= &rhs.data;
-            }
-        }
-    };
-    ($lhs:ty, $rhs:ty, $bound:path) => {
-        impl<T: Scalar + $bound> SubAssign<$rhs> for $lhs {
-            fn sub_assign(&mut self, rhs: $rhs) {
-                self.data -= &rhs.data;
-            }
-        }
-    };
-}
-pub(crate) use impl_sub_assign;
-
-macro_rules! impl_add_assign {
-    ($lhs:ty, $rhs:ty) => {
-        impl<T: Scalar> AddAssign<$rhs> for $lhs {
-            fn add_assign(&mut self, rhs: $rhs) {
-                self.data += &rhs.data;
-            }
-        }
-    };
-    ($lhs:ty, $rhs:ty, $bound:path) => {
-        impl<T: Scalar + $bound> AddAssign<$rhs> for $lhs {
-            fn add_assign(&mut self, rhs: $rhs) {
-                self.data += &rhs.data;
-            }
-        }
-    };
-}
-pub(crate) use impl_add_assign;
-
 macro_rules! impl_sub_lhs {
     ($lhs:ty, $rhs:ty, $out:ty) => {
         impl<T: Scalar> Sub<$rhs> for $lhs {

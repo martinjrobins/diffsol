@@ -1059,17 +1059,6 @@ pub fn exponential_decay_with_reset_problem_sens<M: MatrixHost + 'static>() -> (
 // via `get_batch`/`get_batch_mut` to support `nbatch > 1`.
 // ------------------------------------------------------------------
 
-fn exponential_decay_two_root_batched<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
-    let nbatch = y.context().nbatch();
-    for b in 0..nbatch {
-        let xb = x.get_batch(b);
-        let x0 = xb.get_index(0);
-        let mut yb = y.get_batch_mut(b);
-        yb.set_index(0, x0 - M::T::from_f64(0.6).unwrap());
-        yb.set_index(1, x0 - M::T::from_f64(0.3).unwrap());
-    }
-}
-
 fn exponential_decay_time_root_batched<M: Matrix>(_x: &M::V, _p: &M::V, t: M::T, y: &mut M::V) {
     y.fill(t - M::T::from_f64(5.0).unwrap());
 }
@@ -1211,16 +1200,6 @@ fn exponential_decay_out_adj_mul_batched<M: Matrix>(
                 - M::T::from_f64(4.0).unwrap() * vb.get_index(1),
         );
     }
-}
-
-fn exponential_decay_out_sens_batched<M: Matrix>(
-    _x: &M::V,
-    _p: &M::V,
-    _t: M::T,
-    _v: &M::V,
-    y: &mut M::V,
-) {
-    y.fill(M::T::zero());
 }
 
 fn exponential_decay_out_sens_adj_batched<M: Matrix>(

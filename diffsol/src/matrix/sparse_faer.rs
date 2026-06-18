@@ -505,7 +505,7 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Context, FaerContext, FaerSparseMat, Matrix, MatrixCommon, Vector};
+    use crate::{FaerContext, FaerSparseMat};
 
     super::super::generate_matrix_tests!(
         faer_sparse,
