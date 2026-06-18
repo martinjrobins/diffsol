@@ -1014,6 +1014,40 @@ pub(crate) mod tests {
         assert_eq!(c.get_index(1, 1), f::<M>(4.0));
     }
 
+    pub fn test_batched_gemm_broadcast_a<M: DenseMatrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        // A with nbatch=1: [[1,0],[0,2]]
+        let a = M::from_vec(
+            2,
+            2,
+            vec![f::<M>(1.0), f::<M>(0.0), f::<M>(0.0), f::<M>(2.0)],
+            Default::default(),
+        );
+        // batch0: B=[[3,4],[5,6]], batch1: B=[[1,1],[1,1]]
+        let b = M::from_vec(
+            2,
+            2,
+            vec![
+                f::<M>(3.0),
+                f::<M>(5.0),
+                f::<M>(4.0),
+                f::<M>(6.0),
+                f::<M>(1.0),
+                f::<M>(1.0),
+                f::<M>(1.0),
+                f::<M>(1.0),
+            ],
+            ctx.clone(),
+        );
+        let mut c = M::zeros(2, 2, ctx);
+        c.gemm(f::<M>(1.0), &a, &b, f::<M>(0.0));
+        // batch0: [[1,0],[0,2]]*[[3,4],[5,6]]=[[3,4],[10,12]]
+        assert_eq!(c.get_index(0, 0), f::<M>(3.0));
+        assert_eq!(c.get_index(1, 0), f::<M>(10.0));
+        assert_eq!(c.get_index(0, 1), f::<M>(4.0));
+        assert_eq!(c.get_index(1, 1), f::<M>(12.0));
+    }
+
     pub fn test_batched_gemv_o_broadcast_x<M: DenseMatrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         // 2x3 diff matrix, nbatch=2
@@ -1092,7 +1126,61 @@ pub(crate) mod tests {
         assert_eq!(result.get_index(1, 1), f::<M>(5.0));
     }
 
+    pub fn test_batched_gemm_vo_broadcast_a<M: DenseMatrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        // diff with nbatch=1: 2x3 matrix [[1,2,3],[4,5,6]]
+        let diff = M::from_vec(
+            2,
+            3,
+            vec![
+                f::<M>(1.0),
+                f::<M>(4.0),
+                f::<M>(2.0),
+                f::<M>(5.0),
+                f::<M>(3.0),
+                f::<M>(6.0),
+            ],
+            Default::default(),
+        );
+        // b with nbatch=2: batch0=[[1,0],[0,1]], batch1=[[2,0],[0,3]]
+        let b = M::from_vec(
+            2,
+            2,
+            vec![
+                f::<M>(1.0),
+                f::<M>(0.0),
+                f::<M>(0.0),
+                f::<M>(1.0),
+                f::<M>(2.0),
+                f::<M>(0.0),
+                f::<M>(0.0),
+                f::<M>(3.0),
+            ],
+            ctx.clone(),
+        );
+        let mut result = M::zeros(2, 3, ctx);
+        {
+            let d_view = diff.columns(0, 2);
+            let mut r_view = result.columns_mut(0, 2);
+            r_view.gemm_vo(f::<M>(1.0), &d_view, &b, f::<M>(0.0));
+        }
+        // batch0: [[1,2],[4,5]]*I=[[1,2],[4,5]], batch1: [[1,2],[4,5]]*[[2,0],[0,3]]=[[2,6],[8,15]]
+        assert_eq!(result.get_index(0, 0), f::<M>(1.0));
+        assert_eq!(result.get_index(1, 0), f::<M>(4.0));
+        assert_eq!(result.get_index(0, 1), f::<M>(2.0));
+        assert_eq!(result.get_index(1, 1), f::<M>(5.0));
+    }
+
     // --- Incompatible batch tests ---
+
+    pub fn test_batched_gemm_incompatible_a<M: DenseMatrix>(ctx2: M::C, ctx3: M::C) {
+        assert_eq!(ctx2.nbatch(), 2);
+        assert_eq!(ctx3.nbatch(), 3);
+        let a = M::zeros(2, 2, ctx3);
+        let b = M::zeros(2, 2, ctx2.clone());
+        let mut c = M::zeros(2, 2, ctx2);
+        c.gemm(f::<M>(1.0), &a, &b, f::<M>(0.0));
+    }
 
     pub fn test_batched_gemv_incompatible<M: DenseMatrix>(ctx2: M::C, ctx3: M::C) {
         assert_eq!(ctx2.nbatch(), 2);
@@ -1314,6 +1402,14 @@ macro_rules! generate_matrix_tests {
                 $crate::matrix::tests::test_batched_gemm_vo_broadcast_b::<$M>($ctx2);
             }
             #[test]
+            fn [<test_batched_gemm_broadcast_a_ $suffix>]() {
+                $crate::matrix::tests::test_batched_gemm_broadcast_a::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_gemm_vo_broadcast_a_ $suffix>]() {
+                $crate::matrix::tests::test_batched_gemm_vo_broadcast_a::<$M>($ctx2);
+            }
+            #[test]
             fn [<test_batched_resize_cols_ $suffix>]() {
                 $crate::matrix::tests::test_batched_resize_cols::<$M>($ctx2);
             }
@@ -1330,6 +1426,11 @@ macro_rules! generate_matrix_tests {
             #[should_panic(expected = "incompatible nbatch")]
             fn [<test_batched_gemm_incompatible_ $suffix>]() {
                 $crate::matrix::tests::test_batched_gemm_incompatible::<$M>($ctx2, $ctx1.clone_with_nbatch(3));
+            }
+            #[test]
+            #[should_panic(expected = "incompatible nbatch")]
+            fn [<test_batched_gemm_incompatible_a_ $suffix>]() {
+                $crate::matrix::tests::test_batched_gemm_incompatible_a::<$M>($ctx2, $ctx1.clone_with_nbatch(3));
             }
         }
     };
