@@ -424,12 +424,17 @@ impl<T: NalgebraScalar> Matrix for NalgebraMat<T> {
     }
 
     fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
-        let nbatch = self.context.nbatch();
+        let self_nbatch = self.context.nbatch();
         let ncols = self.ncols();
         let x_nbatch = x.data.ncols();
         self.context.assert_compatible_nbatch(x_nbatch, "gemv");
-        for b in 0..nbatch {
-            let a_view = self.data.columns(b * ncols, ncols);
+        let max_nbatch = self_nbatch.max(x_nbatch);
+        for b in 0..max_nbatch {
+            let a_view = if self_nbatch == 1 {
+                self.data.columns(0, ncols)
+            } else {
+                self.data.columns(b * ncols, ncols)
+            };
             let x_col = if x_nbatch == 1 {
                 x.data.column(0)
             } else {
@@ -615,6 +620,13 @@ mod tests {
     use super::*;
 
     super::super::generate_matrix_tests!(
+        nalgebra,
+        NalgebraMat<f64>,
+        NalgebraContext::default(),
+        NalgebraContext::with_nbatch(2)
+    );
+
+    super::super::generate_dense_matrix_tests!(
         nalgebra,
         NalgebraMat<f64>,
         NalgebraContext::default(),

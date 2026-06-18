@@ -141,15 +141,18 @@ impl<'a, T: FaerScalar> MatrixView<'a> for FaerMatRef<'a, T> {
     }
 
     fn gemv_o(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
-        let nbatch = self.context.nbatch();
+        let self_nbatch = self.context.nbatch();
         let ncols = self.ncols();
         let stride = self.batch_stride;
         let x_nbatch = x.data.ncols();
+        let max_nbatch = self_nbatch.max(x_nbatch);
         self.context.assert_compatible_nbatch(x_nbatch, "gemv_o");
-        for b in 0..nbatch {
-            let a_view = self
-                .data
-                .get(0..self.nrows(), b * stride..b * stride + ncols);
+        for b in 0..max_nbatch {
+            let a_view = if self_nbatch == 1 {
+                self.data.get(0..self.nrows(), 0..ncols)
+            } else {
+                self.data.get(0..self.nrows(), b * stride..b * stride + ncols)
+            };
             let x_col = if x_nbatch == 1 {
                 x.data.col(0)
             } else {
@@ -174,15 +177,18 @@ impl<'a, T: FaerScalar> MatrixView<'a> for FaerMatRef<'a, T> {
         beta: Self::T,
         y: &mut Self::V,
     ) {
-        let nbatch = self.context.nbatch();
+        let self_nbatch = self.context.nbatch();
         let ncols = self.ncols();
         let stride = self.batch_stride;
         let x_nbatch = x.data.ncols();
+        let max_nbatch = self_nbatch.max(x_nbatch);
         self.context.assert_compatible_nbatch(x_nbatch, "gemv_v");
-        for b in 0..nbatch {
-            let a_view = self
-                .data
-                .get(0..self.nrows(), b * stride..b * stride + ncols);
+        for b in 0..max_nbatch {
+            let a_view = if self_nbatch == 1 {
+                self.data.get(0..self.nrows(), 0..ncols)
+            } else {
+                self.data.get(0..self.nrows(), b * stride..b * stride + ncols)
+            };
             let x_col = if x_nbatch == 1 {
                 x.data.col(0)
             } else {
@@ -585,12 +591,17 @@ impl<T: FaerScalar> Matrix for FaerMat<T> {
         })
     }
     fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
-        let nbatch = self.context.nbatch();
+        let self_nbatch = self.context.nbatch();
         let ncols = self.ncols();
         let x_nbatch = x.data.ncols();
         self.context.assert_compatible_nbatch(x_nbatch, "gemv");
-        for b in 0..nbatch {
-            let a_view = self.data.get(0..self.nrows(), b * ncols..b * ncols + ncols);
+        let max_nbatch = self_nbatch.max(x_nbatch);
+        for b in 0..max_nbatch {
+            let a_view = if self_nbatch == 1 {
+                self.data.get(0..self.nrows(), 0..ncols)
+            } else {
+                self.data.get(0..self.nrows(), b * ncols..b * ncols + ncols)
+            };
             let x_col = if x_nbatch == 1 {
                 x.data.col(0)
             } else {
@@ -675,6 +686,13 @@ mod tests {
     use super::*;
 
     super::super::generate_matrix_tests!(
+        faer,
+        FaerMat<f64>,
+        FaerContext::default(),
+        FaerContext::with_nbatch(2)
+    );
+
+    super::super::generate_dense_matrix_tests!(
         faer,
         FaerMat<f64>,
         FaerContext::default(),

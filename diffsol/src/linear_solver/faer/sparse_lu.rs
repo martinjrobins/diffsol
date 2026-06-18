@@ -3,7 +3,7 @@ use crate::{
     linear_solver::LinearSolver,
     linear_solver_error,
     scalar::IndexType,
-    FaerContext, FaerScalar, FaerSparseMat, FaerVec, Matrix, NonLinearOpJacobian,
+    Context, FaerContext, FaerScalar, FaerSparseMat, FaerVec, Matrix, NonLinearOpJacobian, Vector,
 };
 
 use faer::{
@@ -17,7 +17,7 @@ pub struct FaerSparseLU<T>
 where
     T: FaerScalar,
 {
-    lu: Option<Lu<IndexType, T>>,
+    lu: Vec<Lu<IndexType, T>>,
     lu_symbolic: Option<SymbolicLu<IndexType>>,
     matrix: Option<FaerSparseMat<T>>,
 }
@@ -28,7 +28,7 @@ where
 {
     fn default() -> Self {
         Self {
-            lu: None,
+            lu: Vec::new(),
             matrix: None,
             lu_symbolic: None,
         }
@@ -44,18 +44,28 @@ impl<T: FaerScalar> LinearSolver<FaerSparseMat<T>> for FaerSparseLU<T> {
     ) {
         let matrix = self.matrix.as_mut().expect("Matrix not set");
         op.jacobian_inplace(x, t, matrix);
-        self.lu = Some(
-            Lu::try_new_with_symbolic(self.lu_symbolic.as_ref().unwrap().clone(), matrix.data.rb())
+        let nbatch = matrix.context.nbatch();
+        self.lu.clear();
+        for b in 0..nbatch {
+            self.lu.push(
+                Lu::try_new_with_symbolic(
+                    self.lu_symbolic.as_ref().unwrap().clone(),
+                    matrix.data[b].rb(),
+                )
                 .expect("Failed to factorise matrix"),
-        )
+            );
+        }
     }
 
     fn solve_in_place(&self, x: &mut FaerVec<T>) -> Result<(), DiffsolError> {
-        if self.lu.is_none() {
+        if self.lu.is_empty() {
             return Err(linear_solver_error!(LuNotInitialized))?;
         }
-        let lu = self.lu.as_ref().unwrap();
-        lu.solve_in_place(&mut x.data);
+        let nbatch = x.context().nbatch();
+        for b in 0..nbatch {
+            let lu = &self.lu[b];
+            lu.solve_in_place(x.data.col_mut(b));
+        }
         Ok(())
     }
 
@@ -68,10 +78,10 @@ impl<T: FaerScalar> LinearSolver<FaerSparseMat<T>> for FaerSparseLU<T> {
         let ncols = op.nstates();
         let nrows = op.nout();
         let matrix = C::M::new_from_sparsity(nrows, ncols, op.jacobian_sparsity(), *op.context());
-        self.matrix = Some(matrix);
         self.lu_symbolic = Some(
-            SymbolicLu::try_new(self.matrix.as_ref().unwrap().data.symbolic())
+            SymbolicLu::try_new(matrix.data[0].symbolic())
                 .expect("Failed to create symbolic LU"),
         );
+        self.matrix = Some(matrix);
     }
 }

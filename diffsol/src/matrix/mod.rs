@@ -430,6 +430,16 @@ pub(crate) mod tests {
         M::T::from_f64(x).unwrap()
     }
 
+    fn triplet_values<M: Matrix>(m: &M) -> Vec<M::T> {
+        let (_, vals) = m.triplet_iter();
+        vals.collect()
+    }
+
+    fn triplet_indices<M: Matrix>(m: &M) -> Vec<(IndexType, IndexType)> {
+        let (idx, _) = m.triplet_iter();
+        idx.collect()
+    }
+
     pub fn test_partition_indices_by_zero_diagonal<M: Matrix>() {
         let indices = vec![(0, 0), (1, 1), (3, 3)];
         let values = vec![M::T::one(), M::T::from_f64(2.0).unwrap(), M::T::one()];
@@ -468,6 +478,107 @@ pub(crate) mod tests {
         );
         assert_eq!(non_zero_diagonal_indices.clone_as_vec(), vec![0, 1, 2, 3]);
     }
+
+    // --- Matrix-generic tests (work with both dense and sparse) ---
+
+    pub fn test_zeros<M: Matrix>() {
+        let a = M::zeros(2, 3, Default::default());
+        assert_eq!(a.nrows(), 2);
+        assert_eq!(a.ncols(), 3);
+        let vals = triplet_values(&a);
+        assert!(vals.is_empty() || vals.iter().all(|v| v.is_zero()));
+    }
+
+    pub fn test_from_diagonal<M: Matrix>() {
+        let v = M::V::from_vec(
+            vec![f::<M>(2.0), f::<M>(3.0), f::<M>(5.0)],
+            Default::default(),
+        );
+        let a = M::from_diagonal(&v);
+        assert_eq!(a.nrows(), 3);
+        assert_eq!(a.ncols(), 3);
+        let idx = triplet_indices(&a);
+        let vals = triplet_values(&a);
+        // diagonal matrix triplet_iter returns only the diagonal nnz entries
+        for &(i, j) in &idx {
+            let pos = idx.iter().position(|&x| x == (i, j)).unwrap();
+            if i == j {
+                assert!(vals[pos] != M::T::zero(), "diagonal entry should be non-zero");
+            } else {
+                assert!(vals[pos].is_zero(), "off-diagonal entry should be zero");
+            }
+        }
+    }
+
+    pub fn test_from_diagonal_dense<M: DenseMatrix>() {
+        let v = M::V::from_vec(
+            vec![f::<M>(2.0), f::<M>(3.0), f::<M>(5.0)],
+            Default::default(),
+        );
+        let a = M::from_diagonal(&v);
+        assert_eq!(a.nrows(), 3);
+        assert_eq!(a.ncols(), 3);
+        assert_eq!(a.get_index(0, 0), f::<M>(2.0));
+        assert_eq!(a.get_index(1, 1), f::<M>(3.0));
+        assert_eq!(a.get_index(2, 2), f::<M>(5.0));
+        assert_eq!(a.get_index(0, 1), f::<M>(0.0));
+        assert_eq!(a.get_index(1, 0), f::<M>(0.0));
+    }
+
+    pub fn test_gemv<M: Matrix>() {
+        let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
+        let values = vec![f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0)];
+        let a = M::try_from_triplets(2, 2, indices, values, Default::default()).unwrap();
+        let x = M::V::from_vec(vec![f::<M>(1.0), f::<M>(2.0)], Default::default());
+        let mut y = M::V::zeros(2, Default::default());
+        a.gemv(f::<M>(1.0), &x, f::<M>(0.0), &mut y);
+        assert_eq!(y.clone_as_vec(), vec![f::<M>(5.0), f::<M>(11.0)]);
+    }
+
+    pub fn test_set_column<M: Matrix>() {
+        let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
+        let values = vec![
+            f::<M>(0.0),
+            f::<M>(0.0),
+            f::<M>(0.0),
+            f::<M>(0.0),
+        ];
+        let mut a = M::try_from_triplets(2, 2, indices, values, Default::default()).unwrap();
+        let v = M::V::from_vec(vec![f::<M>(7.0), f::<M>(8.0)], Default::default());
+        a.set_column(1, &v);
+        let idx = triplet_indices(&a);
+        let vals = triplet_values(&a);
+        assert_eq!(idx, vec![(0, 0), (1, 0), (0, 1), (1, 1)]);
+        assert_eq!(vals, vec![f::<M>(0.0), f::<M>(0.0), f::<M>(7.0), f::<M>(8.0)]);
+    }
+
+    pub fn test_copy_from<M: Matrix>() {
+        let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
+        let values = vec![f::<M>(1.0), f::<M>(2.0), f::<M>(3.0), f::<M>(4.0)];
+        let a = M::try_from_triplets(2, 2, indices, values, Default::default()).unwrap();
+        let mut b = M::zeros(2, 2, Default::default());
+        b.copy_from(&a);
+        let vals = triplet_values(&b);
+        assert_eq!(vals, vec![f::<M>(1.0), f::<M>(2.0), f::<M>(3.0), f::<M>(4.0)]);
+    }
+
+    pub fn test_scale_add_and_assign<M: Matrix>() {
+        let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
+        let x_vals = vec![f::<M>(1.0), f::<M>(2.0), f::<M>(3.0), f::<M>(4.0)];
+        let y_vals = vec![f::<M>(10.0), f::<M>(20.0), f::<M>(30.0), f::<M>(40.0)];
+        let x = M::try_from_triplets(2, 2, indices.clone(), x_vals, Default::default()).unwrap();
+        let y = M::try_from_triplets(2, 2, indices, y_vals, Default::default()).unwrap();
+        let mut result = M::zeros(2, 2, Default::default());
+        result.copy_from(&x);
+        result.scale_add_and_assign(&x, f::<M>(2.0), &y);
+        let vals = triplet_values(&result);
+        assert_eq!(
+            vals,
+            vec![f::<M>(21.0), f::<M>(42.0), f::<M>(63.0), f::<M>(84.0)]
+        );
+    }
+
+    // --- DenseMatrix-specific tests ---
 
     pub fn test_column_axpy<M: DenseMatrix>() {
         let mut a = M::zeros(2, 2, Default::default());
@@ -512,19 +623,7 @@ pub(crate) mod tests {
         assert_eq!(a.get_index(1, 1), M::T::from_f64(4.0).unwrap());
     }
 
-    pub fn test_zeros<M: DenseMatrix>() {
-        let a = M::zeros(2, 3, Default::default());
-        assert_eq!(a.nrows(), 2);
-        assert_eq!(a.ncols(), 3);
-        for i in 0..2 {
-            for j in 0..3 {
-                assert_eq!(a.get_index(i, j), M::T::zero());
-            }
-        }
-    }
-
     pub fn test_from_vec<M: DenseMatrix>() {
-        // column-major: col0=[1,3], col1=[2,4]
         let a = M::from_vec(
             2,
             2,
@@ -539,38 +638,7 @@ pub(crate) mod tests {
         assert_eq!(a.get_index(1, 1), f::<M>(4.0));
     }
 
-    pub fn test_from_diagonal<M: DenseMatrix>() {
-        let v = M::V::from_vec(
-            vec![f::<M>(2.0), f::<M>(3.0), f::<M>(5.0)],
-            Default::default(),
-        );
-        let a = M::from_diagonal(&v);
-        assert_eq!(a.nrows(), 3);
-        assert_eq!(a.ncols(), 3);
-        assert_eq!(a.get_index(0, 0), f::<M>(2.0));
-        assert_eq!(a.get_index(1, 1), f::<M>(3.0));
-        assert_eq!(a.get_index(2, 2), f::<M>(5.0));
-        assert_eq!(a.get_index(0, 1), f::<M>(0.0));
-        assert_eq!(a.get_index(1, 0), f::<M>(0.0));
-    }
-
-    pub fn test_gemv<M: DenseMatrix>() {
-        // A = [[1,2],[3,4]] col-major: [1,3,2,4]
-        let a = M::from_vec(
-            2,
-            2,
-            vec![f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0)],
-            Default::default(),
-        );
-        let x = M::V::from_vec(vec![f::<M>(1.0), f::<M>(2.0)], Default::default());
-        let mut y = M::V::zeros(2, Default::default());
-        a.gemv(f::<M>(1.0), &x, f::<M>(0.0), &mut y);
-        // y = [1*1+2*2, 3*1+4*2] = [5, 11]
-        assert_eq!(y.clone_as_vec(), vec![f::<M>(5.0), f::<M>(11.0)]);
-    }
-
     pub fn test_gemm<M: DenseMatrix>() {
-        // A = [[1,2],[3,4]], B = [[2,0],[1,3]]
         let a = M::from_vec(
             2,
             2,
@@ -585,7 +653,6 @@ pub(crate) mod tests {
         );
         let mut c = M::zeros(2, 2, Default::default());
         c.gemm(f::<M>(1.0), &a, &b, f::<M>(0.0));
-        // C = A*B = [[1*2+2*1, 1*0+2*3],[3*2+4*1, 3*0+4*3]] = [[4,6],[10,12]]
         assert_eq!(c.get_index(0, 0), f::<M>(4.0));
         assert_eq!(c.get_index(1, 0), f::<M>(10.0));
         assert_eq!(c.get_index(0, 1), f::<M>(6.0));
@@ -613,7 +680,6 @@ pub(crate) mod tests {
     }
 
     pub fn test_columns_view<M: DenseMatrix>() {
-        // 2x3 matrix: [[1,2,3],[4,5,6]]
         let a = M::from_vec(
             2,
             3,
@@ -650,53 +716,163 @@ pub(crate) mod tests {
         assert_eq!(col.get_index(1), f::<M>(4.0));
     }
 
-    pub fn test_set_column<M: DenseMatrix>() {
-        let mut a = M::zeros(2, 2, Default::default());
-        let v = M::V::from_vec(vec![f::<M>(7.0), f::<M>(8.0)], Default::default());
-        a.set_column(1, &v);
-        assert_eq!(a.get_index(0, 0), f::<M>(0.0));
-        assert_eq!(a.get_index(0, 1), f::<M>(7.0));
-        assert_eq!(a.get_index(1, 1), f::<M>(8.0));
+    // --- Batched Matrix-generic tests ---
+
+    pub fn test_batched_zeros_m<M: Matrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let a = M::zeros(2, 3, ctx);
+        assert_eq!(a.nrows(), 2);
+        assert_eq!(a.ncols(), 3);
+        let vals = triplet_values(&a);
+        assert!(vals.is_empty() || vals.iter().all(|v| v.is_zero()));
     }
 
-    pub fn test_copy_from<M: DenseMatrix>() {
-        let a = M::from_vec(
-            2,
-            2,
-            vec![f::<M>(1.0), f::<M>(2.0), f::<M>(3.0), f::<M>(4.0)],
-            Default::default(),
+    pub fn test_batched_gemv_m<M: Matrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
+        let values = vec![
+            f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0), // batch 0
+            f::<M>(5.0), f::<M>(7.0), f::<M>(6.0), f::<M>(8.0), // batch 1
+        ];
+        let a = M::try_from_triplets(2, 2, indices, values, ctx.clone()).unwrap();
+        let x = M::V::from_vec(
+            vec![f::<M>(1.0), f::<M>(2.0), f::<M>(1.0), f::<M>(1.0)],
+            ctx.clone(),
         );
-        let mut b = M::zeros(2, 2, Default::default());
+        let mut y = M::V::zeros(2, ctx);
+        a.gemv(f::<M>(1.0), &x, f::<M>(0.0), &mut y);
+        assert_eq!(
+            y.clone_as_vec(),
+            vec![f::<M>(5.0), f::<M>(11.0), f::<M>(11.0), f::<M>(15.0)]
+        );
+    }
+
+    pub fn test_batched_gemv_broadcast_x_m<M: Matrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
+        let values = vec![
+            f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0),
+            f::<M>(5.0), f::<M>(7.0), f::<M>(6.0), f::<M>(8.0),
+        ];
+        let a = M::try_from_triplets(2, 2, indices, values, ctx.clone()).unwrap();
+        let x = M::V::from_vec(vec![f::<M>(1.0), f::<M>(2.0)], Default::default());
+        let mut y = M::V::zeros(2, ctx);
+        a.gemv(f::<M>(1.0), &x, f::<M>(0.0), &mut y);
+        assert_eq!(
+            y.clone_as_vec(),
+            vec![f::<M>(5.0), f::<M>(11.0), f::<M>(17.0), f::<M>(23.0)]
+        );
+    }
+
+    pub fn test_batched_gemv_broadcast_mat_m<M: Matrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
+        let values = vec![f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0)];
+        let a = M::try_from_triplets(2, 2, indices, values, ctx.clone_with_nbatch(1)).unwrap();
+        let x = M::V::from_vec(
+            vec![f::<M>(1.0), f::<M>(2.0), f::<M>(3.0), f::<M>(4.0)],
+            ctx.clone(),
+        );
+        let mut y = M::V::zeros(2, ctx);
+        a.gemv(f::<M>(1.0), &x, f::<M>(0.0), &mut y);
+        assert_eq!(
+            y.clone_as_vec(),
+            vec![f::<M>(5.0), f::<M>(11.0), f::<M>(11.0), f::<M>(25.0)]
+        );
+    }
+
+    pub fn test_batched_triplet_iter_s<M: Matrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let indices = vec![(0, 0), (1, 1)];
+        let nnz = indices.len();
+        let values = vec![
+            f::<M>(1.0), f::<M>(2.0), // batch 0
+            f::<M>(3.0), f::<M>(4.0), // batch 1
+        ];
+        let a = M::try_from_triplets(2, 2, indices, values, ctx).unwrap();
+        let (idx_iter, val_iter) = a.triplet_iter();
+        let idx: Vec<_> = idx_iter.collect();
+        let vals: Vec<_> = val_iter.collect();
+        assert_eq!(idx.len(), nnz);
+        assert_eq!(vals.len(), nnz * 2);
+    }
+
+    pub fn test_batched_from_diagonal_m<M: Matrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let v = M::V::from_vec(vec![f::<M>(2.0), f::<M>(3.0), f::<M>(4.0), f::<M>(5.0)], ctx);
+        let a = M::from_diagonal(&v);
+        assert_eq!(a.nrows(), 2);
+        assert_eq!(a.ncols(), 2);
+        let idx = triplet_indices(&a);
+        let vals = triplet_values(&a);
+        for &(i, j) in &idx {
+            let pos = idx.iter().position(|&x| x == (i, j)).unwrap();
+            if i == j {
+                assert!(vals[pos] != M::T::zero(), "diagonal entry should be non-zero");
+            } else {
+                assert!(vals[pos].is_zero(), "off-diagonal entry should be zero");
+            }
+        }
+    }
+
+    pub fn test_batched_copy_from_m<M: Matrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
+        let values = vec![
+            f::<M>(1.0), f::<M>(2.0), f::<M>(3.0), f::<M>(4.0),
+            f::<M>(5.0), f::<M>(6.0), f::<M>(7.0), f::<M>(8.0),
+        ];
+        let a = M::try_from_triplets(2, 2, indices, values, ctx.clone()).unwrap();
+        let mut b = M::zeros(2, 2, ctx);
         b.copy_from(&a);
-        assert_eq!(b.get_index(0, 0), f::<M>(1.0));
-        assert_eq!(b.get_index(1, 0), f::<M>(2.0));
-        assert_eq!(b.get_index(0, 1), f::<M>(3.0));
-        assert_eq!(b.get_index(1, 1), f::<M>(4.0));
+        let vals = triplet_values(&b);
+        assert_eq!(vals, vec![
+            f::<M>(1.0), f::<M>(2.0), f::<M>(3.0), f::<M>(4.0),
+            f::<M>(5.0), f::<M>(6.0), f::<M>(7.0), f::<M>(8.0),
+        ]);
     }
 
-    pub fn test_scale_add_and_assign<M: DenseMatrix>() {
-        let x = M::from_vec(
-            2,
-            2,
-            vec![f::<M>(1.0), f::<M>(2.0), f::<M>(3.0), f::<M>(4.0)],
-            Default::default(),
-        );
-        let y = M::from_vec(
-            2,
-            2,
-            vec![f::<M>(10.0), f::<M>(20.0), f::<M>(30.0), f::<M>(40.0)],
-            Default::default(),
-        );
-        let mut result = M::zeros(2, 2, Default::default());
+    pub fn test_batched_set_column_m<M: Matrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
+        let values = vec![
+            f::<M>(0.0), f::<M>(0.0), f::<M>(0.0), f::<M>(0.0),
+            f::<M>(0.0), f::<M>(0.0), f::<M>(0.0), f::<M>(0.0),
+        ];
+        let mut a = M::try_from_triplets(2, 2, indices, values, ctx.clone()).unwrap();
+        let v = M::V::from_vec(vec![f::<M>(5.0), f::<M>(6.0), f::<M>(7.0), f::<M>(8.0)], ctx);
+        a.set_column(0, &v);
+        let vals = triplet_values(&a);
+        assert_eq!(vals, vec![
+            f::<M>(5.0), f::<M>(6.0), f::<M>(0.0), f::<M>(0.0),
+            f::<M>(7.0), f::<M>(8.0), f::<M>(0.0), f::<M>(0.0),
+        ]);
+    }
+
+    pub fn test_batched_scale_add_and_assign_m<M: Matrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
+        let x_vals = vec![
+            f::<M>(1.0), f::<M>(2.0), f::<M>(3.0), f::<M>(4.0),
+            f::<M>(5.0), f::<M>(6.0), f::<M>(7.0), f::<M>(8.0),
+        ];
+        let y_vals = vec![
+            f::<M>(10.0), f::<M>(20.0), f::<M>(30.0), f::<M>(40.0),
+            f::<M>(50.0), f::<M>(60.0), f::<M>(70.0), f::<M>(80.0),
+        ];
+        let x = M::try_from_triplets(2, 2, indices.clone(), x_vals, ctx.clone()).unwrap();
+        let y = M::try_from_triplets(2, 2, indices, y_vals, ctx.clone()).unwrap();
+        let mut result = M::zeros(2, 2, ctx);
+        result.copy_from(&x);
         result.scale_add_and_assign(&x, f::<M>(2.0), &y);
-        // result = x + 2*y = [1+20, 2+40, 3+60, 4+80] = [21, 42, 63, 84]
-        assert_eq!(result.get_index(0, 0), f::<M>(21.0));
-        assert_eq!(result.get_index(1, 0), f::<M>(42.0));
-        assert_eq!(result.get_index(0, 1), f::<M>(63.0));
-        assert_eq!(result.get_index(1, 1), f::<M>(84.0));
+        let vals = triplet_values(&result);
+        assert_eq!(vals, vec![
+            f::<M>(21.0), f::<M>(42.0), f::<M>(63.0), f::<M>(84.0),
+            f::<M>(105.0), f::<M>(126.0), f::<M>(147.0), f::<M>(168.0),
+        ]);
     }
 
-    // --- Batched tests ---
+    // --- Batched DenseMatrix-specific tests ---
 
     pub fn test_batched_zeros<M: DenseMatrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
@@ -1306,16 +1482,76 @@ macro_rules! generate_matrix_tests {
                 $crate::matrix::tests::test_zeros::<$M>();
             }
             #[test]
-            fn [<test_from_vec_ $suffix>]() {
-                $crate::matrix::tests::test_from_vec::<$M>();
-            }
-            #[test]
             fn [<test_from_diagonal_ $suffix>]() {
                 $crate::matrix::tests::test_from_diagonal::<$M>();
             }
             #[test]
             fn [<test_gemv_ $suffix>]() {
                 $crate::matrix::tests::test_gemv::<$M>();
+            }
+            #[test]
+            fn [<test_set_column_ $suffix>]() {
+                $crate::matrix::tests::test_set_column::<$M>();
+            }
+            #[test]
+            fn [<test_copy_from_ $suffix>]() {
+                $crate::matrix::tests::test_copy_from::<$M>();
+            }
+            #[test]
+            fn [<test_scale_add_and_assign_ $suffix>]() {
+                $crate::matrix::tests::test_scale_add_and_assign::<$M>();
+            }
+            #[test]
+            fn [<test_partition_indices_ $suffix>]() {
+                $crate::matrix::tests::test_partition_indices_by_zero_diagonal::<$M>();
+            }
+            #[test]
+            fn [<test_batched_zeros_ $suffix>]() {
+                $crate::matrix::tests::test_batched_zeros_m::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_gemv_ $suffix>]() {
+                $crate::matrix::tests::test_batched_gemv_m::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_gemv_broadcast_x_ $suffix>]() {
+                $crate::matrix::tests::test_batched_gemv_broadcast_x_m::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_gemv_broadcast_mat_ $suffix>]() {
+                $crate::matrix::tests::test_batched_gemv_broadcast_mat_m::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_from_diagonal_ $suffix>]() {
+                $crate::matrix::tests::test_batched_from_diagonal_m::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_copy_from_ $suffix>]() {
+                $crate::matrix::tests::test_batched_copy_from_m::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_set_column_ $suffix>]() {
+                $crate::matrix::tests::test_batched_set_column_m::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_scale_add_ $suffix>]() {
+                $crate::matrix::tests::test_batched_scale_add_and_assign_m::<$M>($ctx2);
+            }
+        }
+    };
+}
+
+#[cfg(test)]
+macro_rules! generate_dense_matrix_tests {
+    ($suffix:ident, $M:ty, $ctx1:expr, $ctx2:expr) => {
+        paste::paste! {
+            #[test]
+            fn [<test_from_vec_ $suffix>]() {
+                $crate::matrix::tests::test_from_vec::<$M>();
+            }
+            #[test]
+            fn [<test_from_diagonal_dense_ $suffix>]() {
+                $crate::matrix::tests::test_from_diagonal_dense::<$M>();
             }
             #[test]
             fn [<test_gemm_ $suffix>]() {
@@ -1334,40 +1570,16 @@ macro_rules! generate_matrix_tests {
                 $crate::matrix::tests::test_column_view::<$M>();
             }
             #[test]
-            fn [<test_set_column_ $suffix>]() {
-                $crate::matrix::tests::test_set_column::<$M>();
-            }
-            #[test]
-            fn [<test_copy_from_ $suffix>]() {
-                $crate::matrix::tests::test_copy_from::<$M>();
-            }
-            #[test]
-            fn [<test_scale_add_and_assign_ $suffix>]() {
-                $crate::matrix::tests::test_scale_add_and_assign::<$M>();
-            }
-            #[test]
             fn [<test_column_axpy_ $suffix>]() {
                 $crate::matrix::tests::test_column_axpy::<$M>();
-            }
-            #[test]
-            fn [<test_partition_indices_ $suffix>]() {
-                $crate::matrix::tests::test_partition_indices_by_zero_diagonal::<$M>();
             }
             #[test]
             fn [<test_resize_cols_ $suffix>]() {
                 $crate::matrix::tests::test_resize_cols::<$M>();
             }
             #[test]
-            fn [<test_batched_zeros_ $suffix>]() {
-                $crate::matrix::tests::test_batched_zeros::<$M>($ctx2);
-            }
-            #[test]
             fn [<test_batched_from_vec_ $suffix>]() {
                 $crate::matrix::tests::test_batched_from_vec::<$M>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_gemv_ $suffix>]() {
-                $crate::matrix::tests::test_batched_gemv::<$M>($ctx2);
             }
             #[test]
             fn [<test_batched_gemm_ $suffix>]() {
@@ -1384,10 +1596,6 @@ macro_rules! generate_matrix_tests {
             #[test]
             fn [<test_batched_gemm_vo_on_columns_ $suffix>]() {
                 $crate::matrix::tests::test_batched_gemm_vo_on_columns::<$M>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_gemv_broadcast_x_ $suffix>]() {
-                $crate::matrix::tests::test_batched_gemv_broadcast_x::<$M>($ctx2);
             }
             #[test]
             fn [<test_batched_gemm_broadcast_b_ $suffix>]() {
@@ -1435,5 +1643,22 @@ macro_rules! generate_matrix_tests {
         }
     };
 }
+
+#[cfg(test)]
+macro_rules! generate_sparse_matrix_tests {
+    ($suffix:ident, $M:ty, $ctx1:expr, $ctx2:expr) => {
+        paste::paste! {
+            #[test]
+            fn [<test_batched_triplet_iter_ $suffix>]() {
+                $crate::matrix::tests::test_batched_triplet_iter_s::<$M>($ctx2);
+            }
+        }
+    };
+}
+
 #[cfg(test)]
 pub(crate) use generate_matrix_tests;
+#[cfg(test)]
+pub(crate) use generate_dense_matrix_tests;
+#[cfg(test)]
+pub(crate) use generate_sparse_matrix_tests;
