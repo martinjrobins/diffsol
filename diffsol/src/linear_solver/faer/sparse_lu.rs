@@ -79,9 +79,38 @@ impl<T: FaerScalar> LinearSolver<FaerSparseMat<T>> for FaerSparseLU<T> {
         let nrows = op.nout();
         let matrix = C::M::new_from_sparsity(nrows, ncols, op.jacobian_sparsity(), *op.context());
         self.lu_symbolic = Some(
-            SymbolicLu::try_new(matrix.data[0].symbolic())
-                .expect("Failed to create symbolic LU"),
+            SymbolicLu::try_new(matrix.data[0].symbolic()).expect("Failed to create symbolic LU"),
         );
         self.matrix = Some(matrix);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        linear_solver::tests::{linear_problem, linear_problem_batched, test_linear_solver},
+        op::ParameterisedOp,
+        Context, FaerContext, FaerSparseMat, Op,
+    };
+
+    use super::*;
+
+    #[test]
+    fn test_sparse_lu() {
+        let (op, rtol, atol, solns) = linear_problem::<FaerSparseMat<f64>>();
+        let p = FaerVec::zeros(0, *op.context());
+        let op = ParameterisedOp::new(&op, &p);
+        let s = FaerSparseLU::default();
+        test_linear_solver(s, op, rtol, &atol, solns);
+    }
+
+    #[test]
+    fn test_sparse_lu_batched() {
+        let ctx = FaerContext::with_nbatch(2);
+        let (op, rtol, atol, solns) = linear_problem_batched::<FaerSparseMat<f64>>(ctx);
+        let p = FaerVec::zeros(0, *op.context());
+        let op = ParameterisedOp::new(&op, &p);
+        let s = FaerSparseLU::default();
+        test_linear_solver(s, op, rtol, &atol, solns);
     }
 }

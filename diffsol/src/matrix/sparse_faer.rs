@@ -5,8 +5,8 @@ use super::extract_block::CscBlock;
 use super::sparsity::MatrixSparsityRef;
 use super::{Matrix, MatrixCommon, MatrixSparsity};
 use crate::error::{DiffsolError, MatrixError};
-use crate::{DefaultSolver, FaerScalar, FaerSparseLU, IndexType, Scalar, Scale};
 use crate::{Context, FaerContext, FaerVec, FaerVecIndex, Vector, VectorIndex};
+use crate::{DefaultSolver, FaerScalar, FaerSparseLU, IndexType, Scalar, Scale};
 
 use faer::reborrow::{Reborrow, ReborrowMut};
 use faer::sparse::ops::{ternary_op_assign_into, union_symbolic};
@@ -335,7 +335,9 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
         });
         let values = (0..nbatch).flat_map(move |b| {
             (0..ncols).flat_map(move |j| {
-                self.data[b].col_range(j).map(move |i| self.data[b].val()[i])
+                self.data[b]
+                    .col_range(j)
+                    .map(move |i| self.data[b].val()[i])
             })
         });
         (indices, values)
@@ -381,8 +383,7 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
     fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
         let x_nbatch = x.data.ncols();
         let self_nbatch = self.data.len();
-        self.context
-            .assert_compatible_nbatch(x_nbatch, "gemv");
+        self.context.assert_compatible_nbatch(x_nbatch, "gemv");
         let max_nbatch = self_nbatch.max(x_nbatch);
         for b in 0..max_nbatch {
             let x_col = if x_nbatch == 1 {

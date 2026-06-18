@@ -151,7 +151,8 @@ impl<'a, T: FaerScalar> MatrixView<'a> for FaerMatRef<'a, T> {
             let a_view = if self_nbatch == 1 {
                 self.data.get(0..self.nrows(), 0..ncols)
             } else {
-                self.data.get(0..self.nrows(), b * stride..b * stride + ncols)
+                self.data
+                    .get(0..self.nrows(), b * stride..b * stride + ncols)
             };
             let x_col = if x_nbatch == 1 {
                 x.data.col(0)
@@ -187,7 +188,8 @@ impl<'a, T: FaerScalar> MatrixView<'a> for FaerMatRef<'a, T> {
             let a_view = if self_nbatch == 1 {
                 self.data.get(0..self.nrows(), 0..ncols)
             } else {
-                self.data.get(0..self.nrows(), b * stride..b * stride + ncols)
+                self.data
+                    .get(0..self.nrows(), b * stride..b * stride + ncols)
             };
             let x_col = if x_nbatch == 1 {
                 x.data.col(0)

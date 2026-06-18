@@ -503,7 +503,10 @@ pub(crate) mod tests {
         for &(i, j) in &idx {
             let pos = idx.iter().position(|&x| x == (i, j)).unwrap();
             if i == j {
-                assert!(vals[pos] != M::T::zero(), "diagonal entry should be non-zero");
+                assert!(
+                    vals[pos] != M::T::zero(),
+                    "diagonal entry should be non-zero"
+                );
             } else {
                 assert!(vals[pos].is_zero(), "off-diagonal entry should be zero");
             }
@@ -537,19 +540,17 @@ pub(crate) mod tests {
 
     pub fn test_set_column<M: Matrix>() {
         let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
-        let values = vec![
-            f::<M>(0.0),
-            f::<M>(0.0),
-            f::<M>(0.0),
-            f::<M>(0.0),
-        ];
+        let values = vec![f::<M>(0.0), f::<M>(0.0), f::<M>(0.0), f::<M>(0.0)];
         let mut a = M::try_from_triplets(2, 2, indices, values, Default::default()).unwrap();
         let v = M::V::from_vec(vec![f::<M>(7.0), f::<M>(8.0)], Default::default());
         a.set_column(1, &v);
         let idx = triplet_indices(&a);
         let vals = triplet_values(&a);
         assert_eq!(idx, vec![(0, 0), (1, 0), (0, 1), (1, 1)]);
-        assert_eq!(vals, vec![f::<M>(0.0), f::<M>(0.0), f::<M>(7.0), f::<M>(8.0)]);
+        assert_eq!(
+            vals,
+            vec![f::<M>(0.0), f::<M>(0.0), f::<M>(7.0), f::<M>(8.0)]
+        );
     }
 
     pub fn test_copy_from<M: Matrix>() {
@@ -559,7 +560,10 @@ pub(crate) mod tests {
         let mut b = M::zeros(2, 2, Default::default());
         b.copy_from(&a);
         let vals = triplet_values(&b);
-        assert_eq!(vals, vec![f::<M>(1.0), f::<M>(2.0), f::<M>(3.0), f::<M>(4.0)]);
+        assert_eq!(
+            vals,
+            vec![f::<M>(1.0), f::<M>(2.0), f::<M>(3.0), f::<M>(4.0)]
+        );
     }
 
     pub fn test_scale_add_and_assign<M: Matrix>() {
@@ -731,8 +735,14 @@ pub(crate) mod tests {
         assert_eq!(ctx.nbatch(), 2);
         let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
         let values = vec![
-            f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0), // batch 0
-            f::<M>(5.0), f::<M>(7.0), f::<M>(6.0), f::<M>(8.0), // batch 1
+            f::<M>(1.0),
+            f::<M>(3.0),
+            f::<M>(2.0),
+            f::<M>(4.0), // batch 0
+            f::<M>(5.0),
+            f::<M>(7.0),
+            f::<M>(6.0),
+            f::<M>(8.0), // batch 1
         ];
         let a = M::try_from_triplets(2, 2, indices, values, ctx.clone()).unwrap();
         let x = M::V::from_vec(
@@ -751,8 +761,14 @@ pub(crate) mod tests {
         assert_eq!(ctx.nbatch(), 2);
         let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
         let values = vec![
-            f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0),
-            f::<M>(5.0), f::<M>(7.0), f::<M>(6.0), f::<M>(8.0),
+            f::<M>(1.0),
+            f::<M>(3.0),
+            f::<M>(2.0),
+            f::<M>(4.0),
+            f::<M>(5.0),
+            f::<M>(7.0),
+            f::<M>(6.0),
+            f::<M>(8.0),
         ];
         let a = M::try_from_triplets(2, 2, indices, values, ctx.clone()).unwrap();
         let x = M::V::from_vec(vec![f::<M>(1.0), f::<M>(2.0)], Default::default());
@@ -786,8 +802,10 @@ pub(crate) mod tests {
         let indices = vec![(0, 0), (1, 1)];
         let nnz = indices.len();
         let values = vec![
-            f::<M>(1.0), f::<M>(2.0), // batch 0
-            f::<M>(3.0), f::<M>(4.0), // batch 1
+            f::<M>(1.0),
+            f::<M>(2.0), // batch 0
+            f::<M>(3.0),
+            f::<M>(4.0), // batch 1
         ];
         let a = M::try_from_triplets(2, 2, indices, values, ctx).unwrap();
         let (idx_iter, val_iter) = a.triplet_iter();
@@ -799,7 +817,10 @@ pub(crate) mod tests {
 
     pub fn test_batched_from_diagonal_m<M: Matrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
-        let v = M::V::from_vec(vec![f::<M>(2.0), f::<M>(3.0), f::<M>(4.0), f::<M>(5.0)], ctx);
+        let v = M::V::from_vec(
+            vec![f::<M>(2.0), f::<M>(3.0), f::<M>(4.0), f::<M>(5.0)],
+            ctx,
+        );
         let a = M::from_diagonal(&v);
         assert_eq!(a.nrows(), 2);
         assert_eq!(a.ncols(), 2);
@@ -808,7 +829,10 @@ pub(crate) mod tests {
         for &(i, j) in &idx {
             let pos = idx.iter().position(|&x| x == (i, j)).unwrap();
             if i == j {
-                assert!(vals[pos] != M::T::zero(), "diagonal entry should be non-zero");
+                assert!(
+                    vals[pos] != M::T::zero(),
+                    "diagonal entry should be non-zero"
+                );
             } else {
                 assert!(vals[pos].is_zero(), "off-diagonal entry should be zero");
             }
@@ -819,46 +843,91 @@ pub(crate) mod tests {
         assert_eq!(ctx.nbatch(), 2);
         let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
         let values = vec![
-            f::<M>(1.0), f::<M>(2.0), f::<M>(3.0), f::<M>(4.0),
-            f::<M>(5.0), f::<M>(6.0), f::<M>(7.0), f::<M>(8.0),
+            f::<M>(1.0),
+            f::<M>(2.0),
+            f::<M>(3.0),
+            f::<M>(4.0),
+            f::<M>(5.0),
+            f::<M>(6.0),
+            f::<M>(7.0),
+            f::<M>(8.0),
         ];
         let a = M::try_from_triplets(2, 2, indices, values, ctx.clone()).unwrap();
         let mut b = M::zeros(2, 2, ctx);
         b.copy_from(&a);
         let vals = triplet_values(&b);
-        assert_eq!(vals, vec![
-            f::<M>(1.0), f::<M>(2.0), f::<M>(3.0), f::<M>(4.0),
-            f::<M>(5.0), f::<M>(6.0), f::<M>(7.0), f::<M>(8.0),
-        ]);
+        assert_eq!(
+            vals,
+            vec![
+                f::<M>(1.0),
+                f::<M>(2.0),
+                f::<M>(3.0),
+                f::<M>(4.0),
+                f::<M>(5.0),
+                f::<M>(6.0),
+                f::<M>(7.0),
+                f::<M>(8.0),
+            ]
+        );
     }
 
     pub fn test_batched_set_column_m<M: Matrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
         let values = vec![
-            f::<M>(0.0), f::<M>(0.0), f::<M>(0.0), f::<M>(0.0),
-            f::<M>(0.0), f::<M>(0.0), f::<M>(0.0), f::<M>(0.0),
+            f::<M>(0.0),
+            f::<M>(0.0),
+            f::<M>(0.0),
+            f::<M>(0.0),
+            f::<M>(0.0),
+            f::<M>(0.0),
+            f::<M>(0.0),
+            f::<M>(0.0),
         ];
         let mut a = M::try_from_triplets(2, 2, indices, values, ctx.clone()).unwrap();
-        let v = M::V::from_vec(vec![f::<M>(5.0), f::<M>(6.0), f::<M>(7.0), f::<M>(8.0)], ctx);
+        let v = M::V::from_vec(
+            vec![f::<M>(5.0), f::<M>(6.0), f::<M>(7.0), f::<M>(8.0)],
+            ctx,
+        );
         a.set_column(0, &v);
         let vals = triplet_values(&a);
-        assert_eq!(vals, vec![
-            f::<M>(5.0), f::<M>(6.0), f::<M>(0.0), f::<M>(0.0),
-            f::<M>(7.0), f::<M>(8.0), f::<M>(0.0), f::<M>(0.0),
-        ]);
+        assert_eq!(
+            vals,
+            vec![
+                f::<M>(5.0),
+                f::<M>(6.0),
+                f::<M>(0.0),
+                f::<M>(0.0),
+                f::<M>(7.0),
+                f::<M>(8.0),
+                f::<M>(0.0),
+                f::<M>(0.0),
+            ]
+        );
     }
 
     pub fn test_batched_scale_add_and_assign_m<M: Matrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
         let x_vals = vec![
-            f::<M>(1.0), f::<M>(2.0), f::<M>(3.0), f::<M>(4.0),
-            f::<M>(5.0), f::<M>(6.0), f::<M>(7.0), f::<M>(8.0),
+            f::<M>(1.0),
+            f::<M>(2.0),
+            f::<M>(3.0),
+            f::<M>(4.0),
+            f::<M>(5.0),
+            f::<M>(6.0),
+            f::<M>(7.0),
+            f::<M>(8.0),
         ];
         let y_vals = vec![
-            f::<M>(10.0), f::<M>(20.0), f::<M>(30.0), f::<M>(40.0),
-            f::<M>(50.0), f::<M>(60.0), f::<M>(70.0), f::<M>(80.0),
+            f::<M>(10.0),
+            f::<M>(20.0),
+            f::<M>(30.0),
+            f::<M>(40.0),
+            f::<M>(50.0),
+            f::<M>(60.0),
+            f::<M>(70.0),
+            f::<M>(80.0),
         ];
         let x = M::try_from_triplets(2, 2, indices.clone(), x_vals, ctx.clone()).unwrap();
         let y = M::try_from_triplets(2, 2, indices, y_vals, ctx.clone()).unwrap();
@@ -866,10 +935,19 @@ pub(crate) mod tests {
         result.copy_from(&x);
         result.scale_add_and_assign(&x, f::<M>(2.0), &y);
         let vals = triplet_values(&result);
-        assert_eq!(vals, vec![
-            f::<M>(21.0), f::<M>(42.0), f::<M>(63.0), f::<M>(84.0),
-            f::<M>(105.0), f::<M>(126.0), f::<M>(147.0), f::<M>(168.0),
-        ]);
+        assert_eq!(
+            vals,
+            vec![
+                f::<M>(21.0),
+                f::<M>(42.0),
+                f::<M>(63.0),
+                f::<M>(84.0),
+                f::<M>(105.0),
+                f::<M>(126.0),
+                f::<M>(147.0),
+                f::<M>(168.0),
+            ]
+        );
     }
 
     // --- Batched DenseMatrix-specific tests ---
@@ -1657,8 +1735,8 @@ macro_rules! generate_sparse_matrix_tests {
 }
 
 #[cfg(test)]
-pub(crate) use generate_matrix_tests;
-#[cfg(test)]
 pub(crate) use generate_dense_matrix_tests;
+#[cfg(test)]
+pub(crate) use generate_matrix_tests;
 #[cfg(test)]
 pub(crate) use generate_sparse_matrix_tests;

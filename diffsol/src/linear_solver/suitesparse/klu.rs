@@ -26,39 +26,46 @@ use crate::{
     linear_solver_error,
     matrix::MatrixCommon,
     vector::Vector,
-    FaerSparseMat, FaerVec, Matrix, NonLinearOpJacobian,
+    Context, FaerSparseMat, FaerVec, Matrix, NonLinearOpJacobian,
 };
 
 trait MatrixKLU: Matrix<T = f64> {
-    fn column_pointers_mut_ptr(&mut self) -> *mut KluIndextype;
-    fn row_indices_mut_ptr(&mut self) -> *mut KluIndextype;
-    fn values_mut_ptr(&mut self) -> *mut f64;
+    fn column_pointers(&self) -> *const KluIndextype;
+    fn row_indices(&self) -> *const KluIndextype;
+    fn values_ptr(&self, batch: usize) -> *const f64;
+    fn nbatch(&self) -> usize;
 }
 
 impl MatrixKLU for FaerSparseMat<f64> {
-    fn column_pointers_mut_ptr(&mut self) -> *mut KluIndextype {
-        let ptrs = self.data[0].symbolic().col_ptr();
-        ptrs.as_ptr() as *mut KluIndextype
+    fn column_pointers(&self) -> *const KluIndextype {
+        self.data[0].symbolic().col_ptr().as_ptr() as *const KluIndextype
     }
 
-    fn row_indices_mut_ptr(&mut self) -> *mut KluIndextype {
-        let indices = self.data[0].symbolic().row_idx();
-        indices.as_ptr() as *mut KluIndextype
+    fn row_indices(&self) -> *const KluIndextype {
+        self.data[0].symbolic().row_idx().as_ptr() as *const KluIndextype
     }
 
-    fn values_mut_ptr(&mut self) -> *mut f64 {
-        let values = self.data[0].val();
-        values.as_ptr() as *mut f64
+    fn values_ptr(&self, batch: usize) -> *const f64 {
+        self.data[batch].val().as_ptr() as *const f64
+    }
+
+    fn nbatch(&self) -> usize {
+        self.data.len()
     }
 }
 
 trait VectorKLU: Vector {
     fn values_mut_ptr(&mut self) -> *mut f64;
+    fn batch_values_mut_ptr(&mut self, batch: usize) -> *mut f64;
 }
 
 impl VectorKLU for FaerVec<f64> {
     fn values_mut_ptr(&mut self) -> *mut f64 {
         self.data.as_mut().as_ptr_mut()
+    }
+
+    fn batch_values_mut_ptr(&mut self, batch: usize) -> *mut f64 {
+        unsafe { self.data.as_mut().ptr_at_mut(0, batch) }
     }
 }
 
@@ -69,15 +76,15 @@ struct KluSymbolic {
 
 impl KluSymbolic {
     fn try_from_matrix(
-        mat: &mut impl MatrixKLU,
+        mat: &impl MatrixKLU,
         common: *mut klu_common,
     ) -> Result<Self, DiffsolError> {
         let n = mat.nrows() as i64;
         let inner = unsafe {
             klu_analyze(
                 n,
-                mat.column_pointers_mut_ptr(),
-                mat.row_indices_mut_ptr(),
+                mat.column_pointers() as *mut KluIndextype,
+                mat.row_indices() as *mut KluIndextype,
                 common,
             )
         };
@@ -102,16 +109,17 @@ struct KluNumeric {
 }
 
 impl KluNumeric {
-    fn try_from_symbolic(
+    fn try_from_raw(
         symbolic: &mut KluSymbolic,
-        mat: &mut impl MatrixKLU,
+        col_ptrs: *mut KluIndextype,
+        row_indices: *mut KluIndextype,
+        values: *mut f64,
     ) -> Result<Self, DiffsolError> {
-        // TODO: there is also klu_refactor which is faster and reuses inner
         let inner = unsafe {
             klu_factor(
-                mat.column_pointers_mut_ptr(),
-                mat.row_indices_mut_ptr(),
-                mat.values_mut_ptr(),
+                col_ptrs,
+                row_indices,
+                values,
                 symbolic.inner,
                 symbolic.common,
             )
@@ -159,7 +167,7 @@ where
 {
     klu_common: RefCell<KluCommon>,
     klu_symbolic: Option<KluSymbolic>,
-    klu_numeric: Option<KluNumeric>,
+    klu_numeric: Vec<KluNumeric>,
     matrix: Option<M>,
 }
 
@@ -172,7 +180,7 @@ where
         let klu_common = RefCell::new(klu_common);
         Self {
             klu_common,
-            klu_numeric: None,
+            klu_numeric: Vec::new(),
             klu_symbolic: None,
             matrix: None,
         }
@@ -192,31 +200,46 @@ where
     ) {
         let matrix = self.matrix.as_mut().expect("Matrix not set");
         op.jacobian_inplace(x, t, matrix);
-        self.klu_numeric = KluNumeric::try_from_symbolic(
-            self.klu_symbolic.as_mut().expect("Symbolic not set"),
-            matrix,
-        )
-        .ok();
+        let nbatch = matrix.nbatch();
+        self.klu_numeric.clear();
+        let col_ptrs = matrix.column_pointers() as *mut KluIndextype;
+        let row_indices = matrix.row_indices() as *mut KluIndextype;
+        for b in 0..nbatch {
+            let values = matrix.values_ptr(b) as *mut f64;
+            self.klu_numeric.push(
+                KluNumeric::try_from_raw(
+                    self.klu_symbolic.as_mut().expect("Symbolic not set"),
+                    col_ptrs,
+                    row_indices,
+                    values,
+                )
+                .expect("Failed to factorise matrix"),
+            );
+        }
     }
 
     fn solve_in_place(&self, x: &mut M::V) -> Result<(), DiffsolError> {
-        if self.klu_numeric.is_none() {
+        if self.klu_numeric.is_empty() {
             return Err(linear_solver_error!(LuNotInitialized));
         }
-        let klu_numeric = self.klu_numeric.as_ref().unwrap();
+        let nbatch = x.context().nbatch();
         let klu_symbolic = self.klu_symbolic.as_ref().unwrap();
         let n = self.matrix.as_ref().unwrap().nrows() as KluIndextype;
         let mut klu_common = self.klu_common.borrow_mut();
-        unsafe {
-            klu_solve(
-                klu_symbolic.inner,
-                klu_numeric.inner,
-                n,
-                1,
-                x.values_mut_ptr(),
-                klu_common.as_mut(),
-            )
-        };
+        for b in 0..nbatch {
+            let klu_numeric = &self.klu_numeric[b];
+            let x_ptr = x.batch_values_mut_ptr(b);
+            unsafe {
+                klu_solve(
+                    klu_symbolic.inner,
+                    klu_numeric.inner,
+                    n,
+                    1,
+                    x_ptr,
+                    klu_common.as_mut(),
+                )
+            };
+        }
         Ok(())
     }
 
@@ -226,7 +249,7 @@ where
         let mut matrix =
             C::M::new_from_sparsity(nrows, ncols, op.jacobian_sparsity(), op.context().clone());
         let mut klu_common = self.klu_common.borrow_mut();
-        self.klu_symbolic = KluSymbolic::try_from_matrix(&mut matrix, klu_common.as_mut()).ok();
+        self.klu_symbolic = KluSymbolic::try_from_matrix(&matrix, klu_common.as_mut()).ok();
         self.matrix = Some(matrix);
     }
 }
@@ -234,9 +257,9 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{
-        linear_solver::tests::{linear_problem, test_linear_solver},
+        linear_solver::tests::{linear_problem, linear_problem_batched, test_linear_solver},
         op::ParameterisedOp,
-        FaerSparseMat, Op,
+        Context, FaerContext, FaerSparseMat, Op,
     };
 
     use super::*;
@@ -244,6 +267,16 @@ mod tests {
     #[test]
     fn test_klu() {
         let (op, rtol, atol, solns) = linear_problem::<FaerSparseMat<f64>>();
+        let p = FaerVec::zeros(0, *op.context());
+        let op = ParameterisedOp::new(&op, &p);
+        let s = KLU::default();
+        test_linear_solver(s, op, rtol, &atol, solns);
+    }
+
+    #[test]
+    fn test_klu_batched() {
+        let ctx = FaerContext::with_nbatch(2);
+        let (op, rtol, atol, solns) = linear_problem_batched::<FaerSparseMat<f64>>(ctx);
         let p = FaerVec::zeros(0, *op.context());
         let op = ParameterisedOp::new(&op, &p);
         let s = KLU::default();

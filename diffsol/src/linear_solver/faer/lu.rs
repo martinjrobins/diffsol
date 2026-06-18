@@ -73,3 +73,33 @@ impl<T: FaerScalar> LinearSolver<FaerMat<T>> for LU<T> {
         self.matrix = Some(matrix);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        linear_solver::tests::{linear_problem, linear_problem_batched, test_linear_solver},
+        op::ParameterisedOp,
+        Context, FaerContext, FaerMat, Op,
+    };
+
+    use super::*;
+
+    #[test]
+    fn test_lu() {
+        let (op, rtol, atol, solns) = linear_problem::<FaerMat<f64>>();
+        let p = FaerVec::zeros(0, *op.context());
+        let op = ParameterisedOp::new(&op, &p);
+        let s = LU::default();
+        test_linear_solver(s, op, rtol, &atol, solns);
+    }
+
+    #[test]
+    fn test_lu_batched() {
+        let ctx = FaerContext::with_nbatch(2);
+        let (op, rtol, atol, solns) = linear_problem_batched::<FaerMat<f64>>(ctx);
+        let p = FaerVec::zeros(0, *op.context());
+        let op = ParameterisedOp::new(&op, &p);
+        let s = LU::default();
+        test_linear_solver(s, op, rtol, &atol, solns);
+    }
+}
