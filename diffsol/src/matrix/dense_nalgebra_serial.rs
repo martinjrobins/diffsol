@@ -246,12 +246,18 @@ impl<'a, T: NalgebraScalar> MatrixViewMut<'a> for NalgebraMatMut<'a, T> {
         let self_ncols = self.ncols();
         let self_stride = self.batch_stride;
         let a_ncols = a.ncols();
+        let a_nbatch = a.context.nbatch();
         let b_ncols = b.ncols();
         let b_nbatch = b.context.nbatch();
-        self.context.assert_compatible_nbatch(b_nbatch, "gemm_oo");
+        self.context.assert_compatible_nbatch(a_nbatch, "gemm_oo_a");
+        self.context.assert_compatible_nbatch(b_nbatch, "gemm_oo_b");
         for bi in 0..nbatch {
             let mut self_view = self.data.columns_mut(bi * self_stride, self_ncols);
-            let a_view = a.data.columns(bi * a_ncols, a_ncols);
+            let a_view = if a_nbatch == 1 {
+                a.data.columns(0, a_ncols)
+            } else {
+                a.data.columns(bi * a_ncols, a_ncols)
+            };
             let b_view = if b_nbatch == 1 {
                 b.data.columns(0, b_ncols)
             } else {
@@ -266,12 +272,18 @@ impl<'a, T: NalgebraScalar> MatrixViewMut<'a> for NalgebraMatMut<'a, T> {
         let self_stride = self.batch_stride;
         let a_ncols = a.ncols();
         let a_stride = a.batch_stride;
+        let a_nbatch = a.context.nbatch();
         let b_ncols = b.ncols();
         let b_nbatch = b.context.nbatch();
-        self.context.assert_compatible_nbatch(b_nbatch, "gemm_vo");
+        self.context.assert_compatible_nbatch(a_nbatch, "gemm_vo_a");
+        self.context.assert_compatible_nbatch(b_nbatch, "gemm_vo_b");
         for bi in 0..nbatch {
             let mut self_view = self.data.columns_mut(bi * self_stride, self_ncols);
-            let a_view = a.data.columns(bi * a_stride, a_ncols);
+            let a_view = if a_nbatch == 1 {
+                a.data.columns(0, a_ncols)
+            } else {
+                a.data.columns(bi * a_stride, a_ncols)
+            };
             let b_view = if b_nbatch == 1 {
                 b.data.columns(0, b_ncols)
             } else {
@@ -466,12 +478,18 @@ impl<T: NalgebraScalar> DenseMatrix for NalgebraMat<T> {
         }
         let self_ncols = self.ncols();
         let a_ncols = a.ncols();
+        let a_nbatch = a.context.nbatch();
         let b_ncols = b.ncols();
         let b_nbatch = b.context.nbatch();
-        self.context.assert_compatible_nbatch(b_nbatch, "gemm");
+        self.context.assert_compatible_nbatch(a_nbatch, "gemm_a");
+        self.context.assert_compatible_nbatch(b_nbatch, "gemm_b");
         for bi in 0..nbatch {
             let mut self_view = self.data.columns_mut(bi * self_ncols, self_ncols);
-            let a_view = a.data.columns(bi * a_ncols, a_ncols);
+            let a_view = if a_nbatch == 1 {
+                a.data.columns(0, a_ncols)
+            } else {
+                a.data.columns(bi * a_ncols, a_ncols)
+            };
             let b_view = if b_nbatch == 1 {
                 b.data.columns(0, b_ncols)
             } else {

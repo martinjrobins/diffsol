@@ -9,8 +9,11 @@ use crate::VectorIndex;
 use crate::{Dense, DenseRef, FaerContext, FaerScalar, FaerVec, Vector, VectorViewMut};
 use crate::{FaerLU, FaerVecMut, FaerVecRef};
 
-use faer::{get_global_parallelism, unzip, zip, Accum};
+use faer::reborrow::ReborrowMut;
 use faer::{linalg::matmul::matmul, Mat, MatMut, MatRef};
+use faer::{unzip, zip, Accum};
+
+use crate::Context;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct FaerMat<T: FaerScalar> {
@@ -22,32 +25,54 @@ pub struct FaerMat<T: FaerScalar> {
 pub struct FaerMatRef<'a, T: FaerScalar> {
     pub(crate) data: MatRef<'a, T>,
     pub(crate) context: FaerContext,
+    pub(crate) batch_stride: usize,
 }
 
 #[derive(Debug, PartialEq)]
 pub struct FaerMatMut<'a, T: FaerScalar> {
     pub(crate) data: MatMut<'a, T>,
     pub(crate) context: FaerContext,
+    pub(crate) batch_stride: usize,
 }
 
 impl<T: FaerScalar> DefaultSolver for FaerMat<T> {
     type LS = FaerLU<T>;
 }
 
-impl_matrix_common_ref!(
-    FaerMatMut<'a, T>,
-    FaerVec<T>,
-    FaerContext,
-    MatMut<'a, T>,
-    FaerScalar
-);
-impl_matrix_common_ref!(
-    FaerMatRef<'a, T>,
-    FaerVec<T>,
-    FaerContext,
-    MatRef<'a, T>,
-    FaerScalar
-);
+impl<'a, T: Scalar + FaerScalar> MatrixCommon for FaerMatMut<'a, T> {
+    type T = T;
+    type V = FaerVec<T>;
+    type C = FaerContext;
+    type Inner = MatMut<'a, T>;
+
+    fn nrows(&self) -> IndexType {
+        self.data.nrows()
+    }
+    fn ncols(&self) -> IndexType {
+        self.data.ncols() - (Context::nbatch(&self.context) - 1) * self.batch_stride
+    }
+    fn inner(&self) -> &Self::Inner {
+        &self.data
+    }
+}
+
+impl<'a, T: Scalar + FaerScalar> MatrixCommon for FaerMatRef<'a, T> {
+    type T = T;
+    type V = FaerVec<T>;
+    type C = FaerContext;
+    type Inner = MatRef<'a, T>;
+
+    fn nrows(&self) -> IndexType {
+        self.data.nrows()
+    }
+    fn ncols(&self) -> IndexType {
+        self.data.ncols() - (Context::nbatch(&self.context) - 1) * self.batch_stride
+    }
+    fn inner(&self) -> &Self::Inner {
+        &self.data
+    }
+}
+
 impl_matrix_common!(FaerMat<T>, FaerVec<T>, FaerContext, Mat<T>, FaerScalar);
 
 macro_rules! impl_mul_scalar {
@@ -116,15 +141,31 @@ impl<'a, T: FaerScalar> MatrixView<'a> for FaerMatRef<'a, T> {
     }
 
     fn gemv_o(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
-        y.mul_assign(Scale(beta));
-        matmul(
-            y.data.as_mut(),
-            Accum::Add,
-            self.data.as_ref(),
-            x.data.as_ref(),
-            alpha,
-            get_global_parallelism(),
-        );
+        let nbatch = self.context.nbatch();
+        let ncols = self.ncols();
+        let stride = self.batch_stride;
+        let x_nbatch = x.data.ncols();
+        self.context.assert_compatible_nbatch(x_nbatch, "gemv_o");
+        for b in 0..nbatch {
+            let a_view = self
+                .data
+                .get(0..self.nrows(), b * stride..b * stride + ncols);
+            let x_col = if x_nbatch == 1 {
+                x.data.col(0)
+            } else {
+                x.data.col(b)
+            };
+            let mut y_col = y.data.col_mut(b);
+            y_col *= faer::Scale(beta);
+            matmul(
+                y_col.as_mat_mut(),
+                Accum::Add,
+                a_view,
+                x_col.as_mat(),
+                alpha,
+                self.context.par,
+            );
+        }
     }
     fn gemv_v(
         &self,
@@ -133,15 +174,31 @@ impl<'a, T: FaerScalar> MatrixView<'a> for FaerMatRef<'a, T> {
         beta: Self::T,
         y: &mut Self::V,
     ) {
-        y.mul_assign(Scale(beta));
-        matmul(
-            y.data.as_mut(),
-            Accum::Add,
-            self.data.as_ref(),
-            x.data.as_ref(),
-            alpha,
-            get_global_parallelism(),
-        );
+        let nbatch = self.context.nbatch();
+        let ncols = self.ncols();
+        let stride = self.batch_stride;
+        let x_nbatch = x.data.ncols();
+        self.context.assert_compatible_nbatch(x_nbatch, "gemv_v");
+        for b in 0..nbatch {
+            let a_view = self
+                .data
+                .get(0..self.nrows(), b * stride..b * stride + ncols);
+            let x_col = if x_nbatch == 1 {
+                x.data.col(0)
+            } else {
+                x.data.col(b)
+            };
+            let mut y_col = y.data.col_mut(b);
+            y_col *= faer::Scale(beta);
+            matmul(
+                y_col.as_mat_mut(),
+                Accum::Add,
+                a_view,
+                x_col.as_mat(),
+                alpha,
+                self.context.par,
+            );
+        }
     }
 }
 
@@ -157,26 +214,81 @@ impl<'a, T: FaerScalar> MatrixViewMut<'a> for FaerMatMut<'a, T> {
     }
 
     fn gemm_oo(&mut self, alpha: Self::T, a: &Self::Owned, b: &Self::Owned, beta: Self::T) {
-        self.mul_assign(Scale(beta));
-        matmul(
-            self.data.as_mut(),
-            Accum::Add,
-            a.data.as_ref(),
-            b.data.as_ref(),
-            alpha,
-            get_global_parallelism(),
-        )
+        let nbatch = self.context.nbatch();
+        let self_ncols = self.ncols();
+        let self_stride = self.batch_stride;
+        let a_ncols = a.ncols();
+        let a_nbatch = a.context.nbatch();
+        let b_ncols = b.ncols();
+        let b_nbatch = b.context.nbatch();
+        self.context.assert_compatible_nbatch(a_nbatch, "gemm_oo_a");
+        self.context.assert_compatible_nbatch(b_nbatch, "gemm_oo_b");
+        for bi in 0..nbatch {
+            let mut self_view = self.data.rb_mut().get_mut(
+                0..a.nrows(),
+                bi * self_stride..bi * self_stride + self_ncols,
+            );
+            let a_view = if a_nbatch == 1 {
+                a.data.get(0..a.nrows(), 0..a_ncols)
+            } else {
+                a.data
+                    .get(0..a.nrows(), bi * a_ncols..bi * a_ncols + a_ncols)
+            };
+            let b_view = if b_nbatch == 1 {
+                b.data.get(0..b.nrows(), 0..b_ncols)
+            } else {
+                b.data
+                    .get(0..b.nrows(), bi * b_ncols..bi * b_ncols + b_ncols)
+            };
+            self_view *= faer::Scale(beta);
+            matmul(
+                self_view,
+                Accum::Add,
+                a_view,
+                b_view,
+                alpha,
+                self.context.par,
+            );
+        }
     }
     fn gemm_vo(&mut self, alpha: Self::T, a: &Self::View, b: &Self::Owned, beta: Self::T) {
-        self.mul_assign(Scale(beta));
-        matmul(
-            self.data.as_mut(),
-            Accum::Add,
-            a.data.as_ref(),
-            b.data.as_ref(),
-            alpha,
-            get_global_parallelism(),
-        )
+        let nbatch = self.context.nbatch();
+        let self_ncols = self.ncols();
+        let self_stride = self.batch_stride;
+        let a_ncols = a.ncols();
+        let a_stride = a.batch_stride;
+        let a_nbatch = a.context.nbatch();
+        let b_ncols = b.ncols();
+        let b_nbatch = b.context.nbatch();
+        self.context.assert_compatible_nbatch(a_nbatch, "gemm_vo_a");
+        self.context.assert_compatible_nbatch(b_nbatch, "gemm_vo_b");
+        for bi in 0..nbatch {
+            let mut self_view = self.data.rb_mut().get_mut(
+                0..a.nrows(),
+                bi * self_stride..bi * self_stride + self_ncols,
+            );
+            let a_view = if a_nbatch == 1 {
+                a.data.get(0..a.nrows(), 0..a_ncols)
+            } else {
+                a.data
+                    .get(0..a.nrows(), bi * a_stride..bi * a_stride + a_ncols)
+            };
+            let b_view = if b_nbatch == 1 {
+                b.data.get(0..b.nrows(), 0..b_ncols)
+            } else {
+                b.data
+                    .get(0..b.nrows(), bi * b_ncols..bi * b_ncols + b_ncols)
+            };
+            self_view *= faer::Scale(beta);
+            matmul(
+                self_view,
+                Accum::Add,
+                a_view,
+                b_view,
+                alpha,
+                self.context.par,
+            );
+        }
     }
 }
 
@@ -185,16 +297,33 @@ impl<T: FaerScalar> DenseMatrix for FaerMat<T> {
     type ViewMut<'a> = FaerMatMut<'a, T>;
 
     fn from_vec(nrows: IndexType, ncols: IndexType, data: Vec<Self::T>, ctx: Self::C) -> Self {
-        let data = Mat::from_fn(nrows, ncols, |i, j| data[i + j * nrows]);
+        let nbatch = ctx.nbatch();
+        let data = Mat::from_fn(nrows, ncols * nbatch, |i, j| data[i + j * nrows]);
         Self { data, context: ctx }
     }
 
     fn resize_cols(&mut self, ncols: IndexType) {
-        if ncols == self.ncols() {
+        let old_ncols = self.ncols();
+        if ncols == old_ncols {
+            return;
+        }
+        let nbatch = self.context.nbatch();
+        if nbatch == 1 {
+            self.data.resize_with(self.nrows(), ncols, |_, _| T::zero());
             return;
         }
         let nrows = self.nrows();
-        self.data.resize_with(nrows, ncols, |_, _| T::zero());
+        let copy_ncols = ncols.min(old_ncols);
+        let mut new_data = Mat::zeros(nrows, ncols * nbatch);
+        for b in 0..nbatch {
+            new_data
+                .get_mut(0..nrows, b * ncols..b * ncols + copy_ncols)
+                .copy_from(
+                    self.data
+                        .get(0..nrows, b * old_ncols..b * old_ncols + copy_ncols),
+                );
+        }
+        self.data = new_data;
     }
 
     fn get_index(&self, i: IndexType, j: IndexType) -> Self::T {
@@ -202,29 +331,94 @@ impl<T: FaerScalar> DenseMatrix for FaerMat<T> {
     }
 
     fn gemm(&mut self, alpha: Self::T, a: &Self, b: &Self, beta: Self::T) {
-        self.data.mul_assign(faer::Scale(beta));
-        matmul(
-            self.data.as_mut(),
-            Accum::Add,
-            a.data.as_ref(),
-            b.data.as_ref(),
-            alpha,
-            get_global_parallelism(),
-        )
+        let nbatch = self.context.nbatch();
+        if nbatch == 1 {
+            self.data.mul_assign(faer::Scale(beta));
+            matmul(
+                self.data.as_mut(),
+                Accum::Add,
+                a.data.as_ref(),
+                b.data.as_ref(),
+                alpha,
+                self.context.par,
+            );
+            return;
+        }
+        let self_ncols = self.ncols();
+        let a_ncols = a.ncols();
+        let a_nbatch = a.context.nbatch();
+        let b_ncols = b.ncols();
+        let b_nbatch = b.context.nbatch();
+        self.context.assert_compatible_nbatch(a_nbatch, "gemm_a");
+        self.context.assert_compatible_nbatch(b_nbatch, "gemm_b");
+        for bi in 0..nbatch {
+            let mut self_view = self.data.get_mut(
+                0..self.nrows(),
+                bi * self_ncols..bi * self_ncols + self_ncols,
+            );
+            let a_view = if a_nbatch == 1 {
+                a.data.get(0..a.nrows(), 0..a_ncols)
+            } else {
+                a.data
+                    .get(0..a.nrows(), bi * a_ncols..bi * a_ncols + a_ncols)
+            };
+            let b_view = if b_nbatch == 1 {
+                b.data.get(0..b.nrows(), 0..b_ncols)
+            } else {
+                b.data
+                    .get(0..b.nrows(), bi * b_ncols..bi * b_ncols + b_ncols)
+            };
+            self_view *= faer::Scale(beta);
+            matmul(
+                self_view,
+                Accum::Add,
+                a_view,
+                b_view,
+                alpha,
+                self.context.par,
+            );
+        }
     }
-    fn column_mut(&mut self, i: usize) -> <Self::V as Vector>::ViewMut<'_> {
-        let data = self.data.get_mut(0..self.nrows(), i);
-        FaerVecMut {
-            data,
-            context: self.context,
+
+    fn column_mut(&mut self, j: usize) -> <Self::V as Vector>::ViewMut<'_> {
+        let nbatch = self.context.nbatch();
+        let ncols = self.ncols();
+        let nrows = self.nrows();
+        if nbatch == 1 {
+            let data = self.data.get_mut(0..nrows, j..j + 1);
+            return FaerVecMut {
+                data,
+                context: self.context,
+            };
+        }
+        let col_stride = self.data.col_stride();
+        // SAFETY: ptr_at_mut(0, j) points within the Mat's allocation. The strided
+        // view accesses physical columns j, j+ncols, ..., j+(nbatch-1)*ncols — all
+        // within the nrows * ncols * nbatch element allocation. row_stride=1 matches
+        // column-major layout. Exclusive access is guaranteed by &mut self.
+        unsafe {
+            let ptr = self.data.as_mut().ptr_at_mut(0, j);
+            let data =
+                MatMut::from_raw_parts_mut(ptr, nrows, nbatch, 1, ncols as isize * col_stride);
+            FaerVecMut {
+                data,
+                context: self.context,
+            }
         }
     }
 
     fn columns_mut(&mut self, start: usize, end: usize) -> Self::ViewMut<'_> {
-        let data = self.data.get_mut(0..self.data.nrows(), start..end);
+        let nbatch = self.context.nbatch();
+        let ncols = self.ncols();
+        let sub_width = end - start;
+        let total_raw = (nbatch - 1) * ncols + sub_width;
+        let data = self
+            .data
+            .get_mut(0..self.data.nrows(), start..start + total_raw);
         FaerMatMut {
             data,
             context: self.context,
+            batch_stride: ncols,
         }
     }
 
@@ -232,18 +426,42 @@ impl<T: FaerScalar> DenseMatrix for FaerMat<T> {
         self.data[(i, j)] = value;
     }
 
-    fn column(&self, i: usize) -> <Self::V as Vector>::View<'_> {
-        let data = self.data.get(0..self.data.nrows(), i);
-        FaerVecRef {
-            data,
-            context: self.context,
+    fn column(&self, j: usize) -> <Self::V as Vector>::View<'_> {
+        let nbatch = self.context.nbatch();
+        let ncols = self.ncols();
+        let nrows = self.nrows();
+        if nbatch == 1 {
+            let data = self.data.get(0..nrows, j..j + 1);
+            return FaerVecRef {
+                data,
+                context: self.context,
+            };
+        }
+        let col_stride = self.data.col_stride();
+        // SAFETY: ptr_at(0, j) points within the Mat's allocation. The strided
+        // view accesses physical columns j, j+ncols, ..., j+(nbatch-1)*ncols — all
+        // within the nrows * ncols * nbatch element allocation. row_stride=1 matches
+        // column-major layout.
+        unsafe {
+            let ptr = self.data.as_ref().ptr_at(0, j);
+            let data = MatRef::from_raw_parts(ptr, nrows, nbatch, 1, ncols as isize * col_stride);
+            FaerVecRef {
+                data,
+                context: self.context,
+            }
         }
     }
+
     fn columns(&self, start: usize, end: usize) -> Self::View<'_> {
-        let data = self.data.get(0..self.nrows(), start..end);
+        let nbatch = self.context.nbatch();
+        let ncols = self.ncols();
+        let sub_width = end - start;
+        let total_raw = (nbatch - 1) * ncols + sub_width;
+        let data = self.data.get(0..self.nrows(), start..start + total_raw);
         FaerMatRef {
             data,
             context: self.context,
+            batch_stride: ncols,
         }
     }
 
@@ -257,10 +475,20 @@ impl<T: FaerScalar> DenseMatrix for FaerMat<T> {
         if i == j {
             panic!("Column index cannot be the same");
         }
-        for k in 0..self.nrows() {
-            let value =
-                unsafe { *self.data.get_unchecked(k, i) + alpha * *self.data.get_unchecked(k, j) };
-            unsafe { *self.data.get_mut_unchecked(k, i) = value };
+        let nbatch = self.context.nbatch();
+        let ncols = self.ncols();
+        let nrows = self.nrows();
+        for b in 0..nbatch {
+            for k in 0..nrows {
+                let ci = b * ncols + i;
+                let cj = b * ncols + j;
+                let value = unsafe {
+                    *self.data.get_unchecked(k, ci) + alpha * *self.data.get_unchecked(k, cj)
+                };
+                unsafe {
+                    *self.data.get_mut_unchecked(k, ci) = value;
+                };
+            }
         }
     }
 }
@@ -278,13 +506,21 @@ impl<T: FaerScalar> Matrix for FaerMat<T> {
     }
 
     fn gather(&mut self, other: &Self, indices: &<Self::V as Vector>::Index) {
-        assert_eq!(indices.len(), self.nrows() * self.ncols());
-        let mut idx = indices.data.iter().peekable();
-        for j in 0..self.ncols() {
-            let other_col = other.data.col(*idx.peek().unwrap() / other.nrows());
-            for self_ij in self.data.col_mut(j).iter_mut() {
-                let other_i = idx.next().unwrap() % other.nrows();
-                *self_ij = other_col[other_i];
+        let nrows = self.nrows();
+        let other_nrows = other.nrows();
+        let ncols = self.ncols();
+        let other_ncols = other.ncols();
+        let nbatch = self.context.nbatch();
+        assert_eq!(indices.len(), nrows * ncols);
+        for b in 0..nbatch {
+            let mut idx = indices.data.iter().peekable();
+            for j in 0..ncols {
+                let other_col_idx = *idx.peek().unwrap() / other_nrows;
+                for i in 0..nrows {
+                    let other_i = idx.next().unwrap() % other_nrows;
+                    self.data[(i, b * ncols + j)] =
+                        other.data[(other_i, b * other_ncols + other_col_idx)];
+                }
             }
         }
     }
@@ -295,10 +531,15 @@ impl<T: FaerScalar> Matrix for FaerMat<T> {
         src_indices: &<Self::V as Vector>::Index,
         data: &Self::V,
     ) {
-        for (dst_i, src_i) in dst_indices.data.iter().zip(src_indices.data.iter()) {
-            let i = dst_i % self.nrows();
-            let j = dst_i / self.nrows();
-            self.data[(i, j)] = data[*src_i];
+        let nbatch = self.context.nbatch();
+        let nrows = self.nrows();
+        let ncols = self.ncols();
+        for b in 0..nbatch {
+            for (dst_i, src_i) in dst_indices.data.iter().zip(src_indices.data.iter()) {
+                let i = dst_i % nrows;
+                let j = dst_i / nrows;
+                self.data[(i, b * ncols + j)] = data.data[(*src_i, b)];
+            }
         }
     }
 
@@ -314,8 +555,11 @@ impl<T: FaerScalar> Matrix for FaerMat<T> {
     ) {
         let ncols = self.ncols();
         let nrows = self.nrows();
+        let nbatch = self.context.nbatch();
         let indices = (0..ncols).flat_map(move |j| (0..nrows).map(move |i| (i, j)));
-        let values = (0..ncols).flat_map(move |j| (0..nrows).map(move |i| self.data[(i, j)]));
+        let values = (0..nbatch).flat_map(move |b| {
+            (0..ncols).flat_map(move |j| (0..nrows).map(move |i| self.data[(i, b * ncols + j)]))
+        });
         (indices, values)
     }
 
@@ -326,10 +570,14 @@ impl<T: FaerScalar> Matrix for FaerMat<T> {
         values: Vec<T>,
         ctx: Self::C,
     ) -> Result<Self, DiffsolError> {
-        assert_eq!(indices.len(), values.len());
-        let mut m = Mat::zeros(nrows, ncols);
-        for (&(i, j), v) in indices.iter().zip(values) {
-            m[(i, j)] = v;
+        let nbatch = ctx.nbatch();
+        let nnz = indices.len();
+        assert_eq!(values.len(), nnz * nbatch);
+        let mut m = Mat::zeros(nrows, ncols * nbatch);
+        for b in 0..nbatch {
+            for (k, &(i, j)) in indices.iter().enumerate() {
+                m[(i, b * ncols + j)] = values[b * nnz + k];
+            }
         }
         Ok(Self {
             data: m,
@@ -337,26 +585,46 @@ impl<T: FaerScalar> Matrix for FaerMat<T> {
         })
     }
     fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
-        y.mul_assign(Scale(beta));
-        matmul(
-            y.data.as_mut(),
-            Accum::Add,
-            self.data.as_ref(),
-            x.data.as_ref(),
-            alpha,
-            get_global_parallelism(),
-        );
+        let nbatch = self.context.nbatch();
+        let ncols = self.ncols();
+        let x_nbatch = x.data.ncols();
+        self.context.assert_compatible_nbatch(x_nbatch, "gemv");
+        for b in 0..nbatch {
+            let a_view = self.data.get(0..self.nrows(), b * ncols..b * ncols + ncols);
+            let x_col = if x_nbatch == 1 {
+                x.data.col(0)
+            } else {
+                x.data.col(b)
+            };
+            let mut y_col = y.data.col_mut(b);
+            y_col *= faer::Scale(beta);
+            matmul(
+                y_col.as_mat_mut(),
+                Accum::Add,
+                a_view,
+                x_col.as_mat(),
+                alpha,
+                self.context.par,
+            );
+        }
     }
     fn zeros(nrows: IndexType, ncols: IndexType, ctx: Self::C) -> Self {
-        let data = Mat::zeros(nrows, ncols);
+        let nbatch = ctx.nbatch();
+        let data = Mat::zeros(nrows, ncols * nbatch);
         Self { data, context: ctx }
     }
     fn copy_from(&mut self, other: &Self) {
         self.data.copy_from(&other.data);
     }
     fn from_diagonal(v: &Self::V) -> Self {
-        let dim = v.len();
-        let data = Mat::from_fn(dim, dim, |i, j| if i == j { v[i] } else { T::zero() });
+        let nbatch = v.context().nbatch();
+        let nstates = v.len();
+        let mut data = Mat::zeros(nstates, nstates * nbatch);
+        for b in 0..nbatch {
+            for i in 0..nstates {
+                data[(i, b * nstates + i)] = v.data[(i, b)];
+            }
+        }
         Self {
             data,
             context: *v.context(),
@@ -365,25 +633,26 @@ impl<T: FaerScalar> Matrix for FaerMat<T> {
     fn partition_indices_by_zero_diagonal(
         &self,
     ) -> (<Self::V as Vector>::Index, <Self::V as Vector>::Index) {
-        let diagonal = self.data.diagonal().column_vector();
-        let (zero_indices, nonzero_indices) = diagonal.iter().enumerate().fold(
-            (Vec::new(), Vec::new()),
-            |(mut zero_indices, mut nonzero_indices), (i, &v)| {
-                if v.is_zero() {
-                    zero_indices.push(i);
-                } else {
-                    nonzero_indices.push(i);
-                }
-                (zero_indices, nonzero_indices)
-            },
-        );
+        let mut zero_diagonal_indices = Vec::new();
+        let mut non_zero_diagonal_indices = Vec::new();
+        for i in 0..self.nrows() {
+            if self.data[(i, i)].is_zero() {
+                zero_diagonal_indices.push(i);
+            } else {
+                non_zero_diagonal_indices.push(i);
+            }
+        }
         (
-            <Self::V as Vector>::Index::from_vec(zero_indices, self.context),
-            <Self::V as Vector>::Index::from_vec(nonzero_indices, self.context),
+            <Self::V as Vector>::Index::from_vec(zero_diagonal_indices, self.context),
+            <Self::V as Vector>::Index::from_vec(non_zero_diagonal_indices, self.context),
         )
     }
     fn set_column(&mut self, j: IndexType, v: &Self::V) {
-        self.column_mut(j).copy_from(v);
+        let nbatch = self.context.nbatch();
+        let ncols = self.ncols();
+        for b in 0..nbatch {
+            self.data.col_mut(b * ncols + j).copy_from(v.data.col(b));
+        }
     }
 
     fn scale_add_and_assign(&mut self, x: &Self, beta: Self::T, y: &Self) {
@@ -405,60 +674,10 @@ impl<T: FaerScalar> Matrix for FaerMat<T> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_zeros() {
-        super::super::tests::test_zeros::<FaerMat<f64>>();
-    }
-    #[test]
-    fn test_from_vec() {
-        super::super::tests::test_from_vec::<FaerMat<f64>>();
-    }
-    #[test]
-    fn test_from_diagonal() {
-        super::super::tests::test_from_diagonal::<FaerMat<f64>>();
-    }
-    #[test]
-    fn test_gemv() {
-        super::super::tests::test_gemv::<FaerMat<f64>>();
-    }
-    #[test]
-    fn test_gemm() {
-        super::super::tests::test_gemm::<FaerMat<f64>>();
-    }
-    #[test]
-    fn test_mat_mul() {
-        super::super::tests::test_mat_mul::<FaerMat<f64>>();
-    }
-    #[test]
-    fn test_columns_view() {
-        super::super::tests::test_columns_view::<FaerMat<f64>>();
-    }
-    #[test]
-    fn test_column_view() {
-        super::super::tests::test_column_view::<FaerMat<f64>>();
-    }
-    #[test]
-    fn test_set_column() {
-        super::super::tests::test_set_column::<FaerMat<f64>>();
-    }
-    #[test]
-    fn test_copy_from() {
-        super::super::tests::test_copy_from::<FaerMat<f64>>();
-    }
-    #[test]
-    fn test_scale_add_and_assign() {
-        super::super::tests::test_scale_add_and_assign::<FaerMat<f64>>();
-    }
-    #[test]
-    fn test_column_axpy() {
-        super::super::tests::test_column_axpy::<FaerMat<f64>>();
-    }
-    #[test]
-    fn test_partition_indices_by_zero_diagonal() {
-        super::super::tests::test_partition_indices_by_zero_diagonal::<FaerMat<f64>>();
-    }
-    #[test]
-    fn test_resize_cols() {
-        super::super::tests::test_resize_cols::<FaerMat<f64>>();
-    }
+    super::super::generate_matrix_tests!(
+        faer,
+        FaerMat<f64>,
+        FaerContext::default(),
+        FaerContext::with_nbatch(2)
+    );
 }

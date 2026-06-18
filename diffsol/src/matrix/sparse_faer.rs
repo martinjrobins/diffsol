@@ -328,11 +328,14 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
         }
     }
     fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
-        let tmp = Self::V {
-            data: &self.data * &x.data,
-            context: self.context,
-        };
-        y.axpy(alpha, &tmp, beta);
+        let nbatch = x.data.ncols();
+        for b in 0..nbatch {
+            let x_col = x.data.col(b).to_owned();
+            let tmp_col = &self.data * &x_col;
+            for i in 0..y.data.nrows() {
+                y.data[(i, b)] = beta * y.data[(i, b)] + alpha * tmp_col[i];
+            }
+        }
     }
     fn zeros(nrows: IndexType, ncols: IndexType, ctx: Self::C) -> Self {
         Self {
