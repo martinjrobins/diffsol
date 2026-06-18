@@ -1799,13 +1799,18 @@ mod test {
         let (problem, soln) = exponential_decay_problem_diffsl::<M, diffsl::LlvmModule>(false);
         let mut s = problem.bdf_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
-        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        insta::assert_yaml_snapshot!(s.get_statistics(), @"
         number_of_linear_solver_setups: 14
         number_of_steps: 52
         number_of_error_test_failures: 1
         number_of_nonlinear_solver_iterations: 164
         number_of_nonlinear_solver_fails: 0
-        "###);
+        number_of_linear_solver_setups_from_checkpoint: 1
+        number_of_linear_solver_setups_from_first_convergence_fail: 0
+        number_of_linear_solver_setups_from_second_convergence_fail: 0
+        number_of_linear_solver_setups_from_error_test_fail: 1
+        number_of_linear_solver_setups_from_step_success: 12
+        ");
     }
 
     #[cfg(feature = "diffsl-llvm")]
@@ -2054,13 +2059,18 @@ mod test {
         soln.rtol = problem.rtol;
         let mut s = problem.bdf_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
-        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        insta::assert_yaml_snapshot!(s.get_statistics(), @"
         number_of_linear_solver_setups: 23
         number_of_steps: 47
         number_of_error_test_failures: 8
         number_of_nonlinear_solver_iterations: 119
         number_of_nonlinear_solver_fails: 0
-        "###);
+        number_of_linear_solver_setups_from_checkpoint: 1
+        number_of_linear_solver_setups_from_first_convergence_fail: 0
+        number_of_linear_solver_setups_from_second_convergence_fail: 0
+        number_of_linear_solver_setups_from_error_test_fail: 8
+        number_of_linear_solver_setups_from_step_success: 14
+        ");
     }
 
     #[test]
