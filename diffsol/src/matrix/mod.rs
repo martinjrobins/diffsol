@@ -423,7 +423,8 @@ pub trait DenseMatrix:
 #[cfg(test)]
 pub(crate) mod tests {
     use super::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
-    use crate::{scalar::IndexType, Context, Vector, VectorIndex};
+    use crate::scalar::Scale;
+use crate::{scalar::IndexType, Context, Vector, VectorIndex};
     use num_traits::{FromPrimitive, One, Zero};
 
     fn f<M: Matrix>(x: f64) -> M::T {
@@ -1448,6 +1449,155 @@ pub(crate) mod tests {
         );
     }
 
+    // --- New unbatched Matrix-generic tests ---
+
+    pub fn test_mul_scalar<M: Matrix>() {
+        let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
+        let values = vec![f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0)];
+        let a = M::try_from_triplets(2, 2, indices, values, Default::default()).unwrap();
+        let result = a * Scale(f::<M>(2.0));
+        let (_, vals) = result.triplet_iter();
+        let vals: Vec<_> = vals.collect();
+        assert_eq!(
+            vals,
+            vec![f::<M>(2.0), f::<M>(6.0), f::<M>(4.0), f::<M>(8.0)]
+        );
+    }
+
+    pub fn test_add_column_to_vector<M: Matrix>() {
+        let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
+        let values = vec![f::<M>(1.0), f::<M>(2.0), f::<M>(3.0), f::<M>(4.0)];
+        let mat = M::try_from_triplets(2, 2, indices, values, Default::default()).unwrap();
+        let mut v = M::V::zeros(2, Default::default());
+        mat.add_column_to_vector(1, &mut v);
+        assert_eq!(v.clone_as_vec(), vec![f::<M>(3.0), f::<M>(4.0)]);
+    }
+
+    // --- New unbatched DenseMatrix-specific tests ---
+
+    pub fn test_add<M: DenseMatrix>() {
+        let a = M::from_vec(
+            2,
+            2,
+            vec![f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0)],
+            Default::default(),
+        );
+        let b = M::from_vec(
+            2,
+            2,
+            vec![f::<M>(5.0), f::<M>(7.0), f::<M>(6.0), f::<M>(8.0)],
+            Default::default(),
+        );
+        let result = a + &b;
+        assert_eq!(result.get_index(0, 0), f::<M>(6.0));
+        assert_eq!(result.get_index(1, 1), f::<M>(12.0));
+    }
+
+    pub fn test_sub<M: DenseMatrix>() {
+        let a = M::from_vec(
+            2,
+            2,
+            vec![f::<M>(5.0), f::<M>(7.0), f::<M>(6.0), f::<M>(8.0)],
+            Default::default(),
+        );
+        let b = M::from_vec(
+            2,
+            2,
+            vec![f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0)],
+            Default::default(),
+        );
+        let result = a - &b;
+        assert_eq!(result.get_index(0, 0), f::<M>(4.0));
+        assert_eq!(result.get_index(1, 1), f::<M>(4.0));
+    }
+
+    pub fn test_add_assign<M: DenseMatrix>() {
+        let mut a = M::from_vec(
+            2,
+            2,
+            vec![f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0)],
+            Default::default(),
+        );
+        let b = M::from_vec(
+            2,
+            2,
+            vec![f::<M>(5.0), f::<M>(7.0), f::<M>(6.0), f::<M>(8.0)],
+            Default::default(),
+        );
+        a += &b;
+        assert_eq!(a.get_index(0, 0), f::<M>(6.0));
+        assert_eq!(a.get_index(1, 1), f::<M>(12.0));
+    }
+
+    pub fn test_sub_assign<M: DenseMatrix>() {
+        let mut a = M::from_vec(
+            2,
+            2,
+            vec![f::<M>(5.0), f::<M>(7.0), f::<M>(6.0), f::<M>(8.0)],
+            Default::default(),
+        );
+        let b = M::from_vec(
+            2,
+            2,
+            vec![f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0)],
+            Default::default(),
+        );
+        a -= &b;
+        assert_eq!(a.get_index(0, 0), f::<M>(4.0));
+        assert_eq!(a.get_index(1, 1), f::<M>(4.0));
+    }
+
+    pub fn test_gather<M: DenseMatrix>() {
+        let mat1 = M::from_vec(
+            3,
+            3,
+            vec![
+                f::<M>(1.0),
+                f::<M>(2.0),
+                f::<M>(3.0),
+                f::<M>(4.0),
+                f::<M>(5.0),
+                f::<M>(6.0),
+                f::<M>(7.0),
+                f::<M>(8.0),
+                f::<M>(9.0),
+            ],
+            Default::default(),
+        );
+        let mut mat2 = M::zeros(2, 2, Default::default());
+        let indices = <M::V as Vector>::Index::from_vec(vec![0, 1, 3, 4], Default::default());
+        mat2.gather(&mat1, &indices);
+        assert_eq!(mat2.get_index(0, 0), f::<M>(1.0));
+        assert_eq!(mat2.get_index(1, 0), f::<M>(2.0));
+        assert_eq!(mat2.get_index(0, 1), f::<M>(4.0));
+        assert_eq!(mat2.get_index(1, 1), f::<M>(5.0));
+    }
+
+    pub fn test_set_data_with_indices<M: DenseMatrix>() {
+        let mut mat = M::zeros(2, 2, Default::default());
+        let dst_indices = <M::V as Vector>::Index::from_vec(vec![0, 3], Default::default());
+        let src_indices = <M::V as Vector>::Index::from_vec(vec![0, 1], Default::default());
+        let data = M::V::from_vec(vec![f::<M>(5.0), f::<M>(6.0)], Default::default());
+        mat.set_data_with_indices(&dst_indices, &src_indices, &data);
+        assert_eq!(mat.get_index(0, 0), f::<M>(5.0));
+        assert_eq!(mat.get_index(1, 1), f::<M>(6.0));
+    }
+
+    pub fn test_mul_assign_scalar<M: DenseMatrix>() {
+        let mut mat = M::from_vec(
+            2,
+            2,
+            vec![f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0)],
+            Default::default(),
+        );
+        {
+            let mut view = mat.columns_mut(0, 2);
+            view *= Scale(f::<M>(2.0));
+        }
+        assert_eq!(mat.get_index(0, 0), f::<M>(2.0));
+        assert_eq!(mat.get_index(1, 1), f::<M>(8.0));
+    }
+
     pub fn test_batched_combine<M: DenseMatrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         #[rustfmt::skip]
@@ -1509,6 +1659,14 @@ macro_rules! generate_matrix_tests {
             #[test]
             fn [<test_partition_indices_ $suffix>]() {
                 $crate::matrix::tests::test_partition_indices_by_zero_diagonal::<$M>();
+            }
+            #[test]
+            fn [<test_mul_scalar_ $suffix>]() {
+                $crate::matrix::tests::test_mul_scalar::<$M>();
+            }
+            #[test]
+            fn [<test_add_column_to_vector_ $suffix>]() {
+                $crate::matrix::tests::test_add_column_to_vector::<$M>();
             }
             #[test]
             fn [<test_batched_zeros_ $suffix>]() {
@@ -1581,6 +1739,34 @@ macro_rules! generate_dense_matrix_tests {
             #[test]
             fn [<test_resize_cols_ $suffix>]() {
                 $crate::matrix::tests::test_resize_cols::<$M>();
+            }
+            #[test]
+            fn [<test_add_ $suffix>]() {
+                $crate::matrix::tests::test_add::<$M>();
+            }
+            #[test]
+            fn [<test_sub_ $suffix>]() {
+                $crate::matrix::tests::test_sub::<$M>();
+            }
+            #[test]
+            fn [<test_add_assign_ $suffix>]() {
+                $crate::matrix::tests::test_add_assign::<$M>();
+            }
+            #[test]
+            fn [<test_sub_assign_ $suffix>]() {
+                $crate::matrix::tests::test_sub_assign::<$M>();
+            }
+            #[test]
+            fn [<test_gather_ $suffix>]() {
+                $crate::matrix::tests::test_gather::<$M>();
+            }
+            #[test]
+            fn [<test_set_data_with_indices_ $suffix>]() {
+                $crate::matrix::tests::test_set_data_with_indices::<$M>();
+            }
+            #[test]
+            fn [<test_mul_assign_scalar_ $suffix>]() {
+                $crate::matrix::tests::test_mul_assign_scalar::<$M>();
             }
             #[test]
             fn [<test_batched_from_vec_ $suffix>]() {

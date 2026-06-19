@@ -396,8 +396,9 @@ pub trait DefaultDenseMatrix: Vector {
 pub(crate) mod tests {
     use std::panic::{catch_unwind, AssertUnwindSafe};
 
-    use super::{Vector, VectorCommon, VectorIndex};
+    use super::{Vector, VectorCommon, VectorIndex, VectorViewMut};
     use crate::context::nalgebra::NalgebraContext;
+    use crate::scalar::Scale;
     use crate::vector::nalgebra_serial::NalgebraVec;
     use crate::Context;
     use num_traits::FromPrimitive;
@@ -437,6 +438,66 @@ pub(crate) mod tests {
         let slice = fv::<V>(&[1.0, 2.0, 3.0]);
         let v = V::from_slice(&slice, Default::default());
         assert_eq!(v.clone_as_vec(), slice);
+    }
+
+    pub fn test_mul_scalar<V: Vector>() {
+        let v = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0]), Default::default());
+        let result = v * Scale(f::<V>(2.0));
+        assert_eq!(result.clone_as_vec(), fv::<V>(&[2.0, 4.0, 6.0]));
+    }
+
+    pub fn test_div_scalar<V: Vector>() {
+        let v = V::from_vec(fv::<V>(&[2.0, 4.0, 6.0]), Default::default());
+        let result = v / Scale(f::<V>(2.0));
+        assert_eq!(result.clone_as_vec(), fv::<V>(&[1.0, 2.0, 3.0]));
+    }
+
+    pub fn test_axpy<V: Vector>() {
+        let mut y = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0]), Default::default());
+        let x = V::from_vec(fv::<V>(&[4.0, 5.0, 6.0]), Default::default());
+        y.axpy(f::<V>(2.0), &x, f::<V>(1.0));
+        assert_eq!(y.clone_as_vec(), fv::<V>(&[9.0, 12.0, 15.0]));
+        y.axpy(f::<V>(2.0), &x, f::<V>(0.0));
+        assert_eq!(y.clone_as_vec(), fv::<V>(&[8.0, 10.0, 12.0]));
+        y.axpy(f::<V>(0.0), &x, f::<V>(1.0));
+        assert_eq!(y.clone_as_vec(), fv::<V>(&[8.0, 10.0, 12.0]));
+    }
+
+    pub fn test_copy_from_indices<V: Vector>() {
+        let mut v1 = V::zeros(5, Default::default());
+        let v2 = V::from_vec(
+            fv::<V>(&[10.0, 20.0, 30.0, 40.0, 50.0]),
+            Default::default(),
+        );
+        let indices = V::Index::from_vec(vec![0, 2, 4], Default::default());
+        v1.copy_from_indices(&v2, &indices);
+        assert_eq!(
+            v1.clone_as_vec(),
+            fv::<V>(&[10.0, 0.0, 30.0, 0.0, 50.0])
+        );
+    }
+
+    pub fn test_gather<V: Vector>() {
+        let mut result = V::zeros(3, Default::default());
+        let v = V::from_vec(fv::<V>(&[10.0, 20.0, 30.0, 40.0]), Default::default());
+        let indices = V::Index::from_vec(vec![3, 0, 2], Default::default());
+        result.gather(&v, &indices);
+        assert_eq!(result.clone_as_vec(), fv::<V>(&[40.0, 10.0, 30.0]));
+    }
+
+    pub fn test_scatter<V: Vector>() {
+        let v = V::from_vec(fv::<V>(&[40.0, 10.0, 30.0]), Default::default());
+        let indices = V::Index::from_vec(vec![3, 0, 2], Default::default());
+        let mut result = V::zeros(4, Default::default());
+        v.scatter(&indices, &mut result);
+        assert_eq!(result.clone_as_vec(), fv::<V>(&[10.0, 0.0, 30.0, 40.0]));
+    }
+
+    pub fn test_copy_from_via_view_mut<V: Vector>() {
+        let mut v1 = V::zeros(3, Default::default());
+        let v2 = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0]), Default::default());
+        v1.as_view_mut().copy_from(&v2);
+        assert_eq!(v1.clone_as_vec(), fv::<V>(&[1.0, 2.0, 3.0]));
     }
 
     pub fn test_batched_len_and_total_len<V: Vector>(ctx: V::C) {
@@ -766,6 +827,34 @@ macro_rules! generate_vector_tests {
             #[test]
             fn [<test_from_slice_ $suffix>]() {
                 $crate::vector::tests::test_from_slice::<$V>();
+            }
+            #[test]
+            fn [<test_mul_scalar_ $suffix>]() {
+                $crate::vector::tests::test_mul_scalar::<$V>();
+            }
+            #[test]
+            fn [<test_div_scalar_ $suffix>]() {
+                $crate::vector::tests::test_div_scalar::<$V>();
+            }
+            #[test]
+            fn [<test_axpy_ $suffix>]() {
+                $crate::vector::tests::test_axpy::<$V>();
+            }
+            #[test]
+            fn [<test_copy_from_indices_ $suffix>]() {
+                $crate::vector::tests::test_copy_from_indices::<$V>();
+            }
+            #[test]
+            fn [<test_gather_ $suffix>]() {
+                $crate::vector::tests::test_gather::<$V>();
+            }
+            #[test]
+            fn [<test_scatter_ $suffix>]() {
+                $crate::vector::tests::test_scatter::<$V>();
+            }
+            #[test]
+            fn [<test_copy_from_via_view_mut_ $suffix>]() {
+                $crate::vector::tests::test_copy_from_via_view_mut::<$V>();
             }
             #[test]
             fn [<test_batched_len_and_total_len_ $suffix>]() {

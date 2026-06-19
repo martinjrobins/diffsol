@@ -222,4 +222,16 @@ pub mod tests {
         let s = CudaLU::default();
         test_linear_solver(s, op, rtol, &atol, solns);
     }
+
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn test_lu_cuda_batched() {
+        use crate::{CudaContext, CudaLU, CudaMat, CudaVec};
+        let ctx = CudaContext::default().with_nbatch(2);
+        let (op, rtol, atol, solns) = linear_problem_batched::<CudaMat<f64>>(ctx);
+        let p = CudaVec::zeros(0, op.context().clone());
+        let op = ParameterisedOp::new(&op, &p);
+        let s = CudaLU::default();
+        test_linear_solver(s, op, rtol, &atol, solns);
+    }
 }

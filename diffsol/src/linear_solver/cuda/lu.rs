@@ -2,8 +2,8 @@ use std::{cell::RefCell, mem::MaybeUninit};
 
 use crate::{
     error::{DiffsolError, LinearSolverError},
-    linear_solver_error, CudaContext, CudaMat, CudaVec, LinearSolver, Matrix, NonLinearOpJacobian,
-    ScalarCuda,
+    linear_solver_error, CudaContext, CudaMat, CudaVec, Context, LinearSolver, Matrix,
+    NonLinearOpJacobian, ScalarCuda,
 };
 use cudarc::{
     cusolver::sys::{
@@ -69,27 +69,32 @@ impl<T: ScalarCuda> LinearSolver<CudaMat<T>> for CudaLU<T> {
         let matrix = self.matrix.as_mut().expect("Matrix not set");
         let work = self.work.as_mut().expect("Work space not set");
         let pivots = self.pivots.as_mut().expect("Pivots not set");
-        let mut nfo = self.nfo.as_mut().expect("NFO not set").borrow_mut();
+        let nfo = self.nfo.as_mut().expect("NFO not set").get_mut();
         op.jacobian_inplace(x, t, matrix);
-        {
-            let m = i32::try_from(matrix.nrows()).unwrap();
-            let n = i32::try_from(matrix.ncols()).unwrap();
-            let lda = i32::try_from(matrix.nrows()).unwrap();
-            let stream = &op.context().stream;
-            let (a, _syn) = matrix.data.device_ptr_mut(stream);
-            let (workspace, _ws_syn) = work.device_ptr_mut(stream);
-            let (pivots, _pivots_syn) = pivots.device_ptr_mut(stream);
-            let (nfo, _nfo_syn) = nfo.device_ptr_mut(stream);
+        let nbatch = op.context().nbatch();
+        let nrows = matrix.nrows();
+        let ncols = matrix.ncols();
+        let stream = &op.context().stream;
+        for b in 0..nbatch {
+            let m = i32::try_from(nrows).unwrap();
+            let n = i32::try_from(ncols).unwrap();
+            let lda = i32::try_from(nrows).unwrap();
+            let a_offset = b * nrows * ncols;
+            let p_offset = b * nrows;
+            let (a_ptr, _) = matrix.data.device_ptr_mut(stream);
+            let (ws_ptr, _) = work.device_ptr_mut(stream);
+            let (p_ptr, _) = pivots.device_ptr_mut(stream);
+            let (n_ptr, _) = nfo.device_ptr_mut(stream);
             unsafe {
                 cusolverDnDgetrf(
                     self.handle,
                     m,
                     n,
-                    a as *mut f64,
+                    (a_ptr as *mut f64).add(a_offset),
                     lda,
-                    workspace as *mut f64,
-                    pivots as *mut i32,
-                    nfo as *mut i32,
+                    ws_ptr as *mut f64,
+                    (p_ptr as *mut i32).add(p_offset),
+                    (n_ptr as *mut i32).add(b),
                 )
             };
         }
@@ -108,30 +113,36 @@ impl<T: ScalarCuda> LinearSolver<CudaMat<T>> for CudaLU<T> {
         if !self.linearisation_set {
             return Err(linear_solver_error!(LinearSolverNotSetup))?;
         }
-        if x.data.len() != matrix.nrows() {
+        let nbatch = x.context.nbatch();
+        let nrows = matrix.nrows();
+        let x_nstates = x.data.len() as usize / nbatch;
+        if x_nstates != nrows {
             return Err(linear_solver_error!(LinearSolverMatrixVectorNotCompatible))?;
         }
         let mut nfo = self.nfo.as_ref().expect("NFO not set").borrow_mut();
-        {
-            let stream = matrix.data.stream();
-            let n = i32::try_from(x.data.len()).unwrap();
-            let lda = i32::try_from(self.matrix.as_ref().unwrap().nrows()).unwrap();
-            let (a, _syn) = matrix.data.device_ptr(stream);
-            let (x_data, _x_syn) = x.data.device_ptr_mut(stream);
-            let (pivots, _pivots_syn) = self.pivots.as_ref().unwrap().device_ptr(stream);
-            let (nfo, _nfo_syn) = nfo.device_ptr_mut(stream);
+        let stream = matrix.data.stream();
+        let lda = i32::try_from(nrows).unwrap();
+        let n = i32::try_from(nrows).unwrap();
+        for b in 0..nbatch {
+            let a_offset = b * nrows * matrix.ncols();
+            let p_offset = b * nrows;
+            let x_offset = b * nrows;
+            let (a_ptr, _) = matrix.data.device_ptr(stream);
+            let (x_ptr, _) = x.data.device_ptr_mut(stream);
+            let (p_ptr, _) = self.pivots.as_ref().unwrap().device_ptr(stream);
+            let (n_ptr, _) = nfo.device_ptr_mut(stream);
             unsafe {
                 cusolverDnDgetrs(
                     self.handle,
                     cublasOperation_t::CUBLAS_OP_N,
                     n,
                     1,
-                    a as *mut f64,
+                    (a_ptr as *mut f64).add(a_offset),
                     lda,
-                    pivots as *mut i32,
-                    x_data as *mut f64,
+                    (p_ptr as *mut i32).add(p_offset),
+                    (x_ptr as *mut f64).add(x_offset),
                     n,
-                    nfo as *mut i32,
+                    (n_ptr as *mut i32).add(b),
                 )
             };
         }
@@ -146,6 +157,7 @@ impl<T: ScalarCuda> LinearSolver<CudaMat<T>> for CudaLU<T> {
     ) {
         let ncols = op.nstates();
         let nrows = op.nout();
+        let nbatch = op.context().nbatch();
         let matrix =
             C::M::new_from_sparsity(nrows, ncols, op.jacobian_sparsity(), op.context().clone());
 
@@ -170,9 +182,13 @@ impl<T: ScalarCuda> LinearSolver<CudaMat<T>> for CudaLU<T> {
                     .alloc(lwork as usize)
                     .expect("Failed to allocate work space"),
             );
-            self.pivots = Some(stream.alloc(nrows).expect("Failed to allocate pivots"));
+            self.pivots = Some(
+                stream
+                    .alloc(nrows * nbatch)
+                    .expect("Failed to allocate pivots"),
+            );
             self.nfo = Some(RefCell::new(
-                stream.alloc(1).expect("Failed to allocate NFO"),
+                stream.alloc(nbatch).expect("Failed to allocate NFO"),
             ));
         }
         self.linearisation_set = false;
