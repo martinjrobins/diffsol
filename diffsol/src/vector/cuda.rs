@@ -1945,4 +1945,5 @@ mod tests {
         CudaContext::default().with_nbatch(2),
         CudaContext::default().with_nbatch(3)
     );
+
 }
