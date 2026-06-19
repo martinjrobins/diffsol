@@ -424,7 +424,7 @@ pub trait DenseMatrix:
 pub(crate) mod tests {
     use super::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
     use crate::scalar::Scale;
-use crate::{scalar::IndexType, Context, Vector, VectorIndex};
+    use crate::{scalar::IndexType, Context, Vector, VectorIndex};
     use num_traits::{FromPrimitive, One, Zero};
 
     fn f<M: Matrix>(x: f64) -> M::T {
@@ -1626,6 +1626,246 @@ use crate::{scalar::IndexType, Context, Vector, VectorIndex};
         let recom_vals: Vec<_> = recom_vals.collect();
         assert_eq!(orig_vals, recom_vals);
     }
+
+    pub fn test_batched_add_column_to_vector_m<M: Matrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
+        let values = vec![
+            f::<M>(1.0),
+            f::<M>(2.0),
+            f::<M>(3.0),
+            f::<M>(4.0),
+            f::<M>(5.0),
+            f::<M>(6.0),
+            f::<M>(7.0),
+            f::<M>(8.0),
+        ];
+        let mat = M::try_from_triplets(2, 2, indices, values, ctx.clone()).unwrap();
+        let mut v = M::V::zeros(2, ctx);
+        mat.add_column_to_vector(1, &mut v);
+        assert_eq!(
+            v.clone_as_vec(),
+            vec![f::<M>(3.0), f::<M>(4.0), f::<M>(7.0), f::<M>(8.0)]
+        );
+    }
+
+    pub fn test_batched_set_data_with_indices_m<M: Matrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
+        let zero_values = vec![
+            f::<M>(0.0),
+            f::<M>(0.0),
+            f::<M>(0.0),
+            f::<M>(0.0),
+            f::<M>(0.0),
+            f::<M>(0.0),
+            f::<M>(0.0),
+            f::<M>(0.0),
+        ];
+        let mut mat = M::try_from_triplets(2, 2, indices, zero_values, ctx.clone()).unwrap();
+        let dst_indices = <M::V as Vector>::Index::from_vec(vec![0, 3], Default::default());
+        let src_indices = <M::V as Vector>::Index::from_vec(vec![0, 1], Default::default());
+        let data = M::V::from_vec(
+            vec![f::<M>(5.0), f::<M>(6.0), f::<M>(50.0), f::<M>(60.0)],
+            ctx,
+        );
+        mat.set_data_with_indices(&dst_indices, &src_indices, &data);
+        let (_, vals) = mat.triplet_iter();
+        let vals: Vec<_> = vals.collect();
+        assert_eq!(
+            vals,
+            vec![
+                f::<M>(5.0),
+                f::<M>(0.0),
+                f::<M>(0.0),
+                f::<M>(6.0),
+                f::<M>(50.0),
+                f::<M>(0.0),
+                f::<M>(0.0),
+                f::<M>(60.0),
+            ]
+        );
+    }
+
+    pub fn test_batched_gather_m<M: Matrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let indices: Vec<(IndexType, IndexType)> =
+            (0..3).flat_map(|j| (0..3).map(move |i| (i, j))).collect();
+        let values = vec![
+            f::<M>(1.0),
+            f::<M>(2.0),
+            f::<M>(3.0),
+            f::<M>(4.0),
+            f::<M>(5.0),
+            f::<M>(6.0),
+            f::<M>(7.0),
+            f::<M>(8.0),
+            f::<M>(9.0),
+            f::<M>(10.0),
+            f::<M>(20.0),
+            f::<M>(30.0),
+            f::<M>(40.0),
+            f::<M>(50.0),
+            f::<M>(60.0),
+            f::<M>(70.0),
+            f::<M>(80.0),
+            f::<M>(90.0),
+        ];
+        let mat1 = M::try_from_triplets(3, 3, indices, values, ctx.clone()).unwrap();
+        let dest_indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
+        let zero_values = vec![
+            f::<M>(0.0),
+            f::<M>(0.0),
+            f::<M>(0.0),
+            f::<M>(0.0),
+            f::<M>(0.0),
+            f::<M>(0.0),
+            f::<M>(0.0),
+            f::<M>(0.0),
+        ];
+        let mut mat2 = M::try_from_triplets(2, 2, dest_indices, zero_values, ctx).unwrap();
+        let gather_indices =
+            <M::V as Vector>::Index::from_vec(vec![0, 1, 3, 4], Default::default());
+        mat2.gather(&mat1, &gather_indices);
+        let (_, vals) = mat2.triplet_iter();
+        let vals: Vec<_> = vals.collect();
+        assert_eq!(
+            vals,
+            vec![
+                f::<M>(1.0),
+                f::<M>(2.0),
+                f::<M>(4.0),
+                f::<M>(5.0),
+                f::<M>(10.0),
+                f::<M>(20.0),
+                f::<M>(40.0),
+                f::<M>(50.0),
+            ]
+        );
+    }
+
+    pub fn test_batched_mul_scalar_m<M: Matrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
+        let values = vec![
+            f::<M>(1.0),
+            f::<M>(3.0),
+            f::<M>(2.0),
+            f::<M>(4.0),
+            f::<M>(5.0),
+            f::<M>(7.0),
+            f::<M>(6.0),
+            f::<M>(8.0),
+        ];
+        let a = M::try_from_triplets(2, 2, indices, values, ctx.clone()).unwrap();
+        let result = a * Scale(f::<M>(2.0));
+        let (_, vals) = result.triplet_iter();
+        let vals: Vec<_> = vals.collect();
+        assert_eq!(
+            vals,
+            vec![
+                f::<M>(2.0),
+                f::<M>(6.0),
+                f::<M>(4.0),
+                f::<M>(8.0),
+                f::<M>(10.0),
+                f::<M>(14.0),
+                f::<M>(12.0),
+                f::<M>(16.0),
+            ]
+        );
+    }
+
+    pub fn test_batched_partition_indices<M: Matrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let zero_val = M::T::zero();
+        let one_val = f::<M>(1.0);
+        let two_val = f::<M>(2.0);
+        let indices = vec![(0, 0), (1, 1), (2, 2)];
+        let values = vec![one_val, zero_val, one_val, two_val, zero_val, two_val];
+        let m = M::try_from_triplets(3, 3, indices, values, ctx).unwrap();
+        let (zero_idx, nonzero_idx) = m.partition_indices_by_zero_diagonal();
+        assert_eq!(zero_idx.clone_as_vec(), vec![1]);
+        assert_eq!(nonzero_idx.clone_as_vec(), vec![0, 2]);
+    }
+
+    pub fn test_batched_column_axpy<M: DenseMatrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let mut a = M::from_vec(
+            2,
+            2,
+            vec![
+                f::<M>(1.0),
+                f::<M>(3.0),
+                f::<M>(2.0),
+                f::<M>(4.0),
+                f::<M>(5.0),
+                f::<M>(7.0),
+                f::<M>(6.0),
+                f::<M>(8.0),
+            ],
+            ctx,
+        );
+        a.column_axpy(f::<M>(2.0), 0, 1);
+        assert_eq!(a.get_index(0, 0), f::<M>(1.0));
+        assert_eq!(a.get_index(0, 1), f::<M>(4.0));
+        assert_eq!(a.get_index(1, 0), f::<M>(3.0));
+        assert_eq!(a.get_index(1, 1), f::<M>(10.0));
+    }
+
+    pub fn test_batched_mat_mul<M: DenseMatrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let a = M::from_vec(
+            2,
+            2,
+            vec![
+                f::<M>(1.0),
+                f::<M>(3.0),
+                f::<M>(2.0),
+                f::<M>(4.0),
+                f::<M>(2.0),
+                f::<M>(1.0),
+                f::<M>(0.0),
+                f::<M>(3.0),
+            ],
+            ctx.clone(),
+        );
+        let b = M::from_vec(
+            2,
+            2,
+            vec![
+                f::<M>(2.0),
+                f::<M>(1.0),
+                f::<M>(0.0),
+                f::<M>(3.0),
+                f::<M>(1.0),
+                f::<M>(0.0),
+                f::<M>(2.0),
+                f::<M>(1.0),
+            ],
+            ctx.clone(),
+        );
+        let c = a.mat_mul(&b);
+        assert_eq!(c.get_index(0, 0), f::<M>(4.0));
+        assert_eq!(c.get_index(1, 0), f::<M>(10.0));
+        assert_eq!(c.get_index(0, 1), f::<M>(6.0));
+        assert_eq!(c.get_index(1, 1), f::<M>(12.0));
+    }
+
+    pub fn test_batched_from_diagonal_dense<M: DenseMatrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let v = M::V::from_vec(
+            vec![f::<M>(2.0), f::<M>(3.0), f::<M>(4.0), f::<M>(5.0)],
+            ctx,
+        );
+        let a = M::from_diagonal(&v);
+        assert_eq!(a.nrows(), 2);
+        assert_eq!(a.ncols(), 2);
+        assert_eq!(a.get_index(0, 0), f::<M>(2.0));
+        assert_eq!(a.get_index(1, 1), f::<M>(3.0));
+        assert_eq!(a.get_index(0, 1), f::<M>(0.0));
+        assert_eq!(a.get_index(1, 0), f::<M>(0.0));
+    }
 }
 
 #[cfg(test)]
@@ -1667,6 +1907,26 @@ macro_rules! generate_matrix_tests {
             #[test]
             fn [<test_add_column_to_vector_ $suffix>]() {
                 $crate::matrix::tests::test_add_column_to_vector::<$M>();
+            }
+            #[test]
+            fn [<test_batched_add_column_to_vector_ $suffix>]() {
+                $crate::matrix::tests::test_batched_add_column_to_vector_m::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_set_data_with_indices_ $suffix>]() {
+                $crate::matrix::tests::test_batched_set_data_with_indices_m::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_gather_ $suffix>]() {
+                $crate::matrix::tests::test_batched_gather_m::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_mul_scalar_ $suffix>]() {
+                $crate::matrix::tests::test_batched_mul_scalar_m::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_partition_indices_ $suffix>]() {
+                $crate::matrix::tests::test_batched_partition_indices::<$M>($ctx2);
             }
             #[test]
             fn [<test_batched_zeros_ $suffix>]() {
@@ -1767,6 +2027,18 @@ macro_rules! generate_dense_matrix_tests {
             #[test]
             fn [<test_mul_assign_scalar_ $suffix>]() {
                 $crate::matrix::tests::test_mul_assign_scalar::<$M>();
+            }
+            #[test]
+            fn [<test_batched_column_axpy_ $suffix>]() {
+                $crate::matrix::tests::test_batched_column_axpy::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_mat_mul_ $suffix>]() {
+                $crate::matrix::tests::test_batched_mat_mul::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_from_diagonal_dense_ $suffix>]() {
+                $crate::matrix::tests::test_batched_from_diagonal_dense::<$M>($ctx2);
             }
             #[test]
             fn [<test_batched_from_vec_ $suffix>]() {

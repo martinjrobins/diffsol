@@ -2,7 +2,7 @@ use std::{cell::RefCell, mem::MaybeUninit};
 
 use crate::{
     error::{DiffsolError, LinearSolverError},
-    linear_solver_error, CudaContext, CudaMat, CudaVec, Context, LinearSolver, Matrix,
+    linear_solver_error, Context, CudaContext, CudaMat, CudaVec, LinearSolver, Matrix,
     NonLinearOpJacobian, ScalarCuda,
 };
 use cudarc::{

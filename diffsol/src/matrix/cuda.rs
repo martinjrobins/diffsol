@@ -10,54 +10,14 @@ use crate::{
     error::{DiffsolError, MatrixError},
     linear_solver::cuda::lu::CudaLU,
     matrix::default_solver::DefaultSolver,
-    matrix_error, CudaContext, CudaType, CudaVec, CudaVecMut, CudaVecRef, IndexType, MatrixCommon,
-    ScalarCuda, Scale, Vector, VectorIndex, Context,
+    matrix_error, Context, CudaContext, CudaType, CudaVec, CudaVecMut, CudaVecRef, IndexType,
+    MatrixCommon, ScalarCuda, Scale, Vector, VectorIndex,
 };
 
 use super::{
     sparsity::{Dense, DenseRef},
     DenseMatrix, Matrix, MatrixView, MatrixViewMut,
 };
-
-/// triplet iterator for a dense matrix held in column-major order
-struct DenseMatTripletIter<T: ScalarCuda> {
-    data: Vec<T>,
-    nrows: IndexType,
-    ncols: IndexType,
-    current_row: IndexType,
-    current_col: IndexType,
-}
-
-impl<T: ScalarCuda> DenseMatTripletIter<T> {
-    fn new(data: Vec<T>, nrows: IndexType, ncols: IndexType) -> Self {
-        Self {
-            data,
-            nrows,
-            ncols,
-            current_row: 0,
-            current_col: 0,
-        }
-    }
-}
-
-impl<T: ScalarCuda> Iterator for DenseMatTripletIter<T> {
-    type Item = (IndexType, IndexType, T);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.current_col >= self.ncols {
-            return None;
-        }
-        let index = self.current_row + self.current_col * self.nrows;
-        let value = self.data[index];
-        let triplet = (self.current_row, self.current_col, value);
-        self.current_row += 1;
-        if self.current_row >= self.nrows {
-            self.current_row = 0;
-            self.current_col += 1;
-        }
-        Some(triplet)
-    }
-}
 
 /// a CUDA matrix in column-major order
 #[derive(Clone, Debug)]
@@ -202,14 +162,24 @@ impl<T: ScalarCuda> CudaMat<T> {
             self.nrows, self.ncols,
             "Matrix must be square to get diagonal"
         );
-        let mut data: CudaSlice<T> = unsafe { self.context.stream.alloc(self.nrows) }
+        let nbatch = self.context.nbatch();
+        let n = self.nrows();
+        let total = n * nbatch;
+        let mut data: CudaSlice<T> = unsafe { self.context.stream.alloc(total) }
             .expect("Failed to allocate memory for diagonal");
         let f = self.context.function::<T>("mat_get_diagonal");
-        let n = self.nrows() as u32;
-        let mut build = self.context.stream.launch_builder(&f);
-        build.arg(&self.data).arg(&mut data).arg(&n);
-        let config = self.context.launch_config_1d(n, &f);
-        unsafe { build.launch(config) }.expect("Failed to launch kernel");
+        let n_u32 = n as u32;
+        let batch_stride = n * n;
+        for b in 0..nbatch {
+            let src_start = b * batch_stride;
+            let dst_start = b * n;
+            let mut build = self.context.stream.launch_builder(&f);
+            let src_slice = self.data.slice(src_start..src_start + batch_stride);
+            let mut dst_slice = data.slice_mut(dst_start..dst_start + n);
+            build.arg(&src_slice).arg(&mut dst_slice).arg(&n_u32);
+            let config = self.context.launch_config_1d(n_u32, &f);
+            unsafe { build.launch(config) }.expect("Failed to launch kernel");
+        }
         CudaVec {
             data,
             context: self.context.clone(),
@@ -555,8 +525,7 @@ impl<'a, T: ScalarCuda> MatrixView<'a> for CudaMatRef<'a, T> {
     fn gemv_o(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
         let nbatch = self.context.nbatch();
         let x_nbatch = x.context.nbatch();
-        self.context
-            .assert_compatible_nbatch(x_nbatch, "gemv_o");
+        self.context.assert_compatible_nbatch(x_nbatch, "gemv_o");
         let nrows = self.nrows();
         let ncols = self.ncols();
         let batch_stride = self.batch_stride;
@@ -569,7 +538,8 @@ impl<'a, T: ScalarCuda> MatrixView<'a> for CudaMatRef<'a, T> {
             let a_slice = self.data.slice(a_start..a_start + nrows * ncols);
             let x_slice = x.data.slice(x_start..x_start + x_nstates);
             let mut y_slice = y.data.slice_mut(y_start..y_start + nrows);
-            self.context.gemv(nrows, ncols, alpha, beta, &a_slice, &x_slice, &mut y_slice);
+            self.context
+                .gemv(nrows, ncols, alpha, beta, &a_slice, &x_slice, &mut y_slice);
         }
     }
     fn gemv_v(
@@ -581,8 +551,7 @@ impl<'a, T: ScalarCuda> MatrixView<'a> for CudaMatRef<'a, T> {
     ) {
         let nbatch = self.context.nbatch();
         let x_nbatch = x.context.nbatch();
-        self.context
-            .assert_compatible_nbatch(x_nbatch, "gemv_v");
+        self.context.assert_compatible_nbatch(x_nbatch, "gemv_v");
         let nrows = self.nrows();
         let ncols = self.ncols();
         let batch_stride = self.batch_stride;
@@ -596,7 +565,8 @@ impl<'a, T: ScalarCuda> MatrixView<'a> for CudaMatRef<'a, T> {
             let a_slice = self.data.slice(a_start..a_start + nrows * ncols);
             let x_slice = x.data.slice(x_start..x_start + x_nstates);
             let mut y_slice = y.data.slice_mut(y_start..y_start + nrows);
-            self.context.gemv(nrows, ncols, alpha, beta, &a_slice, &x_slice, &mut y_slice);
+            self.context
+                .gemv(nrows, ncols, alpha, beta, &a_slice, &x_slice, &mut y_slice);
         }
     }
 }
@@ -649,8 +619,21 @@ impl<'a, T: ScalarCuda> MatrixViewMut<'a> for CudaMatMut<'a, T> {
             let self_start = b_idx * self_batch_stride;
             let a_slice = a.data.slice(a_start..a_start + a.nrows * a.ncols);
             let b_slice = b.data.slice(b_start..b_start + b.nrows * b.ncols);
-            let mut self_slice = self.data.slice_mut(self_start..self_start + self_nrows * self_ncols);
-            self.context.gemm(a.nrows(), a.ncols(), b.nrows(), b.ncols(), self_nrows, alpha, beta, &a_slice, &b_slice, &mut self_slice);
+            let mut self_slice = self
+                .data
+                .slice_mut(self_start..self_start + self_nrows * self_ncols);
+            self.context.gemm(
+                a.nrows(),
+                a.ncols(),
+                b.nrows(),
+                b.ncols(),
+                self_nrows,
+                alpha,
+                beta,
+                &a_slice,
+                &b_slice,
+                &mut self_slice,
+            );
         }
     }
     fn gemm_vo(&mut self, alpha: Self::T, a: &Self::View, b: &Self::Owned, beta: Self::T) {
@@ -670,8 +653,21 @@ impl<'a, T: ScalarCuda> MatrixViewMut<'a> for CudaMatMut<'a, T> {
             let self_start = b_idx * self_batch_stride;
             let a_slice = a.data.slice(a_start..a_start + a.nrows * a.ncols);
             let b_slice = b.data.slice(b_start..b_start + b.nrows * b.ncols);
-            let mut self_slice = self.data.slice_mut(self_start..self_start + self_nrows * self_ncols);
-            self.context.gemm(a.nrows(), a.ncols(), b.nrows(), b.ncols(), self_nrows, alpha, beta, &a_slice, &b_slice, &mut self_slice);
+            let mut self_slice = self
+                .data
+                .slice_mut(self_start..self_start + self_nrows * self_ncols);
+            self.context.gemm(
+                a.nrows(),
+                a.ncols(),
+                b.nrows(),
+                b.ncols(),
+                self_nrows,
+                alpha,
+                beta,
+                &a_slice,
+                &b_slice,
+                &mut self_slice,
+            );
         }
     }
 }
@@ -751,10 +747,8 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
         let self_nrows = self.nrows;
         let self_ncols = self.ncols;
         let self_batch_size = self_nrows * self_ncols;
-        self.context
-            .assert_compatible_nbatch(a_nbatch, "gemm_a");
-        self.context
-            .assert_compatible_nbatch(b_nbatch, "gemm_b");
+        self.context.assert_compatible_nbatch(a_nbatch, "gemm_a");
+        self.context.assert_compatible_nbatch(b_nbatch, "gemm_b");
         let effective_nbatch = nbatch.max(a_nbatch).max(b_nbatch);
         for b_idx in 0..effective_nbatch {
             let a_b = if a_nbatch == 1 { 0 } else { b_idx };
@@ -765,7 +759,9 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
             let self_start = self_b * self_batch_size;
             let a_slice = a.data.slice(a_start..a_start + a.nrows * a.ncols);
             let b_slice = b.data.slice(b_start..b_start + b.nrows * b.ncols);
-            let mut self_slice = self.data.slice_mut(self_start..self_start + self_batch_size);
+            let mut self_slice = self
+                .data
+                .slice_mut(self_start..self_start + self_batch_size);
             self.context.gemm(
                 a.nrows(),
                 a.ncols(),
@@ -872,8 +868,7 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
                 let (y, _syn_y) = y.device_ptr(&self.context.stream);
                 y
             };
-            self.context
-                .axpy_inner::<T>(alpha, x, y, nrows as c_int);
+            self.context.axpy_inner::<T>(alpha, x, y, nrows as c_int);
         }
     }
 }
@@ -905,11 +900,17 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
             let other_start = other_b * other_batch_size;
             let f = self.context.function::<T>("vec_gather");
             let n = indices.len() as u32;
-            if n == 0 { continue; }
+            if n == 0 {
+                continue;
+            }
             let config = self.context.launch_config_1d(n, &f);
             let mut build = self.context.stream.launch_builder(&f);
-            let mut self_slice = self.data.slice_mut(self_start..self_start + self_batch_size);
-            let other_slice = other.data.slice(other_start..other_start + other_batch_size);
+            let mut self_slice = self
+                .data
+                .slice_mut(self_start..self_start + self_batch_size);
+            let other_slice = other
+                .data
+                .slice(other_start..other_start + other_batch_size);
             build
                 .arg(&mut self_slice)
                 .arg(&other_slice)
@@ -940,10 +941,14 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
             let data_start = data_b * data_nstates;
             let f = self.context.function::<T>("mat_set_data_with_indices");
             let n = dst_indices.len() as u32;
-            if n == 0 { continue; }
+            if n == 0 {
+                continue;
+            }
             let config = self.context.launch_config_1d(n, &f);
             let mut build = self.context.stream.launch_builder(&f);
-            let mut self_slice = self.data.slice_mut(self_start..self_start + self_batch_size);
+            let mut self_slice = self
+                .data
+                .slice_mut(self_start..self_start + self_batch_size);
             let data_slice = data.data.slice(data_start..data_start + data_nstates);
             build
                 .arg(&mut self_slice)
@@ -1035,8 +1040,7 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
     fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
         let nbatch = self.context.nbatch();
         let x_nbatch = x.context.nbatch();
-        self.context
-            .assert_compatible_nbatch(x_nbatch, "gemv");
+        self.context.assert_compatible_nbatch(x_nbatch, "gemv");
         let effective_nbatch = nbatch.max(x_nbatch);
         for b in 0..effective_nbatch {
             let self_b = if nbatch == 1 { 0 } else { b };
@@ -1096,8 +1100,12 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
                 let n = (nrows * self_ncols) as u32;
                 let f = self.context.function::<T>("vec_copy");
                 let mut build = self.context.stream.launch_builder(&f);
-                let mut self_slice = self.data.slice_mut(self_start..self_start + nrows * self_ncols);
-                let other_slice = other.data.slice(other_start..other_start + nrows * other_ncols);
+                let mut self_slice = self
+                    .data
+                    .slice_mut(self_start..self_start + nrows * self_ncols);
+                let other_slice = other
+                    .data
+                    .slice(other_start..other_start + nrows * other_ncols);
                 build.arg(&mut self_slice).arg(&other_slice).arg(&n);
                 let config = self.context.launch_config_1d(n, &f);
                 unsafe { build.launch(config) }.expect("Failed to launch kernel");
@@ -1166,25 +1174,21 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
             let v_b = if v_nbatch == 1 { 0 } else { b };
             let v_nstates = v.data.len() as IndexType / v_nbatch;
             assert_eq!(
-                v_nstates,
-                nrows,
+                v_nstates, nrows,
                 "Column length mismatch: {} != {}",
-                v_nstates,
-                nrows
+                v_nstates, nrows
             );
             let f = self.context.function::<T>("mat_set_column");
             let n = nrows as u32;
             let j_cint = j as c_int;
             let mat_start = b * nrows * self.ncols;
             let v_start = v_b * v_nstates;
-            let mut mat_slice = self.data.slice_mut(mat_start..mat_start + nrows * self.ncols);
+            let mut mat_slice = self
+                .data
+                .slice_mut(mat_start..mat_start + nrows * self.ncols);
             let v_slice = v.data.slice(v_start..v_start + v_nstates);
             let mut build = self.context.stream.launch_builder(&f);
-            build
-                .arg(&mut mat_slice)
-                .arg(&v_slice)
-                .arg(&j_cint)
-                .arg(&n);
+            build.arg(&mut mat_slice).arg(&v_slice).arg(&j_cint).arg(&n);
             let config = self.context.launch_config_1d(n, &f);
             unsafe { build.launch(config) }.expect("Failed to launch kernel");
         }
@@ -1211,7 +1215,9 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
             let x_start = x_b * nrows * x_ncols;
             let y_start = y_b * nrows * y_ncols;
             let n = (nrows * self_ncols) as u32;
-            let mut self_slice = self.data.slice_mut(self_start..self_start + nrows * self_ncols);
+            let mut self_slice = self
+                .data
+                .slice_mut(self_start..self_start + nrows * self_ncols);
             let x_slice = x.data.slice(x_start..x_start + nrows * x_ncols);
             let y_slice = y.data.slice(y_start..y_start + nrows * y_ncols);
             let mut build = self.context.stream.launch_builder(&f);

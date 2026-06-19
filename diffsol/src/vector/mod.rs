@@ -396,7 +396,7 @@ pub trait DefaultDenseMatrix: Vector {
 pub(crate) mod tests {
     use std::panic::{catch_unwind, AssertUnwindSafe};
 
-    use super::{Vector, VectorCommon, VectorIndex, VectorViewMut};
+    use super::{Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
     use crate::context::nalgebra::NalgebraContext;
     use crate::scalar::Scale;
     use crate::vector::nalgebra_serial::NalgebraVec;
@@ -465,16 +465,10 @@ pub(crate) mod tests {
 
     pub fn test_copy_from_indices<V: Vector>() {
         let mut v1 = V::zeros(5, Default::default());
-        let v2 = V::from_vec(
-            fv::<V>(&[10.0, 20.0, 30.0, 40.0, 50.0]),
-            Default::default(),
-        );
+        let v2 = V::from_vec(fv::<V>(&[10.0, 20.0, 30.0, 40.0, 50.0]), Default::default());
         let indices = V::Index::from_vec(vec![0, 2, 4], Default::default());
         v1.copy_from_indices(&v2, &indices);
-        assert_eq!(
-            v1.clone_as_vec(),
-            fv::<V>(&[10.0, 0.0, 30.0, 0.0, 50.0])
-        );
+        assert_eq!(v1.clone_as_vec(), fv::<V>(&[10.0, 0.0, 30.0, 0.0, 50.0]));
     }
 
     pub fn test_gather<V: Vector>() {
@@ -497,6 +491,199 @@ pub(crate) mod tests {
         let mut v1 = V::zeros(3, Default::default());
         let v2 = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0]), Default::default());
         v1.as_view_mut().copy_from(&v2);
+        assert_eq!(v1.clone_as_vec(), fv::<V>(&[1.0, 2.0, 3.0]));
+    }
+
+    pub fn test_set_index<V: Vector>() {
+        let mut v = V::zeros(3, Default::default());
+        v.set_index(1, f::<V>(42.0));
+        assert_eq!(v.clone_as_vec(), fv::<V>(&[0.0, 42.0, 0.0]));
+    }
+
+    pub fn test_get_index<V: Vector>() {
+        let v = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0]), Default::default());
+        assert_eq!(v.get_index(0), f::<V>(1.0));
+        assert_eq!(v.get_index(2), f::<V>(3.0));
+    }
+
+    pub fn test_norm<V: Vector>() {
+        let v = V::from_vec(fv::<V>(&[3.0, 4.0]), Default::default());
+        let norm = v.norm(2);
+        let diff = norm - f::<V>(5.0);
+        assert!(num_traits::abs(diff) < f::<V>(1e-12));
+    }
+
+    pub fn test_squared_norm<V: Vector>() {
+        let x = V::from_vec(fv::<V>(&[1.0, 2.0]), Default::default());
+        let y = V::from_vec(fv::<V>(&[1.0, 1.0]), Default::default());
+        let atol = V::from_vec(fv::<V>(&[1e-3, 1e-3]), Default::default());
+        let rtol = f::<V>(1e-2);
+        let norm = x.squared_norm(&y, &atol, rtol);
+        let denom = f::<V>(1.0) * rtol + f::<V>(1e-3);
+        let err0 = f::<V>(1.0) / denom;
+        let err1 = f::<V>(2.0) / denom;
+        let expected = (err0 * err0 + err1 * err1) / f::<V>(2.0);
+        assert!(num_traits::abs(norm - expected) < f::<V>(1e-12));
+    }
+
+    pub fn test_fill<V: Vector>() {
+        let mut v = V::zeros(3, Default::default());
+        v.fill(f::<V>(7.0));
+        assert_eq!(v.clone_as_vec(), fv::<V>(&[7.0, 7.0, 7.0]));
+    }
+
+    pub fn test_from_element<V: Vector>() {
+        let v = V::from_element(2, f::<V>(5.0), Default::default());
+        assert_eq!(v.clone_as_vec(), fv::<V>(&[5.0, 5.0]));
+    }
+
+    pub fn test_copy_from<V: Vector>() {
+        let mut v1 = V::zeros(3, Default::default());
+        let v2 = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0]), Default::default());
+        v1.copy_from(&v2);
+        assert_eq!(v1.clone_as_vec(), fv::<V>(&[1.0, 2.0, 3.0]));
+    }
+
+    pub fn test_from_vec<V: Vector>() {
+        let v = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0]), Default::default());
+        assert_eq!(v.clone_as_vec(), fv::<V>(&[1.0, 2.0, 3.0]));
+    }
+
+    pub fn test_component_mul_assign<V: Vector>() {
+        let mut a = V::from_vec(fv::<V>(&[2.0, 3.0]), Default::default());
+        let b = V::from_vec(fv::<V>(&[10.0, 20.0]), Default::default());
+        a.component_mul_assign(&b);
+        assert_eq!(a.clone_as_vec(), fv::<V>(&[20.0, 60.0]));
+    }
+
+    pub fn test_component_div_assign<V: Vector>() {
+        let mut a = V::from_vec(fv::<V>(&[6.0, 12.0]), Default::default());
+        let b = V::from_vec(fv::<V>(&[2.0, 3.0]), Default::default());
+        a.component_div_assign(&b);
+        assert_eq!(a.clone_as_vec(), fv::<V>(&[3.0, 4.0]));
+    }
+
+    pub fn test_assign_at_indices<V: Vector>() {
+        let mut v = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0]), Default::default());
+        let indices = V::Index::from_vec(vec![0, 2], Default::default());
+        v.assign_at_indices(&indices, f::<V>(0.0));
+        assert_eq!(v.clone_as_vec(), fv::<V>(&[0.0, 2.0, 0.0]));
+    }
+
+    pub fn test_add<V: Vector>() {
+        let a = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0]), Default::default());
+        let b = V::from_vec(fv::<V>(&[10.0, 20.0, 30.0]), Default::default());
+        let c = a + b;
+        assert_eq!(c.clone_as_vec(), fv::<V>(&[11.0, 22.0, 33.0]));
+    }
+
+    pub fn test_sub<V: Vector>() {
+        let a = V::from_vec(fv::<V>(&[10.0, 20.0, 30.0]), Default::default());
+        let b = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0]), Default::default());
+        let c = a - b;
+        assert_eq!(c.clone_as_vec(), fv::<V>(&[9.0, 18.0, 27.0]));
+    }
+
+    pub fn test_add_assign<V: Vector>() {
+        let mut a = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0]), Default::default());
+        let b = V::from_vec(fv::<V>(&[10.0, 20.0, 30.0]), Default::default());
+        a += b;
+        assert_eq!(a.clone_as_vec(), fv::<V>(&[11.0, 22.0, 33.0]));
+    }
+
+    pub fn test_sub_assign<V: Vector>() {
+        let mut a = V::from_vec(fv::<V>(&[10.0, 20.0, 30.0]), Default::default());
+        let b = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0]), Default::default());
+        a -= b;
+        assert_eq!(a.clone_as_vec(), fv::<V>(&[9.0, 18.0, 27.0]));
+    }
+
+    pub fn test_axpy_v<V: Vector>() {
+        let mut y = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0]), Default::default());
+        let x = V::from_vec(fv::<V>(&[4.0, 5.0, 6.0]), Default::default());
+        let x_view = x.as_view();
+        y.axpy_v(f::<V>(2.0), &x_view, f::<V>(1.0));
+        assert_eq!(y.clone_as_vec(), fv::<V>(&[9.0, 12.0, 15.0]));
+    }
+
+    pub fn test_mul_assign_scalar<V: Vector>() {
+        let mut v = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0]), Default::default());
+        v *= Scale(f::<V>(2.0));
+        assert_eq!(v.clone_as_vec(), fv::<V>(&[2.0, 4.0, 6.0]));
+    }
+
+    pub fn test_copy_from_view<V: Vector>() {
+        let mut v1 = V::zeros(3, Default::default());
+        let v2 = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0]), Default::default());
+        let view = v2.as_view();
+        v1.copy_from_view(&view);
+        assert_eq!(v1.clone_as_vec(), fv::<V>(&[1.0, 2.0, 3.0]));
+    }
+
+    pub fn test_view_squared_norm<V: Vector>() {
+        let x = V::from_vec(fv::<V>(&[1.0, 2.0]), Default::default());
+        let y = V::from_vec(fv::<V>(&[1.0, 1.0]), Default::default());
+        let atol = V::from_vec(fv::<V>(&[1e-3, 1e-3]), Default::default());
+        let rtol = f::<V>(1e-2);
+        let view = x.as_view();
+        let norm = VectorView::squared_norm(&view, &y, &atol, rtol);
+        let denom = f::<V>(1.0) * rtol + f::<V>(1e-3);
+        let err0 = f::<V>(1.0) / denom;
+        let err1 = f::<V>(2.0) / denom;
+        let expected = (err0 * err0 + err1 * err1) / f::<V>(2.0);
+        assert!(num_traits::abs(norm - expected) < f::<V>(1e-12));
+    }
+
+    pub fn test_view_into_owned<V: Vector>() {
+        let v = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0]), Default::default());
+        let view = v.as_view();
+        let owned = view.into_owned();
+        assert_eq!(owned.clone_as_vec(), fv::<V>(&[1.0, 2.0, 3.0]));
+    }
+
+    pub fn test_view_get_index<V: Vector>() {
+        let v = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0]), Default::default());
+        let view = v.as_view();
+        assert_eq!(view.get_index(1), f::<V>(2.0));
+        assert_eq!(view.get_index(2), f::<V>(3.0));
+    }
+
+    pub fn test_view_mut_axpy<V: Vector>() {
+        let mut y = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0]), Default::default());
+        let x = V::from_vec(fv::<V>(&[4.0, 5.0, 6.0]), Default::default());
+        {
+            let mut y_view = y.as_view_mut();
+            y_view.axpy(f::<V>(2.0), &x, f::<V>(1.0));
+        }
+        assert_eq!(y.clone_as_vec(), fv::<V>(&[9.0, 12.0, 15.0]));
+    }
+
+    pub fn test_view_mut_set_index<V: Vector>() {
+        let mut v = V::zeros(3, Default::default());
+        {
+            let mut view = v.as_view_mut();
+            view.set_index(1, f::<V>(42.0));
+        }
+        assert_eq!(v.clone_as_vec(), fv::<V>(&[0.0, 42.0, 0.0]));
+    }
+
+    pub fn test_view_mut_mul_assign_scalar<V: Vector>() {
+        let mut v = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0]), Default::default());
+        {
+            let mut view = v.as_view_mut();
+            view *= Scale(f::<V>(2.0));
+        }
+        assert_eq!(v.clone_as_vec(), fv::<V>(&[2.0, 4.0, 6.0]));
+    }
+
+    pub fn test_view_mut_copy_from_view<V: Vector>() {
+        let mut v1 = V::zeros(3, Default::default());
+        let v2 = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0]), Default::default());
+        {
+            let v2_view = v2.as_view();
+            let mut v1_view = v1.as_view_mut();
+            v1_view.copy_from_view(&v2_view);
+        }
         assert_eq!(v1.clone_as_vec(), fv::<V>(&[1.0, 2.0, 3.0]));
     }
 
@@ -557,10 +744,13 @@ pub(crate) mod tests {
         assert_eq!(ctx.nbatch(), 2);
         let x = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0]), ctx.clone());
         let y = V::from_vec(fv::<V>(&[1.0, 1.0, 1.0, 1.0]), ctx);
-        let atol = V::from_vec(fv::<V>(&[1.0, 1.0]), V::C::default());
-        let rtol = f::<V>(0.0);
+        let atol = V::from_vec(fv::<V>(&[1e-3, 1e-3]), V::C::default());
+        let rtol = f::<V>(1e-2);
         let norm = x.squared_norm(&y, &atol, rtol);
-        let batch1 = (f::<V>(3.0) * f::<V>(3.0) + f::<V>(4.0) * f::<V>(4.0)) / f::<V>(2.0);
+        let denom = f::<V>(1.0) * rtol + f::<V>(1e-3);
+        let err3 = f::<V>(3.0) / denom;
+        let err4 = f::<V>(4.0) / denom;
+        let batch1 = (err3 * err3 + err4 * err4) / f::<V>(2.0);
         let diff = norm - batch1;
         assert!(num_traits::abs(diff) < f::<V>(1e-12));
     }
@@ -697,6 +887,120 @@ pub(crate) mod tests {
         let b = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0]), ctx);
         a -= b;
         assert_eq!(a.clone_as_vec(), fv::<V>(&[9.0, 18.0, 27.0, 36.0]));
+    }
+
+    pub fn test_batched_from_slice<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let slice = fv::<V>(&[1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
+        let v = V::from_slice(&slice, ctx);
+        assert_eq!(v.clone_as_vec(), fv::<V>(&[1.0, 2.0, 3.0, 1.0, 2.0, 3.0]));
+    }
+
+    pub fn test_batched_mul_scalar<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let v = V::from_vec(fv::<V>(&[1.0, 2.0, 10.0, 20.0]), ctx);
+        let result = v * Scale(f::<V>(2.0));
+        assert_eq!(result.clone_as_vec(), fv::<V>(&[2.0, 4.0, 20.0, 40.0]));
+    }
+
+    pub fn test_batched_div_scalar<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let v = V::from_vec(fv::<V>(&[2.0, 4.0, 20.0, 40.0]), ctx);
+        let result = v / Scale(f::<V>(2.0));
+        assert_eq!(result.clone_as_vec(), fv::<V>(&[1.0, 2.0, 10.0, 20.0]));
+    }
+
+    pub fn test_batched_copy_from_indices<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let mut v1 = V::zeros(4, ctx.clone());
+        let v2 = V::from_vec(
+            fv::<V>(&[10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0]),
+            ctx,
+        );
+        let indices = V::Index::from_vec(vec![0, 2, 3], Default::default());
+        v1.copy_from_indices(&v2, &indices);
+        assert_eq!(
+            v1.clone_as_vec(),
+            fv::<V>(&[10.0, 0.0, 30.0, 40.0, 50.0, 0.0, 70.0, 80.0])
+        );
+    }
+
+    pub fn test_batched_gather<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let mut result = V::zeros(3, ctx.clone());
+        let v = V::from_vec(
+            fv::<V>(&[10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0]),
+            ctx,
+        );
+        let indices = V::Index::from_vec(vec![3, 0, 2], Default::default());
+        result.gather(&v, &indices);
+        assert_eq!(
+            result.clone_as_vec(),
+            fv::<V>(&[40.0, 10.0, 30.0, 80.0, 50.0, 70.0])
+        );
+    }
+
+    pub fn test_batched_scatter<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let v = V::from_vec(fv::<V>(&[40.0, 10.0, 30.0, 80.0, 50.0, 70.0]), ctx.clone());
+        let indices = V::Index::from_vec(vec![3, 0, 2], Default::default());
+        let mut result = V::zeros(4, ctx);
+        v.scatter(&indices, &mut result);
+        assert_eq!(
+            result.clone_as_vec(),
+            fv::<V>(&[10.0, 0.0, 30.0, 40.0, 50.0, 0.0, 70.0, 80.0])
+        );
+    }
+
+    pub fn test_batched_get_batch<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let v = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 10.0, 20.0, 30.0]), ctx);
+        let batch0 = v.get_batch(0);
+        assert_eq!(batch0.get_index(0), f::<V>(1.0));
+        assert_eq!(batch0.get_index(1), f::<V>(2.0));
+        assert_eq!(batch0.get_index(2), f::<V>(3.0));
+        let batch1 = v.get_batch(1);
+        assert_eq!(batch1.get_index(0), f::<V>(10.0));
+        assert_eq!(batch1.get_index(1), f::<V>(20.0));
+        assert_eq!(batch1.get_index(2), f::<V>(30.0));
+    }
+
+    pub fn test_batched_get_batch_mut<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let mut v = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 10.0, 20.0, 30.0]), ctx);
+        {
+            let mut batch0 = v.get_batch_mut(0);
+            batch0.set_index(1, f::<V>(99.0));
+        }
+        assert_eq!(
+            v.clone_as_vec(),
+            fv::<V>(&[1.0, 99.0, 3.0, 10.0, 20.0, 30.0])
+        );
+    }
+
+    pub fn test_batched_axpy_v<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let mut y = V::from_vec(fv::<V>(&[1.0, 2.0, 10.0, 20.0]), ctx.clone());
+        let x = V::from_vec(fv::<V>(&[3.0, 4.0, 30.0, 40.0]), ctx);
+        let x_view = x.as_view();
+        y.axpy_v(f::<V>(2.0), &x_view, f::<V>(1.0));
+        assert_eq!(y.clone_as_vec(), fv::<V>(&[7.0, 10.0, 70.0, 100.0]));
+    }
+
+    pub fn test_batched_mul_assign_scalar<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let mut v = V::from_vec(fv::<V>(&[1.0, 2.0, 10.0, 20.0]), ctx);
+        v *= Scale(f::<V>(2.0));
+        assert_eq!(v.clone_as_vec(), fv::<V>(&[2.0, 4.0, 20.0, 40.0]));
+    }
+
+    pub fn test_batched_copy_from_view<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let mut v1 = V::zeros(2, ctx);
+        let v2 = V::from_vec(fv::<V>(&[5.0, 7.0]), V::C::default());
+        let view = v2.as_view();
+        v1.copy_from_view(&view);
+        assert_eq!(v1.clone_as_vec(), fv::<V>(&[5.0, 7.0, 5.0, 7.0]));
     }
 
     // --- Incompatible batch tests ---
@@ -857,6 +1161,106 @@ macro_rules! generate_vector_tests {
                 $crate::vector::tests::test_copy_from_via_view_mut::<$V>();
             }
             #[test]
+            fn [<test_set_index_ $suffix>]() {
+                $crate::vector::tests::test_set_index::<$V>();
+            }
+            #[test]
+            fn [<test_get_index_ $suffix>]() {
+                $crate::vector::tests::test_get_index::<$V>();
+            }
+            #[test]
+            fn [<test_norm_ $suffix>]() {
+                $crate::vector::tests::test_norm::<$V>();
+            }
+            #[test]
+            fn [<test_squared_norm_ $suffix>]() {
+                $crate::vector::tests::test_squared_norm::<$V>();
+            }
+            #[test]
+            fn [<test_fill_ $suffix>]() {
+                $crate::vector::tests::test_fill::<$V>();
+            }
+            #[test]
+            fn [<test_from_element_ $suffix>]() {
+                $crate::vector::tests::test_from_element::<$V>();
+            }
+            #[test]
+            fn [<test_copy_from_ $suffix>]() {
+                $crate::vector::tests::test_copy_from::<$V>();
+            }
+            #[test]
+            fn [<test_from_vec_ $suffix>]() {
+                $crate::vector::tests::test_from_vec::<$V>();
+            }
+            #[test]
+            fn [<test_component_mul_assign_ $suffix>]() {
+                $crate::vector::tests::test_component_mul_assign::<$V>();
+            }
+            #[test]
+            fn [<test_component_div_assign_ $suffix>]() {
+                $crate::vector::tests::test_component_div_assign::<$V>();
+            }
+            #[test]
+            fn [<test_assign_at_indices_ $suffix>]() {
+                $crate::vector::tests::test_assign_at_indices::<$V>();
+            }
+            #[test]
+            fn [<test_add_ $suffix>]() {
+                $crate::vector::tests::test_add::<$V>();
+            }
+            #[test]
+            fn [<test_sub_ $suffix>]() {
+                $crate::vector::tests::test_sub::<$V>();
+            }
+            #[test]
+            fn [<test_add_assign_ $suffix>]() {
+                $crate::vector::tests::test_add_assign::<$V>();
+            }
+            #[test]
+            fn [<test_sub_assign_ $suffix>]() {
+                $crate::vector::tests::test_sub_assign::<$V>();
+            }
+            #[test]
+            fn [<test_axpy_v_ $suffix>]() {
+                $crate::vector::tests::test_axpy_v::<$V>();
+            }
+            #[test]
+            fn [<test_mul_assign_scalar_ $suffix>]() {
+                $crate::vector::tests::test_mul_assign_scalar::<$V>();
+            }
+            #[test]
+            fn [<test_copy_from_view_ $suffix>]() {
+                $crate::vector::tests::test_copy_from_view::<$V>();
+            }
+            #[test]
+            fn [<test_view_squared_norm_ $suffix>]() {
+                $crate::vector::tests::test_view_squared_norm::<$V>();
+            }
+            #[test]
+            fn [<test_view_into_owned_ $suffix>]() {
+                $crate::vector::tests::test_view_into_owned::<$V>();
+            }
+            #[test]
+            fn [<test_view_get_index_ $suffix>]() {
+                $crate::vector::tests::test_view_get_index::<$V>();
+            }
+            #[test]
+            fn [<test_view_mut_axpy_ $suffix>]() {
+                $crate::vector::tests::test_view_mut_axpy::<$V>();
+            }
+            #[test]
+            fn [<test_view_mut_set_index_ $suffix>]() {
+                $crate::vector::tests::test_view_mut_set_index::<$V>();
+            }
+            #[test]
+            fn [<test_view_mut_mul_assign_scalar_ $suffix>]() {
+                $crate::vector::tests::test_view_mut_mul_assign_scalar::<$V>();
+            }
+            #[test]
+            fn [<test_view_mut_copy_from_view_ $suffix>]() {
+                $crate::vector::tests::test_view_mut_copy_from_view::<$V>();
+            }
+            #[test]
             fn [<test_batched_len_and_total_len_ $suffix>]() {
                 $crate::vector::tests::test_batched_len_and_total_len::<$V>($ctx3);
             }
@@ -954,6 +1358,50 @@ macro_rules! generate_vector_tests {
             #[test]
             fn [<test_batched_sub_assign_ $suffix>]() {
                 $crate::vector::tests::test_batched_sub_assign::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_from_slice_ $suffix>]() {
+                $crate::vector::tests::test_batched_from_slice::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_mul_scalar_ $suffix>]() {
+                $crate::vector::tests::test_batched_mul_scalar::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_div_scalar_ $suffix>]() {
+                $crate::vector::tests::test_batched_div_scalar::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_copy_from_indices_ $suffix>]() {
+                $crate::vector::tests::test_batched_copy_from_indices::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_gather_ $suffix>]() {
+                $crate::vector::tests::test_batched_gather::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_scatter_ $suffix>]() {
+                $crate::vector::tests::test_batched_scatter::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_get_batch_ $suffix>]() {
+                $crate::vector::tests::test_batched_get_batch::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_get_batch_mut_ $suffix>]() {
+                $crate::vector::tests::test_batched_get_batch_mut::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_axpy_v_ $suffix>]() {
+                $crate::vector::tests::test_batched_axpy_v::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_mul_assign_scalar_ $suffix>]() {
+                $crate::vector::tests::test_batched_mul_assign_scalar::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_copy_from_view_ $suffix>]() {
+                $crate::vector::tests::test_batched_copy_from_view::<$V>($ctx2);
             }
             #[test]
             #[should_panic(expected = "incompatible nbatch")]
