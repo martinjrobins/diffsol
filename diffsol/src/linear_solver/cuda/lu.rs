@@ -13,6 +13,7 @@ use cudarc::{
     driver::{CudaSlice, DevicePtr, DevicePtrMut},
 };
 
+
 pub struct CudaLU<T>
 where
     T: ScalarCuda,
@@ -75,16 +76,16 @@ impl<T: ScalarCuda> LinearSolver<CudaMat<T>> for CudaLU<T> {
         let nrows = matrix.nrows();
         let ncols = matrix.ncols();
         let stream = &op.context().stream;
+        let m = i32::try_from(nrows).unwrap();
+        let n = i32::try_from(ncols).unwrap();
+        let lda = i32::try_from(nrows).unwrap();
+        let (a_ptr, _) = matrix.data.device_ptr_mut(stream);
+        let (ws_ptr, _) = work.device_ptr_mut(stream);
+        let (p_ptr, _) = pivots.device_ptr_mut(stream);
+        let (n_ptr, _) = nfo.device_ptr_mut(stream);
         for b in 0..nbatch {
-            let m = i32::try_from(nrows).unwrap();
-            let n = i32::try_from(ncols).unwrap();
-            let lda = i32::try_from(nrows).unwrap();
             let a_offset = b * nrows * ncols;
             let p_offset = b * nrows;
-            let (a_ptr, _) = matrix.data.device_ptr_mut(stream);
-            let (ws_ptr, _) = work.device_ptr_mut(stream);
-            let (p_ptr, _) = pivots.device_ptr_mut(stream);
-            let (n_ptr, _) = nfo.device_ptr_mut(stream);
             unsafe {
                 cusolverDnDgetrf(
                     self.handle,
@@ -115,31 +116,33 @@ impl<T: ScalarCuda> LinearSolver<CudaMat<T>> for CudaLU<T> {
         }
         let nbatch = x.context.nbatch();
         let nrows = matrix.nrows();
+        let ncols = matrix.ncols();
         let x_nstates = x.data.len() as usize / nbatch;
         if x_nstates != nrows {
             return Err(linear_solver_error!(LinearSolverMatrixVectorNotCompatible))?;
         }
         let mut nfo = self.nfo.as_ref().expect("NFO not set").borrow_mut();
-        let stream = matrix.data.stream();
+        let stream = &x.context.stream;
         let lda = i32::try_from(nrows).unwrap();
         let n = i32::try_from(nrows).unwrap();
+        let nrhs = 1i32;
+        let (a_ptr, _) = matrix.data.device_ptr(stream);
+        let (p_ptr, _) = self.pivots.as_ref().unwrap().device_ptr(stream);
+        let (x_ptr, _) = x.data.device_ptr_mut(stream);
+        let (n_ptr, _) = nfo.device_ptr_mut(stream);
         for b in 0..nbatch {
-            let a_offset = b * nrows * matrix.ncols();
+            let a_offset = b * nrows * ncols;
             let p_offset = b * nrows;
-            let x_offset = b * nrows;
-            let (a_ptr, _) = matrix.data.device_ptr(stream);
-            let (x_ptr, _) = x.data.device_ptr_mut(stream);
-            let (p_ptr, _) = self.pivots.as_ref().unwrap().device_ptr(stream);
-            let (n_ptr, _) = nfo.device_ptr_mut(stream);
+            let x_offset = b * x_nstates;
             unsafe {
                 cusolverDnDgetrs(
                     self.handle,
                     cublasOperation_t::CUBLAS_OP_N,
                     n,
-                    1,
-                    (a_ptr as *mut f64).add(a_offset),
+                    nrhs,
+                    (a_ptr as *const f64).add(a_offset),
                     lda,
-                    (p_ptr as *mut i32).add(p_offset),
+                    (p_ptr as *const i32).add(p_offset),
                     (x_ptr as *mut f64).add(x_offset),
                     n,
                     (n_ptr as *mut i32).add(b),
@@ -191,6 +194,7 @@ impl<T: ScalarCuda> LinearSolver<CudaMat<T>> for CudaLU<T> {
                 stream.alloc(nbatch).expect("Failed to allocate NFO"),
             ));
         }
+
         self.linearisation_set = false;
     }
 }

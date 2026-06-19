@@ -14,18 +14,24 @@ void vec_squared_norm_f64(const double* __restrict__ y,
                           const double* __restrict__ y0,
                           const double* __restrict__ abs_tol,
                           double rel_tol,
-                          int n,
+                          int nstates, int nbatch,
+                          int y_stride, int y_nbatch,
+                          int y0_stride, int y0_nbatch,
+                          int atol_stride, int atol_nbatch,
                           double* partial_sums) {
     extern __shared__ double sdata[];
 
+    int b = blockIdx.y;
     int tid = threadIdx.x;
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int idx = blockIdx.x * blockDim.x + tid;
     double local_sum = 0.0;
 
-    // Grid-stride loop
-    for (int i = idx; i < n; i += blockDim.x * gridDim.x) {
-        double denom = fabs(y0[i]) * rel_tol + abs_tol[i];
-        double ratio = y[i] / denom;
+    for (int i = idx; i < nstates; i += blockDim.x * gridDim.x) {
+        int yi = (b % y_nbatch) * y_stride + i;
+        int y0i = (b % y0_nbatch) * y0_stride + i;
+        int ati = (b % atol_nbatch) * atol_stride + i;
+        double denom = fabs(y0[y0i]) * rel_tol + abs_tol[ati];
+        double ratio = y[yi] / denom;
         local_sum += ratio * ratio;
     }
 
@@ -42,5 +48,5 @@ void vec_squared_norm_f64(const double* __restrict__ y,
 
     // Write result of this block to global memory
     if (tid == 0)
-        partial_sums[blockIdx.x] = sdata[0];
+        partial_sums[b * gridDim.x + blockIdx.x] = sdata[0];
 }
