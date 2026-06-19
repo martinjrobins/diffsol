@@ -1203,7 +1203,14 @@ pub(crate) mod tests {
     pub fn test_strided_view_mut_add_assign<M: DenseMatrix>(ctx: M::C) {
         let mut matrix = make_strided_test_matrix::<M>(ctx.nbatch());
         let rhs = M::V::from_vec(
-            vec![f::<M::V>(5.0), f::<M::V>(5.0), f::<M::V>(5.0), f::<M::V>(10.0), f::<M::V>(10.0), f::<M::V>(10.0)],
+            vec![
+                f::<M::V>(5.0),
+                f::<M::V>(5.0),
+                f::<M::V>(5.0),
+                f::<M::V>(10.0),
+                f::<M::V>(10.0),
+                f::<M::V>(10.0),
+            ],
             ctx.clone(),
         );
         {
@@ -1224,7 +1231,14 @@ pub(crate) mod tests {
     pub fn test_strided_view_mut_sub_assign<M: DenseMatrix>(ctx: M::C) {
         let mut matrix = make_strided_test_matrix::<M>(ctx.nbatch());
         let rhs = M::V::from_vec(
-            vec![f::<M::V>(1.0), f::<M::V>(1.0), f::<M::V>(1.0), f::<M::V>(1.0), f::<M::V>(1.0), f::<M::V>(1.0)],
+            vec![
+                f::<M::V>(1.0),
+                f::<M::V>(1.0),
+                f::<M::V>(1.0),
+                f::<M::V>(1.0),
+                f::<M::V>(1.0),
+                f::<M::V>(1.0),
+            ],
             ctx.clone(),
         );
         {
@@ -1790,4 +1804,3 @@ macro_rules! generate_vector_tests {
 }
 #[cfg(test)]
 pub(crate) use generate_vector_tests;
-

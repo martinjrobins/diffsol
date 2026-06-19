@@ -13,7 +13,6 @@ use cudarc::{
     driver::{CudaSlice, DevicePtr, DevicePtrMut},
 };
 
-
 pub struct CudaLU<T>
 where
     T: ScalarCuda,

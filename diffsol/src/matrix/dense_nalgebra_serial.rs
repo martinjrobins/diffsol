@@ -123,12 +123,32 @@ impl_add!(
     NalgebraMat<T>,
     NalgebraScalar
 );
-impl_add!(
-    NalgebraMatRef<'_, T>,
-    &NalgebraMat<T>,
-    NalgebraMat<T>,
-    NalgebraScalar
-);
+
+impl<'a, T: NalgebraScalar> Add<&NalgebraMat<T>> for NalgebraMatRef<'a, T> {
+    type Output = NalgebraMat<T>;
+    fn add(self, rhs: &NalgebraMat<T>) -> Self::Output {
+        let nbatch = self.context.nbatch();
+        let rhs_nbatch = rhs.context.nbatch();
+        let max_nbatch = nbatch.max(rhs_nbatch);
+        let nrows = self.nrows();
+        let ncols = self.ncols();
+        let rhs_ncols = rhs.ncols();
+        let stride = self.batch_stride;
+        let mut result = nalgebra::DMatrix::zeros(nrows, ncols * max_nbatch);
+        for b in 0..max_nbatch {
+            let self_b = if nbatch == 1 { 0 } else { b };
+            let rhs_b = if rhs_nbatch == 1 { 0 } else { b };
+            let self_cols = self.data.columns(self_b * stride, ncols);
+            let rhs_cols = rhs.data.columns(rhs_b * rhs_ncols, rhs_ncols);
+            let sum = &self_cols + rhs_cols;
+            result.columns_mut(b * ncols, ncols).copy_from(&sum);
+        }
+        NalgebraMat {
+            data: result,
+            context: self.context.clone_with_nbatch(max_nbatch),
+        }
+    }
+}
 
 impl_sub!(
     NalgebraMat<T>,
@@ -142,12 +162,32 @@ impl_sub!(
     NalgebraMat<T>,
     NalgebraScalar
 );
-impl_sub!(
-    NalgebraMatRef<'_, T>,
-    &NalgebraMat<T>,
-    NalgebraMat<T>,
-    NalgebraScalar
-);
+
+impl<'a, T: NalgebraScalar> Sub<&NalgebraMat<T>> for NalgebraMatRef<'a, T> {
+    type Output = NalgebraMat<T>;
+    fn sub(self, rhs: &NalgebraMat<T>) -> Self::Output {
+        let nbatch = self.context.nbatch();
+        let rhs_nbatch = rhs.context.nbatch();
+        let max_nbatch = nbatch.max(rhs_nbatch);
+        let nrows = self.nrows();
+        let ncols = self.ncols();
+        let rhs_ncols = rhs.ncols();
+        let stride = self.batch_stride;
+        let mut result = nalgebra::DMatrix::zeros(nrows, ncols * max_nbatch);
+        for b in 0..max_nbatch {
+            let self_b = if nbatch == 1 { 0 } else { b };
+            let rhs_b = if rhs_nbatch == 1 { 0 } else { b };
+            let self_cols = self.data.columns(self_b * stride, ncols);
+            let rhs_cols = rhs.data.columns(rhs_b * rhs_ncols, rhs_ncols);
+            let diff = &self_cols - rhs_cols;
+            result.columns_mut(b * ncols, ncols).copy_from(&diff);
+        }
+        NalgebraMat {
+            data: result,
+            context: self.context.clone_with_nbatch(max_nbatch),
+        }
+    }
+}
 
 impl_add_assign!(NalgebraMat<T>, &NalgebraMat<T>, NalgebraScalar);
 impl_add_assign!(NalgebraMat<T>, &NalgebraMatRef<'_, T>, NalgebraScalar);
@@ -183,8 +223,17 @@ impl<'a, T: NalgebraScalar> MatrixView<'a> for NalgebraMatRef<'a, T> {
     type Owned = NalgebraMat<T>;
 
     fn into_owned(self) -> Self::Owned {
+        let nbatch = self.context.nbatch();
+        let nrows = self.nrows();
+        let ncols = self.ncols();
+        let stride = self.batch_stride;
+        let owned = nalgebra::DMatrix::from_fn(nrows, ncols * nbatch, |i, j| {
+            let b = j / ncols;
+            let col = j % ncols;
+            self.data[(i, b * stride + col)]
+        });
         Self::Owned {
-            data: self.data.into_owned(),
+            data: owned,
             context: self.context,
         }
     }

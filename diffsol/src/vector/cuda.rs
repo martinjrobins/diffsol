@@ -5,8 +5,7 @@ use super::{VectorIndex, VectorView, VectorViewMut};
 use cudarc::cublas::sys as cublas;
 use cudarc::cublas::CudaBlas;
 use cudarc::driver::{
-    CudaFunction, CudaSlice, CudaView, CudaViewMut, DevicePtr, LaunchConfig,
-    PushKernelArg,
+    CudaFunction, CudaSlice, CudaView, CudaViewMut, DevicePtr, LaunchConfig, PushKernelArg,
 };
 
 use crate::{
@@ -28,7 +27,12 @@ extern "C" fn root_finding_blk_size<T: ScalarCuda>(block_size: std::ffi::c_int) 
 }
 
 impl CudaContext {
-    pub(crate) fn launch_config_2d(&self, nstates: u32, nbatch: u32, f: &CudaFunction) -> LaunchConfig {
+    pub(crate) fn launch_config_2d(
+        &self,
+        nstates: u32,
+        nbatch: u32,
+        f: &CudaFunction,
+    ) -> LaunchConfig {
         let (_min_grid_size, block_size) = f
             .occupancy_max_potential_block_size(zero, 0, 0, None)
             .expect("Failed to get occupancy max potential block size");
@@ -83,8 +87,6 @@ impl CudaContext {
         .expect("Failed to call cublasDnrm2_v2");
         result
     }
-
-    
 }
 
 #[derive(Debug, Clone)]
@@ -174,7 +176,12 @@ macro_rules! impl_mul_scalar {
                 let stride = nstates as i32;
                 let scalar = rhs.value();
                 let mut build = self.context.stream.launch_builder(&f);
-                build.arg(&mut self.data).arg(&scalar).arg(&nstates).arg(&nbatch_u32).arg(&stride);
+                build
+                    .arg(&mut self.data)
+                    .arg(&scalar)
+                    .arg(&nstates)
+                    .arg(&nbatch_u32)
+                    .arg(&stride);
                 let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
                 unsafe { build.launch(config) }.expect("Failed to launch kernel");
                 self
@@ -208,7 +215,8 @@ macro_rules! impl_mul_scalar_alloc {
                     .arg(&mut ret.data)
                     .arg(&nstates_u32)
                     .arg(&ret_stride)
-                    .arg(&src_stride).arg(&src_nbatch);
+                    .arg(&src_stride)
+                    .arg(&src_nbatch);
                 let config = self.context.launch_config_2d(nstates_u32, nbatch_u32, &f);
                 unsafe { build.launch(config) }.expect("Failed to launch kernel");
                 ret
@@ -243,7 +251,12 @@ macro_rules! impl_mul_assign_scalar {
                 let stride = nstates as i32;
                 let mut build = self.context.stream.launch_builder(&f);
                 let scalar = rhs.value();
-                build.arg(&mut self.data).arg(&scalar).arg(&nstates).arg(&nbatch_u32).arg(&stride);
+                build
+                    .arg(&mut self.data)
+                    .arg(&scalar)
+                    .arg(&nstates)
+                    .arg(&nbatch_u32)
+                    .arg(&stride);
                 let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
                 unsafe { build.launch(config) }.expect("Failed to launch kernel");
             }
@@ -268,7 +281,9 @@ impl<T: ScalarCuda> Mul<Scale<T>> for CudaVecRef<'_, T> {
         if nstates_u32 == 0 {
             return ret;
         }
-        let config = self.context.launch_config_2d(nstates_u32, nbatch as u32, &f);
+        let config = self
+            .context
+            .launch_config_2d(nstates_u32, nbatch as u32, &f);
         let mut build = self.context.stream.launch_builder(&f);
         let src_data = self.data.slice(self.col_offset..);
         let src_stride = self.stride() as i32;
@@ -325,7 +340,9 @@ impl<T: ScalarCuda> Mul<Scale<T>> for CudaVecMut<'_, T> {
         if nstates_u32 == 0 {
             return ret;
         }
-        let config = self.context.launch_config_2d(nstates_u32, nbatch as u32, &f);
+        let config = self
+            .context
+            .launch_config_2d(nstates_u32, nbatch as u32, &f);
         let mut build = self.context.stream.launch_builder(&f);
         let self_data = self.data.slice(self.col_offset..);
         let ret_stride = self.nstates as i32;
@@ -1216,11 +1233,18 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
         let nbatch_u32 = nbatch as u32;
 
         let f = self.context.function::<T>("vec_squared_norm");
-        let config = self.context.launch_config_2d_reduce(nstates_u32, nbatch_u32, &f, squared_norm_blk_size::<T>);
+        let config = self.context.launch_config_2d_reduce(
+            nstates_u32,
+            nbatch_u32,
+            &f,
+            squared_norm_blk_size::<T>,
+        );
         let blocks_per_batch = config.grid_dim.0 as usize;
         let total_blocks = blocks_per_batch * nbatch;
         let mut partial_sums = unsafe {
-            self.context.stream.alloc::<T>(total_blocks)
+            self.context
+                .stream
+                .alloc::<T>(total_blocks)
                 .expect("Failed to allocate memory for partial sums")
         };
         let mut build = self.context.stream.launch_builder(&f);
@@ -1233,21 +1257,33 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
         let atol_nbatch_i32 = atol_nbatch as i32;
         let rtol_val = rtol;
 
-        build.arg(&self.data).arg(&y.data).arg(&atol.data)
-             .arg(&rtol_val)
-             .arg(&nstates_u32).arg(&nbatch_u32)
-             .arg(&y_stride).arg(&y_nbatch_i32)
-             .arg(&y0_stride).arg(&y0_nbatch_i32)
-             .arg(&atol_stride).arg(&atol_nbatch_i32)
-             .arg(&mut partial_sums);
+        build
+            .arg(&self.data)
+            .arg(&y.data)
+            .arg(&atol.data)
+            .arg(&rtol_val)
+            .arg(&nstates_u32)
+            .arg(&nbatch_u32)
+            .arg(&y_stride)
+            .arg(&y_nbatch_i32)
+            .arg(&y0_stride)
+            .arg(&y0_nbatch_i32)
+            .arg(&atol_stride)
+            .arg(&atol_nbatch_i32)
+            .arg(&mut partial_sums);
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
-        let partial_sums = self.context.stream.clone_dtoh(&partial_sums)
+        let partial_sums = self
+            .context
+            .stream
+            .clone_dtoh(&partial_sums)
             .expect("Failed to copy data from device to host");
         let nstates_t = T::from_f64(nstates as f64).unwrap();
         let mut max_norm = T::zero();
         for b in 0..nbatch {
             let start = b * blocks_per_batch;
-            let sum = partial_sums[start..start + blocks_per_batch].iter().fold(T::zero(), |acc, x| acc + *x);
+            let sum = partial_sums[start..start + blocks_per_batch]
+                .iter()
+                .fold(T::zero(), |acc, x| acc + *x);
             let norm = sum / nstates_t;
             if norm > max_norm {
                 max_norm = norm;
@@ -1534,19 +1570,31 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
         let nbatch_u32 = nbatch as u32;
 
         let f = self.context.function::<T>("vec_root_finding");
-        let config = self.context.launch_config_2d_reduce(nstates_u32, nbatch_u32, &f, root_finding_blk_size::<T>);
+        let config = self.context.launch_config_2d_reduce(
+            nstates_u32,
+            nbatch_u32,
+            &f,
+            root_finding_blk_size::<T>,
+        );
         let blocks_per_batch = config.grid_dim.0 as usize;
         let total_blocks = blocks_per_batch * nbatch;
 
         let mut max_vals = unsafe {
-            self.context.stream.alloc::<T>(total_blocks)
+            self.context
+                .stream
+                .alloc::<T>(total_blocks)
                 .expect("Failed to allocate memory for max_vals")
         };
         let mut max_idxs = unsafe {
-            self.context.stream.alloc::<c_int>(total_blocks)
+            self.context
+                .stream
+                .alloc::<c_int>(total_blocks)
                 .expect("Failed to allocate memory for max_idxs")
         };
-        let mut root_flag = self.context.stream.alloc_zeros::<c_int>(nbatch)
+        let mut root_flag = self
+            .context
+            .stream
+            .alloc_zeros::<c_int>(nbatch)
             .expect("Failed to allocate memory for root_flag");
 
         let mut build = self.context.stream.launch_builder(&f);
@@ -1556,20 +1604,34 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
         let g1_stride = g1_nstates as i32;
         let g1_nbatch_i32 = g1_nbatch as i32;
 
-        build.arg(&self.data).arg(&g1.data)
-             .arg(&nstates_u32).arg(&nbatch_u32)
-             .arg(&g0_stride).arg(&g0_nbatch_i32)
-             .arg(&g1_stride).arg(&g1_nbatch_i32)
-             .arg(&mut root_flag)
-             .arg(&mut max_vals)
-             .arg(&mut max_idxs);
+        build
+            .arg(&self.data)
+            .arg(&g1.data)
+            .arg(&nstates_u32)
+            .arg(&nbatch_u32)
+            .arg(&g0_stride)
+            .arg(&g0_nbatch_i32)
+            .arg(&g1_stride)
+            .arg(&g1_nbatch_i32)
+            .arg(&mut root_flag)
+            .arg(&mut max_vals)
+            .arg(&mut max_idxs);
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
 
-        let h_max_vals = self.context.stream.clone_dtoh(&max_vals)
+        let h_max_vals = self
+            .context
+            .stream
+            .clone_dtoh(&max_vals)
             .expect("Failed to copy data from device to host");
-        let h_max_idxs = self.context.stream.clone_dtoh(&max_idxs)
+        let h_max_idxs = self
+            .context
+            .stream
+            .clone_dtoh(&max_idxs)
             .expect("Failed to copy data from device to host");
-        let h_root_flag = self.context.stream.clone_dtoh(&root_flag)
+        let h_root_flag = self
+            .context
+            .stream
+            .clone_dtoh(&root_flag)
             .expect("Failed to copy data from device to host");
 
         let mut first_result: Option<(bool, T, i32)> = None;
@@ -1791,11 +1853,18 @@ impl<T: ScalarCuda> VectorView<'_> for CudaVecRef<'_, T> {
         let nbatch_u32 = nbatch as u32;
 
         let f = self.context.function::<T>("vec_squared_norm");
-        let config = self.context.launch_config_2d_reduce(nstates_u32, nbatch_u32, &f, squared_norm_blk_size::<T>);
+        let config = self.context.launch_config_2d_reduce(
+            nstates_u32,
+            nbatch_u32,
+            &f,
+            squared_norm_blk_size::<T>,
+        );
         let blocks_per_batch = config.grid_dim.0 as usize;
         let total_blocks = blocks_per_batch * nbatch;
         let mut partial_sums = unsafe {
-            self.context.stream.alloc::<T>(total_blocks)
+            self.context
+                .stream
+                .alloc::<T>(total_blocks)
                 .expect("Failed to allocate memory for partial sums")
         };
         let mut build = self.context.stream.launch_builder(&f);
@@ -1809,21 +1878,33 @@ impl<T: ScalarCuda> VectorView<'_> for CudaVecRef<'_, T> {
         let atol_nbatch_i32 = atol_nbatch as i32;
         let rtol_val = rtol;
 
-        build.arg(&self_data).arg(&y.data).arg(&atol.data)
-             .arg(&rtol_val)
-             .arg(&nstates_u32).arg(&nbatch_u32)
-             .arg(&y_stride).arg(&y_nbatch_i32)
-             .arg(&y0_stride).arg(&y0_nbatch_i32)
-             .arg(&atol_stride).arg(&atol_nbatch_i32)
-             .arg(&mut partial_sums);
+        build
+            .arg(&self_data)
+            .arg(&y.data)
+            .arg(&atol.data)
+            .arg(&rtol_val)
+            .arg(&nstates_u32)
+            .arg(&nbatch_u32)
+            .arg(&y_stride)
+            .arg(&y_nbatch_i32)
+            .arg(&y0_stride)
+            .arg(&y0_nbatch_i32)
+            .arg(&atol_stride)
+            .arg(&atol_nbatch_i32)
+            .arg(&mut partial_sums);
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
-        let partial_sums = self.context.stream.clone_dtoh(&partial_sums)
+        let partial_sums = self
+            .context
+            .stream
+            .clone_dtoh(&partial_sums)
             .expect("Failed to copy data from device to host");
         let nstates_t = T::from_f64(nstates as f64).unwrap();
         let mut max_norm = T::zero();
         for b in 0..nbatch {
             let start = b * blocks_per_batch;
-            let sum = partial_sums[start..start + blocks_per_batch].iter().fold(T::zero(), |acc, x| acc + *x);
+            let sum = partial_sums[start..start + blocks_per_batch]
+                .iter()
+                .fold(T::zero(), |acc, x| acc + *x);
             let norm = sum / nstates_t;
             if norm > max_norm {
                 max_norm = norm;
@@ -1945,5 +2026,4 @@ mod tests {
         CudaContext::default().with_nbatch(2),
         CudaContext::default().with_nbatch(3)
     );
-
 }

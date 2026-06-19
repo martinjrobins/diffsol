@@ -110,11 +110,77 @@ impl_mul_assign_scalar!(FaerMatMut<'_, T>);
 
 impl_add!(FaerMat<T>, &FaerMat<T>, FaerMat<T>, FaerScalar);
 impl_add!(FaerMat<T>, &FaerMatRef<'_, T>, FaerMat<T>, FaerScalar);
-impl_add!(FaerMatRef<'_, T>, &FaerMat<T>, FaerMat<T>, FaerScalar);
+
+impl<'a, T: FaerScalar> Add<&FaerMat<T>> for FaerMatRef<'a, T> {
+    type Output = FaerMat<T>;
+    fn add(self, rhs: &FaerMat<T>) -> Self::Output {
+        let nbatch = self.context.nbatch();
+        let rhs_nbatch = rhs.context.nbatch();
+        let max_nbatch = nbatch.max(rhs_nbatch);
+        let nrows = self.nrows();
+        let ncols = self.ncols();
+        let rhs_ncols = rhs.ncols();
+        let stride = self.batch_stride;
+        let mut result = faer::Mat::zeros(nrows, ncols * max_nbatch);
+        for b in 0..max_nbatch {
+            let self_b = if nbatch == 1 { 0 } else { b };
+            let rhs_b = if rhs_nbatch == 1 { 0 } else { b };
+            let self_cols = self
+                .data
+                .get(0..nrows, self_b * stride..self_b * stride + ncols);
+            let rhs_cols = rhs
+                .data
+                .get(0..nrows, rhs_b * rhs_ncols..rhs_b * rhs_ncols + rhs_ncols);
+            let mut dst = result
+                .as_mut()
+                .get_mut(0..nrows, b * ncols..b * ncols + ncols);
+            zip!(dst.as_mut(), self_cols, rhs_cols).for_each(|unzip!(dst, a, b)| {
+                *dst = a + b;
+            });
+        }
+        FaerMat {
+            data: result,
+            context: self.context.clone_with_nbatch(max_nbatch),
+        }
+    }
+}
 
 impl_sub!(FaerMat<T>, &FaerMat<T>, FaerMat<T>, FaerScalar);
 impl_sub!(FaerMat<T>, &FaerMatRef<'_, T>, FaerMat<T>, FaerScalar);
-impl_sub!(FaerMatRef<'_, T>, &FaerMat<T>, FaerMat<T>, FaerScalar);
+
+impl<'a, T: FaerScalar> Sub<&FaerMat<T>> for FaerMatRef<'a, T> {
+    type Output = FaerMat<T>;
+    fn sub(self, rhs: &FaerMat<T>) -> Self::Output {
+        let nbatch = self.context.nbatch();
+        let rhs_nbatch = rhs.context.nbatch();
+        let max_nbatch = nbatch.max(rhs_nbatch);
+        let nrows = self.nrows();
+        let ncols = self.ncols();
+        let rhs_ncols = rhs.ncols();
+        let stride = self.batch_stride;
+        let mut result = faer::Mat::zeros(nrows, ncols * max_nbatch);
+        for b in 0..max_nbatch {
+            let self_b = if nbatch == 1 { 0 } else { b };
+            let rhs_b = if rhs_nbatch == 1 { 0 } else { b };
+            let self_cols = self
+                .data
+                .get(0..nrows, self_b * stride..self_b * stride + ncols);
+            let rhs_cols = rhs
+                .data
+                .get(0..nrows, rhs_b * rhs_ncols..rhs_b * rhs_ncols + rhs_ncols);
+            let mut dst = result
+                .as_mut()
+                .get_mut(0..nrows, b * ncols..b * ncols + ncols);
+            zip!(dst.as_mut(), self_cols, rhs_cols).for_each(|unzip!(dst, a, b)| {
+                *dst = a - b;
+            });
+        }
+        FaerMat {
+            data: result,
+            context: self.context.clone_with_nbatch(max_nbatch),
+        }
+    }
+}
 
 impl_add_assign!(FaerMat<T>, &FaerMat<T>, FaerScalar);
 impl_add_assign!(FaerMat<T>, &FaerMatRef<'_, T>, FaerScalar);
@@ -134,8 +200,17 @@ impl<'a, T: FaerScalar> MatrixView<'a> for FaerMatRef<'a, T> {
     type Owned = FaerMat<T>;
 
     fn into_owned(self) -> Self::Owned {
+        let nbatch = self.context.nbatch();
+        let nrows = self.nrows();
+        let ncols = self.ncols();
+        let stride = self.batch_stride;
+        let owned = faer::Mat::from_fn(nrows, ncols * nbatch, |i, j| {
+            let b = j / ncols;
+            let col = j % ncols;
+            self.data[(i, b * stride + col)]
+        });
         Self::Owned {
-            data: self.data.to_owned(),
+            data: owned,
             context: self.context,
         }
     }

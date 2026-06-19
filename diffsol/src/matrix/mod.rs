@@ -1866,6 +1866,132 @@ pub(crate) mod tests {
         assert_eq!(a.get_index(0, 1), f::<M>(0.0));
         assert_eq!(a.get_index(1, 0), f::<M>(0.0));
     }
+
+    fn make_strided_matrix<M: DenseMatrix>(nbatch: usize) -> M {
+        let ctx = M::C::default().clone_with_nbatch(nbatch);
+        let nrows = 3;
+        let ncols = 4;
+        let mut data = Vec::with_capacity(nrows * ncols * nbatch);
+        for b in 0..nbatch {
+            for col in 0..ncols {
+                for row in 0..nrows {
+                    data.push(f::<M>(row as f64 + col as f64 * 10.0 + b as f64 * 100.0));
+                }
+            }
+        }
+        M::from_vec(nrows, ncols, data, ctx)
+    }
+
+    pub fn test_strided_matrix_view_into_owned<M: DenseMatrix>(ctx: M::C) {
+        let matrix = make_strided_matrix::<M>(ctx.nbatch());
+        let view = matrix.columns(0, 2);
+        let owned = view.into_owned();
+        assert_eq!(owned.nrows(), 3);
+        assert_eq!(owned.ncols(), 2);
+        // column 0, batch 0: [0,1,2]
+        assert_eq!(owned.get_index(0, 0), f::<M>(0.0));
+        assert_eq!(owned.get_index(1, 0), f::<M>(1.0));
+        assert_eq!(owned.get_index(2, 0), f::<M>(2.0));
+        // column 1, batch 0: [10,11,12]
+        assert_eq!(owned.get_index(0, 1), f::<M>(10.0));
+        assert_eq!(owned.get_index(1, 1), f::<M>(11.0));
+        assert_eq!(owned.get_index(2, 1), f::<M>(12.0));
+    }
+
+    pub fn test_strided_matrix_view_add_owned<M: DenseMatrix>(ctx: M::C) {
+        let matrix = make_strided_matrix::<M>(ctx.nbatch());
+        let view = matrix.columns(0, 2);
+        // owned 3x2 with nbatch=1 (broadcast) — column-major: col0=[1,2,3], col1=[4,5,6]
+        let rhs = M::from_vec(
+            3,
+            2,
+            vec![
+                f::<M>(1.0),
+                f::<M>(2.0),
+                f::<M>(3.0),
+                f::<M>(4.0),
+                f::<M>(5.0),
+                f::<M>(6.0),
+            ],
+            M::C::default(),
+        );
+        let result = view + &rhs;
+        // batch0: [0,1,2,10,11,12] + [1,2,3,4,5,6] = [1,3,5,14,16,18]
+        assert_eq!(result.get_index(0, 0), f::<M>(1.0));
+        assert_eq!(result.get_index(0, 1), f::<M>(14.0));
+    }
+
+    pub fn test_strided_matrix_view_sub_owned<M: DenseMatrix>(ctx: M::C) {
+        let matrix = make_strided_matrix::<M>(ctx.nbatch());
+        let view = matrix.columns(0, 2);
+        let rhs = M::from_vec(
+            3,
+            2,
+            vec![
+                f::<M>(0.0),
+                f::<M>(1.0),
+                f::<M>(2.0),
+                f::<M>(10.0),
+                f::<M>(11.0),
+                f::<M>(12.0),
+            ],
+            M::C::default(),
+        );
+        let result = view - &rhs;
+        // batch0: [0,1,2,10,11,12] - [0,1,2,10,11,12] = all zeros
+        assert_eq!(result.get_index(0, 0), f::<M>(0.0));
+        assert_eq!(result.get_index(0, 1), f::<M>(0.0));
+    }
+
+    pub fn test_strided_matrix_view_mul_scalar<M: DenseMatrix>(ctx: M::C) {
+        let matrix = make_strided_matrix::<M>(ctx.nbatch());
+        let view = matrix.columns(0, 2);
+        let result = view * Scale(f::<M>(2.0));
+        assert_eq!(result.get_index(0, 0), f::<M>(0.0));
+        assert_eq!(result.get_index(1, 0), f::<M>(2.0));
+        assert_eq!(result.get_index(0, 1), f::<M>(20.0));
+    }
+
+    pub fn test_strided_matrix_view_mut_add_assign_view<M: DenseMatrix>(ctx: M::C) {
+        let mut a = make_strided_matrix::<M>(ctx.nbatch());
+        let b = make_strided_matrix::<M>(ctx.nbatch());
+        {
+            let mut a_view = a.columns_mut(0, 2);
+            let b_view = b.columns(2, 4);
+            a_view += &b_view;
+        }
+        // a columns 0-1 now = original a[0..2] + b[2..4]
+        // batch0 a[0..2]: [[0,10],[1,11],[2,12]]
+        // batch0 b[2..4]: [[20,30],[21,31],[22,32]]
+        // sum: [[20,40],[22,42],[24,44]]
+        assert_eq!(a.get_index(0, 0), f::<M>(20.0));
+        assert_eq!(a.get_index(1, 0), f::<M>(22.0));
+        assert_eq!(a.get_index(0, 1), f::<M>(40.0));
+    }
+
+    pub fn test_strided_matrix_view_mut_sub_assign_view<M: DenseMatrix>(ctx: M::C) {
+        let mut a = make_strided_matrix::<M>(ctx.nbatch());
+        let b = make_strided_matrix::<M>(ctx.nbatch());
+        {
+            let mut a_view = a.columns_mut(0, 2);
+            let b_view = b.columns(0, 2);
+            a_view -= &b_view;
+        }
+        // same columns subtracted = all zero
+        assert_eq!(a.get_index(0, 0), f::<M>(0.0));
+        assert_eq!(a.get_index(1, 0), f::<M>(0.0));
+    }
+
+    pub fn test_strided_matrix_view_mut_mul_assign_scalar<M: DenseMatrix>(ctx: M::C) {
+        let mut a = make_strided_matrix::<M>(ctx.nbatch());
+        {
+            let mut a_view = a.columns_mut(0, 2);
+            a_view *= Scale(f::<M>(2.0));
+        }
+        assert_eq!(a.get_index(0, 0), f::<M>(0.0));
+        assert_eq!(a.get_index(1, 0), f::<M>(2.0));
+        assert_eq!(a.get_index(0, 1), f::<M>(20.0));
+    }
 }
 
 #[cfg(test)]
@@ -2102,6 +2228,34 @@ macro_rules! generate_dense_matrix_tests {
             #[should_panic(expected = "incompatible nbatch")]
             fn [<test_batched_gemm_incompatible_a_ $suffix>]() {
                 $crate::matrix::tests::test_batched_gemm_incompatible_a::<$M>($ctx2, $ctx1.clone_with_nbatch(3));
+            }
+            #[test]
+            fn [<test_strided_matrix_view_into_owned_ $suffix>]() {
+                $crate::matrix::tests::test_strided_matrix_view_into_owned::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_strided_matrix_view_add_owned_ $suffix>]() {
+                $crate::matrix::tests::test_strided_matrix_view_add_owned::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_strided_matrix_view_sub_owned_ $suffix>]() {
+                $crate::matrix::tests::test_strided_matrix_view_sub_owned::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_strided_matrix_view_mul_scalar_ $suffix>]() {
+                $crate::matrix::tests::test_strided_matrix_view_mul_scalar::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_strided_matrix_view_mut_add_assign_view_ $suffix>]() {
+                $crate::matrix::tests::test_strided_matrix_view_mut_add_assign_view::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_strided_matrix_view_mut_sub_assign_view_ $suffix>]() {
+                $crate::matrix::tests::test_strided_matrix_view_mut_sub_assign_view::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_strided_matrix_view_mut_mul_assign_scalar_ $suffix>]() {
+                $crate::matrix::tests::test_strided_matrix_view_mut_mul_assign_scalar::<$M>($ctx2);
             }
         }
     };

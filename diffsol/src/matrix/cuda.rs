@@ -10,8 +10,8 @@ use crate::{
     error::{DiffsolError, MatrixError},
     linear_solver::cuda::lu::CudaLU,
     matrix::default_solver::DefaultSolver,
-    matrix_error, Context, CudaContext, CudaVec, CudaVecMut, CudaVecRef, IndexType,
-    MatrixCommon, ScalarCuda, Scale, Vector, VectorIndex,
+    matrix_error, Context, CudaContext, CudaVec, CudaVecMut, CudaVecRef, IndexType, MatrixCommon,
+    ScalarCuda, Scale, Vector, VectorIndex,
 };
 
 use super::{
@@ -128,10 +128,14 @@ impl<T: ScalarCuda> CudaMat<T> {
         let mat_stride = (n * n) as i32;
         let diag_stride = n as i32;
         let nbatch_i32 = nbatch as i32;
-        build.arg(&self.data).arg(&mut data)
+        build
+            .arg(&self.data)
+            .arg(&mut data)
             .arg(&n_u32)
-            .arg(&mat_stride).arg(&nbatch_i32)
-            .arg(&diag_stride).arg(&nbatch_i32);
+            .arg(&mat_stride)
+            .arg(&nbatch_i32)
+            .arg(&diag_stride)
+            .arg(&nbatch_i32);
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
         CudaVec {
             data,
@@ -208,7 +212,12 @@ macro_rules! impl_mul_scalar {
                 let stride = nstates as i32;
                 let scalar = rhs.value();
                 let mut build = self.context.stream.launch_builder(&f);
-                build.arg(&mut self.data).arg(&scalar).arg(&nstates).arg(&nbatch_u32).arg(&stride);
+                build
+                    .arg(&mut self.data)
+                    .arg(&scalar)
+                    .arg(&nstates)
+                    .arg(&nbatch_u32)
+                    .arg(&stride);
                 let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
                 unsafe { build.launch(config) }.expect("Failed to launch kernel");
                 self
@@ -238,7 +247,8 @@ macro_rules! impl_mul_scalar_alloc {
                     .arg(&mut ret.data)
                     .arg(&nstates)
                     .arg(&ret_stride)
-                    .arg(&src_stride).arg(&src_nbatch);
+                    .arg(&src_stride)
+                    .arg(&src_nbatch);
                 let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
                 unsafe { build.launch(config) }.expect("Failed to launch kernel");
                 ret
@@ -262,7 +272,12 @@ macro_rules! impl_mul_assign_scalar {
                 let stride = nstates as i32;
                 let mut build = self.context.stream.launch_builder(&f);
                 let scalar = rhs.value();
-                build.arg(&mut self.data).arg(&scalar).arg(&nstates).arg(&nbatch_u32).arg(&stride);
+                build
+                    .arg(&mut self.data)
+                    .arg(&scalar)
+                    .arg(&nstates)
+                    .arg(&nbatch_u32)
+                    .arg(&stride);
                 let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
                 unsafe { build.launch(config) }.expect("Failed to launch kernel");
             }
@@ -285,10 +300,13 @@ macro_rules! impl_sub_assign {
                 let rhs_nstates = (rhs.data.len() / rhs_nbatch as usize) as u32;
                 let rhs_stride = rhs_nstates as i32;
                 let mut build = self.context.stream.launch_builder(&f);
-                build.arg(&mut self.data).arg(&rhs.data)
+                build
+                    .arg(&mut self.data)
+                    .arg(&rhs.data)
                     .arg(&nstates)
                     .arg(&self_stride)
-                    .arg(&rhs_stride).arg(&rhs_nbatch);
+                    .arg(&rhs_stride)
+                    .arg(&rhs_nbatch);
                 let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
                 unsafe { build.launch(config) }.expect("Failed to launch kernel");
             }
@@ -309,10 +327,13 @@ macro_rules! impl_add_assign {
                 let rhs_nstates = (rhs.data.len() / rhs_nbatch as usize) as u32;
                 let rhs_stride = rhs_nstates as i32;
                 let mut build = self.context.stream.launch_builder(&f);
-                build.arg(&mut self.data).arg(&rhs.data)
+                build
+                    .arg(&mut self.data)
+                    .arg(&rhs.data)
                     .arg(&nstates)
                     .arg(&self_stride)
-                    .arg(&rhs_stride).arg(&rhs_nbatch);
+                    .arg(&rhs_stride)
+                    .arg(&rhs_nbatch);
                 let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
                 unsafe { build.launch(config) }.expect("Failed to launch kernel");
             }
@@ -334,10 +355,13 @@ macro_rules! impl_sub_assign_mut {
                 let rhs_stride = rhs_nstates as i32;
                 let mut build = self.context.stream.launch_builder(&f);
                 let rhs_data = rhs.data.as_view();
-                build.arg(&mut self.data).arg(&rhs_data)
+                build
+                    .arg(&mut self.data)
+                    .arg(&rhs_data)
                     .arg(&nstates)
                     .arg(&self_stride)
-                    .arg(&rhs_stride).arg(&rhs_nbatch);
+                    .arg(&rhs_stride)
+                    .arg(&rhs_nbatch);
                 let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
                 unsafe { build.launch(config) }.expect("Failed to launch kernel");
             }
@@ -359,10 +383,13 @@ macro_rules! impl_add_assign_mut {
                 let rhs_stride = rhs_nstates as i32;
                 let mut build = self.context.stream.launch_builder(&f);
                 let rhs_data = rhs.data.as_view();
-                build.arg(&mut self.data).arg(&rhs_data)
+                build
+                    .arg(&mut self.data)
+                    .arg(&rhs_data)
                     .arg(&nstates)
                     .arg(&self_stride)
-                    .arg(&rhs_stride).arg(&rhs_nbatch);
+                    .arg(&rhs_stride)
+                    .arg(&rhs_nbatch);
                 let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
                 unsafe { build.launch(config) }.expect("Failed to launch kernel");
             }
@@ -385,24 +412,22 @@ macro_rules! impl_sub_both_ref {
         impl<T: ScalarCuda> Sub<$rhs> for $lhs {
             type Output = $out;
             fn sub(self, rhs: $rhs) -> Self::Output {
-                assert_eq!(
-                    self.data.len(),
-                    rhs.data.len(),
-                    "Vector length mismatch: {} != {}",
-                    self.data.len(),
-                    rhs.data.len()
-                );
-                let mut ret = Self::Output::zeros(self.nrows(), self.ncols(), self.context.clone());
-                let f = self.context.function::<T>("vec_sub");
                 let nbatch = self.context.nbatch();
-                let nstates = (self.data.len() / nbatch) as u32;
-                let nbatch_u32 = nbatch as u32;
-                let self_stride = nstates as i32;
-                let rhs_nbatch = rhs.context.nbatch() as i32;
-                let rhs_nstates = (rhs.data.len() / rhs_nbatch as usize) as u32;
-                let rhs_stride = rhs_nstates as i32;
-                let ret_stride = nstates as i32;
-                let ret_nbatch = nbatch as i32;
+                let rhs_nbatch = rhs.context.nbatch();
+                let max_nbatch = nbatch.max(rhs_nbatch);
+                let nstates = (self.nrows() * self.ncols()) as u32;
+                let nbatch_u32 = max_nbatch as u32;
+                let self_stride = self.batch_stride as i32;
+                let rhs_nbatch_i32 = rhs_nbatch as i32;
+                let rhs_stride = (rhs.nrows() * rhs.ncols()) as i32;
+                let mut ret = Self::Output::zeros(
+                    self.nrows(),
+                    self.ncols(),
+                    self.context.clone_with_nbatch(max_nbatch),
+                );
+                let ret_nbatch = max_nbatch as i32;
+                let ret_stride = (ret.nrows() * ret.ncols()) as i32;
+                let f = self.context.function::<T>("vec_sub");
                 let mut build = self.context.stream.launch_builder(&f);
                 build
                     .arg(&self.data)
@@ -410,7 +435,8 @@ macro_rules! impl_sub_both_ref {
                     .arg(&mut ret.data)
                     .arg(&nstates)
                     .arg(&self_stride)
-                    .arg(&rhs_stride).arg(&rhs_nbatch)
+                    .arg(&rhs_stride)
+                    .arg(&rhs_nbatch_i32)
                     .arg(&ret_stride)
                     .arg(&ret_nbatch);
                 let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
@@ -442,10 +468,13 @@ macro_rules! impl_sub_lhs {
                 let rhs_nstates = (rhs.data.len() / rhs_nbatch as usize) as u32;
                 let rhs_stride = rhs_nstates as i32;
                 let mut build = self.context.stream.launch_builder(&f);
-                build.arg(&mut self.data).arg(&rhs.data)
+                build
+                    .arg(&mut self.data)
+                    .arg(&rhs.data)
                     .arg(&nstates)
                     .arg(&self_stride)
-                    .arg(&rhs_stride).arg(&rhs_nbatch);
+                    .arg(&rhs_stride)
+                    .arg(&rhs_nbatch);
                 let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
                 unsafe { build.launch(config) }.expect("Failed to launch kernel");
                 self
@@ -463,24 +492,22 @@ macro_rules! impl_add_both_ref {
         impl<T: ScalarCuda> Add<$rhs> for $lhs {
             type Output = $out;
             fn add(self, rhs: $rhs) -> Self::Output {
-                assert_eq!(
-                    self.data.len(),
-                    rhs.data.len(),
-                    "Vector length mismatch: {} != {}",
-                    self.data.len(),
-                    rhs.data.len()
-                );
-                let mut ret = Self::Output::zeros(self.nrows(), self.ncols(), self.context.clone());
-                let f = self.context.function::<T>("vec_add");
                 let nbatch = self.context.nbatch();
-                let nstates = (self.data.len() / nbatch) as u32;
-                let nbatch_u32 = nbatch as u32;
-                let self_stride = nstates as i32;
-                let rhs_nbatch = rhs.context.nbatch() as i32;
-                let rhs_nstates = (rhs.data.len() / rhs_nbatch as usize) as u32;
-                let rhs_stride = rhs_nstates as i32;
-                let ret_stride = nstates as i32;
-                let ret_nbatch = nbatch as i32;
+                let rhs_nbatch = rhs.context.nbatch();
+                let max_nbatch = nbatch.max(rhs_nbatch);
+                let nstates = (self.nrows() * self.ncols()) as u32;
+                let nbatch_u32 = max_nbatch as u32;
+                let self_stride = self.batch_stride as i32;
+                let rhs_nbatch_i32 = rhs_nbatch as i32;
+                let rhs_stride = (rhs.nrows() * rhs.ncols()) as i32;
+                let mut ret = Self::Output::zeros(
+                    self.nrows(),
+                    self.ncols(),
+                    self.context.clone_with_nbatch(max_nbatch),
+                );
+                let ret_nbatch = max_nbatch as i32;
+                let ret_stride = (ret.nrows() * ret.ncols()) as i32;
+                let f = self.context.function::<T>("vec_add");
                 let mut build = self.context.stream.launch_builder(&f);
                 build
                     .arg(&self.data)
@@ -488,7 +515,8 @@ macro_rules! impl_add_both_ref {
                     .arg(&mut ret.data)
                     .arg(&nstates)
                     .arg(&self_stride)
-                    .arg(&rhs_stride).arg(&rhs_nbatch)
+                    .arg(&rhs_stride)
+                    .arg(&rhs_nbatch_i32)
                     .arg(&ret_stride)
                     .arg(&ret_nbatch);
                 let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
@@ -520,10 +548,13 @@ macro_rules! impl_add_lhs {
                 let rhs_nstates = (rhs.data.len() / rhs_nbatch as usize) as u32;
                 let rhs_stride = rhs_nstates as i32;
                 let mut build = self.context.stream.launch_builder(&f);
-                build.arg(&mut self.data).arg(&rhs.data)
+                build
+                    .arg(&mut self.data)
+                    .arg(&rhs.data)
                     .arg(&nstates)
                     .arg(&self_stride)
-                    .arg(&rhs_stride).arg(&rhs_nbatch);
+                    .arg(&rhs_stride)
+                    .arg(&rhs_nbatch);
                 let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
                 unsafe { build.launch(config) }.expect("Failed to launch kernel");
                 self
@@ -554,10 +585,13 @@ impl<'a, T: ScalarCuda> MatrixView<'a> for CudaMatRef<'a, T> {
         let src_stride = self.batch_stride as i32;
         let dst_stride = (nrows * ncols) as i32;
         let nbatch_i32 = nbatch as i32;
-        build.arg(&mut data).arg(&self.data)
+        build
+            .arg(&mut data)
+            .arg(&self.data)
             .arg(&nstates)
             .arg(&dst_stride)
-            .arg(&src_stride).arg(&nbatch_i32);
+            .arg(&src_stride)
+            .arg(&nbatch_i32);
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
         CudaMat {
             data,
@@ -647,10 +681,13 @@ impl<'a, T: ScalarCuda> MatrixViewMut<'a> for CudaMatMut<'a, T> {
         let dst_stride = (nrows * ncols) as i32;
         let nbatch_i32 = nbatch as i32;
         let src_data = self.data.slice(..);
-        build.arg(&mut data).arg(&src_data)
+        build
+            .arg(&mut data)
+            .arg(&src_data)
             .arg(&nstates)
             .arg(&dst_stride)
-            .arg(&src_stride).arg(&nbatch_i32);
+            .arg(&src_stride)
+            .arg(&nbatch_i32);
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
         CudaMat {
             data,
@@ -678,12 +715,21 @@ impl<'a, T: ScalarCuda> MatrixViewMut<'a> for CudaMatMut<'a, T> {
         let ncols_b = b.ncols as c_int;
         let nrows_c = self_nrows as c_int;
 
-        let stride_a: c_longlong =
-            if a_nbatch == 1 { 0 } else { (a.nrows * a.ncols) as c_longlong };
-        let stride_b: c_longlong =
-            if b_nbatch == 1 { 0 } else { (b.nrows * b.ncols) as c_longlong };
-        let stride_c: c_longlong =
-            if nbatch == 1 { 0 } else { self_batch_stride as c_longlong };
+        let stride_a: c_longlong = if a_nbatch == 1 {
+            0
+        } else {
+            (a.nrows * a.ncols) as c_longlong
+        };
+        let stride_b: c_longlong = if b_nbatch == 1 {
+            0
+        } else {
+            (b.nrows * b.ncols) as c_longlong
+        };
+        let stride_c: c_longlong = if nbatch == 1 {
+            0
+        } else {
+            self_batch_stride as c_longlong
+        };
 
         let (a_ptr, _) = a.data.device_ptr(&self.context.stream);
         let (b_ptr, _) = b.data.device_ptr(&self.context.stream);
@@ -696,12 +742,20 @@ impl<'a, T: ScalarCuda> MatrixViewMut<'a> for CudaMatMut<'a, T> {
                 *blas.handle(),
                 cublasOperation_t::CUBLAS_OP_N,
                 cublasOperation_t::CUBLAS_OP_N,
-                nrows_a, ncols_b, ncols_a,
+                nrows_a,
+                ncols_b,
+                ncols_a,
                 &alpha_f64 as *const f64,
-                a_ptr as *const f64, nrows_a, stride_a,
-                b_ptr as *const f64, nrows_b, stride_b,
+                a_ptr as *const f64,
+                nrows_a,
+                stride_a,
+                b_ptr as *const f64,
+                nrows_b,
+                stride_b,
                 &beta_f64 as *const f64,
-                c_ptr as *mut f64, nrows_c, stride_c,
+                c_ptr as *mut f64,
+                nrows_c,
+                stride_c,
                 effective_nbatch,
             )
         }
@@ -726,12 +780,21 @@ impl<'a, T: ScalarCuda> MatrixViewMut<'a> for CudaMatMut<'a, T> {
         let ncols_b = b.ncols as c_int;
         let nrows_c = self_nrows as c_int;
 
-        let stride_a: c_longlong =
-            if a_nbatch == 1 { 0 } else { a.batch_stride as c_longlong };
-        let stride_b: c_longlong =
-            if b_nbatch == 1 { 0 } else { (b.nrows * b.ncols) as c_longlong };
-        let stride_c: c_longlong =
-            if nbatch == 1 { 0 } else { self_batch_stride as c_longlong };
+        let stride_a: c_longlong = if a_nbatch == 1 {
+            0
+        } else {
+            a.batch_stride as c_longlong
+        };
+        let stride_b: c_longlong = if b_nbatch == 1 {
+            0
+        } else {
+            (b.nrows * b.ncols) as c_longlong
+        };
+        let stride_c: c_longlong = if nbatch == 1 {
+            0
+        } else {
+            self_batch_stride as c_longlong
+        };
 
         let (a_ptr, _) = a.data.device_ptr(&self.context.stream);
         let (b_ptr, _) = b.data.device_ptr(&self.context.stream);
@@ -744,12 +807,20 @@ impl<'a, T: ScalarCuda> MatrixViewMut<'a> for CudaMatMut<'a, T> {
                 *blas.handle(),
                 cublasOperation_t::CUBLAS_OP_N,
                 cublasOperation_t::CUBLAS_OP_N,
-                nrows_a, ncols_b, ncols_a,
+                nrows_a,
+                ncols_b,
+                ncols_a,
                 &alpha_f64 as *const f64,
-                a_ptr as *const f64, nrows_a, stride_a,
-                b_ptr as *const f64, nrows_b, stride_b,
+                a_ptr as *const f64,
+                nrows_a,
+                stride_a,
+                b_ptr as *const f64,
+                nrows_b,
+                stride_b,
                 &beta_f64 as *const f64,
-                c_ptr as *mut f64, nrows_c, stride_c,
+                c_ptr as *mut f64,
+                nrows_c,
+                stride_c,
                 effective_nbatch,
             )
         }
@@ -843,12 +914,21 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
         let ncols_b = b.ncols as c_int;
         let nrows_c = self_nrows as c_int;
 
-        let stride_a: c_longlong =
-            if a_nbatch == 1 { 0 } else { (a.nrows * a.ncols) as c_longlong };
-        let stride_b: c_longlong =
-            if b_nbatch == 1 { 0 } else { (b.nrows * b.ncols) as c_longlong };
-        let stride_c: c_longlong =
-            if nbatch == 1 { 0 } else { (self_nrows * self_ncols) as c_longlong };
+        let stride_a: c_longlong = if a_nbatch == 1 {
+            0
+        } else {
+            (a.nrows * a.ncols) as c_longlong
+        };
+        let stride_b: c_longlong = if b_nbatch == 1 {
+            0
+        } else {
+            (b.nrows * b.ncols) as c_longlong
+        };
+        let stride_c: c_longlong = if nbatch == 1 {
+            0
+        } else {
+            (self_nrows * self_ncols) as c_longlong
+        };
 
         let (a_ptr, _) = a.data.device_ptr(&self.context.stream);
         let (b_ptr, _) = b.data.device_ptr(&self.context.stream);
@@ -861,12 +941,20 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
                 *blas.handle(),
                 cublasOperation_t::CUBLAS_OP_N,
                 cublasOperation_t::CUBLAS_OP_N,
-                nrows_a, ncols_b, ncols_a,
+                nrows_a,
+                ncols_b,
+                ncols_a,
                 &alpha_f64 as *const f64,
-                a_ptr as *const f64, nrows_a, stride_a,
-                b_ptr as *const f64, nrows_b, stride_b,
+                a_ptr as *const f64,
+                nrows_a,
+                stride_a,
+                b_ptr as *const f64,
+                nrows_b,
+                stride_b,
                 &beta_f64 as *const f64,
-                c_ptr as *mut f64, nrows_c, stride_c,
+                c_ptr as *mut f64,
+                nrows_c,
+                stride_c,
                 effective_nbatch,
             )
         }
@@ -964,12 +1052,17 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
         let y_offset = (i * nrows) as i32;
         let data_ptr = &mut self.data as *mut CudaSlice<T>;
         unsafe {
-            build.arg(&mut *data_ptr).arg(&*data_ptr)
-                .arg(&alpha_val).arg(&beta_val)
-                .arg(&y_offset).arg(&x_offset)
+            build
+                .arg(&mut *data_ptr)
+                .arg(&*data_ptr)
+                .arg(&alpha_val)
+                .arg(&beta_val)
+                .arg(&y_offset)
+                .arg(&x_offset)
                 .arg(&nrows_u32)
                 .arg(&stride)
-                .arg(&stride).arg(&nbatch_i32);
+                .arg(&stride)
+                .arg(&nbatch_i32);
         }
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
     }
@@ -1006,11 +1099,15 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
         let self_nbatch_i32 = nbatch as i32;
         let other_stride = (other_nrows * other_ncols) as i32;
         let other_nbatch_i32 = other_nbatch as i32;
-        build.arg(&mut self.data).arg(&other.data)
+        build
+            .arg(&mut self.data)
+            .arg(&other.data)
             .arg(&indices.data)
             .arg(&n_indices)
-            .arg(&self_stride).arg(&self_nbatch_i32)
-            .arg(&other_stride).arg(&other_nbatch_i32);
+            .arg(&self_stride)
+            .arg(&self_nbatch_i32)
+            .arg(&other_stride)
+            .arg(&other_nbatch_i32);
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
     }
 
@@ -1040,12 +1137,16 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
         let data_nstates = data.data.len() as IndexType / data_nbatch;
         let other_stride = data_nstates as i32;
         let other_nbatch_i32 = data_nbatch as i32;
-        build.arg(&mut self.data).arg(&data.data)
+        build
+            .arg(&mut self.data)
+            .arg(&data.data)
             .arg(&dst_indices.data)
             .arg(&src_indices.data)
             .arg(&n)
-            .arg(&self_stride).arg(&self_nbatch_i32)
-            .arg(&other_stride).arg(&other_nbatch_i32);
+            .arg(&self_stride)
+            .arg(&self_nbatch_i32)
+            .arg(&other_stride)
+            .arg(&other_nbatch_i32);
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
     }
 
@@ -1069,12 +1170,17 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
         let mat_nbatch_i32 = nbatch as i32;
         let y_offset: i32 = 0;
         let x_offset = (j * nrows) as i32;
-        build.arg(&mut v.data).arg(&self.data)
-            .arg(&alpha_val).arg(&beta_val)
-            .arg(&y_offset).arg(&x_offset)
+        build
+            .arg(&mut v.data)
+            .arg(&self.data)
+            .arg(&alpha_val)
+            .arg(&beta_val)
+            .arg(&y_offset)
+            .arg(&x_offset)
             .arg(&nrows_u32)
             .arg(&v_stride)
-            .arg(&mat_stride).arg(&mat_nbatch_i32);
+            .arg(&mat_stride)
+            .arg(&mat_nbatch_i32);
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
     }
 
@@ -1191,10 +1297,13 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
         let self_stride = (nrows * self_ncols) as i32;
         let other_stride = (nrows * other_ncols) as i32;
         let other_nbatch_i32 = other_nbatch as i32;
-        build.arg(&mut self.data).arg(&other.data)
+        build
+            .arg(&mut self.data)
+            .arg(&other.data)
             .arg(&nstates)
             .arg(&self_stride)
-            .arg(&other_stride).arg(&other_nbatch_i32);
+            .arg(&other_stride)
+            .arg(&other_nbatch_i32);
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
     }
 
@@ -1215,10 +1324,14 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
         let mat_nbatch_i32 = nbatch as i32;
         let diag_stride = nstates as i32;
         let diag_nbatch_i32 = v.context.nbatch() as i32;
-        build.arg(&mut data).arg(&v.data)
+        build
+            .arg(&mut data)
+            .arg(&v.data)
             .arg(&n_u32)
-            .arg(&mat_stride).arg(&mat_nbatch_i32)
-            .arg(&diag_stride).arg(&diag_nbatch_i32);
+            .arg(&mat_stride)
+            .arg(&mat_nbatch_i32)
+            .arg(&diag_stride)
+            .arg(&diag_nbatch_i32);
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
         Self {
             data,
@@ -1273,10 +1386,15 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
         let mat_nbatch_i32 = nbatch as i32;
         let col_stride = v_nstates as i32;
         let col_nbatch_i32 = v_nbatch as i32;
-        build.arg(&mut self.data).arg(&v.data)
-            .arg(&j_cint).arg(&n_u32)
-            .arg(&mat_stride).arg(&mat_nbatch_i32)
-            .arg(&col_stride).arg(&col_nbatch_i32);
+        build
+            .arg(&mut self.data)
+            .arg(&v.data)
+            .arg(&j_cint)
+            .arg(&n_u32)
+            .arg(&mat_stride)
+            .arg(&mat_nbatch_i32)
+            .arg(&col_stride)
+            .arg(&col_nbatch_i32);
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
     }
 
@@ -1303,12 +1421,17 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
         let x_nbatch_i32 = x_nbatch as i32;
         let y_stride = (nrows * y_ncols) as i32;
         let y_nbatch_i32 = y_nbatch as i32;
-        build.arg(&mut self.data).arg(&x.data).arg(&y.data)
+        build
+            .arg(&mut self.data)
+            .arg(&x.data)
+            .arg(&y.data)
             .arg(&beta)
             .arg(&nstates)
             .arg(&self_stride)
-            .arg(&x_stride).arg(&x_nbatch_i32)
-            .arg(&y_stride).arg(&y_nbatch_i32);
+            .arg(&x_stride)
+            .arg(&x_nbatch_i32)
+            .arg(&y_stride)
+            .arg(&y_nbatch_i32);
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
     }
 
