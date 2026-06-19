@@ -17,7 +17,8 @@ use log::info;
 use log::trace;
 use num_traits::{abs, FromPrimitive, One, Pow, ToPrimitive, Zero};
 
-use super::bdf::BdfStatistics;
+use super::jacobian_update::SolverState;
+use super::OdeSolverStatistics;
 use std::ops::{MulAssign, SubAssign};
 
 /// A Runge-Kutta method.
@@ -38,7 +39,7 @@ where
     tableau: Tableau<M>,
     state: RkState<Eqn::V>,
     a_rows: Vec<Eqn::V>,
-    statistics: BdfStatistics,
+    statistics: OdeSolverStatistics,
     root_finder: Option<RootFinder<Eqn::V>>,
     tstop: Option<Eqn::T>,
     diff: M,
@@ -115,7 +116,7 @@ where
         integrate_main_eqn: bool,
     ) -> Result<Self, DiffsolError> {
         // update statistics
-        let statistics = BdfStatistics::default();
+        let statistics = OdeSolverStatistics::default();
 
         state.check_consistent_with_problem(problem)?;
 
@@ -348,8 +349,12 @@ where
         &self.tableau
     }
 
-    pub(crate) fn get_statistics(&self) -> &BdfStatistics {
+    pub(crate) fn get_statistics(&self) -> &OdeSolverStatistics {
         &self.statistics
+    }
+
+    pub(crate) fn statistics_mut(&mut self) -> &mut OdeSolverStatistics {
+        &mut self.statistics
     }
 
     pub(crate) fn set_state(&mut self, state: RkState<Eqn::V>) {
@@ -635,6 +640,8 @@ where
             );
             if !nonlinear_solver.is_jacobian_set() {
                 nonlinear_solver.reset_jacobian(op, &self.state.y, t);
+                self.statistics
+                    .record_linear_solver_setup(SolverState::Checkpoint);
             }
             let solve_result = nonlinear_solver.solve_in_place(
                 op,
@@ -691,6 +698,8 @@ where
                         &self.old_state.s[j],
                         t,
                     );
+                    self.statistics
+                        .record_linear_solver_setup(SolverState::Checkpoint);
                 }
 
                 // solve
@@ -717,10 +726,6 @@ where
                 }
             }
         }
-        self.statistics.number_of_linear_solver_setups = op.map_or_else(
-            || s_op.as_ref().unwrap().number_of_jac_evals(),
-            |op| op.number_of_jac_evals(),
-        );
         Ok(())
     }
 
