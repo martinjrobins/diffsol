@@ -2,9 +2,10 @@ use crate::{
     matrix::Matrix,
     ode_solver::problem::OdeSolverSolution,
     scalar::{scale, Scalar},
-    ConstantOp, MatrixHost, NonLinearOpJacobian, NonLinearOpSens, NonLinearOpTimePartial,
-    OdeBuilder, OdeEquations, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
-    OdeEquationsImplicitSens, OdeSolverProblem, Op, Vector,
+    vector::{VectorView, VectorViewMut},
+    ConstantOp, Context, MatrixHost, NonLinearOpJacobian, NonLinearOpSens,
+    NonLinearOpTimePartial, OdeBuilder, OdeEquations, OdeEquationsImplicit,
+    OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeSolverProblem, Op, Vector,
 };
 use num_traits::{FromPrimitive, One, Zero};
 use std::ops::MulAssign;
@@ -197,6 +198,76 @@ fn exponential_decay_with_algebraic_out_sens_adj<M: MatrixHost>(
     y[0] = -x[2] * v[0];
 }
 
+#[allow(unused_mut)]
+pub fn exponential_decay_with_algebraic_batched<M: Matrix>(
+    x: &M::V,
+    p: &M::V,
+    _t: M::T,
+    y: &mut M::V,
+) {
+    y.copy_from(x);
+    let nstates = y.len();
+    let nbatch = y.context().nbatch();
+    for b in 0..nbatch {
+        let pb = p.get_batch(b);
+        let xb = x.get_batch(b);
+        let mut yb = y.get_batch_mut(b);
+        yb.mul_assign(scale(-pb.get_index(0)));
+        yb.set_index(nstates - 1, xb.get_index(nstates - 1) - xb.get_index(nstates - 2));
+    }
+}
+
+#[allow(unused_mut)]
+pub fn exponential_decay_with_algebraic_jacobian_batched<M: Matrix>(
+    _x: &M::V,
+    p: &M::V,
+    _t: M::T,
+    v: &M::V,
+    y: &mut M::V,
+) {
+    y.copy_from(v);
+    let nstates = y.len();
+    let nbatch = y.context().nbatch();
+    for b in 0..nbatch {
+        let pb = p.get_batch(b);
+        let vb = v.get_batch(b);
+        let mut yb = y.get_batch_mut(b);
+        yb.mul_assign(scale(-pb.get_index(0)));
+        yb.set_index(nstates - 1, vb.get_index(nstates - 1) - vb.get_index(nstates - 2));
+    }
+}
+
+#[allow(dead_code)]
+pub fn exponential_decay_with_algebraic_mass_batched<M: Matrix>(
+    x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    beta: M::T,
+    y: &mut M::V,
+) {
+    let nstates = y.len();
+    let nbatch = y.context().nbatch();
+    let mut saved_yz = Vec::with_capacity(nbatch);
+    for b in 0..nbatch {
+        let yb = y.get_batch(b);
+        saved_yz.push(beta * yb.get_index(nstates - 1));
+    }
+    y.axpy(M::T::one(), x, beta);
+    for b in 0..nbatch {
+        y.get_batch_mut(b).set_index(nstates - 1, saved_yz[b]);
+    }
+}
+
+pub fn exponential_decay_with_algebraic_init_batched<M: Matrix>(_p: &M::V, _t: M::T, y: &mut M::V) {
+    let nbatch = y.context().nbatch();
+    for b in 0..nbatch {
+        let mut yb = y.get_batch_mut(b);
+        yb.set_index(0, M::T::one());
+        yb.set_index(1, M::T::one());
+        yb.set_index(2, M::T::one());
+    }
+}
+
 #[allow(clippy::type_complexity)]
 pub fn exponential_decay_with_algebraic_problem<M: MatrixHost + 'static>(
     use_coloring: bool,
@@ -223,6 +294,46 @@ pub fn exponential_decay_with_algebraic_problem<M: MatrixHost + 'static>(
         let t = M::T::from_f64(i as f64 / 10.0).unwrap();
         let y0 = M::V::from_vec(vec![M::T::one(), M::T::one(), M::T::one()], ctx.clone());
         let y: M::V = y0 * scale((-p[0] * t).exp());
+        soln.push(y, t);
+    }
+    (problem, soln)
+}
+
+#[allow(clippy::type_complexity)]
+pub fn exponential_decay_with_algebraic_problem_batched<M: Matrix + 'static>(
+    nbatch: usize,
+) -> (
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
+    OdeSolverSolution<M::V>,
+) {
+    let ctx = M::C::default().clone_with_nbatch(nbatch);
+    let mut p_f64 = Vec::with_capacity(nbatch);
+    for b in 0..nbatch {
+        p_f64.push(0.1 * (b + 1) as f64);
+    }
+    let problem = OdeBuilder::<M>::new()
+        .context(ctx.clone())
+        .p(p_f64.clone())
+        .rhs_implicit(
+            exponential_decay_with_algebraic_batched::<M>,
+            exponential_decay_with_algebraic_jacobian_batched::<M>,
+        )
+        .mass(exponential_decay_with_algebraic_mass_batched::<M>)
+        .init(exponential_decay_with_algebraic_init_batched::<M>, 3)
+        .build()
+        .unwrap();
+    let mut soln = OdeSolverSolution::default();
+    for i in 0..10 {
+        let t = M::T::from_f64(i as f64 / 10.0).unwrap();
+        let mut y_data = Vec::with_capacity(3 * nbatch);
+        for b in 0..nbatch {
+            let k = M::T::from_f64(p_f64[b]).unwrap();
+            let val = (-k * t).exp();
+            y_data.push(val);
+            y_data.push(val);
+            y_data.push(val);
+        }
+        let y = M::V::from_vec(y_data, ctx.clone());
         soln.push(y, t);
     }
     (problem, soln)

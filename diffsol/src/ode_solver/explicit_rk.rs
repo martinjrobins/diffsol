@@ -526,6 +526,23 @@ mod test {
     }
 
     #[test]
+    fn test_tsit45_faer_exponential_decay_batched() {
+        use crate::FaerMat;
+        let (problem, soln) = exponential_decay_problem_batched::<FaerMat<f64>>(2);
+        let mut s = problem.tsit45().unwrap();
+        test_ode_solver(&mut s, soln, None, false, false);
+    }
+
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn test_tsit45_cuda_exponential_decay_batched() {
+        use crate::{CudaLU, CudaMat};
+        let (problem, soln) = exponential_decay_problem_batched::<CudaMat<f64>>(2);
+        let mut s = problem.tsit45().unwrap();
+        test_ode_solver(&mut s, soln, None, false, false);
+    }
+
+    #[test]
     fn test_root_finder_tsit45() {
         let (problem, soln) = exponential_decay_problem_with_root::<M>(false, true);
         let mut s = problem.tsit45().unwrap();
