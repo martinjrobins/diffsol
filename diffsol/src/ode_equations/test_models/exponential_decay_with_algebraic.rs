@@ -3,9 +3,9 @@ use crate::{
     ode_solver::problem::OdeSolverSolution,
     scalar::{scale, Scalar},
     vector::{VectorView, VectorViewMut},
-    ConstantOp, Context, MatrixHost, NonLinearOpJacobian, NonLinearOpSens,
-    NonLinearOpTimePartial, OdeBuilder, OdeEquations, OdeEquationsImplicit,
-    OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeSolverProblem, Op, Vector,
+    ConstantOp, Context, MatrixHost, NonLinearOpJacobian, NonLinearOpSens, NonLinearOpTimePartial,
+    OdeBuilder, OdeEquations, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
+    OdeEquationsImplicitSens, OdeSolverProblem, Op, Vector,
 };
 use num_traits::{FromPrimitive, One, Zero};
 use std::ops::MulAssign;
@@ -213,7 +213,10 @@ pub fn exponential_decay_with_algebraic_batched<M: Matrix>(
         let xb = x.get_batch(b);
         let mut yb = y.get_batch_mut(b);
         yb.mul_assign(scale(-pb.get_index(0)));
-        yb.set_index(nstates - 1, xb.get_index(nstates - 1) - xb.get_index(nstates - 2));
+        yb.set_index(
+            nstates - 1,
+            xb.get_index(nstates - 1) - xb.get_index(nstates - 2),
+        );
     }
 }
 
@@ -233,7 +236,10 @@ pub fn exponential_decay_with_algebraic_jacobian_batched<M: Matrix>(
         let vb = v.get_batch(b);
         let mut yb = y.get_batch_mut(b);
         yb.mul_assign(scale(-pb.get_index(0)));
-        yb.set_index(nstates - 1, vb.get_index(nstates - 1) - vb.get_index(nstates - 2));
+        yb.set_index(
+            nstates - 1,
+            vb.get_index(nstates - 1) - vb.get_index(nstates - 2),
+        );
     }
 }
 

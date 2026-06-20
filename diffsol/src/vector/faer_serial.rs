@@ -509,6 +509,32 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
             );
         }
     }
+    fn batched_axpy(&mut self, alpha: &[Self::T], x: &Self, beta: Self::T) {
+        let self_ncols = self.data.ncols();
+        let x_ncols = x.data.ncols();
+        assert_eq!(
+            alpha.len(),
+            self_ncols,
+            "batched_axpy: alpha.len() must equal self.nbatch()"
+        );
+        if self_ncols == x_ncols {
+            for b in 0..self_ncols {
+                zip!(self.data.col_mut(b), x.data.col(b))
+                    .for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha[b]);
+            }
+        } else if x_ncols == 1 {
+            let x_col = x.data.col(0);
+            for b in 0..self_ncols {
+                zip!(self.data.col_mut(b), x_col)
+                    .for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha[b]);
+            }
+        } else {
+            panic!(
+                "incompatible nbatch in batched_axpy: self={}, x={}",
+                self_ncols, x_ncols
+            );
+        }
+    }
     fn component_mul_assign(&mut self, other: &Self) {
         let self_ncols = self.data.ncols();
         let other_ncols = other.data.ncols();

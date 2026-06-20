@@ -10,6 +10,7 @@ extern "C" {
 #include "vec_assign_at_indices.cu"
 #include "vec_axpy_offset.cu"
 #include "vec_axpy.cu"
+#include "vec_batched_axpy.cu"
 #include "vec_copy_from_indices.cu"
 #include "vec_copy.cu"
 #include "vec_div_assign.cu"

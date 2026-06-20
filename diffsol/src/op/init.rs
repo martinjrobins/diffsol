@@ -235,10 +235,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let y0 = Vcpu::from_vec(
-            vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-            ctx.clone(),
-        );
+        let y0 = Vcpu::from_vec(vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0], ctx.clone());
         let t = 0.0;
         let (algebraic_indices, _) = problem
             .eqn()
@@ -249,10 +246,7 @@ mod tests {
 
         let initop = InitOp::new(&problem.eqn, t, &y0, algebraic_indices);
 
-        let dy0 = Vcpu::from_vec(
-            vec![4.0, 5.0, 6.0, 4.0, 5.0, 6.0],
-            ctx.clone(),
-        );
+        let dy0 = Vcpu::from_vec(vec![4.0, 5.0, 6.0, 4.0, 5.0, 6.0], ctx.clone());
         let du_v = Vcpu::from_vec(
             vec![dy0[0], dy0[1], y0[2], dy0[3], dy0[4], y0[5]],
             ctx.clone(),
@@ -261,17 +255,11 @@ mod tests {
         initop.call_inplace(&du_v, t, &mut y_out);
         // batch 0 (k=0.1): F = -M*[4,5,1] + f = [-4, -5, 0] + [-0.1, -0.1, 0] = [-4.1, -5.1, 0]
         // batch 1 (k=0.2): F = -M*[4,5,1] + f = [-4, -5, 0] + [-0.2, -0.2, 0] = [-4.2, -5.2, 0]
-        let expect = Vcpu::from_vec(
-            vec![-4.1, -5.1, 0.0, -4.2, -5.2, 0.0],
-            ctx.clone(),
-        );
+        let expect = Vcpu::from_vec(vec![-4.1, -5.1, 0.0, -4.2, -5.2, 0.0], ctx.clone());
         y_out.assert_eq_st(&expect, 1e-10);
 
         // Solution x solves F(x)=0: x_b = [-k, -k, 1]
-        let x0 = Vcpu::from_vec(
-            vec![-0.1, -0.1, 1.0, -0.2, -0.2, 1.0],
-            ctx.clone(),
-        );
+        let x0 = Vcpu::from_vec(vec![-0.1, -0.1, 1.0, -0.2, -0.2, 1.0], ctx.clone());
         let mut zero_out = Vcpu::zeros(3, ctx);
         initop.call_inplace(&x0, t, &mut zero_out);
         let expect_zero = Vcpu::from_vec(vec![0.0; 6], zero_out.context().clone());

@@ -8,10 +8,11 @@ use crate::{
     error::{DiffsolError, OdeSolverError},
     nonlinear_solver::{convergence::Convergence, NonLinearSolver},
     ode_solver_error, scale, AugmentedOdeEquations, AugmentedOdeEquationsImplicit, ConstantOp,
-    InitOp, LinearOp, LinearSolver, Matrix, NewtonNonlinearSolver, NonLinearOp, NonLinearOpAdjoint,
-    NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, NonLinearOpTimePartial,
-    OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
-    OdeEquationsImplicitSens, OdeSolverProblem, Op, SensEquations, Vector, VectorIndex,
+    Context, InitOp, LinearOp, LinearSolver, Matrix, NewtonNonlinearSolver, NonLinearOp,
+    NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint,
+    NonLinearOpTimePartial, OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit,
+    OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeSolverProblem, Op, SensEquations,
+    Vector, VectorIndex, VectorView, VectorViewMut,
 };
 use crate::{non_linear_solver_error, BacktrackingLineSearch, NoLineSearch};
 
@@ -357,7 +358,8 @@ impl<V: Vector> StateRefMut<'_, V> {
 
         let mut root_flow = V::zeros(nroots, ctx.clone());
         root_op.jac_mul_inplace(&y_before, t, &f_minus, &mut root_flow);
-        let denom = root_flow.get_index(root_idx) + root_t.get_index(root_idx);
+        let denom =
+            root_flow.get_batch(0).get_index(root_idx) + root_t.get_batch(0).get_index(root_idx);
         let denom_tol = V::T::from_f64(100.0).unwrap() * V::T::EPSILON;
         if denom.abs() <= denom_tol {
             return Err(ode_solver_error!(
@@ -371,6 +373,7 @@ impl<V: Vector> StateRefMut<'_, V> {
         let mut reset_sens = V::zeros(nstates, ctx.clone());
         let mut root_jac_s = V::zeros(nroots, ctx.clone());
         let mut root_sens = V::zeros(nroots, ctx);
+        let nbatch = correction_dir.context().nbatch();
         let mut s_plus = Vec::with_capacity(nparams);
         for (j, s_j_before) in s_before.iter().enumerate() {
             basis.set_index(j, V::T::one());
@@ -381,12 +384,16 @@ impl<V: Vector> StateRefMut<'_, V> {
             root_op.jac_mul_inplace(&y_before, t, s_j_before, &mut root_jac_s);
             root_op.sens_mul_inplace(&y_before, t, &basis, &mut root_sens);
 
-            let numerator = root_jac_s.get_index(root_idx) + root_sens.get_index(root_idx);
-            let tau_p = -numerator / denom;
-
             let mut s_j_plus = reset_jac_s.clone();
             s_j_plus += &reset_sens;
-            s_j_plus.axpy(tau_p, &correction_dir, V::T::one());
+
+            let mut tau_p = Vec::with_capacity(nbatch);
+            for b in 0..nbatch {
+                let num = root_jac_s.get_batch(b).get_index(root_idx)
+                    + root_sens.get_batch(b).get_index(root_idx);
+                tau_p.push(-num / denom);
+            }
+            s_j_plus.batched_axpy(&tau_p, &correction_dir, V::T::one());
             s_plus.push(s_j_plus);
 
             basis.set_index(j, V::T::zero());
@@ -452,7 +459,8 @@ impl<V: Vector> StateRefMut<'_, V> {
 
         let mut root_flow = V::zeros(nroots, ctx.clone());
         root_op.jac_mul_inplace(&y_before, t, &f_minus, &mut root_flow);
-        let denom = root_flow.get_index(root_idx) + root_t.get_index(root_idx);
+        let denom =
+            root_flow.get_batch(0).get_index(root_idx) + root_t.get_batch(0).get_index(root_idx);
         let denom_tol = V::T::from_f64(100.0).unwrap() * V::T::EPSILON;
         if denom.abs() <= denom_tol {
             return Err(ode_solver_error!(
@@ -466,6 +474,7 @@ impl<V: Vector> StateRefMut<'_, V> {
         let mut reset_sens = V::zeros(nstates, ctx.clone());
         let mut root_jac_s = V::zeros(nroots, ctx.clone());
         let mut root_sens = V::zeros(nroots, ctx);
+        let nbatch = correction_dir.context().nbatch();
         let mut s_plus = Vec::with_capacity(nparams);
         for (j, s_j_before) in s_before.iter().enumerate() {
             basis.set_index(j, V::T::one());
@@ -476,12 +485,16 @@ impl<V: Vector> StateRefMut<'_, V> {
             root_op.jac_mul_inplace(&y_before, t, s_j_before, &mut root_jac_s);
             root_op.sens_mul_inplace(&y_before, t, &basis, &mut root_sens);
 
-            let numerator = root_jac_s.get_index(root_idx) + root_sens.get_index(root_idx);
-            let tau_p = -numerator / denom;
-
             let mut s_j_plus = reset_jac_s.clone();
             s_j_plus += &reset_sens;
-            s_j_plus.axpy(tau_p, &correction_dir, V::T::one());
+
+            let mut tau_p = Vec::with_capacity(nbatch);
+            for b in 0..nbatch {
+                let num = root_jac_s.get_batch(b).get_index(root_idx)
+                    + root_sens.get_batch(b).get_index(root_idx);
+                tau_p.push(-num / denom);
+            }
+            s_j_plus.batched_axpy(&tau_p, &correction_dir, V::T::one());
             s_plus.push(s_j_plus);
 
             basis.set_index(j, V::T::zero());
@@ -586,7 +599,8 @@ impl<V: Vector> StateRefMut<'_, V> {
 
         let mut root_flow = V::zeros(nroots, ctx.clone());
         root_op.jac_mul_inplace(y_minus, t_event, f_minus, &mut root_flow);
-        let denom = root_flow.get_index(root_idx) + root_t.get_index(root_idx);
+        let denom =
+            root_flow.get_batch(0).get_index(root_idx) + root_t.get_batch(0).get_index(root_idx);
         let denom_tol = V::T::from_f64(100.0).unwrap() * V::T::EPSILON;
         if denom.abs() <= denom_tol {
             return Err(ode_solver_error!(
@@ -613,19 +627,26 @@ impl<V: Vector> StateRefMut<'_, V> {
         let mut root_adj = V::zeros(nstates, ctx.clone());
         let mut reset_sens_adj = V::zeros(nparams, ctx.clone());
         let mut root_sens_adj = V::zeros(nparams, ctx.clone());
+        let nbatch = root_flow.context().nbatch();
 
         for i in 0..nchannels {
-            let alpha = {
-                let lambda_i = &self.s[i];
-                let mut alpha_num = V::T::zero();
-                for j in 0..nstates {
-                    alpha_num += lambda_i.get_index(j) * correction_dir.get_index(j);
-                }
+            for b in 0..nbatch {
+                let mut alpha_num = {
+                    let lambda_i = self.s[i].get_batch(b);
+                    let cdir_b = correction_dir.get_batch(b);
+                    let mut s = V::T::zero();
+                    for j in 0..nstates {
+                        s += lambda_i.get_index(j) * cdir_b.get_index(j);
+                    }
+                    s
+                };
                 if let (Some(l_minus), Some(l_plus)) = (&l_minus, &l_plus) {
-                    alpha_num += l_minus.get_index(i) - l_plus.get_index(i);
+                    alpha_num +=
+                        l_minus.get_batch(b).get_index(i) - l_plus.get_batch(b).get_index(i);
                 }
-                alpha_num / denom
-            };
+                let alpha_b = alpha_num / denom;
+                root_basis.get_batch_mut(b).set_index(root_idx, alpha_b);
+            }
 
             {
                 let lambda_i = &self.s[i];
@@ -638,10 +659,14 @@ impl<V: Vector> StateRefMut<'_, V> {
                 );
             }
 
-            root_basis.set_index(root_idx, alpha);
             root_op.jac_transpose_mul_inplace(y_minus, t_event, &root_basis, &mut root_adj);
             root_op.sens_transpose_mul_inplace(y_minus, t_event, &root_basis, &mut root_sens_adj);
-            root_basis.set_index(root_idx, V::T::zero());
+
+            for b in 0..nbatch {
+                root_basis
+                    .get_batch_mut(b)
+                    .set_index(root_idx, V::T::zero());
+            }
 
             self.s[i].copy_from(&root_adj);
             self.s[i].axpy(-V::T::one(), &reset_adj, V::T::one());
@@ -714,7 +739,8 @@ impl<V: Vector> StateRefMut<'_, V> {
         let root_t = root_op.time_derive(forward.y, forward.t);
         let mut root_flow = V::zeros(nroots, ctx.clone());
         root_op.jac_mul_inplace(forward.y, forward.t, forward.dy, &mut root_flow);
-        let denom = root_flow.get_index(root_idx) + root_t.get_index(root_idx);
+        let denom =
+            root_flow.get_batch(0).get_index(root_idx) + root_t.get_batch(0).get_index(root_idx);
         let denom_tol = V::T::from_f64(100.0).unwrap() * V::T::EPSILON;
         if denom.abs() <= denom_tol {
             return Err(ode_solver_error!(
@@ -725,14 +751,22 @@ impl<V: Vector> StateRefMut<'_, V> {
 
         let nstates = eqn.rhs().nstates();
         let nparams = eqn.rhs().nparams();
+        let nbatch = root_flow.context().nbatch();
         let mut root_basis = V::zeros(nroots, ctx.clone());
         let mut lambda_corr = V::zeros(nstates, ctx.clone());
         let mut q_corr = V::zeros(nparams, ctx.clone());
         for i in 0..nout {
-            root_basis.set_index(root_idx, out.get_index(i) / denom);
+            for b in 0..nbatch {
+                let val = out.get_batch(b).get_index(i) / denom;
+                root_basis.get_batch_mut(b).set_index(root_idx, val);
+            }
             root_op.jac_transpose_mul_inplace(forward.y, forward.t, &root_basis, &mut lambda_corr);
             root_op.sens_transpose_mul_inplace(forward.y, forward.t, &root_basis, &mut q_corr);
-            root_basis.set_index(root_idx, V::T::zero());
+            for b in 0..nbatch {
+                root_basis
+                    .get_batch_mut(b)
+                    .set_index(root_idx, V::T::zero());
+            }
             self.s[i] += &lambda_corr;
             self.sg[i] += &q_corr;
         }

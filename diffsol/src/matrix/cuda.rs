@@ -872,8 +872,12 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
                 self.context
                     .stream
                     .memcpy_dtod(
-                        &self.data.slice(old_offset..old_offset + nrows * cols_to_copy),
-                        &mut self.data.slice_mut(new_offset..new_offset + nrows * cols_to_copy),
+                        &self
+                            .data
+                            .slice(old_offset..old_offset + nrows * cols_to_copy),
+                        &mut self
+                            .data
+                            .slice_mut(new_offset..new_offset + nrows * cols_to_copy),
                     )
                     .expect("Failed to copy data during resize_cols shrink");
             }

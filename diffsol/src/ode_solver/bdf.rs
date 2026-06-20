@@ -1598,7 +1598,9 @@ mod test {
             exponential_decay::{
                 exponential_decay_problem, exponential_decay_problem_adjoint,
                 exponential_decay_problem_batched, exponential_decay_problem_batched_adjoint,
+                exponential_decay_problem_batched_adjoint_with_reset,
                 exponential_decay_problem_batched_sens,
+                exponential_decay_problem_batched_sens_with_reset,
                 exponential_decay_problem_batched_with_reset, exponential_decay_problem_sens,
                 exponential_decay_problem_with_root,
                 exponential_decay_with_single_reset_root_problem_adjoint,
@@ -2493,6 +2495,44 @@ mod test {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn test_bdf_nalgebra_exponential_decay_batched_sens_with_reset() {
+        let nbatch = 2;
+        let (problem, soln) = exponential_decay_problem_batched_sens_with_reset::<M>(nbatch);
+        let mut s = problem.bdf_sens::<LS>().unwrap();
+        test_ode_solver(&mut s, soln, None, false, true);
+    }
+
+    #[test]
+    fn test_bdf_nalgebra_exponential_decay_batched_adjoint_with_reset() {
+        use crate::{AdjointOdeSolverMethod, OdeSolverState};
+        let nbatch = 2;
+        let (mut problem, soln) = exponential_decay_problem_batched_adjoint_with_reset::<M>(nbatch);
+        let final_time = soln.solution_points.last().unwrap().t;
+        let ctx = problem.eqn.context().clone_with_nbatch(nbatch);
+        let dgdp_check = setup_test_adjoint::<LS, _>(&mut problem, soln);
+        let mut s = problem.bdf::<LS>().unwrap();
+        let (checkpointer, _y, _t, _stop_reason) =
+            s.solve_with_checkpointing(final_time, None).unwrap();
+        let adjoint_solver = problem
+            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(s), Some(2))
+            .unwrap();
+        let (state, _) = adjoint_solver
+            .solve_adjoint_backwards_pass(&[], &[])
+            .unwrap();
+        let gs_adj = state.into_common().sg;
+        let nout = problem.eqn.nout();
+        let atol = crate::NalgebraVec::<f64>::from_element(nout, 1e-6, ctx);
+        for j in 0..nout {
+            gs_adj[j].assert_eq_norm(
+                &dgdp_check.column(j).into_owned(),
+                &atol,
+                1e-2,  // looser rtol for FD
+                100.0, // looser threshold
+            );
         }
     }
 

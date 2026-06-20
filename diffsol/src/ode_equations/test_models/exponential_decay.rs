@@ -1406,6 +1406,66 @@ fn exponential_decay_constant_reset_sens<M: Matrix>(
     y.fill(M::T::zero());
 }
 
+fn exponential_decay_time_root_jac_batched<M: Matrix>(
+    _x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    _v: &M::V,
+    y: &mut M::V,
+) {
+    y.fill(M::T::zero());
+}
+
+fn exponential_decay_time_root_sens_batched<M: Matrix>(
+    _x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    _v: &M::V,
+    y: &mut M::V,
+) {
+    y.fill(M::T::zero());
+}
+
+fn exponential_decay_time_root_adj_batched<M: Matrix>(
+    _x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    _v: &M::V,
+    y: &mut M::V,
+) {
+    y.fill(M::T::zero());
+}
+
+fn exponential_decay_time_root_sens_adj_batched<M: Matrix>(
+    _x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    _v: &M::V,
+    y: &mut M::V,
+) {
+    y.fill(M::T::zero());
+}
+
+fn exponential_decay_constant_reset_adj_batched<M: Matrix>(
+    _x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    _v: &M::V,
+    y: &mut M::V,
+) {
+    y.fill(M::T::zero());
+}
+
+fn exponential_decay_constant_reset_sens_adj_batched<M: Matrix>(
+    _x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    _v: &M::V,
+    y: &mut M::V,
+) {
+    y.fill(M::T::zero());
+}
+
 fn exponential_decay_two_root_jac<M: Matrix>(
     _x: &M::V,
     _p: &M::V,
@@ -1482,6 +1542,189 @@ pub fn exponential_decay_with_constant_reset_problem_sens<M: MatrixHost + 'stati
     };
     soln.push(M::V::from_element(nstates, M::T::zero(), ctx), M::T::zero());
 
+    (problem, soln)
+}
+
+#[allow(clippy::type_complexity)]
+pub fn exponential_decay_problem_batched_sens_with_reset<M: Matrix + 'static>(
+    nbatch: usize,
+) -> (
+    OdeSolverProblem<
+        impl OdeEquationsImplicitSens<
+            M = M,
+            V = M::V,
+            T = M::T,
+            C = M::C,
+            Reset: NonLinearOpJacobian<M = M, V = M::V, T = M::T, C = M::C>
+                       + NonLinearOpSens<M = M, V = M::V, T = M::T, C = M::C>
+                       + NonLinearOpTimePartial<M = M, V = M::V, T = M::T, C = M::C>,
+            Root: NonLinearOpJacobian<M = M, V = M::V, T = M::T, C = M::C>
+                      + NonLinearOpSens<M = M, V = M::V, T = M::T, C = M::C>
+                      + NonLinearOpTimePartial<M = M, V = M::V, T = M::T, C = M::C>,
+        >,
+    >,
+    OdeSolverSolution<M::V>,
+) {
+    let ctx = M::C::default().clone_with_nbatch(nbatch);
+    let mut p_f64 = Vec::new();
+    for b in 0..nbatch {
+        let k = 0.1 * (b + 1) as f64;
+        let y0 = (b + 1) as f64;
+        p_f64.push(k);
+        p_f64.push(y0);
+    }
+    let problem = OdeBuilder::<M>::new()
+        .context(ctx.clone())
+        .p(p_f64.clone())
+        .sens_rtol(1e-6)
+        .sens_atol([1e-6])
+        .rhs_sens_implicit(
+            exponential_decay::<M>,
+            exponential_decay_jacobian::<M>,
+            exponential_decay_sens_batched::<M>,
+        )
+        .init_sens(
+            exponential_decay_init::<M>,
+            exponential_decay_init_sens_batched::<M>,
+            2,
+        )
+        .root_sens_implicit(
+            exponential_decay_time_root_batched::<M>,
+            exponential_decay_time_root_jac_batched::<M>,
+            exponential_decay_time_root_sens_batched::<M>,
+            1,
+        )
+        .reset_sens_implicit(
+            exponential_decay_reset::<M>,
+            exponential_decay_constant_reset_jac::<M>,
+            exponential_decay_constant_reset_sens::<M>,
+        )
+        .build()
+        .unwrap();
+    let t_reset = M::T::from_f64(5.0).unwrap();
+    let mut soln = OdeSolverSolution {
+        atol: problem.atol.clone(),
+        rtol: problem.rtol,
+        ..Default::default()
+    };
+    for i in 0..11 {
+        let t = M::T::from_f64(i as f64).unwrap();
+        let mut y_data = Vec::new();
+        let mut s_k_data = Vec::new();
+        let mut s_y0_data = Vec::new();
+        for b in 0..nbatch {
+            let k = M::T::from_f64(p_f64[b * 2]).unwrap();
+            let y0 = M::T::from_f64(p_f64[b * 2 + 1]).unwrap();
+            let t_val = if t > t_reset {
+                let dt = t - t_reset;
+                M::T::from_f64(0.4).unwrap() * (-k * dt).exp()
+            } else {
+                y0 * (-k * t).exp()
+            };
+            y_data.push(t_val);
+            y_data.push(t_val);
+            let s_k = if t > t_reset {
+                let dt = t - t_reset;
+                -M::T::from_f64(0.4).unwrap() * dt * (-k * dt).exp()
+            } else {
+                -y0 * t * (-k * t).exp()
+            };
+            s_k_data.push(s_k);
+            s_k_data.push(s_k);
+            let s_y0 = if t > t_reset {
+                M::T::zero()
+            } else {
+                (-k * t).exp()
+            };
+            s_y0_data.push(s_y0);
+            s_y0_data.push(s_y0);
+        }
+        let y = M::V::from_vec(y_data, ctx.clone());
+        let s_k = M::V::from_vec(s_k_data, ctx.clone());
+        let s_y0 = M::V::from_vec(s_y0_data, ctx.clone());
+        soln.push_sens(y, t, &[s_k, s_y0]);
+    }
+    (problem, soln)
+}
+
+#[allow(clippy::type_complexity)]
+pub fn exponential_decay_problem_batched_adjoint_with_reset<M: Matrix + 'static>(
+    nbatch: usize,
+) -> (
+    OdeSolverProblem<
+        impl OdeEquationsImplicitAdjoint<
+            M = M,
+            V = M::V,
+            T = M::T,
+            C = M::C,
+            Reset: NonLinearOpJacobian<M = M, V = M::V, T = M::T, C = M::C>
+                       + NonLinearOpAdjoint<M = M, V = M::V, T = M::T, C = M::C>
+                       + NonLinearOpSensAdjoint<M = M, V = M::V, T = M::T, C = M::C>
+                       + NonLinearOpTimePartial<M = M, V = M::V, T = M::T, C = M::C>,
+            Root: NonLinearOpJacobian<M = M, V = M::V, T = M::T, C = M::C>
+                      + NonLinearOpAdjoint<M = M, V = M::V, T = M::T, C = M::C>
+                      + NonLinearOpSensAdjoint<M = M, V = M::V, T = M::T, C = M::C>
+                      + NonLinearOpTimePartial<M = M, V = M::V, T = M::T, C = M::C>,
+        >,
+    >,
+    OdeSolverSolution<M::V>,
+) {
+    let ctx = M::C::default().clone_with_nbatch(nbatch);
+    let mut p_f64 = Vec::new();
+    for b in 0..nbatch {
+        let k = 0.1 * (b + 1) as f64;
+        let y0 = (b + 1) as f64;
+        p_f64.push(k);
+        p_f64.push(y0);
+    }
+    let problem = OdeBuilder::<M>::new()
+        .context(ctx.clone())
+        .p(p_f64.clone())
+        .integrate_out(true)
+        .rhs_adjoint_implicit(
+            exponential_decay::<M>,
+            exponential_decay_jacobian::<M>,
+            exponential_decay_jacobian_adjoint_batched::<M>,
+            exponential_decay_sens_transpose_batched::<M>,
+        )
+        .init_adjoint(
+            exponential_decay_init::<M>,
+            exponential_decay_init_sens_adjoint_batched::<M>,
+            2,
+        )
+        .root_adjoint_implicit(
+            exponential_decay_time_root_batched::<M>,
+            exponential_decay_time_root_jac_batched::<M>,
+            exponential_decay_time_root_adj_batched::<M>,
+            exponential_decay_time_root_sens_adj_batched::<M>,
+            1,
+        )
+        .reset_adjoint_implicit(
+            exponential_decay_reset::<M>,
+            exponential_decay_constant_reset_jac::<M>,
+            exponential_decay_constant_reset_adj_batched::<M>,
+            exponential_decay_constant_reset_sens_adj_batched::<M>,
+        )
+        .out_adjoint_implicit(
+            exponential_decay_out_batched::<M>,
+            exponential_decay_out_jac_mul_batched::<M>,
+            exponential_decay_out_adj_mul_batched::<M>,
+            exponential_decay_out_sens_adj_batched::<M>,
+            2,
+        )
+        .build()
+        .unwrap();
+    // Single solution point at final time; dgdp computed via setup_test_adjoint
+    let mut soln = OdeSolverSolution {
+        atol: problem.atol.clone(),
+        rtol: problem.rtol,
+        ..Default::default()
+    };
+    let t_final = M::T::from_f64(10.0).unwrap();
+    soln.push(
+        M::V::from_element(2, M::T::from_f64(0.0).unwrap(), ctx.clone()),
+        t_final,
+    );
     (problem, soln)
 }
 

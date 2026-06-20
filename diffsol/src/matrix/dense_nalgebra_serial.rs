@@ -589,7 +589,10 @@ impl<T: NalgebraScalar> DenseMatrix for NalgebraMat<T> {
             let slice = self.data.as_mut_slice();
             for b in 1..nbatch {
                 let len = nrows * ncols;
-                slice.copy_within(b * old_ncols * nrows..b * old_ncols * nrows + len, b * ncols * nrows);
+                slice.copy_within(
+                    b * old_ncols * nrows..b * old_ncols * nrows + len,
+                    b * ncols * nrows,
+                );
             }
             self.data
                 .resize_horizontally_mut(ncols * nbatch, Self::T::zero());

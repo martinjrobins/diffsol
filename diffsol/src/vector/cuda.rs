@@ -1247,12 +1247,9 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
         let nbatch_u32 = nbatch as u32;
 
         let f = self.context.function::<T>("vec_norm");
-        let config = self.context.launch_config_2d_reduce(
-            nstates_u32,
-            nbatch_u32,
-            &f,
-            norm_blk_size::<T>,
-        );
+        let config =
+            self.context
+                .launch_config_2d_reduce(nstates_u32, nbatch_u32, &f, norm_blk_size::<T>);
         let blocks_per_batch = config.grid_dim.0 as usize;
         let total_blocks = blocks_per_batch * nbatch;
         let mut partial_sums = unsafe {
@@ -1571,6 +1568,52 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
             .arg(&x_stride)
             .arg(&x_nbatch_i32);
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
+    }
+    fn batched_axpy(&mut self, alpha: &[Self::T], x: &Self, beta: Self::T) {
+        let self_nbatch = self.context.nbatch();
+        let x_nbatch = x.context.nbatch();
+        assert_eq!(
+            alpha.len(),
+            self_nbatch,
+            "batched_axpy: alpha.len() must equal self.nbatch()"
+        );
+        self.context
+            .assert_compatible_nbatch(x_nbatch, "batched_axpy");
+        let nstates = self.data.len() as IndexType / self_nbatch;
+        if nstates == 0 {
+            return;
+        }
+        let x_nstates = x.data.len() as IndexType / x_nbatch;
+
+        let alpha_dev = unsafe {
+            self.context
+                .stream
+                .alloc::<T>(self_nbatch)
+                .expect("Failed to allocate device memory for batched_axpy alpha")
+        };
+        self.context
+            .stream
+            .memcpy_htod(alpha, &mut alpha_dev)
+            .expect("Failed to copy alpha to device");
+
+        let nstates_u32 = nstates as u32;
+        let nbatch_u32 = self_nbatch as u32;
+        let f = self.context.function::<T>("vec_batched_axpy");
+        let config = self.context.launch_config_2d(nstates_u32, nbatch_u32, &f);
+        let mut build = self.context.stream.launch_builder(&f);
+        let self_stride = nstates as i32;
+        let x_stride = x_nstates as i32;
+        let x_nbatch_i32 = x_nbatch as i32;
+        build
+            .arg(&mut self.data)
+            .arg(&x.data)
+            .arg(&alpha_dev)
+            .arg(&beta)
+            .arg(&nstates_u32)
+            .arg(&self_stride)
+            .arg(&x_stride)
+            .arg(&x_nbatch_i32);
+        unsafe { build.launch(config) }.expect("Failed to launch batched_axpy kernel");
     }
     fn clone_as_vec(&self) -> Vec<Self::T> {
         self.context

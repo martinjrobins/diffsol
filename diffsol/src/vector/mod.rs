@@ -264,6 +264,13 @@ pub trait Vector:
     /// Compute the AXPY operation with a vector view: self = alpha * x + beta * self
     fn axpy_v(&mut self, alpha: Self::T, x: &Self::View<'_>, beta: Self::T);
 
+    /// Per-batch AXPY: self[i]_b = alpha[b] * x[i]_b + beta * self[i]_b
+    ///
+    /// `alpha` must have length equal to `self.context().nbatch()`.
+    /// Each batch uses its own scalar multiplier `alpha[b]`.
+    /// The `x` operand may broadcast if its `nbatch == 1`.
+    fn batched_axpy(&mut self, alpha: &[Self::T], x: &Self, beta: Self::T);
+
     /// Element-wise multiplication: self_i *= other_i
     fn component_mul_assign(&mut self, other: &Self);
 
@@ -1003,6 +1010,37 @@ pub(crate) mod tests {
         assert_eq!(v1.clone_as_vec(), fv::<V>(&[5.0, 7.0, 5.0, 7.0]));
     }
 
+    // --- batched_axpy tests ---
+
+    pub fn test_batched_axpy_new<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let mut y = V::from_vec(fv::<V>(&[1.0, 2.0, 10.0, 20.0]), ctx.clone());
+        let x = V::from_vec(fv::<V>(&[3.0, 4.0, 30.0, 40.0]), ctx);
+        y.batched_axpy(&[f::<V>(2.0), f::<V>(0.5)], &x, f::<V>(1.0));
+        // batch0: [1,2] + 2*[3,4] = [7,10]
+        // batch1: [10,20] + 0.5*[30,40] = [25,40]
+        assert_eq!(y.clone_as_vec(), fv::<V>(&[7.0, 10.0, 25.0, 40.0]));
+    }
+
+    pub fn test_batched_axpy_new_broadcast<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let mut y = V::from_vec(fv::<V>(&[1.0, 2.0, 10.0, 20.0]), ctx);
+        let x = V::from_vec(fv::<V>(&[3.0, 4.0]), V::C::default());
+        y.batched_axpy(&[f::<V>(2.0), f::<V>(0.5)], &x, f::<V>(1.0));
+        // both batches: beta*y + alpha_b * x
+        // batch0: [1,2] + 2*[3,4] = [7,10]
+        // batch1: [10,20] + 0.5*[3,4] = [11.5,22]
+        assert_eq!(y.clone_as_vec(), fv::<V>(&[7.0, 10.0, 11.5, 22.0]));
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub fn test_batched_axpy_new_bad_length<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let mut y = V::zeros(2, ctx);
+        let x = V::zeros(2, V::C::default());
+        y.batched_axpy(&[f::<V>(1.0)], &x, f::<V>(0.0));
+    }
+
     // --- Incompatible batch tests ---
 
     pub fn test_batched_axpy_incompatible<V: Vector>(ctx2: V::C, ctx3: V::C) {
@@ -1704,6 +1742,19 @@ macro_rules! generate_vector_tests {
             #[test]
             fn [<test_batched_copy_from_view_ $suffix>]() {
                 $crate::vector::tests::test_batched_copy_from_view::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_axpy_new_ $suffix>]() {
+                $crate::vector::tests::test_batched_axpy_new::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_axpy_new_broadcast_ $suffix>]() {
+                $crate::vector::tests::test_batched_axpy_new_broadcast::<$V>($ctx2);
+            }
+            #[test]
+            #[should_panic(expected = "alpha.len() must equal")]
+            fn [<test_batched_axpy_new_bad_length_ $suffix>]() {
+                $crate::vector::tests::test_batched_axpy_new_bad_length::<$V>($ctx2);
             }
             #[test]
             #[should_panic(expected = "incompatible nbatch")]

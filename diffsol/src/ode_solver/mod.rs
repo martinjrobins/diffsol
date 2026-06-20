@@ -156,33 +156,48 @@ mod tests {
         let final_time = soln.solution_points.last().unwrap().t;
         let mut p_0 = Eqn::V::zeros(nparams, ctx.clone());
         problem.eqn.get_params(&mut p_0);
-        let h_base = Eqn::T::from_f64(1e-10).unwrap();
+        let nbatch = p_0.context().nbatch();
+        let h_base = Eqn::T::from_f64(1e-6).unwrap();
         let mut h = Eqn::V::from_element(nparams, h_base, ctx.clone());
         h.axpy(h_base, &p_0, Eqn::T::one());
         let p_base = p_0.clone();
         for i in 0..nparams {
-            p_0.set_index(i, p_base.get_index(i) + h.get_index(i));
+            for b in 0..nbatch {
+                let base = p_base.get_batch(b).get_index(i);
+                let hb = h.get_batch(b).get_index(i);
+                p_0.get_batch_mut(b).set_index(i, base + hb);
+            }
             problem.eqn.set_params(&p_0);
             let g_pos = {
                 let mut s = problem.bdf::<LS>().unwrap();
-                s.set_stop_time(final_time).unwrap();
-                while s.step().unwrap() != OdeSolverStopReason::TstopReached {}
+                s.solve(final_time).unwrap();
                 s.state().g.clone()
             };
 
-            p_0.set_index(i, p_base.get_index(i) - h.get_index(i));
+            for b in 0..nbatch {
+                let base = p_base.get_batch(b).get_index(i);
+                let hb = h.get_batch(b).get_index(i);
+                p_0.get_batch_mut(b).set_index(i, base - hb);
+            }
             problem.eqn.set_params(&p_0);
             let g_neg = {
                 let mut s = problem.bdf::<LS>().unwrap();
-                s.set_stop_time(final_time).unwrap();
-                while s.step().unwrap() != OdeSolverStopReason::TstopReached {}
+                s.solve(final_time).unwrap();
                 s.state().g.clone()
             };
-            p_0.set_index(i, p_base.get_index(i));
+            for b in 0..nbatch {
+                let base = p_base.get_batch(b).get_index(i);
+                p_0.get_batch_mut(b).set_index(i, base);
+            }
 
-            let delta = (g_pos - g_neg) / Scale(Eqn::T::from_f64(2.).unwrap() * h.get_index(i));
-            for j in 0..nout {
-                dgdp.set_index(i, j, delta.get_index(j));
+            let delta_full = g_pos - g_neg;
+            for b in 0..nbatch {
+                let hb = h.get_batch(b).get_index(i);
+                let denom = Eqn::T::from_f64(2.0).unwrap() * hb;
+                for j in 0..nout {
+                    let delta_val = delta_full.get_batch(b).get_index(j) / denom;
+                    dgdp.set_index(i, b * nout + j, delta_val);
+                }
             }
         }
         problem.eqn.set_params(&p_base);
@@ -262,7 +277,8 @@ mod tests {
 
         let mut p_0 = ctx.vector_zeros(nparams);
         problem.eqn.get_params(&mut p_0);
-        let h_base = Eqn::T::from_f64(1e-10).unwrap();
+        let nbatch = p_0.context().nbatch();
+        let h_base = Eqn::T::from_f64(1e-6).unwrap();
         let mut h = Eqn::V::from_element(nparams, h_base, ctx.clone());
         h.axpy(h_base, &p_0, Eqn::T::one());
         let mut p_data = p_0.clone();
@@ -276,7 +292,11 @@ mod tests {
         };
 
         for i in 0..nparams {
-            p_0.set_index(i, p_base.get_index(i) + h.get_index(i));
+            for b in 0..nbatch {
+                let base = p_base.get_batch(b).get_index(i);
+                let hb = h.get_batch(b).get_index(i);
+                p_0.get_batch_mut(b).set_index(i, base + hb);
+            }
             problem.eqn.set_params(&p_0);
             let g_pos = {
                 let mut s = problem.bdf::<LS>().unwrap();
@@ -284,7 +304,11 @@ mod tests {
                 sum_squares(&v, &data)
             };
 
-            p_0.set_index(i, p_base.get_index(i) - h.get_index(i));
+            for b in 0..nbatch {
+                let base = p_base.get_batch(b).get_index(i);
+                let hb = h.get_batch(b).get_index(i);
+                p_0.get_batch_mut(b).set_index(i, base - hb);
+            }
             problem.eqn.set_params(&p_0);
             let g_neg = {
                 let mut s = problem.bdf::<LS>().unwrap();
@@ -292,11 +316,19 @@ mod tests {
                 sum_squares(&v, &data)
             };
 
-            p_0.set_index(i, p_base.get_index(i));
+            for b in 0..nbatch {
+                let base = p_base.get_batch(b).get_index(i);
+                p_0.get_batch_mut(b).set_index(i, base);
+            }
 
-            let delta = (g_pos - g_neg) / Scale(Eqn::T::from_f64(2.).unwrap() * h.get_index(i));
-            for j in 0..nout {
-                dgdp.set_index(i, j, delta.get_index(j));
+            let delta_full = g_pos - g_neg;
+            for b in 0..nbatch {
+                let hb = h.get_batch(b).get_index(i);
+                let denom = Eqn::T::from_f64(2.0).unwrap() * hb;
+                for j in 0..nout {
+                    let delta_val = delta_full.get_batch(b).get_index(j) / denom;
+                    dgdp.set_index(i, b * nout + j, delta_val);
+                }
             }
         }
         problem.eqn.set_params(&p_base);

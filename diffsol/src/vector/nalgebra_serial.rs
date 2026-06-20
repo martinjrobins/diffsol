@@ -54,7 +54,7 @@ pub struct NalgebraVecMut<'a, T: NalgebraScalar> {
 impl<T: NalgebraScalar> From<DVector<T>> for NalgebraVec<T> {
     fn from(data: DVector<T>) -> Self {
         let n = data.len();
-        let data = DMatrix::from_iterator(n, 1, data.iter().copied());
+        let data = DMatrix::from_vec(n, 1, data.as_slice().to_vec());
         Self {
             data,
             context: NalgebraContext::default(),
@@ -697,6 +697,32 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
         } else {
             panic!(
                 "incompatible nbatch in axpy_v: self={}, x={}",
+                self_ncols, x_ncols
+            );
+        }
+    }
+    fn batched_axpy(&mut self, alpha: &[T], x: &Self, beta: T) {
+        let self_ncols = self.data.ncols();
+        let x_ncols = x.data.ncols();
+        assert_eq!(
+            alpha.len(),
+            self_ncols,
+            "batched_axpy: alpha.len() must equal self.nbatch()"
+        );
+        if self_ncols == x_ncols {
+            for b in 0..self_ncols {
+                self.data
+                    .column_mut(b)
+                    .axpy(alpha[b], &x.data.column(b), beta);
+            }
+        } else if x_ncols == 1 {
+            let x_col = x.data.column(0);
+            for b in 0..self_ncols {
+                self.data.column_mut(b).axpy(alpha[b], &x_col, beta);
+            }
+        } else {
+            panic!(
+                "incompatible nbatch in batched_axpy: self={}, x={}",
                 self_ncols, x_ncols
             );
         }
