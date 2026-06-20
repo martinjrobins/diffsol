@@ -9,24 +9,42 @@ use crate::{
 
 use super::{DefaultDenseMatrix, Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
 
+/// Stores integer indices used by gather/scatter/assign-at-indices operations.
+/// Indices are shared across all batches.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NalgebraIndex {
     pub(crate) data: DVector<IndexType>,
     pub(crate) context: NalgebraContext,
 }
 
+/// Dense vector backed by nalgebra's [`DMatrix`].
+///
+/// # Data layout with batching
+///
+/// When `nbatch > 1`, data is stored as an `(nstates, nbatch)` DMatrix in
+/// **column-major** order. Each column corresponds to one batch, so batch *b*
+/// occupies column *b*.  Linear indexing (e.g. `from_vec`) visits batch 0
+/// elements first, then batch 1, etc.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NalgebraVec<T: NalgebraScalar> {
     pub(crate) data: DMatrix<T>,
     pub(crate) context: NalgebraContext,
 }
 
+/// Immutable reference to a [`NalgebraVec`].
+///
+/// The underlying [`DMatrixView`] has shape `(nstates, nbatch)` with one
+/// column per batch, matching the layout of [`NalgebraVec`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct NalgebraVecRef<'a, T: NalgebraScalar> {
     pub(crate) data: DMatrixView<'a, T>,
     pub(crate) context: NalgebraContext,
 }
 
+/// Mutable reference to a [`NalgebraVec`].
+///
+/// The underlying [`DMatrixViewMut`] has shape `(nstates, nbatch)` with one
+/// column per batch, matching the layout of [`NalgebraVec`].
 #[derive(Debug, PartialEq)]
 pub struct NalgebraVecMut<'a, T: NalgebraScalar> {
     pub(crate) data: DMatrixViewMut<'a, T>,

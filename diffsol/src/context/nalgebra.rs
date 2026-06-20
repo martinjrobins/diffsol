@@ -1,3 +1,8 @@
+/// Context for the nalgebra backend.
+///
+/// Carries the batch count `nbatch` which determines how many independent
+/// ODE systems are solved simultaneously.  All vectors and matrices created
+/// with this context share the same batch dimension.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct NalgebraContext {
     nbatch: usize,
@@ -24,6 +29,7 @@ impl crate::Context for NalgebraContext {
         self.nbatch
     }
     fn clone_with_nbatch(&self, nbatch: usize) -> Self {
+        assert!(nbatch > 0, "nbatch must be > 0");
         Self { nbatch }
     }
 }

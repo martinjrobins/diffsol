@@ -19,7 +19,17 @@ use super::{
     DenseMatrix, Matrix, MatrixView, MatrixViewMut,
 };
 
-/// a CUDA matrix in column-major order
+/// Dense matrix stored in GPU memory via [`CudaSlice`].
+///
+/// # Data layout
+///
+/// Data is stored in **column-major** order as a flat contiguous array of
+/// `nrows * ncols * nbatch` elements.  With `nbatch > 1`, all elements of
+/// batch 0 appear first, then all elements of batch 1, etc.
+///
+/// ```text
+/// Device memory: [b0(all), b1(all), ..., bN(all)]
+/// ```
 #[derive(Clone, Debug)]
 pub struct CudaMat<T: ScalarCuda> {
     pub(crate) data: CudaSlice<T>,
@@ -28,6 +38,11 @@ pub struct CudaMat<T: ScalarCuda> {
     ncols: IndexType,
 }
 
+/// Immutable reference to a [`CudaMat`], possibly with a strided layout.
+///
+/// When the view spans a subset of columns, `batch_stride` records the
+/// parent matrix's total elements per batch (`nrows * ncols`) so that
+/// CUDA kernels can correctly compute per-batch offsets.
 #[derive(Debug)]
 pub struct CudaMatRef<'a, T: ScalarCuda> {
     pub(crate) data: CudaView<'a, T>,
@@ -37,6 +52,9 @@ pub struct CudaMatRef<'a, T: ScalarCuda> {
     batch_stride: IndexType,
 }
 
+/// Mutable reference to a [`CudaMat`], possibly with a strided layout.
+///
+/// See [`CudaMatRef`] for the layout description.
 #[derive(Debug)]
 pub struct CudaMatMut<'a, T: ScalarCuda> {
     pub(crate) data: CudaViewMut<'a, T>,
@@ -838,18 +856,41 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
         if new_ncols == self.ncols {
             return;
         }
-        let total_new = self.nrows * new_ncols * nbatch;
+        let old_ncols = self.ncols;
+        let nrows = self.nrows;
+        if nbatch == 1 {
+            self.ncols = new_ncols;
+            return;
+        }
+        let cols_to_copy = old_ncols.min(new_ncols);
+        let old_batch_elems = nrows * old_ncols;
+        let new_batch_elems = nrows * new_ncols;
+        if new_ncols < old_ncols {
+            for b in 1..nbatch {
+                let old_offset = b * old_batch_elems;
+                let new_offset = b * new_batch_elems;
+                self.context
+                    .stream
+                    .memcpy_dtod(
+                        &self.data.slice(old_offset..old_offset + nrows * cols_to_copy),
+                        &mut self.data.slice_mut(new_offset..new_offset + nrows * cols_to_copy),
+                    )
+                    .expect("Failed to copy data during resize_cols shrink");
+            }
+            self.ncols = new_ncols;
+            return;
+        }
+        let total_new = nrows * new_ncols * nbatch;
         let mut new_data = unsafe {
             self.context
                 .stream
                 .alloc(total_new)
                 .expect("Failed to allocate memory for resized CudaMat")
         };
-        let cols_to_copy = self.ncols.min(new_ncols);
-        let elements_per_batch = self.nrows * cols_to_copy;
+        let elements_per_batch = nrows * cols_to_copy;
         for b in 0..nbatch {
-            let old_offset = b * self.nrows * self.ncols;
-            let new_offset = b * self.nrows * new_ncols;
+            let old_offset = b * old_batch_elems;
+            let new_offset = b * new_batch_elems;
             if elements_per_batch > 0 {
                 self.context
                     .stream
@@ -859,9 +900,9 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
                     )
                     .expect("Failed to copy data during resize_cols");
             }
-            if new_ncols > self.ncols {
+            if new_ncols > old_ncols {
                 let zero_start = new_offset + elements_per_batch;
-                let zero_len = self.nrows * (new_ncols - self.ncols);
+                let zero_len = nrows * (new_ncols - old_ncols);
                 if zero_len > 0 {
                     self.context
                         .stream

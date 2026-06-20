@@ -1108,6 +1108,76 @@ pub(crate) mod tests {
         );
     }
 
+    pub fn test_batched_gemv_v_broadcast_mat<M: DenseMatrix>(ctx3: M::C) {
+        assert_eq!(ctx3.nbatch(), 2);
+        // matrix view with nbatch=1 broadcasts to x/y with nbatch=2
+        let ctx1 = M::C::default();
+        // 2x3 matrix, nbatch=1: [[1,2,3],[4,5,6]]
+        let diff = M::from_vec(
+            2,
+            3,
+            vec![
+                f::<M>(1.0),
+                f::<M>(4.0),
+                f::<M>(2.0),
+                f::<M>(5.0),
+                f::<M>(3.0),
+                f::<M>(6.0),
+            ],
+            ctx1,
+        );
+        let view = diff.columns(0, 2);
+        // x with nbatch=2, length=2
+        // batch0: [1,1], batch1: [2,2]
+        let x = M::V::from_vec(
+            vec![f::<M>(1.0), f::<M>(1.0), f::<M>(2.0), f::<M>(2.0)],
+            ctx3.clone(),
+        );
+        let mut y = M::V::zeros(2, ctx3);
+        view.gemv_v(f::<M>(1.0), &x.as_view(), f::<M>(0.0), &mut y);
+        // batch0: [[1,2],[4,5]] * [1,1] = [3, 9]
+        // batch1: [[1,2],[4,5]] * [2,2] = [6, 18]
+        assert_eq!(
+            y.clone_as_vec(),
+            vec![f::<M>(3.0), f::<M>(9.0), f::<M>(6.0), f::<M>(18.0)]
+        );
+    }
+
+    pub fn test_batched_gemv_o_broadcast_mat<M: DenseMatrix>(ctx3: M::C) {
+        assert_eq!(ctx3.nbatch(), 2);
+        // matrix view with nbatch=1 broadcasts to x/y with nbatch=2
+        let ctx1 = M::C::default();
+        // 2x3 matrix, nbatch=1: [[1,2,3],[4,5,6]]
+        let diff = M::from_vec(
+            2,
+            3,
+            vec![
+                f::<M>(1.0),
+                f::<M>(4.0),
+                f::<M>(2.0),
+                f::<M>(5.0),
+                f::<M>(3.0),
+                f::<M>(6.0),
+            ],
+            ctx1,
+        );
+        let view = diff.columns(0, 2);
+        // x with nbatch=2, length=2
+        // batch0: [1,1], batch1: [2,2]
+        let x = M::V::from_vec(
+            vec![f::<M>(1.0), f::<M>(1.0), f::<M>(2.0), f::<M>(2.0)],
+            ctx3.clone(),
+        );
+        let mut y = M::V::zeros(2, ctx3);
+        view.gemv_o(f::<M>(1.0), &x, f::<M>(0.0), &mut y);
+        // batch0: [[1,2],[4,5]] * [1,1] = [3, 9]
+        // batch1: [[1,2],[4,5]] * [2,2] = [6, 18]
+        assert_eq!(
+            y.clone_as_vec(),
+            vec![f::<M>(3.0), f::<M>(9.0), f::<M>(6.0), f::<M>(18.0)]
+        );
+    }
+
     pub fn test_batched_gemm_vo_on_columns<M: DenseMatrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         // 2x3 diff matrix, nbatch=2
@@ -2193,6 +2263,14 @@ macro_rules! generate_dense_matrix_tests {
             #[test]
             fn [<test_batched_gemv_o_broadcast_x_ $suffix>]() {
                 $crate::matrix::tests::test_batched_gemv_o_broadcast_x::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_gemv_v_broadcast_mat_ $suffix>]() {
+                $crate::matrix::tests::test_batched_gemv_v_broadcast_mat::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_gemv_o_broadcast_mat_ $suffix>]() {
+                $crate::matrix::tests::test_batched_gemv_o_broadcast_mat::<$M>($ctx2);
             }
             #[test]
             fn [<test_batched_gemm_vo_broadcast_b_ $suffix>]() {

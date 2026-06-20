@@ -15,12 +15,29 @@ use faer::{unzip, zip, Accum};
 
 use crate::Context;
 
+/// Dense matrix backed by a faer [`Mat`].
+///
+/// # Data layout with batching
+///
+/// When `nbatch > 1`, data is stored as an `(nrows, ncols * nbatch)` [`Mat`]
+/// in **column-major** order. All columns of batch 0 appear first, then all
+/// columns of batch 1, etc.  [`MatrixCommon::ncols`] returns the per-batch
+/// logical column count `ncols`.
+///
+/// ```text
+/// Physical columns: [b0_c0, b0_c1, ..., b0_cN, b1_c0, b1_c1, ..., b1_cN, ...]
+/// ```
 #[derive(Clone, Debug, PartialEq)]
 pub struct FaerMat<T: FaerScalar> {
     pub(crate) data: Mat<T>,
     pub(crate) context: FaerContext,
 }
 
+/// Immutable reference to a [`FaerMat`], possibly with a strided layout.
+///
+/// When the view spans a subset of columns, `batch_stride` records the
+/// parent matrix's logical `ncols` so that column `j` of batch `b` maps to
+/// physical column `b * batch_stride + j`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FaerMatRef<'a, T: FaerScalar> {
     pub(crate) data: MatRef<'a, T>,
@@ -28,6 +45,9 @@ pub struct FaerMatRef<'a, T: FaerScalar> {
     pub(crate) batch_stride: usize,
 }
 
+/// Mutable reference to a [`FaerMat`], possibly with a strided layout.
+///
+/// See [`FaerMatRef`] for the layout description.
 #[derive(Debug, PartialEq)]
 pub struct FaerMatMut<'a, T: FaerScalar> {
     pub(crate) data: MatMut<'a, T>,
@@ -49,7 +69,8 @@ impl<'a, T: Scalar + FaerScalar> MatrixCommon for FaerMatMut<'a, T> {
         self.data.nrows()
     }
     fn ncols(&self) -> IndexType {
-        self.data.ncols() - (Context::nbatch(&self.context) - 1) * self.batch_stride
+        let nbatch = Context::nbatch(&self.context);
+        self.data.ncols() - (nbatch - 1) * self.batch_stride
     }
     fn inner(&self) -> &Self::Inner {
         &self.data
@@ -66,7 +87,8 @@ impl<'a, T: Scalar + FaerScalar> MatrixCommon for FaerMatRef<'a, T> {
         self.data.nrows()
     }
     fn ncols(&self) -> IndexType {
-        self.data.ncols() - (Context::nbatch(&self.context) - 1) * self.batch_stride
+        let nbatch = Context::nbatch(&self.context);
+        self.data.ncols() - (nbatch - 1) * self.batch_stride
     }
     fn inner(&self) -> &Self::Inner {
         &self.data
@@ -396,7 +418,18 @@ impl<T: FaerScalar> DenseMatrix for FaerMat<T> {
             return;
         }
         let nrows = self.nrows();
-        let copy_ncols = ncols.min(old_ncols);
+        if ncols < old_ncols {
+            for b in 1..nbatch {
+                let (left, right) = self.data.rb_mut().split_at_col_mut(b * old_ncols);
+                let mut dst = left.get_mut(0..nrows, b * ncols..b * ncols + ncols);
+                let src = right.get(0..nrows, 0..ncols);
+                dst.copy_from(src);
+            }
+            self.data
+                .resize_with(nrows, ncols * nbatch, |_, _| T::zero());
+            return;
+        }
+        let copy_ncols = old_ncols;
         let mut new_data = Mat::zeros(nrows, ncols * nbatch);
         for b in 0..nbatch {
             new_data
@@ -493,6 +526,7 @@ impl<T: FaerScalar> DenseMatrix for FaerMat<T> {
     fn columns_mut(&mut self, start: usize, end: usize) -> Self::ViewMut<'_> {
         let nbatch = self.context.nbatch();
         let ncols = self.ncols();
+        assert!(end <= ncols, "column range end exceeds logical ncols");
         let sub_width = end - start;
         let total_raw = (nbatch - 1) * ncols + sub_width;
         let data = self
@@ -538,6 +572,7 @@ impl<T: FaerScalar> DenseMatrix for FaerMat<T> {
     fn columns(&self, start: usize, end: usize) -> Self::View<'_> {
         let nbatch = self.context.nbatch();
         let ncols = self.ncols();
+        assert!(end <= ncols, "column range end exceeds logical ncols");
         let sub_width = end - start;
         let total_raw = (nbatch - 1) * ncols + sub_width;
         let data = self.data.get(0..self.nrows(), start..start + total_raw);

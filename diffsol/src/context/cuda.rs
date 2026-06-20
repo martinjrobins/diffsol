@@ -35,6 +35,12 @@ impl CudaGlobalContext {
     }
 }
 
+/// Context for the CUDA backend.
+///
+/// Carries a CUDA stream and the batch count `nbatch` which determines how
+/// many independent ODE systems are solved simultaneously via 2D grid kernel
+/// launches.  All vectors and matrices created with this context share the
+/// same batch dimension.
 #[derive(Clone, Debug)]
 pub struct CudaContext {
     pub(crate) stream: Arc<CudaStream>,
@@ -133,6 +139,7 @@ impl crate::Context for CudaContext {
         self.nbatch
     }
     fn clone_with_nbatch(&self, nbatch: usize) -> Self {
+        assert!(nbatch > 0, "nbatch must be > 0");
         Self {
             stream: self.stream.clone(),
             nbatch,

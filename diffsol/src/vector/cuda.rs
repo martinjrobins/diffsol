@@ -17,6 +17,10 @@ extern "C" fn zero(_block_size: std::ffi::c_int) -> usize {
     0
 }
 
+extern "C" fn norm_blk_size<T: ScalarCuda>(block_size: std::ffi::c_int) -> usize {
+    (block_size * std::mem::size_of::<T>() as c_int) as usize
+}
+
 extern "C" fn squared_norm_blk_size<T: ScalarCuda>(block_size: std::ffi::c_int) -> usize {
     (block_size * std::mem::size_of::<T>() as c_int) as usize
 }
@@ -89,18 +93,34 @@ impl CudaContext {
     }
 }
 
+/// Dense vector stored in GPU memory via [`CudaSlice`].
+///
+/// # Data layout with batching
+///
+/// When `nbatch > 1`, data is a flat contiguous array of `nstates * nbatch`
+/// elements. Batch *b* occupies the range `[b * nstates, (b+1) * nstates)`.
+/// The `len()` method returns the per-batch length `nstates`.
 #[derive(Debug, Clone)]
 pub struct CudaVec<T: ScalarCuda> {
     pub(crate) data: CudaSlice<T>,
     pub(crate) context: CudaContext,
 }
 
+/// Stores integer indices in GPU memory used by gather/scatter operations.
+/// Indices are shared across all batches.
 #[derive(Debug, Clone)]
 pub struct CudaIndex {
     pub(crate) data: CudaSlice<c_int>,
     pub(crate) context: CudaContext,
 }
 
+/// Immutable reference to a [`CudaVec`], possibly with a strided layout.
+///
+/// The view spans the full data buffer of the parent but only accesses
+/// `nstates` elements per batch. The `col_offset` determines where each
+/// batch's data begins relative to the view's start.  Together with the
+/// stride (computed as `data.len() / nbatch`), this enables zero-copy
+/// column views of batched matrices.
 #[derive(Debug)]
 pub struct CudaVecRef<'a, T: ScalarCuda> {
     pub(crate) data: CudaView<'a, T>,
@@ -109,6 +129,10 @@ pub struct CudaVecRef<'a, T: ScalarCuda> {
     pub(crate) col_offset: IndexType,
 }
 
+/// Mutable reference to a [`CudaVec`], possibly with a strided layout.
+///
+/// See [`CudaVecRef`] for the layout description; this type adds mutable
+/// access.
 #[derive(Debug)]
 pub struct CudaVecMut<'a, T: ScalarCuda> {
     pub(crate) data: CudaViewMut<'a, T>,
@@ -1212,11 +1236,53 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
         if nbatch == 1 {
             return self.context.norm(&self.data, k);
         }
+        if nstates == 0 {
+            return T::zero();
+        }
+        if k != 2 {
+            panic!("Unsupported norm type");
+        }
+
+        let nstates_u32 = nstates as u32;
+        let nbatch_u32 = nbatch as u32;
+
+        let f = self.context.function::<T>("vec_norm");
+        let config = self.context.launch_config_2d_reduce(
+            nstates_u32,
+            nbatch_u32,
+            &f,
+            norm_blk_size::<T>,
+        );
+        let blocks_per_batch = config.grid_dim.0 as usize;
+        let total_blocks = blocks_per_batch * nbatch;
+        let mut partial_sums = unsafe {
+            self.context
+                .stream
+                .alloc::<T>(total_blocks)
+                .expect("Failed to allocate memory for partial sums")
+        };
+        let mut build = self.context.stream.launch_builder(&f);
+
+        let x_stride = nstates as i32;
+        build
+            .arg(&self.data)
+            .arg(&nstates_u32)
+            .arg(&nbatch_u32)
+            .arg(&x_stride)
+            .arg(&mut partial_sums);
+        unsafe { build.launch(config) }.expect("Failed to launch kernel");
+        let partial_sums = self
+            .context
+            .stream
+            .clone_dtoh(&partial_sums)
+            .expect("Failed to copy data from device to host");
         let mut max_norm = T::zero();
         for b in 0..nbatch {
-            let start = b * nstates;
-            let slice = self.data.slice(start..start + nstates);
-            let norm = self.context.norm(&slice, k);
+            let mut batch_sum = T::zero();
+            for i in 0..blocks_per_batch {
+                batch_sum += partial_sums[b * blocks_per_batch + i];
+            }
+            let norm = batch_sum.sqrt();
             if norm > max_norm {
                 max_norm = norm;
             }
@@ -1226,6 +1292,9 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
     fn squared_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T {
         let nbatch = self.context.nbatch();
         let nstates = self.data.len() as IndexType / nbatch;
+        if nstates == 0 {
+            return Self::T::zero();
+        }
         let atol_nbatch = atol.context.nbatch();
         let y_nbatch = y.context.nbatch();
 
@@ -1448,6 +1517,9 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
         let x_nbatch = x.context.nbatch();
         self.context.assert_compatible_nbatch(x_nbatch, "axpy");
         let nstates = self.data.len() as IndexType / self_nbatch;
+        if nstates == 0 {
+            return;
+        }
         let x_nstates = x.data.len() as IndexType / x_nbatch;
         let nstates_u32 = nstates as u32;
         let nbatch_u32 = self_nbatch as u32;
@@ -1475,6 +1547,9 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
         let x_nbatch = x.context.nbatch();
         self.context.assert_compatible_nbatch(x_nbatch, "axpy_v");
         let nstates = self.data.len() as IndexType / self_nbatch;
+        if nstates == 0 {
+            return;
+        }
         let nstates_u32 = nstates as u32;
         let nbatch_u32 = self_nbatch as u32;
         let f = self.context.function::<T>("vec_axpy");
@@ -1558,6 +1633,9 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
     fn root_finding(&self, g1: &Self) -> (bool, Self::T, i32) {
         let nbatch = self.context.nbatch();
         let nstates = self.data.len() as IndexType / nbatch;
+        if nstates == 0 {
+            return (false, Self::T::zero(), -1);
+        }
         let g1_nbatch = g1.context.nbatch();
         let g1_nstates = g1.data.len() as IndexType / g1_nbatch;
         assert_eq!(
@@ -1846,6 +1924,9 @@ impl<T: ScalarCuda> VectorView<'_> for CudaVecRef<'_, T> {
     fn squared_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: Self::T) -> Self::T {
         let nbatch = self.context.nbatch();
         let nstates = self.nstates;
+        if nstates == 0 {
+            return Self::T::zero();
+        }
         let atol_nbatch = atol.context.nbatch();
         let y_nbatch = y.context.nbatch();
 
@@ -1991,6 +2072,9 @@ impl<'a, T: ScalarCuda> VectorViewMut<'a> for CudaVecMut<'a, T> {
         let x_nbatch = x.context.nbatch();
         self.context.assert_compatible_nbatch(x_nbatch, "axpy");
         let nstates_u32 = self.nstates as u32;
+        if nstates_u32 == 0 {
+            return;
+        }
         let nbatch_u32 = nbatch as u32;
         let f = self.context.function::<T>("vec_axpy");
         let config = self.context.launch_config_2d(nstates_u32, nbatch_u32, &f);

@@ -9,9 +9,21 @@ use crate::{Context, FaerContext, FaerVec, FaerVecIndex, Vector, VectorIndex};
 use crate::{DefaultSolver, FaerScalar, FaerSparseLU, IndexType, Scalar, Scale};
 
 use faer::reborrow::{Reborrow, ReborrowMut};
+use faer::sparse::linalg::matmul::sparse_dense_matmul;
 use faer::sparse::ops::{ternary_op_assign_into, union_symbolic};
 use faer::sparse::{Pair, SparseColMat, SymbolicSparseColMat, SymbolicSparseColMatRef, Triplet};
+use faer::Accum;
 
+/// Sparse matrix backed by a faer [`SparseColMat`].
+///
+/// # Data layout with batching
+///
+/// When `nbatch > 1`, `data` is a `Vec` containing one independent
+/// [`SparseColMat`] per batch.  All batches **must share the same sparsity
+/// pattern** (symbolic structure); only the numeric values differ.
+///
+/// Broadcasting from `nbatch = 1` is supported for [`gemv`] but not for
+/// arithmetic operations (Add, Sub, etc.).
 #[derive(Clone, Debug)]
 pub struct FaerSparseMat<T: FaerScalar> {
     pub(crate) data: Vec<SparseColMat<IndexType, T>>,
@@ -386,20 +398,18 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
         self.context.assert_compatible_nbatch(x_nbatch, "gemv");
         let max_nbatch = self_nbatch.max(x_nbatch);
         for b in 0..max_nbatch {
-            let x_col = if x_nbatch == 1 {
-                x.data.col(0).to_owned()
-            } else {
-                x.data.col(b).to_owned()
-            };
-            let mat = if self_nbatch == 1 {
-                &self.data[0]
-            } else {
-                &self.data[b]
-            };
-            let tmp_col = mat * &x_col;
-            for i in 0..y.data.nrows() {
-                y.data[(i, b)] = beta * y.data[(i, b)] + alpha * tmp_col[i];
-            }
+            let mat_b = if self_nbatch == 1 { 0 } else { b };
+            let x_b = if x_nbatch == 1 { 0 } else { b };
+            let mut y_col = y.data.col_mut(b);
+            y_col *= faer::Scale(beta);
+            sparse_dense_matmul(
+                y_col.as_mat_mut(),
+                Accum::Add,
+                self.data[mat_b].rb(),
+                x.data.col(x_b).as_mat(),
+                alpha,
+                self.context.par,
+            );
         }
     }
 

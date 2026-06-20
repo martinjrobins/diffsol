@@ -11,24 +11,42 @@ use crate::{FaerMat, VectorCommon, VectorHost, VectorIndex, VectorView, VectorVi
 use super::utils::*;
 use super::DefaultDenseMatrix;
 
+/// Dense vector backed by a faer [`Mat`].
+///
+/// # Data layout with batching
+///
+/// When `nbatch > 1`, data is stored as an `(nstates, nbatch)` [`Mat`] in
+/// **column-major** order. Each column corresponds to one batch, so batch *b*
+/// occupies column *b*.  Linear indexing (e.g. `from_vec`) visits batch 0
+/// elements first, then batch 1, etc.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FaerVec<T: FaerScalar> {
     pub(crate) data: Mat<T>,
     pub(crate) context: FaerContext,
 }
 
+/// Stores integer indices used by gather/scatter/assign-at-indices operations.
+/// Indices are shared across all batches.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FaerVecIndex {
     pub(crate) data: Vec<IndexType>,
     pub(crate) context: FaerContext,
 }
 
+/// Immutable reference to a [`FaerVec`].
+///
+/// The underlying [`MatRef`] has shape `(nstates, nbatch)` with one column
+/// per batch, matching the layout of [`FaerVec`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct FaerVecRef<'a, T: FaerScalar> {
     pub(crate) data: MatRef<'a, T>,
     pub(crate) context: FaerContext,
 }
 
+/// Mutable reference to a [`FaerVec`].
+///
+/// The underlying [`MatMut`] has shape `(nstates, nbatch)` with one column
+/// per batch, matching the layout of [`FaerVec`].
 #[derive(Debug, PartialEq)]
 pub struct FaerVecMut<'a, T: FaerScalar> {
     pub(crate) data: MatMut<'a, T>,

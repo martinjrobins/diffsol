@@ -18,10 +18,25 @@ pub mod faer;
 /// It will generally be the case that all the operators / vectors / matrices for the current ode problem
 /// share the same context
 pub trait Context: Clone + Default {
+    /// Returns the batch count for this context.
+    ///
+    /// When `nbatch > 1`, vectors and matrices store data for `nbatch`
+    /// independent ODE systems simultaneously.  Operations between operands
+    /// with different batch counts use broadcast semantics: an operand with
+    /// `nbatch == 1` is applied to all batches of the other operand.
     fn nbatch(&self) -> usize {
         1
     }
+    /// Creates a new context with the given batch count.
+    ///
+    /// Other properties of the context (e.g. CUDA stream, faer parallelism)
+    /// are preserved.
     fn clone_with_nbatch(&self, nbatch: usize) -> Self;
+    /// Panics if the two batch counts are incompatible.
+    ///
+    /// Compatibility rule: two batches are compatible if they are equal, or
+    /// if either one is `1` (broadcast).  Only panics when both are `> 1`
+    /// and differ.
     fn assert_compatible_nbatch(&self, other_nbatch: usize, op: &str) {
         let self_nbatch = self.nbatch();
         if self_nbatch != other_nbatch && self_nbatch != 1 && other_nbatch != 1 {
