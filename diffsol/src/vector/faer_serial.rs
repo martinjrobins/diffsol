@@ -73,6 +73,17 @@ macro_rules! faer_squared_norm_body {
             panic!("Vector lengths do not match");
         }
         let nstates_t = <$T as num_traits::FromPrimitive>::from_f64(nstates as f64).unwrap();
+        if nbatch == 1 && atol_nbatch == 1 {
+            let mut acc = <$T as num_traits::Zero>::zero();
+            zip!($self.data.col(0), $y.data.col(0), $atol.data.col(0)).for_each(
+                |unzip!(xi, yi, ai)| {
+                    let denom = yi.abs() * $rtol + *ai;
+                    let term = *xi / denom;
+                    acc += term * term;
+                },
+            );
+            return acc / nstates_t;
+        }
         let mut max_norm = <$T as num_traits::Zero>::zero();
         for b in 0..nbatch {
             let atol_b = if atol_nbatch > 1 { b } else { 0 };
@@ -412,6 +423,16 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
         }
     }
     fn norm(&self, k: i32) -> T {
+        let nbatch = self.context.nbatch();
+        if nbatch == 1 {
+            let col = self.data.col(0);
+            return match k {
+                1 => col.norm_l1(),
+                2 => col.norm_l2(),
+                _ => col.iter().fold(T::zero(), |acc, x| acc + x.pow(k))
+                    .pow(T::one() / T::from_f64(k as f64).unwrap()),
+            };
+        }
         let mut max_norm = T::zero();
         for b in 0..self.context.nbatch() {
             let col = self.data.col(b);
@@ -554,6 +575,23 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
         let nbatch = self.context.nbatch();
         let nstates = self.len();
         assert_eq!(nstates, g1.len(), "Vector lengths do not match");
+        if nbatch == 1 {
+            let s_col = self.data.col(0);
+            let g_col = g1.data.col(0);
+            let mut max_frac = T::zero();
+            let mut max_frac_index: i32 = -1;
+            let mut found_root = false;
+            for i in 0..nstates {
+                let g0 = unsafe { *s_col.get_unchecked(i) };
+                let g1v = unsafe { *g_col.get_unchecked(i) };
+                if g1v == T::zero() { found_root = true; }
+                if g0 * g1v < T::zero() {
+                    let frac = (g1v / (g1v - g0)).abs();
+                    if frac > max_frac { max_frac = frac; max_frac_index = i as i32; }
+                }
+            }
+            return (found_root, max_frac, max_frac_index);
+        }
         let mut first_result: Option<(bool, Self::T, i32)> = None;
         for b in 0..nbatch {
             let mut max_frac = T::zero();

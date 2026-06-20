@@ -80,6 +80,10 @@ name = "ode_solvers"
 harness = false
 
 [[bench]]
+name = "lin_alg_ops"
+harness = false
+
+[[bench]]
 name = "pybamm_dfn"
 harness = false
 

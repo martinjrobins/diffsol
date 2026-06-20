@@ -220,9 +220,22 @@ impl<'a, T: FaerScalar> MatrixView<'a> for FaerMatRef<'a, T> {
         y: &mut Self::V,
     ) {
         let self_nbatch = self.context.nbatch();
+        let x_nbatch = x.data.ncols();
+        self.context.assert_compatible_nbatch(x_nbatch, "gemv_v");
+        if self_nbatch == 1 && x_nbatch == 1 {
+            y.data *= faer::Scale(beta);
+            matmul(
+                y.data.as_mut(),
+                Accum::Add,
+                self.data,
+                x.data,
+                alpha,
+                self.context.par,
+            );
+            return;
+        }
         let ncols = self.ncols();
         let stride = self.batch_stride;
-        let x_nbatch = x.data.ncols();
         let max_nbatch = self_nbatch.max(x_nbatch);
         self.context.assert_compatible_nbatch(x_nbatch, "gemv_v");
         for b in 0..max_nbatch {
@@ -648,8 +661,21 @@ impl<T: FaerScalar> Matrix for FaerMat<T> {
     }
     fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
         let self_nbatch = self.context.nbatch();
-        let ncols = self.ncols();
         let x_nbatch = x.data.ncols();
+        self.context.assert_compatible_nbatch(x_nbatch, "gemv");
+        if self_nbatch == 1 && x_nbatch == 1 {
+            y.data *= faer::Scale(beta);
+            matmul(
+                y.data.as_mut(),
+                Accum::Add,
+                self.data.as_ref(),
+                x.data.as_ref(),
+                alpha,
+                self.context.par,
+            );
+            return;
+        }
+        let ncols = self.ncols();
         self.context.assert_compatible_nbatch(x_nbatch, "gemv");
         let max_nbatch = self_nbatch.max(x_nbatch);
         for b in 0..max_nbatch {

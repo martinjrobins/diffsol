@@ -71,6 +71,19 @@ macro_rules! nalgebra_squared_norm_body {
             panic!("Vector lengths do not match");
         }
         let nstates_t = <$T as num_traits::FromPrimitive>::from_f64(nstates as f64).unwrap();
+        if nbatch == 1 && atol_nbatch == 1 {
+            let acc = $self
+                .data
+                .column(0)
+                .iter()
+                .zip($y.data.column(0).iter())
+                .zip($atol.data.column(0).iter())
+                .fold(<$T as num_traits::Zero>::zero(), |acc, ((xi, yi), ai)| {
+                    let term = *xi / (yi.abs() * $rtol + *ai);
+                    acc + term * term
+                });
+            return acc / nstates_t;
+        }
         let mut max_norm = <$T as num_traits::Zero>::zero();
         for b in 0..nbatch {
             let atol_b = if atol_nbatch > 1 { b } else { 0 };
@@ -542,7 +555,7 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
     fn norm(&self, k: i32) -> Self::T {
         let nbatch = self.context.nbatch();
         if nbatch == 1 {
-            return self.data.column(0).apply_norm(&LpNorm(k));
+            return self.data.apply_norm(&LpNorm(k));
         }
         let mut max_norm = T::zero();
         for b in 0..nbatch {
@@ -682,6 +695,21 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
         assert_eq!(nstates, g1.len(), "Vector lengths do not match");
         let self_slice = self.data.as_slice();
         let g1_slice = g1.data.as_slice();
+        if nbatch == 1 {
+            let mut max_frac = T::zero();
+            let mut max_frac_index: i32 = -1;
+            let mut found_root = false;
+            for i in 0..nstates {
+                let g0 = unsafe { *self_slice.get_unchecked(i) };
+                let g1v = unsafe { *g1_slice.get_unchecked(i) };
+                if g1v == T::zero() { found_root = true; }
+                if g0 * g1v < T::zero() {
+                    let frac = (g1v / (g1v - g0)).abs();
+                    if frac > max_frac { max_frac = frac; max_frac_index = i as i32; }
+                }
+            }
+            return (found_root, max_frac, max_frac_index);
+        }
         let mut first_result: Option<(bool, Self::T, i32)> = None;
         for b in 0..nbatch {
             let mut max_frac = T::zero();

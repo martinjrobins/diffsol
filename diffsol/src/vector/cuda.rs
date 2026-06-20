@@ -1585,7 +1585,7 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
         }
         let x_nstates = x.data.len() as IndexType / x_nbatch;
 
-        let alpha_dev = unsafe {
+        let mut alpha_dev = unsafe {
             self.context
                 .stream
                 .alloc::<T>(self_nbatch)

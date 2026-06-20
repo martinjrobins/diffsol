@@ -18,7 +18,6 @@ extern "C" {
 #include "vec_gather.cu"
 #include "vec_mul_assign_scalar.cu"
 #include "vec_mul_assign.cu"
-#include "vec_mul_assign_scalar.cu"
 #include "vec_mul_scalar.cu"
 #include "vec_norm.cu"
 #include "vec_root_finding.cu"
