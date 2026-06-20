@@ -279,26 +279,7 @@ impl<'a, T: NalgebraScalar> MatrixView<'a> for NalgebraMatRef<'a, T> {
     }
 
     fn gemv_o(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
-        let self_nbatch = self.context.nbatch();
-        let ncols = self.ncols();
-        let stride = self.batch_stride;
-        let x_nbatch = x.data.ncols();
-        self.context.assert_compatible_nbatch(x_nbatch, "gemv_o");
-        let max_nbatch = self_nbatch.max(x_nbatch);
-        for b in 0..max_nbatch {
-            let a_view = if self_nbatch == 1 {
-                self.data.columns(0, ncols)
-            } else {
-                self.data.columns(b * stride, ncols)
-            };
-            let x_col = if x_nbatch == 1 {
-                x.data.column(0)
-            } else {
-                x.data.column(b)
-            };
-            let mut y_col = y.data.column_mut(b);
-            y_col.gemv(alpha, &a_view, &x_col, beta);
-        }
+        self.gemv_v(alpha, &x.as_view(), beta, y);
     }
 }
 

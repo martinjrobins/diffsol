@@ -64,6 +64,35 @@ impl<T: FaerScalar> From<Col<T>> for FaerVec<T> {
     }
 }
 
+macro_rules! faer_squared_norm_body {
+    ($self:ident, $y:ident, $atol:ident, $rtol:ident, $nstates_expr:expr, $T:ty) => {{
+        let nbatch = $self.context.nbatch();
+        let nstates = $nstates_expr;
+        let atol_nbatch = $atol.context.nbatch();
+        if $y.len() != nstates || $atol.len() != nstates {
+            panic!("Vector lengths do not match");
+        }
+        let nstates_t = <$T as num_traits::FromPrimitive>::from_f64(nstates as f64).unwrap();
+        let mut max_norm = <$T as num_traits::Zero>::zero();
+        for b in 0..nbatch {
+            let atol_b = if atol_nbatch > 1 { b } else { 0 };
+            let mut acc = <$T as num_traits::Zero>::zero();
+            zip!($self.data.col(b), $y.data.col(b), $atol.data.col(atol_b)).for_each(
+                |unzip!(xi, yi, ai)| {
+                    let denom = yi.abs() * $rtol + *ai;
+                    let term = *xi / denom;
+                    acc += term * term;
+                },
+            );
+            let norm = acc / nstates_t;
+            if norm > max_norm {
+                max_norm = norm;
+            }
+        }
+        max_norm
+    }};
+}
+
 impl<T: FaerScalar> FaerVec<T> {
     pub fn check_for_nan(&self, label: &str) -> bool {
         for b in 0..self.data.ncols() {
@@ -187,6 +216,72 @@ macro_rules! impl_faer_add_assign {
             }
         }
     };
+}
+
+macro_rules! faer_copy_from_body {
+    ($self_data:expr, $other:ident, $name:expr) => {{
+        let self_ncols = $self_data.ncols();
+        let other_ncols = $other.data.ncols();
+        if self_ncols == other_ncols {
+            $self_data.copy_from(&$other.data);
+        } else if other_ncols == 1 {
+            let src = $other.data.col(0);
+            for b in 0..self_ncols {
+                $self_data.col_mut(b).copy_from(&src);
+            }
+        } else {
+            panic!(
+                "incompatible nbatch in {}: self={}, other={}",
+                $name, self_ncols, other_ncols
+            );
+        }
+    }};
+}
+
+macro_rules! faer_axpy_body {
+    ($self_data:expr, $x:ident, $alpha:expr, $beta:expr, $name:expr) => {{
+        let self_ncols = $self_data.ncols();
+        let x_ncols = $x.data.ncols();
+        if self_ncols == x_ncols {
+            for b in 0..self_ncols {
+                zip!($self_data.col_mut(b), $x.data.col(b))
+                    .for_each(|unzip!(si, xi)| *si = *si * $beta + *xi * $alpha);
+            }
+        } else if x_ncols == 1 {
+            let x_col = $x.data.col(0);
+            for b in 0..self_ncols {
+                zip!($self_data.col_mut(b), x_col)
+                    .for_each(|unzip!(si, xi)| *si = *si * $beta + *xi * $alpha);
+            }
+        } else {
+            panic!(
+                "incompatible nbatch in {}: self={}, x={}",
+                $name, self_ncols, x_ncols
+            );
+        }
+    }};
+}
+
+macro_rules! faer_component_op_body {
+    ($self:ident, $other:ident, $op:tt, $name:expr) => {{
+        let self_ncols = $self.data.ncols();
+        let other_ncols = $other.data.ncols();
+        if self_ncols == other_ncols {
+            zip!($self.data.as_mut(), $other.data.as_ref())
+                .for_each(|unzip!(s, o)| *s $op *o);
+        } else if other_ncols == 1 {
+            let other_col = $other.data.col(0);
+            for b in 0..self_ncols {
+                zip!($self.data.col_mut(b), other_col)
+                    .for_each(|unzip!(s, o)| *s $op *o);
+            }
+        } else {
+            panic!(
+                "incompatible nbatch in {}: self={}, other={}",
+                $name, self_ncols, other_ncols
+            );
+        }
+    }};
 }
 
 impl_faer_sub_assign!(FaerVec<T>, FaerVec<T>);
@@ -336,30 +431,7 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
     }
 
     fn squared_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T {
-        let nbatch = self.context.nbatch();
-        let nstates = self.len();
-        let atol_nbatch = atol.context.nbatch();
-        if y.len() != nstates || atol.len() != nstates {
-            panic!("Vector lengths do not match");
-        }
-        let nstates_t = Self::T::from_f64(nstates as f64).unwrap();
-        let mut max_norm = T::zero();
-        for b in 0..nbatch {
-            let atol_b = if atol_nbatch > 1 { b } else { 0 };
-            let mut acc = T::zero();
-            zip!(self.data.col(b), y.data.col(b), atol.data.col(atol_b)).for_each(
-                |unzip!(xi, yi, ai)| {
-                    let denom = yi.abs() * rtol + *ai;
-                    let term = *xi / denom;
-                    acc += term * term;
-                },
-            );
-            let norm = acc / nstates_t;
-            if norm > max_norm {
-                max_norm = norm;
-            }
-        }
-        max_norm
+        faer_squared_norm_body!(self, y, atol, rtol, self.len(), Self::T)
     }
     fn as_view(&self) -> Self::View<'_> {
         FaerVecRef {
@@ -392,38 +464,10 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
         }
     }
     fn copy_from(&mut self, other: &Self) {
-        let self_ncols = self.data.ncols();
-        let other_ncols = other.data.ncols();
-        if self_ncols == other_ncols {
-            self.data.copy_from(&other.data);
-        } else if other_ncols == 1 {
-            let src = other.data.col(0);
-            for b in 0..self_ncols {
-                self.data.col_mut(b).copy_from(&src);
-            }
-        } else {
-            panic!(
-                "incompatible nbatch in copy_from: self={}, other={}",
-                self_ncols, other_ncols
-            );
-        }
+        faer_copy_from_body!(self.data, other, "copy_from")
     }
     fn copy_from_view(&mut self, other: &Self::View<'_>) {
-        let self_ncols = self.data.ncols();
-        let other_ncols = other.data.ncols();
-        if self_ncols == other_ncols {
-            self.data.copy_from(&other.data);
-        } else if other_ncols == 1 {
-            let src = other.data.col(0);
-            for b in 0..self_ncols {
-                self.data.col_mut(b).copy_from(&src);
-            }
-        } else {
-            panic!(
-                "incompatible nbatch in copy_from_view: self={}, other={}",
-                self_ncols, other_ncols
-            );
-        }
+        faer_copy_from_body!(self.data, other, "copy_from_view")
     }
     fn fill(&mut self, value: Self::T) {
         zip!(self.data.as_mut()).for_each(|unzip!(s)| *s = value);
@@ -468,46 +512,10 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
         FaerVec { data, context: ctx }
     }
     fn axpy(&mut self, alpha: Self::T, x: &Self, beta: Self::T) {
-        let self_ncols = self.data.ncols();
-        let x_ncols = x.data.ncols();
-        if self_ncols == x_ncols {
-            for b in 0..self_ncols {
-                zip!(self.data.col_mut(b), x.data.col(b))
-                    .for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha);
-            }
-        } else if x_ncols == 1 {
-            let x_col = x.data.col(0);
-            for b in 0..self_ncols {
-                zip!(self.data.col_mut(b), x_col)
-                    .for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha);
-            }
-        } else {
-            panic!(
-                "incompatible nbatch in axpy: self={}, x={}",
-                self_ncols, x_ncols
-            );
-        }
+        faer_axpy_body!(self.data, x, alpha, beta, "axpy")
     }
     fn axpy_v(&mut self, alpha: Self::T, x: &Self::View<'_>, beta: Self::T) {
-        let self_ncols = self.data.ncols();
-        let x_ncols = x.data.ncols();
-        if self_ncols == x_ncols {
-            for b in 0..self_ncols {
-                zip!(self.data.col_mut(b), x.data.col(b))
-                    .for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha);
-            }
-        } else if x_ncols == 1 {
-            let x_col = x.data.col(0);
-            for b in 0..self_ncols {
-                zip!(self.data.col_mut(b), x_col)
-                    .for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha);
-            }
-        } else {
-            panic!(
-                "incompatible nbatch in axpy_v: self={}, x={}",
-                self_ncols, x_ncols
-            );
-        }
+        faer_axpy_body!(self.data, x, alpha, beta, "axpy_v")
     }
     fn batched_axpy(&mut self, alpha: &[Self::T], x: &Self, beta: Self::T) {
         let self_ncols = self.data.ncols();
@@ -536,38 +544,10 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
         }
     }
     fn component_mul_assign(&mut self, other: &Self) {
-        let self_ncols = self.data.ncols();
-        let other_ncols = other.data.ncols();
-        if self_ncols == other_ncols {
-            zip!(self.data.as_mut(), other.data.as_ref()).for_each(|unzip!(s, o)| *s *= *o);
-        } else if other_ncols == 1 {
-            let other_col = other.data.col(0);
-            for b in 0..self_ncols {
-                zip!(self.data.col_mut(b), other_col).for_each(|unzip!(s, o)| *s *= *o);
-            }
-        } else {
-            panic!(
-                "incompatible nbatch in component_mul_assign: self={}, other={}",
-                self_ncols, other_ncols
-            );
-        }
+        faer_component_op_body!(self, other, *=, "component_mul_assign")
     }
     fn component_div_assign(&mut self, other: &Self) {
-        let self_ncols = self.data.ncols();
-        let other_ncols = other.data.ncols();
-        if self_ncols == other_ncols {
-            zip!(self.data.as_mut(), other.data.as_ref()).for_each(|unzip!(s, o)| *s /= *o);
-        } else if other_ncols == 1 {
-            let other_col = other.data.col(0);
-            for b in 0..self_ncols {
-                zip!(self.data.col_mut(b), other_col).for_each(|unzip!(s, o)| *s /= *o);
-            }
-        } else {
-            panic!(
-                "incompatible nbatch in component_div_assign: self={}, other={}",
-                self_ncols, other_ncols
-            );
-        }
+        faer_component_op_body!(self, other, /=, "component_div_assign")
     }
 
     fn root_finding(&self, g1: &Self) -> (bool, Self::T, i32) {
@@ -690,30 +670,7 @@ impl<'a, T: FaerScalar> VectorView<'a> for FaerVecRef<'a, T> {
         }
     }
     fn squared_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: Self::T) -> Self::T {
-        let nbatch = self.context.nbatch();
-        let nstates = self.data.nrows();
-        let atol_nbatch = atol.context.nbatch();
-        if y.len() != nstates || atol.len() != nstates {
-            panic!("Vector lengths do not match");
-        }
-        let nstates_t = Self::T::from_f64(nstates as f64).unwrap();
-        let mut max_norm = T::zero();
-        for b in 0..nbatch {
-            let atol_b = if atol_nbatch > 1 { b } else { 0 };
-            let mut acc = T::zero();
-            zip!(self.data.col(b), y.data.col(b), atol.data.col(atol_b)).for_each(
-                |unzip!(xi, yi, ai)| {
-                    let denom = yi.abs() * rtol + *ai;
-                    let term = *xi / denom;
-                    acc += term * term;
-                },
-            );
-            let norm = acc / nstates_t;
-            if norm > max_norm {
-                max_norm = norm;
-            }
-        }
-        max_norm
+        faer_squared_norm_body!(self, y, atol, rtol, self.data.nrows(), Self::T)
     }
 }
 
@@ -722,38 +679,10 @@ impl<'a, T: FaerScalar> VectorViewMut<'a> for FaerVecMut<'a, T> {
     type View = FaerVecRef<'a, T>;
     type Index = FaerVecIndex;
     fn copy_from(&mut self, other: &Self::Owned) {
-        let self_ncols = self.data.ncols();
-        let other_ncols = other.data.ncols();
-        if self_ncols == other_ncols {
-            self.data.rb_mut().copy_from(&other.data);
-        } else if other_ncols == 1 {
-            let src = other.data.col(0);
-            for b in 0..self_ncols {
-                self.data.rb_mut().col_mut(b).copy_from(src);
-            }
-        } else {
-            panic!(
-                "incompatible nbatch in VectorViewMut::copy_from: self={}, other={}",
-                self_ncols, other_ncols
-            );
-        }
+        faer_copy_from_body!(self.data.rb_mut(), other, "VectorViewMut::copy_from")
     }
     fn copy_from_view(&mut self, other: &Self::View) {
-        let self_ncols = self.data.ncols();
-        let other_ncols = other.data.ncols();
-        if self_ncols == other_ncols {
-            self.data.rb_mut().copy_from(other.data);
-        } else if other_ncols == 1 {
-            let src = other.data.col(0);
-            for b in 0..self_ncols {
-                self.data.rb_mut().col_mut(b).copy_from(src);
-            }
-        } else {
-            panic!(
-                "incompatible nbatch in VectorViewMut::copy_from_view: self={}, other={}",
-                self_ncols, other_ncols
-            );
-        }
+        faer_copy_from_body!(self.data.rb_mut(), other, "VectorViewMut::copy_from_view")
     }
     fn set_index(&mut self, index: IndexType, value: Self::T) {
         let nbatch = self.context.nbatch();
@@ -762,25 +691,7 @@ impl<'a, T: FaerScalar> VectorViewMut<'a> for FaerVecMut<'a, T> {
         }
     }
     fn axpy(&mut self, alpha: Self::T, x: &Self::Owned, beta: Self::T) {
-        let self_ncols = self.data.ncols();
-        let x_ncols = x.data.ncols();
-        if self_ncols == x_ncols {
-            for b in 0..self_ncols {
-                zip!(self.data.rb_mut().col_mut(b), x.data.col(b))
-                    .for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha);
-            }
-        } else if x_ncols == 1 {
-            let x_col = x.data.col(0);
-            for b in 0..self_ncols {
-                zip!(self.data.rb_mut().col_mut(b), x_col)
-                    .for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha);
-            }
-        } else {
-            panic!(
-                "incompatible nbatch in VectorViewMut::axpy: self={}, x={}",
-                self_ncols, x_ncols
-            );
-        }
+        faer_axpy_body!(self.data.rb_mut(), x, alpha, beta, "VectorViewMut::axpy")
     }
 }
 

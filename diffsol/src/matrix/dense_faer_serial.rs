@@ -133,76 +133,48 @@ impl_mul_assign_scalar!(FaerMatMut<'_, T>);
 impl_add!(FaerMat<T>, &FaerMat<T>, FaerMat<T>, FaerScalar);
 impl_add!(FaerMat<T>, &FaerMatRef<'_, T>, FaerMat<T>, FaerScalar);
 
-impl<'a, T: FaerScalar> Add<&FaerMat<T>> for FaerMatRef<'a, T> {
-    type Output = FaerMat<T>;
-    fn add(self, rhs: &FaerMat<T>) -> Self::Output {
-        let nbatch = self.context.nbatch();
-        let rhs_nbatch = rhs.context.nbatch();
-        let max_nbatch = nbatch.max(rhs_nbatch);
-        let nrows = self.nrows();
-        let ncols = self.ncols();
-        let rhs_ncols = rhs.ncols();
-        let stride = self.batch_stride;
-        let mut result = faer::Mat::zeros(nrows, ncols * max_nbatch);
-        for b in 0..max_nbatch {
-            let self_b = if nbatch == 1 { 0 } else { b };
-            let rhs_b = if rhs_nbatch == 1 { 0 } else { b };
-            let self_cols = self
-                .data
-                .get(0..nrows, self_b * stride..self_b * stride + ncols);
-            let rhs_cols = rhs
-                .data
-                .get(0..nrows, rhs_b * rhs_ncols..rhs_b * rhs_ncols + rhs_ncols);
-            let mut dst = result
-                .as_mut()
-                .get_mut(0..nrows, b * ncols..b * ncols + ncols);
-            zip!(dst.as_mut(), self_cols, rhs_cols).for_each(|unzip!(dst, a, b)| {
-                *dst = a + b;
-            });
+macro_rules! impl_faer_matref_op {
+    ($trait:ident, $method:ident, $op:tt) => {
+        impl<'a, T: FaerScalar> $trait<&FaerMat<T>> for FaerMatRef<'a, T> {
+            type Output = FaerMat<T>;
+            fn $method(self, rhs: &FaerMat<T>) -> Self::Output {
+                let nbatch = self.context.nbatch();
+                let rhs_nbatch = rhs.context.nbatch();
+                let max_nbatch = nbatch.max(rhs_nbatch);
+                let nrows = self.nrows();
+                let ncols = self.ncols();
+                let rhs_ncols = rhs.ncols();
+                let stride = self.batch_stride;
+                let mut result = faer::Mat::zeros(nrows, ncols * max_nbatch);
+                for b in 0..max_nbatch {
+                    let self_b = if nbatch == 1 { 0 } else { b };
+                    let rhs_b = if rhs_nbatch == 1 { 0 } else { b };
+                    let self_cols = self
+                        .data
+                        .get(0..nrows, self_b * stride..self_b * stride + ncols);
+                    let rhs_cols = rhs
+                        .data
+                        .get(0..nrows, rhs_b * rhs_ncols..rhs_b * rhs_ncols + rhs_ncols);
+                    let mut dst = result
+                        .as_mut()
+                        .get_mut(0..nrows, b * ncols..b * ncols + ncols);
+                    zip!(dst.as_mut(), self_cols, rhs_cols).for_each(|unzip!(dst, a, b)| {
+                        *dst = a $op b;
+                    });
+                }
+                FaerMat {
+                    data: result,
+                    context: self.context.clone_with_nbatch(max_nbatch),
+                }
+            }
         }
-        FaerMat {
-            data: result,
-            context: self.context.clone_with_nbatch(max_nbatch),
-        }
-    }
+    };
 }
+impl_faer_matref_op!(Add, add, +);
+impl_faer_matref_op!(Sub, sub, -);
 
 impl_sub!(FaerMat<T>, &FaerMat<T>, FaerMat<T>, FaerScalar);
 impl_sub!(FaerMat<T>, &FaerMatRef<'_, T>, FaerMat<T>, FaerScalar);
-
-impl<'a, T: FaerScalar> Sub<&FaerMat<T>> for FaerMatRef<'a, T> {
-    type Output = FaerMat<T>;
-    fn sub(self, rhs: &FaerMat<T>) -> Self::Output {
-        let nbatch = self.context.nbatch();
-        let rhs_nbatch = rhs.context.nbatch();
-        let max_nbatch = nbatch.max(rhs_nbatch);
-        let nrows = self.nrows();
-        let ncols = self.ncols();
-        let rhs_ncols = rhs.ncols();
-        let stride = self.batch_stride;
-        let mut result = faer::Mat::zeros(nrows, ncols * max_nbatch);
-        for b in 0..max_nbatch {
-            let self_b = if nbatch == 1 { 0 } else { b };
-            let rhs_b = if rhs_nbatch == 1 { 0 } else { b };
-            let self_cols = self
-                .data
-                .get(0..nrows, self_b * stride..self_b * stride + ncols);
-            let rhs_cols = rhs
-                .data
-                .get(0..nrows, rhs_b * rhs_ncols..rhs_b * rhs_ncols + rhs_ncols);
-            let mut dst = result
-                .as_mut()
-                .get_mut(0..nrows, b * ncols..b * ncols + ncols);
-            zip!(dst.as_mut(), self_cols, rhs_cols).for_each(|unzip!(dst, a, b)| {
-                *dst = a - b;
-            });
-        }
-        FaerMat {
-            data: result,
-            context: self.context.clone_with_nbatch(max_nbatch),
-        }
-    }
-}
 
 impl_add_assign!(FaerMat<T>, &FaerMat<T>, FaerScalar);
 impl_add_assign!(FaerMat<T>, &FaerMatRef<'_, T>, FaerScalar);
@@ -238,35 +210,7 @@ impl<'a, T: FaerScalar> MatrixView<'a> for FaerMatRef<'a, T> {
     }
 
     fn gemv_o(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
-        let self_nbatch = self.context.nbatch();
-        let ncols = self.ncols();
-        let stride = self.batch_stride;
-        let x_nbatch = x.data.ncols();
-        let max_nbatch = self_nbatch.max(x_nbatch);
-        self.context.assert_compatible_nbatch(x_nbatch, "gemv_o");
-        for b in 0..max_nbatch {
-            let a_view = if self_nbatch == 1 {
-                self.data.get(0..self.nrows(), 0..ncols)
-            } else {
-                self.data
-                    .get(0..self.nrows(), b * stride..b * stride + ncols)
-            };
-            let x_col = if x_nbatch == 1 {
-                x.data.col(0)
-            } else {
-                x.data.col(b)
-            };
-            let mut y_col = y.data.col_mut(b);
-            y_col *= faer::Scale(beta);
-            matmul(
-                y_col.as_mat_mut(),
-                Accum::Add,
-                a_view,
-                x_col.as_mat(),
-                alpha,
-                self.context.par,
-            );
-        }
+        self.gemv_v(alpha, &x.as_view(), beta, y);
     }
     fn gemv_v(
         &self,

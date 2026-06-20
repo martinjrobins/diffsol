@@ -62,6 +62,37 @@ impl<T: NalgebraScalar> From<DVector<T>> for NalgebraVec<T> {
     }
 }
 
+macro_rules! nalgebra_squared_norm_body {
+    ($self:ident, $y:ident, $atol:ident, $rtol:ident, $nstates_expr:expr, $T:ty) => {{
+        let nbatch = $self.context.nbatch();
+        let nstates = $nstates_expr;
+        let atol_nbatch = $atol.context.nbatch();
+        if $y.len() != nstates || $atol.len() != nstates {
+            panic!("Vector lengths do not match");
+        }
+        let nstates_t = <$T as num_traits::FromPrimitive>::from_f64(nstates as f64).unwrap();
+        let mut max_norm = <$T as num_traits::Zero>::zero();
+        for b in 0..nbatch {
+            let atol_b = if atol_nbatch > 1 { b } else { 0 };
+            let acc = $self
+                .data
+                .column(b)
+                .iter()
+                .zip($y.data.column(b).iter())
+                .zip($atol.data.column(atol_b).iter())
+                .fold(<$T as num_traits::Zero>::zero(), |acc, ((xi, yi), ai)| {
+                    let term = *xi / (yi.abs() * $rtol + *ai);
+                    acc + term * term
+                });
+            let norm = acc / nstates_t;
+            if norm > max_norm {
+                max_norm = norm;
+            }
+        }
+        max_norm
+    }};
+}
+
 impl<T: NalgebraScalar> DefaultDenseMatrix for NalgebraVec<T> {
     type M = NalgebraMat<T>;
 }
@@ -180,6 +211,71 @@ macro_rules! impl_nalgebra_add_assign {
             }
         }
     };
+}
+
+macro_rules! nalgebra_copy_from_body {
+    ($self:ident, $other:ident, $name:expr) => {{
+        let self_ncols = $self.data.ncols();
+        let other_ncols = $other.data.ncols();
+        if self_ncols == other_ncols {
+            $self.data.copy_from(&$other.data);
+        } else if other_ncols == 1 {
+            let src = $other.data.column(0);
+            for b in 0..self_ncols {
+                $self.data.column_mut(b).copy_from(&src);
+            }
+        } else {
+            panic!(
+                "incompatible nbatch in {}: self={}, other={}",
+                $name, self_ncols, other_ncols
+            );
+        }
+    }};
+}
+
+macro_rules! nalgebra_axpy_body {
+    ($self:ident, $x:ident, $alpha:expr, $beta:expr, $name:expr) => {{
+        let self_ncols = $self.data.ncols();
+        let x_ncols = $x.data.ncols();
+        if self_ncols == x_ncols {
+            for b in 0..self_ncols {
+                $self
+                    .data
+                    .column_mut(b)
+                    .axpy($alpha, &$x.data.column(b), $beta);
+            }
+        } else if x_ncols == 1 {
+            let x_col = $x.data.column(0);
+            for b in 0..self_ncols {
+                $self.data.column_mut(b).axpy($alpha, &x_col, $beta);
+            }
+        } else {
+            panic!(
+                "incompatible nbatch in {}: self={}, x={}",
+                $name, self_ncols, x_ncols
+            );
+        }
+    }};
+}
+
+macro_rules! nalgebra_component_op_body {
+    ($self:ident, $other:ident, $method:ident, $name:expr) => {{
+        let self_ncols = $self.data.ncols();
+        let other_ncols = $other.data.ncols();
+        if self_ncols == other_ncols {
+            $self.data.$method(&$other.data);
+        } else if other_ncols == 1 {
+            let other_col = $other.data.column(0);
+            for b in 0..self_ncols {
+                $self.data.column_mut(b).$method(&other_col);
+            }
+        } else {
+            panic!(
+                "incompatible nbatch in {}: self={}, other={}",
+                $name, self_ncols, other_ncols
+            );
+        }
+    }};
 }
 
 impl_nalgebra_sub_assign!(NalgebraVec<T>, NalgebraVec<T>);
@@ -396,32 +492,7 @@ impl<'a, T: NalgebraScalar> VectorView<'a> for NalgebraVecRef<'a, T> {
         }
     }
     fn squared_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: Self::T) -> Self::T {
-        let nbatch = self.context.nbatch();
-        let nstates = self.data.nrows();
-        let atol_nbatch = atol.context.nbatch();
-        if y.len() != nstates || atol.len() != nstates {
-            panic!("Vector lengths do not match");
-        }
-        let nstates_t = Self::T::from_f64(nstates as f64).unwrap();
-        let mut max_norm = T::zero();
-        for b in 0..nbatch {
-            let atol_b = if atol_nbatch > 1 { b } else { 0 };
-            let acc = self
-                .data
-                .column(b)
-                .iter()
-                .zip(y.data.column(b).iter())
-                .zip(atol.data.column(atol_b).iter())
-                .fold(T::zero(), |acc, ((xi, yi), ai)| {
-                    let term = *xi / (yi.abs() * rtol + *ai);
-                    acc + term * term
-                });
-            let norm = acc / nstates_t;
-            if norm > max_norm {
-                max_norm = norm;
-            }
-        }
-        max_norm
+        nalgebra_squared_norm_body!(self, y, atol, rtol, self.data.nrows(), Self::T)
     }
 }
 
@@ -430,38 +501,10 @@ impl<'a, T: NalgebraScalar> VectorViewMut<'a> for NalgebraVecMut<'a, T> {
     type View = NalgebraVecRef<'a, T>;
     type Index = NalgebraIndex;
     fn copy_from(&mut self, other: &Self::Owned) {
-        let self_ncols = self.data.ncols();
-        let other_ncols = other.data.ncols();
-        if self_ncols == other_ncols {
-            self.data.copy_from(&other.data);
-        } else if other_ncols == 1 {
-            let src = other.data.column(0);
-            for b in 0..self_ncols {
-                self.data.column_mut(b).copy_from(&src);
-            }
-        } else {
-            panic!(
-                "incompatible nbatch in VectorViewMut::copy_from: self={}, other={}",
-                self_ncols, other_ncols
-            );
-        }
+        nalgebra_copy_from_body!(self, other, "VectorViewMut::copy_from")
     }
     fn copy_from_view(&mut self, other: &Self::View) {
-        let self_ncols = self.data.ncols();
-        let other_ncols = other.data.ncols();
-        if self_ncols == other_ncols {
-            self.data.copy_from(&other.data);
-        } else if other_ncols == 1 {
-            let src = other.data.column(0);
-            for b in 0..self_ncols {
-                self.data.column_mut(b).copy_from(&src);
-            }
-        } else {
-            panic!(
-                "incompatible nbatch in VectorViewMut::copy_from_view: self={}, other={}",
-                self_ncols, other_ncols
-            );
-        }
+        nalgebra_copy_from_body!(self, other, "VectorViewMut::copy_from_view")
     }
     fn set_index(&mut self, index: IndexType, value: Self::T) {
         let nbatch = self.context.nbatch();
@@ -470,23 +513,7 @@ impl<'a, T: NalgebraScalar> VectorViewMut<'a> for NalgebraVecMut<'a, T> {
         }
     }
     fn axpy(&mut self, alpha: Self::T, x: &Self::Owned, beta: Self::T) {
-        let self_ncols = self.data.ncols();
-        let x_ncols = x.data.ncols();
-        if self_ncols == x_ncols {
-            for b in 0..self_ncols {
-                self.data.column_mut(b).axpy(alpha, &x.data.column(b), beta);
-            }
-        } else if x_ncols == 1 {
-            let x_col = x.data.column(0);
-            for b in 0..self_ncols {
-                self.data.column_mut(b).axpy(alpha, &x_col, beta);
-            }
-        } else {
-            panic!(
-                "incompatible nbatch in VectorViewMut::axpy: self={}, x={}",
-                self_ncols, x_ncols
-            );
-        }
+        nalgebra_axpy_body!(self, x, alpha, beta, "VectorViewMut::axpy")
     }
 }
 
@@ -540,32 +567,7 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
         }
     }
     fn squared_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T {
-        let nbatch = self.context.nbatch();
-        let nstates = self.len();
-        let atol_nbatch = atol.context.nbatch();
-        if y.len() != nstates || atol.len() != nstates {
-            panic!("Vector lengths do not match");
-        }
-        let nstates_t = Self::T::from_f64(nstates as f64).unwrap();
-        let mut max_norm = T::zero();
-        for b in 0..nbatch {
-            let atol_b = if atol_nbatch > 1 { b } else { 0 };
-            let acc = self
-                .data
-                .column(b)
-                .iter()
-                .zip(y.data.column(b).iter())
-                .zip(atol.data.column(atol_b).iter())
-                .fold(T::zero(), |acc, ((xi, yi), ai)| {
-                    let term = *xi / (yi.abs() * rtol + *ai);
-                    acc + term * term
-                });
-            let norm = acc / nstates_t;
-            if norm > max_norm {
-                max_norm = norm;
-            }
-        }
-        max_norm
+        nalgebra_squared_norm_body!(self, y, atol, rtol, self.len(), Self::T)
     }
     fn as_view(&self) -> Self::View<'_> {
         Self::View {
@@ -592,41 +594,13 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
         }
     }
     fn copy_from(&mut self, other: &Self) {
-        let self_ncols = self.data.ncols();
-        let other_ncols = other.data.ncols();
-        if self_ncols == other_ncols {
-            self.data.copy_from(&other.data);
-        } else if other_ncols == 1 {
-            let src = other.data.column(0);
-            for b in 0..self_ncols {
-                self.data.column_mut(b).copy_from(&src);
-            }
-        } else {
-            panic!(
-                "incompatible nbatch in copy_from: self={}, other={}",
-                self_ncols, other_ncols
-            );
-        }
+        nalgebra_copy_from_body!(self, other, "copy_from")
     }
     fn fill(&mut self, value: Self::T) {
         self.data.fill(value);
     }
     fn copy_from_view(&mut self, other: &Self::View<'_>) {
-        let self_ncols = self.data.ncols();
-        let other_ncols = other.data.ncols();
-        if self_ncols == other_ncols {
-            self.data.copy_from(&other.data);
-        } else if other_ncols == 1 {
-            let src = other.data.column(0);
-            for b in 0..self_ncols {
-                self.data.column_mut(b).copy_from(&src);
-            }
-        } else {
-            panic!(
-                "incompatible nbatch in copy_from_view: self={}, other={}",
-                self_ncols, other_ncols
-            );
-        }
+        nalgebra_copy_from_body!(self, other, "copy_from_view")
     }
     fn from_element(nstates: usize, value: T, ctx: Self::C) -> Self {
         let data = DMatrix::from_element(nstates, ctx.nbatch(), value);
@@ -664,42 +638,10 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
         Self { data, context: ctx }
     }
     fn axpy(&mut self, alpha: T, x: &Self, beta: T) {
-        let self_ncols = self.data.ncols();
-        let x_ncols = x.data.ncols();
-        if self_ncols == x_ncols {
-            for b in 0..self_ncols {
-                self.data.column_mut(b).axpy(alpha, &x.data.column(b), beta);
-            }
-        } else if x_ncols == 1 {
-            let x_col = x.data.column(0);
-            for b in 0..self_ncols {
-                self.data.column_mut(b).axpy(alpha, &x_col, beta);
-            }
-        } else {
-            panic!(
-                "incompatible nbatch in axpy: self={}, x={}",
-                self_ncols, x_ncols
-            );
-        }
+        nalgebra_axpy_body!(self, x, alpha, beta, "axpy")
     }
     fn axpy_v(&mut self, alpha: Self::T, x: &Self::View<'_>, beta: Self::T) {
-        let self_ncols = self.data.ncols();
-        let x_ncols = x.data.ncols();
-        if self_ncols == x_ncols {
-            for b in 0..self_ncols {
-                self.data.column_mut(b).axpy(alpha, &x.data.column(b), beta);
-            }
-        } else if x_ncols == 1 {
-            let x_col = x.data.column(0);
-            for b in 0..self_ncols {
-                self.data.column_mut(b).axpy(alpha, &x_col, beta);
-            }
-        } else {
-            panic!(
-                "incompatible nbatch in axpy_v: self={}, x={}",
-                self_ncols, x_ncols
-            );
-        }
+        nalgebra_axpy_body!(self, x, alpha, beta, "axpy_v")
     }
     fn batched_axpy(&mut self, alpha: &[T], x: &Self, beta: T) {
         let self_ncols = self.data.ncols();
@@ -728,38 +670,10 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
         }
     }
     fn component_div_assign(&mut self, other: &Self) {
-        let self_ncols = self.data.ncols();
-        let other_ncols = other.data.ncols();
-        if self_ncols == other_ncols {
-            self.data.component_div_assign(&other.data);
-        } else if other_ncols == 1 {
-            let other_col = other.data.column(0);
-            for b in 0..self_ncols {
-                self.data.column_mut(b).component_div_assign(&other_col);
-            }
-        } else {
-            panic!(
-                "incompatible nbatch in component_div_assign: self={}, other={}",
-                self_ncols, other_ncols
-            );
-        }
+        nalgebra_component_op_body!(self, other, component_div_assign, "component_div_assign")
     }
     fn component_mul_assign(&mut self, other: &Self) {
-        let self_ncols = self.data.ncols();
-        let other_ncols = other.data.ncols();
-        if self_ncols == other_ncols {
-            self.data.component_mul_assign(&other.data);
-        } else if other_ncols == 1 {
-            let other_col = other.data.column(0);
-            for b in 0..self_ncols {
-                self.data.column_mut(b).component_mul_assign(&other_col);
-            }
-        } else {
-            panic!(
-                "incompatible nbatch in component_mul_assign: self={}, other={}",
-                self_ncols, other_ncols
-            );
-        }
+        nalgebra_component_op_body!(self, other, component_mul_assign, "component_mul_assign")
     }
 
     fn root_finding(&self, g1: &Self) -> (bool, Self::T, i32) {
