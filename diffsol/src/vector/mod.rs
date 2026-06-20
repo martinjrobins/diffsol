@@ -1160,7 +1160,7 @@ pub(crate) mod tests {
     use crate::matrix::DenseMatrix;
 
     fn make_strided_test_matrix<M: DenseMatrix>(nbatch: usize) -> M {
-        let ctx = M::C::default().clone_with_nbatch(nbatch);
+        let ctx = M::C::default().clone_with_nbatch(nbatch).unwrap();
         let nrows = 3;
         let ncols = 4;
         let mut data = Vec::with_capacity(nrows * ncols * nbatch);
@@ -1438,7 +1438,7 @@ pub(crate) mod tests {
     pub fn test_strided_view_gather<M: DenseMatrix>(ctx: M::C) {
         let matrix = make_strided_test_matrix::<M>(ctx.nbatch());
         let nbatch = ctx.nbatch();
-        let mut result = M::V::zeros(2, M::C::default().clone_with_nbatch(nbatch));
+        let mut result = M::V::zeros(2, M::C::default().clone_with_nbatch(nbatch).unwrap());
         let indices = <M::V as Vector>::Index::from_vec(vec![0, 2], M::C::default());
         let col1 = matrix.column(1);
         let owned = col1.into_owned();
@@ -1453,7 +1453,7 @@ pub(crate) mod tests {
         let col1 = matrix.column(1);
         let owned = col1.into_owned();
         let indices = <M::V as Vector>::Index::from_vec(vec![0, 1, 2], M::C::default());
-        let mut result = M::V::zeros(3, M::C::default().clone_with_nbatch(nbatch));
+        let mut result = M::V::zeros(3, M::C::default().clone_with_nbatch(nbatch).unwrap());
         owned.scatter(&indices, &mut result);
         let b1 = result.get_batch(1);
         assert_eq!(b1.get_index(0), f::<M::V>(110.0));

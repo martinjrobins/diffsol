@@ -934,28 +934,6 @@ mod test {
         test_ode_solver(&mut s, soln, None, true, false);
     }
 
-    #[test]
-    fn test_tr_bdf2_nalgebra_exponential_decay_batched() {
-        let (problem, soln) = exponential_decay_problem_batched::<M>(2);
-        let mut s = problem.tr_bdf2::<LS>().unwrap();
-        test_ode_solver(&mut s, soln, None, false, false);
-    }
-
-    #[test]
-    fn test_tr_bdf2_faer_exponential_decay_batched() {
-        use crate::{FaerLU, FaerMat};
-        let (problem, soln) = exponential_decay_problem_batched::<FaerMat<f64>>(2);
-        let mut s = problem.tr_bdf2::<FaerLU<f64>>().unwrap();
-        test_ode_solver(&mut s, soln, None, false, false);
-    }
-
-    #[test]
-    fn test_tr_bdf2_faer_sparse_exponential_decay_batched() {
-        let (problem, soln) = exponential_decay_problem_batched::<FaerSparseMat<f64>>(2);
-        let mut s = problem.tr_bdf2::<FaerSparseLU<f64>>().unwrap();
-        test_ode_solver(&mut s, soln, None, false, false);
-    }
-
     #[cfg(feature = "cuda")]
     #[test]
     fn test_tr_bdf2_cuda_exponential_decay_batched() {
@@ -965,10 +943,12 @@ mod test {
         test_ode_solver(&mut s, soln, None, false, false);
     }
 
+    #[cfg(feature = "cuda")]
     #[test]
-    fn test_tr_bdf2_nalgebra_exponential_decay_with_algebraic_batched() {
-        let (problem, soln) = exponential_decay_with_algebraic_problem_batched::<M>(2);
-        let mut s = problem.tr_bdf2::<LS>().unwrap();
+    fn test_tr_bdf2_cuda_exponential_decay_with_algebraic_batched() {
+        use crate::{CudaLU, CudaMat};
+        let (problem, soln) = exponential_decay_with_algebraic_problem_batched::<CudaMat<f64>>(2);
+        let mut s = problem.tr_bdf2::<CudaLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
     }
 

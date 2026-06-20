@@ -518,21 +518,6 @@ mod test {
         test_ode_solver(&mut s, soln, None, true, false);
     }
 
-    #[test]
-    fn test_tsit45_nalgebra_exponential_decay_batched() {
-        let (problem, soln) = exponential_decay_problem_batched::<M>(2);
-        let mut s = problem.tsit45().unwrap();
-        test_ode_solver(&mut s, soln, None, false, false);
-    }
-
-    #[test]
-    fn test_tsit45_faer_exponential_decay_batched() {
-        use crate::FaerMat;
-        let (problem, soln) = exponential_decay_problem_batched::<FaerMat<f64>>(2);
-        let mut s = problem.tsit45().unwrap();
-        test_ode_solver(&mut s, soln, None, false, false);
-    }
-
     #[cfg(feature = "cuda")]
     #[test]
     fn test_tsit45_cuda_exponential_decay_batched() {

@@ -1,29 +1,20 @@
 use faer::{get_global_parallelism, Par};
 
+use crate::DiffsolError;
+
 /// Context for the faer backend.
 ///
-/// Carries the batch count `nbatch` which determines how many independent
-/// ODE systems are solved simultaneously, as well as the faer parallelism
-/// configuration.  All vectors and matrices created with this context share
-/// the same batch dimension.
+/// Carries the faer parallelism configuration.  Batching (`nbatch > 1`) is
+/// not supported by this backend; use the CUDA backend instead.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct FaerContext {
     pub par: Par,
-    nbatch: usize,
 }
 
 impl FaerContext {
     pub fn new() -> Self {
         Self {
             par: get_global_parallelism(),
-            nbatch: 1,
-        }
-    }
-    pub fn with_nbatch(nbatch: usize) -> Self {
-        assert!(nbatch > 0, "nbatch must be > 0");
-        Self {
-            par: get_global_parallelism(),
-            nbatch,
         }
     }
 }
@@ -35,14 +26,14 @@ impl Default for FaerContext {
 }
 
 impl crate::Context for FaerContext {
-    fn nbatch(&self) -> usize {
-        self.nbatch
-    }
-    fn clone_with_nbatch(&self, nbatch: usize) -> Self {
-        assert!(nbatch > 0, "nbatch must be > 0");
-        Self {
-            par: self.par,
-            nbatch,
+    fn clone_with_nbatch(&self, nbatch: usize) -> Result<Self, DiffsolError> {
+        if nbatch != 1 {
+            Err(DiffsolError::Other(
+                "FaerContext does not support batching (nbatch > 1). Use the CUDA backend instead."
+                    .to_string(),
+            ))
+        } else {
+            Ok(Self { par: self.par })
         }
     }
 }

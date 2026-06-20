@@ -441,7 +441,7 @@ macro_rules! impl_sub_both_ref {
                 let mut ret = Self::Output::zeros(
                     self.nrows(),
                     self.ncols(),
-                    self.context.clone_with_nbatch(max_nbatch),
+                    self.context.clone_with_nbatch(max_nbatch).unwrap(),
                 );
                 let ret_nbatch = max_nbatch as i32;
                 let ret_stride = (ret.nrows() * ret.ncols()) as i32;
@@ -521,7 +521,7 @@ macro_rules! impl_add_both_ref {
                 let mut ret = Self::Output::zeros(
                     self.nrows(),
                     self.ncols(),
-                    self.context.clone_with_nbatch(max_nbatch),
+                    self.context.clone_with_nbatch(max_nbatch).unwrap(),
                 );
                 let ret_nbatch = max_nbatch as i32;
                 let ret_stride = (ret.nrows() * ret.ncols()) as i32;
@@ -874,11 +874,17 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
                 if old_offset < new_offset {
                     let src = head.slice(old_offset..old_offset + len);
                     let mut dst = tail.slice_mut(0..0 + len);
-                    self.context.stream.memcpy_dtod(&src, &mut dst).expect("Failed to copy data during resize_cols shrink");
+                    self.context
+                        .stream
+                        .memcpy_dtod(&src, &mut dst)
+                        .expect("Failed to copy data during resize_cols shrink");
                 } else {
                     let mut dst = head.slice_mut(new_offset..new_offset + len);
                     let src = tail.slice(old_offset - new_offset..old_offset - new_offset + len);
-                    self.context.stream.memcpy_dtod(&src, &mut dst).expect("Failed to copy data during resize_cols shrink");
+                    self.context
+                        .stream
+                        .memcpy_dtod(&src, &mut dst)
+                        .expect("Failed to copy data during resize_cols shrink");
                 }
             }
             self.ncols = new_ncols;

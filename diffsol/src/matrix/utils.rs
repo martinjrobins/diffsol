@@ -10,7 +10,7 @@ macro_rules! impl_matrix_common {
                 self.data.nrows()
             }
             fn ncols(&self) -> IndexType {
-                self.data.ncols() / crate::Context::nbatch(&self.context)
+                self.data.ncols()
             }
             fn inner(&self) -> &Self::Inner {
                 &self.data
@@ -28,7 +28,7 @@ macro_rules! impl_matrix_common {
                 self.data.nrows()
             }
             fn ncols(&self) -> IndexType {
-                self.data.ncols() / crate::Context::nbatch(&self.context)
+                self.data.ncols()
             }
             fn inner(&self) -> &Self::Inner {
                 &self.data
@@ -36,8 +36,47 @@ macro_rules! impl_matrix_common {
         }
     };
 }
-
 pub(crate) use impl_matrix_common;
+
+macro_rules! impl_matrix_common_ref {
+    ($mat:ty, $vec:ty, $con:ty, $in:ty) => {
+        impl<'a, T: Scalar> MatrixCommon for $mat {
+            type T = T;
+            type V = $vec;
+            type C = $con;
+            type Inner = $in;
+
+            fn nrows(&self) -> IndexType {
+                self.data.nrows()
+            }
+            fn ncols(&self) -> IndexType {
+                self.data.ncols()
+            }
+            fn inner(&self) -> &Self::Inner {
+                &self.data
+            }
+        }
+    };
+    ($mat:ty, $vec:ty, $con:ty, $in:ty, $bound:path) => {
+        impl<'a, T: Scalar + $bound> MatrixCommon for $mat {
+            type T = T;
+            type V = $vec;
+            type C = $con;
+            type Inner = $in;
+
+            fn nrows(&self) -> IndexType {
+                self.data.nrows()
+            }
+            fn ncols(&self) -> IndexType {
+                self.data.ncols()
+            }
+            fn inner(&self) -> &Self::Inner {
+                &self.data
+            }
+        }
+    };
+}
+pub(crate) use impl_matrix_common_ref;
 
 macro_rules! impl_add {
     ($lhs:ty, $rhs:ty, $out:ty) => {

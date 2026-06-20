@@ -785,7 +785,8 @@ pub(crate) mod tests {
         assert_eq!(ctx.nbatch(), 2);
         let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
         let values = vec![f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0)];
-        let a = M::try_from_triplets(2, 2, indices, values, ctx.clone_with_nbatch(1)).unwrap();
+        let a =
+            M::try_from_triplets(2, 2, indices, values, ctx.clone_with_nbatch(1).unwrap()).unwrap();
         let x = M::V::from_vec(
             vec![f::<M>(1.0), f::<M>(2.0), f::<M>(3.0), f::<M>(4.0)],
             ctx.clone(),
@@ -1938,7 +1939,7 @@ pub(crate) mod tests {
     }
 
     fn make_strided_matrix<M: DenseMatrix>(nbatch: usize) -> M {
-        let ctx = M::C::default().clone_with_nbatch(nbatch);
+        let ctx = M::C::default().clone_with_nbatch(nbatch).unwrap();
         let nrows = 3;
         let ncols = 4;
         let mut data = Vec::with_capacity(nrows * ncols * nbatch);
@@ -2295,17 +2296,17 @@ macro_rules! generate_dense_matrix_tests {
             #[test]
             #[should_panic(expected = "incompatible nbatch")]
             fn [<test_batched_gemv_incompatible_ $suffix>]() {
-                $crate::matrix::tests::test_batched_gemv_incompatible::<$M>($ctx2, $ctx1.clone_with_nbatch(3));
+                $crate::matrix::tests::test_batched_gemv_incompatible::<$M>($ctx2, $ctx1.clone_with_nbatch(3).unwrap());
             }
             #[test]
             #[should_panic(expected = "incompatible nbatch")]
             fn [<test_batched_gemm_incompatible_ $suffix>]() {
-                $crate::matrix::tests::test_batched_gemm_incompatible::<$M>($ctx2, $ctx1.clone_with_nbatch(3));
+                $crate::matrix::tests::test_batched_gemm_incompatible::<$M>($ctx2, $ctx1.clone_with_nbatch(3).unwrap());
             }
             #[test]
             #[should_panic(expected = "incompatible nbatch")]
             fn [<test_batched_gemm_incompatible_a_ $suffix>]() {
-                $crate::matrix::tests::test_batched_gemm_incompatible_a::<$M>($ctx2, $ctx1.clone_with_nbatch(3));
+                $crate::matrix::tests::test_batched_gemm_incompatible_a::<$M>($ctx2, $ctx1.clone_with_nbatch(3).unwrap());
             }
             #[test]
             fn [<test_strided_matrix_view_into_owned_ $suffix>]() {

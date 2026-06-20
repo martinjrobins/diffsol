@@ -1,20 +1,15 @@
+use crate::DiffsolError;
+
 /// Context for the nalgebra backend.
 ///
-/// Carries the batch count `nbatch` which determines how many independent
-/// ODE systems are solved simultaneously.  All vectors and matrices created
-/// with this context share the same batch dimension.
+/// Batching (`nbatch > 1`) is not supported by this backend; use the CUDA
+/// backend instead.
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub struct NalgebraContext {
-    nbatch: usize,
-}
+pub struct NalgebraContext {}
 
 impl NalgebraContext {
     pub fn new() -> Self {
-        Self { nbatch: 1 }
-    }
-    pub fn with_nbatch(nbatch: usize) -> Self {
-        assert!(nbatch > 0, "nbatch must be > 0");
-        Self { nbatch }
+        Self {}
     }
 }
 
@@ -25,11 +20,14 @@ impl Default for NalgebraContext {
 }
 
 impl crate::Context for NalgebraContext {
-    fn nbatch(&self) -> usize {
-        self.nbatch
-    }
-    fn clone_with_nbatch(&self, nbatch: usize) -> Self {
-        assert!(nbatch > 0, "nbatch must be > 0");
-        Self { nbatch }
+    fn clone_with_nbatch(&self, nbatch: usize) -> Result<Self, DiffsolError> {
+        if nbatch != 1 {
+            Err(DiffsolError::Other(
+                "NalgebraContext does not support batching (nbatch > 1). Use the CUDA backend instead."
+                    .to_string(),
+            ))
+        } else {
+            Ok(Self {})
+        }
     }
 }

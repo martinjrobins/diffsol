@@ -194,16 +194,6 @@ pub mod tests {
     }
 
     #[test]
-    fn test_lu_nalgebra_batched() {
-        let ctx = NalgebraContext::with_nbatch(2);
-        let (op, rtol, atol, solns) = linear_problem_batched::<NalgebraMat<f64>>(ctx);
-        let p = NalgebraVec::zeros(0, *op.context());
-        let op = ParameterisedOp::new(&op, &p);
-        let s = NalgebraLU::default();
-        test_linear_solver(s, op, rtol, &atol, solns);
-    }
-
-    #[test]
     fn test_lu_faer() {
         let (op, rtol, atol, solns) = linear_problem::<FaerMat<f64>>();
         let p = FaerVec::zeros(0, *op.context());

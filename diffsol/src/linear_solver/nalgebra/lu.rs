@@ -3,19 +3,17 @@ use nalgebra::Dyn;
 use crate::{
     error::{DiffsolError, LinearSolverError},
     linear_solver_error,
-    matrix::{dense_nalgebra_serial::NalgebraMat, MatrixCommon},
-    Context, LinearSolver, Matrix, NalgebraContext, NalgebraScalar, NalgebraVec,
-    NonLinearOpJacobian, Vector,
+    matrix::dense_nalgebra_serial::NalgebraMat,
+    LinearSolver, Matrix, NalgebraContext, NalgebraScalar, NalgebraVec, NonLinearOpJacobian,
 };
 
-/// A [LinearSolver] that uses the LU decomposition in the [`nalgebra` library](https://nalgebra.org/) to solve the linear system.
 #[derive(Clone)]
 pub struct LU<T>
 where
     T: NalgebraScalar,
 {
     matrix: Option<NalgebraMat<T>>,
-    lu: Vec<nalgebra::LU<T, Dyn, Dyn>>,
+    lu: Option<nalgebra::LU<T, Dyn, Dyn>>,
 }
 
 impl<T> Default for LU<T>
@@ -24,7 +22,7 @@ where
 {
     fn default() -> Self {
         Self {
-            lu: Vec::new(),
+            lu: None,
             matrix: None,
         }
     }
@@ -32,17 +30,13 @@ where
 
 impl<T: NalgebraScalar> LinearSolver<NalgebraMat<T>> for LU<T> {
     fn solve_in_place(&self, state: &mut NalgebraVec<T>) -> Result<(), DiffsolError> {
-        if self.lu.is_empty() {
-            return Err(linear_solver_error!(LuNotInitialized))?;
-        }
-        let nbatch = state.context().nbatch();
-        for b in 0..nbatch {
-            let lu = &self.lu[b];
-            let mut col = state.data.column_mut(b);
-            match lu.solve_mut(&mut col) {
-                true => {}
-                false => return Err(linear_solver_error!(LuSolveFailed))?,
-            }
+        let lu = self
+            .lu
+            .as_ref()
+            .ok_or_else(|| linear_solver_error!(LuNotInitialized))?;
+        match lu.solve_mut(&mut state.data) {
+            true => {}
+            false => return Err(linear_solver_error!(LuSolveFailed))?,
         }
         Ok(())
     }
@@ -55,17 +49,7 @@ impl<T: NalgebraScalar> LinearSolver<NalgebraMat<T>> for LU<T> {
     ) {
         let matrix = self.matrix.as_mut().expect("Matrix not set");
         op.jacobian_inplace(x, t, matrix);
-        let nbatch = matrix.context.nbatch();
-        let ncols = matrix.ncols();
-        self.lu.clear();
-        if nbatch == 1 {
-            self.lu.push(matrix.data.clone().lu());
-        } else {
-            for b in 0..nbatch {
-                let sub = matrix.data.columns(b * ncols, ncols).into_owned();
-                self.lu.push(sub.lu());
-            }
-        }
+        self.lu = Some(matrix.data.clone().lu());
     }
 
     fn set_problem<

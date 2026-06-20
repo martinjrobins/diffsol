@@ -3,7 +3,7 @@ use crate::{
     linear_solver::LinearSolver,
     linear_solver_error,
     scalar::IndexType,
-    Context, FaerContext, FaerScalar, FaerSparseMat, FaerVec, Matrix, NonLinearOpJacobian, Vector,
+    FaerContext, FaerScalar, FaerSparseMat, FaerVec, Matrix, NonLinearOpJacobian,
 };
 
 use faer::{
@@ -12,12 +12,11 @@ use faer::{
     sparse::linalg::{solvers::Lu, solvers::SymbolicLu},
 };
 
-/// A [LinearSolver] that uses the LU decomposition in the [`faer`](https://github.com/sarah-ek/faer-rs) library to solve the linear system.
 pub struct FaerSparseLU<T>
 where
     T: FaerScalar,
 {
-    lu: Vec<Lu<IndexType, T>>,
+    lu: Option<Lu<IndexType, T>>,
     lu_symbolic: Option<SymbolicLu<IndexType>>,
     matrix: Option<FaerSparseMat<T>>,
 }
@@ -28,7 +27,7 @@ where
 {
     fn default() -> Self {
         Self {
-            lu: Vec::new(),
+            lu: None,
             matrix: None,
             lu_symbolic: None,
         }
@@ -44,28 +43,18 @@ impl<T: FaerScalar> LinearSolver<FaerSparseMat<T>> for FaerSparseLU<T> {
     ) {
         let matrix = self.matrix.as_mut().expect("Matrix not set");
         op.jacobian_inplace(x, t, matrix);
-        let nbatch = matrix.context.nbatch();
-        self.lu.clear();
-        for b in 0..nbatch {
-            self.lu.push(
-                Lu::try_new_with_symbolic(
-                    self.lu_symbolic.as_ref().unwrap().clone(),
-                    matrix.data[b].rb(),
-                )
+        self.lu = Some(
+            Lu::try_new_with_symbolic(self.lu_symbolic.as_ref().unwrap().clone(), matrix.data.rb())
                 .expect("Failed to factorise matrix"),
-            );
-        }
+        );
     }
 
     fn solve_in_place(&self, x: &mut FaerVec<T>) -> Result<(), DiffsolError> {
-        if self.lu.is_empty() {
-            return Err(linear_solver_error!(LuNotInitialized))?;
-        }
-        let nbatch = x.context().nbatch();
-        for b in 0..nbatch {
-            let lu = &self.lu[b];
-            lu.solve_in_place(x.data.col_mut(b));
-        }
+        let lu = self
+            .lu
+            .as_ref()
+            .ok_or_else(|| linear_solver_error!(LuNotInitialized))?;
+        lu.solve_in_place(x.data.as_mut());
         Ok(())
     }
 
@@ -79,7 +68,7 @@ impl<T: FaerScalar> LinearSolver<FaerSparseMat<T>> for FaerSparseLU<T> {
         let nrows = op.nout();
         let matrix = C::M::new_from_sparsity(nrows, ncols, op.jacobian_sparsity(), *op.context());
         self.lu_symbolic = Some(
-            SymbolicLu::try_new(matrix.data[0].symbolic()).expect("Failed to create symbolic LU"),
+            SymbolicLu::try_new(matrix.data.symbolic()).expect("Failed to create symbolic LU"),
         );
         self.matrix = Some(matrix);
     }
@@ -88,9 +77,9 @@ impl<T: FaerScalar> LinearSolver<FaerSparseMat<T>> for FaerSparseLU<T> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        linear_solver::tests::{linear_problem, linear_problem_batched, test_linear_solver},
+        linear_solver::tests::{linear_problem, test_linear_solver},
         op::ParameterisedOp,
-        FaerContext, FaerSparseMat, Op,
+        FaerSparseMat, Op, Vector,
     };
 
     use super::*;
@@ -98,16 +87,6 @@ mod tests {
     #[test]
     fn test_sparse_lu() {
         let (op, rtol, atol, solns) = linear_problem::<FaerSparseMat<f64>>();
-        let p = FaerVec::zeros(0, *op.context());
-        let op = ParameterisedOp::new(&op, &p);
-        let s = FaerSparseLU::default();
-        test_linear_solver(s, op, rtol, &atol, solns);
-    }
-
-    #[test]
-    fn test_sparse_lu_batched() {
-        let ctx = FaerContext::with_nbatch(2);
-        let (op, rtol, atol, solns) = linear_problem_batched::<FaerSparseMat<f64>>(ctx);
         let p = FaerVec::zeros(0, *op.context());
         let op = ParameterisedOp::new(&op, &p);
         let s = FaerSparseLU::default();

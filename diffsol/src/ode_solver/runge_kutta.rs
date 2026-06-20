@@ -125,7 +125,7 @@ where
         let s = tableau.s();
         let mut a_rows = Vec::with_capacity(s);
         let ctx = problem.context();
-        let solver_ctx = ctx.clone_with_nbatch(1);
+        let solver_ctx = ctx.clone_with_nbatch(1).unwrap();
         for i in 0..s {
             let mut row = Vec::with_capacity(i);
             for j in 0..i {

@@ -39,7 +39,7 @@ impl<M: DenseMatrix> Tableau<M> {
     /// continuous extension from :
     /// from Jørgensen, J. B., Kristensen, M. R., & Thomsen, P. G. (2018). A family of ESDIRK integration methods. arXiv preprint arXiv:1803.01613.
     pub fn tr_bdf2(ctx: M::C) -> Self {
-        let ctx = ctx.clone_with_nbatch(1);
+        let ctx = ctx.clone_with_nbatch(1).unwrap();
         let gamma = M::T::from_f64(2.0 - 2.0_f64.sqrt()).unwrap();
         let d = gamma / M::T::from_f64(2.0).unwrap();
         let w = M::T::from_f64(2.0_f64.sqrt() / 4.0).unwrap();
@@ -99,7 +99,7 @@ impl<M: DenseMatrix> Tableau<M> {
     /// A third order ESDIRK method
     /// from Jørgensen, J. B., Kristensen, M. R., & Thomsen, P. G. (2018). A family of ESDIRK integration methods. arXiv preprint arXiv:1803.01613.
     pub fn esdirk34(ctx: M::C) -> Self {
-        let ctx = ctx.clone_with_nbatch(1);
+        let ctx = ctx.clone_with_nbatch(1).unwrap();
         let gamma = M::T::from_f64(0.435_866_521_508_459).unwrap();
         let a = M::from_vec(
             4,
@@ -159,7 +159,7 @@ impl<M: DenseMatrix> Tableau<M> {
     }
 
     pub fn tsit45(ctx: M::C) -> Self {
-        let ctx = ctx.clone_with_nbatch(1);
+        let ctx = ctx.clone_with_nbatch(1).unwrap();
         let c = M::V::from_vec(
             vec![
                 M::T::zero(),

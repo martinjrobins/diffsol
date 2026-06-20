@@ -75,7 +75,7 @@ fn exponential_decay_jacobian_adjoint<M: MatrixHost>(
 fn exponential_decay_init<M: Matrix>(p: &M::V, _t: M::T, y: &mut M::V) {
     let nstates = y.len();
     let nbatch = y.context().nbatch();
-    let ctx1 = y.context().clone_with_nbatch(1);
+    let ctx1 = y.context().clone_with_nbatch(1).unwrap();
     for b in 0..nbatch {
         let y0 = p.get_batch(b).get_index(1);
         let val = M::V::from_element(nstates, y0, ctx1.clone());
@@ -289,7 +289,7 @@ pub fn exponential_decay_problem_batched<M: Matrix + 'static>(
     OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
-    let ctx = M::C::default().clone_with_nbatch(nbatch);
+    let ctx = M::C::default().clone_with_nbatch(nbatch).unwrap();
     let mut p_f64 = Vec::new();
     for b in 0..nbatch {
         let k = 0.1 * (b + 1) as f64;
@@ -1223,7 +1223,7 @@ pub fn exponential_decay_problem_batched_with_reset<M: Matrix + 'static>(
     OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
     Vec<f64>,
 ) {
-    let ctx = M::C::default().clone_with_nbatch(nbatch);
+    let ctx = M::C::default().clone_with_nbatch(nbatch).unwrap();
     let mut p_f64 = Vec::new();
     for b in 0..nbatch {
         let k = 0.1 * (b + 1) as f64;
@@ -1250,7 +1250,7 @@ pub fn exponential_decay_problem_batched_sens<M: Matrix + 'static>(
     OdeSolverProblem<impl OdeEquationsImplicitSens<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
-    let ctx = M::C::default().clone_with_nbatch(nbatch);
+    let ctx = M::C::default().clone_with_nbatch(nbatch).unwrap();
     let mut p_f64 = Vec::new();
     for b in 0..nbatch {
         let k = 0.1 * (b + 1) as f64;
@@ -1310,7 +1310,7 @@ pub fn exponential_decay_problem_batched_adjoint<M: Matrix + 'static>(
     OdeSolverProblem<impl OdeEquationsImplicitAdjoint<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
-    let ctx = M::C::default().clone_with_nbatch(nbatch);
+    let ctx = M::C::default().clone_with_nbatch(nbatch).unwrap();
     let mut p_f64 = Vec::new();
     for b in 0..nbatch {
         let k = 0.1 * (b + 1) as f64;
@@ -1565,7 +1565,7 @@ pub fn exponential_decay_problem_batched_sens_with_reset<M: Matrix + 'static>(
     >,
     OdeSolverSolution<M::V>,
 ) {
-    let ctx = M::C::default().clone_with_nbatch(nbatch);
+    let ctx = M::C::default().clone_with_nbatch(nbatch).unwrap();
     let mut p_f64 = Vec::new();
     for b in 0..nbatch {
         let k = 0.1 * (b + 1) as f64;
@@ -1669,7 +1669,7 @@ pub fn exponential_decay_problem_batched_adjoint_with_reset<M: Matrix + 'static>
     >,
     OdeSolverSolution<M::V>,
 ) {
-    let ctx = M::C::default().clone_with_nbatch(nbatch);
+    let ctx = M::C::default().clone_with_nbatch(nbatch).unwrap();
     let mut p_f64 = Vec::new();
     for b in 0..nbatch {
         let k = 0.1 * (b + 1) as f64;

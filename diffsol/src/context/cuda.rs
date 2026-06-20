@@ -138,11 +138,11 @@ impl crate::Context for CudaContext {
     fn nbatch(&self) -> usize {
         self.nbatch
     }
-    fn clone_with_nbatch(&self, nbatch: usize) -> Self {
+    fn clone_with_nbatch(&self, nbatch: usize) -> Result<Self, DiffsolError> {
         assert!(nbatch > 0, "nbatch must be > 0");
-        Self {
+        Ok(Self {
             stream: self.stream.clone(),
             nbatch,
-        }
+        })
     }
 }

@@ -1894,7 +1894,7 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
         let start = batch * nstates;
         CudaVecRef {
             data: self.data.slice(start..start + nstates),
-            context: self.context.clone_with_nbatch(1),
+            context: self.context.clone_with_nbatch(1).unwrap(),
             nstates,
             col_offset: 0,
         }
@@ -1906,7 +1906,7 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
         let start = batch * nstates;
         CudaVecMut {
             data: self.data.slice_mut(start..start + nstates),
-            context: self.context.clone_with_nbatch(1),
+            context: self.context.clone_with_nbatch(1).unwrap(),
             nstates,
             col_offset: 0,
         }

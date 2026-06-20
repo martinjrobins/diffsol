@@ -312,7 +312,7 @@ pub fn exponential_decay_with_algebraic_problem_batched<M: Matrix + 'static>(
     OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
-    let ctx = M::C::default().clone_with_nbatch(nbatch);
+    let ctx = M::C::default().clone_with_nbatch(nbatch).unwrap();
     let mut p_f64 = Vec::with_capacity(nbatch);
     for b in 0..nbatch {
         p_f64.push(0.1 * (b + 1) as f64);
