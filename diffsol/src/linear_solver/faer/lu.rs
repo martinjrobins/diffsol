@@ -40,12 +40,16 @@ impl<T: FaerScalar> LinearSolver<FaerMat<T>> for LU<T> {
         let nbatch = matrix.context.nbatch();
         let ncols = matrix.ncols();
         self.lu.clear();
-        for b in 0..nbatch {
-            let sub = matrix
-                .data
-                .get(0..matrix.nrows(), b * ncols..(b + 1) * ncols)
-                .to_owned();
-            self.lu.push(sub.full_piv_lu());
+        if nbatch == 1 {
+            self.lu.push(matrix.data.to_owned().full_piv_lu());
+        } else {
+            for b in 0..nbatch {
+                let sub = matrix
+                    .data
+                    .get(0..matrix.nrows(), b * ncols..(b + 1) * ncols)
+                    .to_owned();
+                self.lu.push(sub.full_piv_lu());
+            }
         }
     }
 

@@ -58,9 +58,13 @@ impl<T: NalgebraScalar> LinearSolver<NalgebraMat<T>> for LU<T> {
         let nbatch = matrix.context.nbatch();
         let ncols = matrix.ncols();
         self.lu.clear();
-        for b in 0..nbatch {
-            let sub = matrix.data.columns(b * ncols, ncols).into_owned();
-            self.lu.push(sub.lu());
+        if nbatch == 1 {
+            self.lu.push(matrix.data.clone().lu());
+        } else {
+            for b in 0..nbatch {
+                let sub = matrix.data.columns(b * ncols, ncols).into_owned();
+                self.lu.push(sub.lu());
+            }
         }
     }
 
