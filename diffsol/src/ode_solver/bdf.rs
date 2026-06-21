@@ -2319,8 +2319,7 @@ mod test {
     fn test_bdf_cuda_exponential_decay_batched_with_reset() {
         use crate::{CudaLU, CudaMat, OdeSolverStopReason};
         let nbatch = 2;
-        let (problem, p_f64) =
-            exponential_decay_problem_batched_with_reset::<CudaMat<f64>>(nbatch);
+        let (problem, p_f64) = exponential_decay_problem_batched_with_reset::<CudaMat<f64>>(nbatch);
         let final_time = 10.0;
         let t_event = 5.0;
         let mut solver = problem.bdf::<CudaLU<f64>>().unwrap();

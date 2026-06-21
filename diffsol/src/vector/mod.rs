@@ -1862,6 +1862,6 @@ macro_rules! generate_vector_tests_batched {
     };
 }
 #[cfg(test)]
-pub(crate) use generate_vector_tests_nonbatched;
-#[cfg(test)]
 pub(crate) use generate_vector_tests_batched;
+#[cfg(test)]
+pub(crate) use generate_vector_tests_nonbatched;

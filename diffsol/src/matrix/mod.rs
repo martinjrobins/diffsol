@@ -2339,10 +2339,10 @@ macro_rules! generate_dense_matrix_tests_batched {
 }
 
 #[cfg(test)]
-pub(crate) use generate_dense_matrix_tests_nonbatched;
-#[cfg(test)]
 pub(crate) use generate_dense_matrix_tests_batched;
 #[cfg(test)]
-pub(crate) use generate_matrix_tests_nonbatched;
+pub(crate) use generate_dense_matrix_tests_nonbatched;
 #[cfg(test)]
 pub(crate) use generate_matrix_tests_batched;
+#[cfg(test)]
+pub(crate) use generate_matrix_tests_nonbatched;
