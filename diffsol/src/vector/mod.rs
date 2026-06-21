@@ -1461,8 +1461,8 @@ pub(crate) mod tests {
 }
 
 #[cfg(test)]
-macro_rules! generate_vector_tests {
-    ($suffix:ident, $V:ty, $ctx2:expr, $ctx3:expr) => {
+macro_rules! generate_vector_tests_nonbatched {
+    ($suffix:ident, $V:ty) => {
         paste::paste! {
             #[test]
             fn [<test_root_finding_ $suffix>]() {
@@ -1600,6 +1600,14 @@ macro_rules! generate_vector_tests {
             fn [<test_view_mut_copy_from_view_ $suffix>]() {
                 $crate::vector::tests::test_view_mut_copy_from_view::<$V>();
             }
+        }
+    };
+}
+
+#[cfg(test)]
+macro_rules! generate_vector_tests_batched {
+    ($suffix:ident, $V:ty, $ctx2:expr, $ctx3:expr) => {
+        paste::paste! {
             #[test]
             fn [<test_batched_len_and_total_len_ $suffix>]() {
                 $crate::vector::tests::test_batched_len_and_total_len::<$V>($ctx3);
@@ -1854,4 +1862,6 @@ macro_rules! generate_vector_tests {
     };
 }
 #[cfg(test)]
-pub(crate) use generate_vector_tests;
+pub(crate) use generate_vector_tests_nonbatched;
+#[cfg(test)]
+pub(crate) use generate_vector_tests_batched;

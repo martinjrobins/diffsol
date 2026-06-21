@@ -2165,7 +2165,9 @@ impl<'a, T: ScalarCuda> VectorViewMut<'a> for CudaVecMut<'a, T> {
 mod tests {
     use super::*;
 
-    super::super::generate_vector_tests!(
+    super::super::generate_vector_tests_nonbatched!(cuda, CudaVec<f64>);
+
+    super::super::generate_vector_tests_batched!(
         cuda,
         CudaVec<f64>,
         CudaContext::default().with_nbatch(2),

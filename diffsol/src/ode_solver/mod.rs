@@ -1172,13 +1172,13 @@ mod tests {
     pub fn test_solve_with_reset<'a, Eqn, Method>(
         mut solver: Method,
         soln: &OdeSolverSolution<Eqn::V>,
+        final_time: Eqn::T,
     ) where
         Eqn: OdeEquationsImplicit + 'a,
         Eqn::M: DefaultSolver,
         Eqn::V: DefaultDenseMatrix,
         Method: OdeSolverMethod<'a, Eqn>,
     {
-        let final_time = Eqn::T::from_f64(100.0).unwrap();
         let (ys, ts, stop_reason) = solver.solve(final_time).unwrap();
         assert_eq!(stop_reason, OdeSolverStopReason::TstopReached);
         let t_last = *ts.last().unwrap();

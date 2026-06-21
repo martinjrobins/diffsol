@@ -1471,14 +1471,18 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
 mod tests {
     use super::*;
 
-    super::super::generate_matrix_tests!(
+    super::super::generate_matrix_tests_nonbatched!(cuda, CudaMat<f64>);
+
+    super::super::generate_matrix_tests_batched!(
         cuda,
         CudaMat<f64>,
         CudaContext::default(),
         CudaContext::default().with_nbatch(2)
     );
 
-    super::super::generate_dense_matrix_tests!(
+    super::super::generate_dense_matrix_tests_nonbatched!(cuda, CudaMat<f64>);
+
+    super::super::generate_dense_matrix_tests_batched!(
         cuda,
         CudaMat<f64>,
         CudaContext::default(),

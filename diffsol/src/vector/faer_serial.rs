@@ -490,4 +490,6 @@ mod tests {
         let v: FaerVec<f64> = col.into();
         assert_eq!(v.clone_as_vec(), vec![1.0, 2.0, 3.0]);
     }
+
+    super::super::generate_vector_tests_nonbatched!(faer, FaerVec<f64>);
 }

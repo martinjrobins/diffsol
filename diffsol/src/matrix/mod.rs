@@ -2048,8 +2048,8 @@ pub(crate) mod tests {
 }
 
 #[cfg(test)]
-macro_rules! generate_matrix_tests {
-    ($suffix:ident, $M:ty, $ctx1:expr, $ctx2:expr) => {
+macro_rules! generate_matrix_tests_nonbatched {
+    ($suffix:ident, $M:ty) => {
         paste::paste! {
             #[test]
             fn [<test_zeros_ $suffix>]() {
@@ -2087,6 +2087,14 @@ macro_rules! generate_matrix_tests {
             fn [<test_add_column_to_vector_ $suffix>]() {
                 $crate::matrix::tests::test_add_column_to_vector::<$M>();
             }
+        }
+    };
+}
+
+#[cfg(test)]
+macro_rules! generate_matrix_tests_batched {
+    ($suffix:ident, $M:ty, $ctx1:expr, $ctx2:expr) => {
+        paste::paste! {
             #[test]
             fn [<test_batched_add_column_to_vector_ $suffix>]() {
                 $crate::matrix::tests::test_batched_add_column_to_vector_m::<$M>($ctx2);
@@ -2144,8 +2152,8 @@ macro_rules! generate_matrix_tests {
 }
 
 #[cfg(test)]
-macro_rules! generate_dense_matrix_tests {
-    ($suffix:ident, $M:ty, $ctx1:expr, $ctx2:expr) => {
+macro_rules! generate_dense_matrix_tests_nonbatched {
+    ($suffix:ident, $M:ty) => {
         paste::paste! {
             #[test]
             fn [<test_from_vec_ $suffix>]() {
@@ -2207,6 +2215,14 @@ macro_rules! generate_dense_matrix_tests {
             fn [<test_mul_assign_scalar_ $suffix>]() {
                 $crate::matrix::tests::test_mul_assign_scalar::<$M>();
             }
+        }
+    };
+}
+
+#[cfg(test)]
+macro_rules! generate_dense_matrix_tests_batched {
+    ($suffix:ident, $M:ty, $ctx1:expr, $ctx2:expr) => {
+        paste::paste! {
             #[test]
             fn [<test_batched_column_axpy_ $suffix>]() {
                 $crate::matrix::tests::test_batched_column_axpy::<$M>($ctx2);
@@ -2323,6 +2339,10 @@ macro_rules! generate_dense_matrix_tests {
 }
 
 #[cfg(test)]
-pub(crate) use generate_dense_matrix_tests;
+pub(crate) use generate_dense_matrix_tests_nonbatched;
 #[cfg(test)]
-pub(crate) use generate_matrix_tests;
+pub(crate) use generate_dense_matrix_tests_batched;
+#[cfg(test)]
+pub(crate) use generate_matrix_tests_nonbatched;
+#[cfg(test)]
+pub(crate) use generate_matrix_tests_batched;

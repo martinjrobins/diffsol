@@ -2319,7 +2319,8 @@ mod test {
     fn test_bdf_cuda_exponential_decay_batched_with_reset() {
         use crate::{CudaLU, CudaMat, OdeSolverStopReason};
         let nbatch = 2;
-        let (problem, p_f64) = exponential_decay_problem_batched_with_reset::<CudaMat<f64>>(nbatch);
+        let (problem, p_f64) =
+            exponential_decay_problem_batched_with_reset::<CudaMat<f64>>(nbatch);
         let final_time = 10.0;
         let t_event = 5.0;
         let mut solver = problem.bdf::<CudaLU<f64>>().unwrap();
@@ -2376,7 +2377,7 @@ mod test {
     #[cfg(feature = "cuda")]
     #[test]
     fn test_bdf_cuda_exponential_decay_batched_adjoint() {
-        use crate::{AdjointOdeSolverMethod, CudaLU, CudaMat};
+        use crate::{CudaLU, CudaMat};
         let nbatch = 2;
         let (mut problem, soln) =
             exponential_decay_problem_batched_adjoint::<CudaMat<f64>>(nbatch, true);
@@ -2396,7 +2397,7 @@ mod test {
     #[cfg(feature = "cuda")]
     #[test]
     fn test_bdf_cuda_exponential_decay_batched_adjoint_sum_squares() {
-        use crate::{AdjointOdeSolverMethod, CudaLU, CudaMat};
+        use crate::{CudaLU, CudaMat};
         let nbatch = 2;
         let (mut problem, soln) =
             exponential_decay_problem_batched_adjoint::<CudaMat<f64>>(nbatch, false);
@@ -2418,7 +2419,7 @@ mod test {
     #[cfg(feature = "cuda")]
     #[test]
     fn test_bdf_cuda_exponential_decay_batched_adjoint_with_reset() {
-        use crate::{AdjointOdeSolverMethod, CudaLU, CudaMat};
+        use crate::{CudaLU, CudaMat};
         let nbatch = 2;
         let (mut problem, soln) =
             exponential_decay_problem_batched_adjoint_with_reset::<CudaMat<f64>>(nbatch);
@@ -2549,7 +2550,7 @@ mod test {
         use crate::ode_solver::tests::test_solve_with_reset;
         let (problem, soln) = exponential_decay_with_reset_problem::<M>();
         let solver = problem.bdf::<LS>().unwrap();
-        test_solve_with_reset(solver, &soln);
+        test_solve_with_reset(solver, &soln, 100.0);
     }
 
     /// Test that `solve_dense()` applies resets and continues to the final evaluation time.

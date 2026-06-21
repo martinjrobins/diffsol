@@ -428,4 +428,7 @@ mod tests {
     fn test_resize_cols() {
         super::super::tests::test_resize_cols::<NalgebraMat<f64>>();
     }
+
+    super::super::generate_matrix_tests_nonbatched!(nalgebra, NalgebraMat<f64>);
+    super::super::generate_dense_matrix_tests_nonbatched!(nalgebra, NalgebraMat<f64>);
 }

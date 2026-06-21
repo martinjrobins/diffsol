@@ -610,7 +610,7 @@ mod test {
         use crate::ode_solver::tests::test_solve_with_reset;
         let (problem, soln) = exponential_decay_with_reset_problem::<M>();
         let solver = problem.tsit45().unwrap();
-        test_solve_with_reset(solver, &soln);
+        test_solve_with_reset(solver, &soln, 100.0);
     }
 
     /// Test that `solve_dense()` applies resets and continues to the final evaluation time.

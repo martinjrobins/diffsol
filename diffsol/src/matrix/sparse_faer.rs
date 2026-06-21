@@ -445,4 +445,6 @@ mod tests {
     fn test_partition_indices_by_zero_diagonal() {
         super::super::tests::test_partition_indices_by_zero_diagonal::<FaerSparseMat<f64>>();
     }
+
+    super::super::generate_matrix_tests_nonbatched!(faer_sparse, FaerSparseMat<f64>);
 }
