@@ -105,7 +105,7 @@ pub struct OpStatistics {
     pub number_of_calls: usize,
     /// number of times the jacobian-vector product was computed
     pub number_of_jac_muls: usize,
-    /// number of times the jacobian matrix was evaluated
+    /// number of times the jacobian matrix was evaluated (SUNDIALS/CVODE `nje`)
     pub number_of_matrix_evals: usize,
     /// number of times the adjoint jacobian-vector product was computed
     pub number_of_jac_adj_muls: usize,

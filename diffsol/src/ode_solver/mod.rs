@@ -18,6 +18,62 @@ pub mod solution;
 pub mod state;
 pub mod tableau;
 
+use serde::Serialize;
+use std::fmt::Display;
+
+use crate::ode_solver::jacobian_update::SolverState;
+
+/// Solver statistics shared by all ODE solver methods.
+#[derive(Clone, Debug, Serialize, Default)]
+pub struct OdeSolverStatistics {
+    /// Total Jacobian/LU setups (CVODE `nsetups`); sum of the per-cause counters below.
+    pub number_of_linear_solver_setups: usize,
+    /// Number of time steps taken by the solver.
+    pub number_of_steps: usize,
+    /// Number of local error test failures (steps rejected for excessive local error).
+    pub number_of_error_test_failures: usize,
+    /// Total number of nonlinear (Newton) solver iterations across all steps.
+    pub number_of_nonlinear_solver_iterations: usize,
+    /// Number of nonlinear (Newton) solver convergence failures.
+    pub number_of_nonlinear_solver_fails: usize,
+    /// Jacobian/LU setups triggered by checkpoint or reinitialisation.
+    pub number_of_linear_solver_setups_from_checkpoint: usize,
+    /// Jacobian/LU setups triggered by a first nonlinear convergence failure.
+    pub number_of_linear_solver_setups_from_first_convergence_fail: usize,
+    /// Jacobian/LU setups triggered by a second nonlinear convergence failure.
+    pub number_of_linear_solver_setups_from_second_convergence_fail: usize,
+    /// Jacobian/LU setups triggered by a local error test failure.
+    pub number_of_linear_solver_setups_from_error_test_fail: usize,
+    /// Jacobian/LU setups triggered by the normal step-success heuristic.
+    pub number_of_linear_solver_setups_from_step_success: usize,
+}
+
+impl OdeSolverStatistics {
+    /// Record a Jacobian/LU setup, incrementing the total and the per-cause counter.
+    pub(crate) fn record_linear_solver_setup(&mut self, cause: SolverState) {
+        self.number_of_linear_solver_setups += 1;
+        match cause {
+            SolverState::Checkpoint => self.number_of_linear_solver_setups_from_checkpoint += 1,
+            SolverState::FirstConvergenceFail => {
+                self.number_of_linear_solver_setups_from_first_convergence_fail += 1
+            }
+            SolverState::SecondConvergenceFail => {
+                self.number_of_linear_solver_setups_from_second_convergence_fail += 1
+            }
+            SolverState::ErrorTestFail => {
+                self.number_of_linear_solver_setups_from_error_test_fail += 1
+            }
+            SolverState::StepSuccess => self.number_of_linear_solver_setups_from_step_success += 1,
+        }
+    }
+}
+
+impl Display for OdeSolverStatistics {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", serde_json::to_string_pretty(self).unwrap())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::rc::Rc;

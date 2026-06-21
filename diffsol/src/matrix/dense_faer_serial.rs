@@ -276,6 +276,9 @@ impl<T: FaerScalar> Matrix for FaerMat<T> {
     fn context(&self) -> &Self::C {
         &self.context
     }
+    fn inner_mut(&mut self) -> &mut Self::Inner {
+        &mut self.data
+    }
 
     fn gather(&mut self, other: &Self, indices: &<Self::V as Vector>::Index) {
         assert_eq!(indices.len(), self.nrows() * self.ncols());

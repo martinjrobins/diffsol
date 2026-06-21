@@ -1101,6 +1101,9 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
     fn context(&self) -> &Self::C {
         &self.context
     }
+    fn inner_mut(&mut self) -> &mut Self::Inner {
+        &mut self.data
+    }
 
     fn gather(&mut self, other: &Self, indices: &<Self::V as Vector>::Index) {
         let nbatch = self.context.nbatch();
