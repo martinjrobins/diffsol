@@ -858,38 +858,9 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
         }
         let old_ncols = self.ncols;
         let nrows = self.nrows;
-        if nbatch == 1 {
-            self.ncols = new_ncols;
-            return;
-        }
         let cols_to_copy = old_ncols.min(new_ncols);
         let old_batch_elems = nrows * old_ncols;
         let new_batch_elems = nrows * new_ncols;
-        if new_ncols < old_ncols {
-            for b in 1..nbatch {
-                let old_offset = b * old_batch_elems;
-                let new_offset = b * new_batch_elems;
-                let len = nrows * cols_to_copy;
-                let (mut head, mut tail) = self.data.split_at_mut(new_offset.max(old_offset));
-                if old_offset < new_offset {
-                    let src = head.slice(old_offset..old_offset + len);
-                    let mut dst = tail.slice_mut(0..0 + len);
-                    self.context
-                        .stream
-                        .memcpy_dtod(&src, &mut dst)
-                        .expect("Failed to copy data during resize_cols shrink");
-                } else {
-                    let mut dst = head.slice_mut(new_offset..new_offset + len);
-                    let src = tail.slice(old_offset - new_offset..old_offset - new_offset + len);
-                    self.context
-                        .stream
-                        .memcpy_dtod(&src, &mut dst)
-                        .expect("Failed to copy data during resize_cols shrink");
-                }
-            }
-            self.ncols = new_ncols;
-            return;
-        }
         let total_new = nrows * new_ncols * nbatch;
         let mut new_data = unsafe {
             self.context

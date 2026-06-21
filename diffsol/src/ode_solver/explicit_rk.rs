@@ -521,7 +521,7 @@ mod test {
     #[cfg(feature = "cuda")]
     #[test]
     fn test_tsit45_cuda_exponential_decay_batched() {
-        use crate::{CudaLU, CudaMat};
+        use crate::CudaMat;
         let (problem, soln) = exponential_decay_problem_batched::<CudaMat<f64>>(2);
         let mut s = problem.tsit45().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);

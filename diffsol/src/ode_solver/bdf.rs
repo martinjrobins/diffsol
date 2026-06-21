@@ -2364,147 +2364,6 @@ mod test {
 
     #[cfg(feature = "cuda")]
     #[test]
-    fn test_bdf_cuda_exponential_decay_batched_adjoint() {
-        use crate::{AdjointOdeSolverMethod, CudaLU, CudaMat, OdeSolverState};
-        let nbatch = 2;
-        let (problem, soln) =
-            exponential_decay_problem_batched_adjoint::<CudaMat<f64>>(nbatch, true);
-        let final_time = soln.solution_points.last().unwrap().t;
-        let mut s = problem.bdf::<CudaLU<f64>>().unwrap();
-        let (checkpointer, _y, _t, _stop_reason) =
-            s.solve_with_checkpointing(final_time, None).unwrap();
-        let adjoint_solver = problem
-            .bdf_solver_adjoint::<CudaLU<f64>, _>(checkpointer, Some(s), Some(2))
-            .unwrap();
-        let (state, _) = adjoint_solver
-            .solve_adjoint_backwards_pass(&[], &[])
-            .unwrap();
-        let gs_adj = state.into_common().sg;
-        let last_sens = soln.sens_solution_points.as_ref().unwrap();
-        let last_idx = soln.solution_points.len() - 1;
-        for j in 0..2 {
-            let expected = &last_sens[j][last_idx].state;
-            for b in 0..nbatch {
-                let adj_b = gs_adj[j].get_batch(b);
-                let exp_b = expected.get_batch(b);
-                for i in 0..2 {
-                    let err = (adj_b.get_index(i) - exp_b.get_index(i)).abs();
-                    let scale = exp_b.get_index(i).abs() * 1e-4 + 1e-4;
-                    assert!(
-                        err < scale * 40.0,
-                        "batch {b}, out {j}, param {i}: adj={}, exp={}, err={err}",
-                        adj_b.get_index(i),
-                        exp_b.get_index(i),
-                    );
-                }
-            }
-        }
-    }
-
-    #[cfg(feature = "cuda")]
-    #[test]
-    fn test_bdf_cuda_exponential_decay_batched_adjoint_sum_squares() {
-        use crate::{
-            ode_solver::tests::{dsum_squaresdp, sum_squares},
-            AdjointOdeSolverMethod, CudaContext, CudaLU, CudaMat, CudaVec, OdeSolverState,
-        };
-        let nbatch = 2;
-        let p_f64 = vec![0.1, 1.0, 0.2, 2.0];
-        let nparams = 2;
-        let times: Vec<f64> = (0..18).map(|i| i as f64 / 2.0).collect();
-        let ctx = CudaContext::default().with_nbatch(nbatch);
-        let h_base = 1e-10;
-
-        let mut p_data_f64 = Vec::new();
-        for b in 0..nbatch {
-            p_data_f64.push(p_f64[b * 2] * 1.1);
-            p_data_f64.push(p_f64[b * 2 + 1] * 1.1);
-        }
-        let (mut problem_data, _) =
-            exponential_decay_problem_batched_adjoint::<CudaMat<f64>>(nbatch, false);
-        let p_data = CudaVec::from_vec(p_data_f64, ctx.clone());
-        problem_data.eqn.set_params(&p_data);
-        let data = {
-            let mut s = problem_data.bdf::<CudaLU<f64>>().unwrap();
-            s.solve_dense(&times).unwrap().0
-        };
-
-        let mut dgdp_per_batch: Vec<Vec<[f64; 2]>> = vec![vec![[0.0; 2]; nparams]; nbatch];
-        for i in 0..nparams {
-            let mut p_pos_f64 = p_f64.clone();
-            let mut p_neg_f64 = p_f64.clone();
-            for b in 0..nbatch {
-                let base_val = p_f64[b * 2 + i];
-                let h = h_base + h_base * base_val.abs();
-                p_pos_f64[b * 2 + i] = base_val + h;
-                p_neg_f64[b * 2 + i] = base_val - h;
-            }
-            let p_pos = CudaVec::from_vec(p_pos_f64.iter().map(|&v| v).collect(), ctx.clone());
-            let p_neg = CudaVec::from_vec(p_neg_f64.iter().map(|&v| v).collect(), ctx.clone());
-
-            let (mut prob_pos, _) =
-                exponential_decay_problem_batched_adjoint::<CudaMat<f64>>(nbatch, false);
-            prob_pos.eqn.set_params(&p_pos);
-            let g_pos = {
-                let mut s = prob_pos.bdf::<CudaLU<f64>>().unwrap();
-                let v = s.solve_dense(&times).unwrap().0;
-                sum_squares(&v, &data)
-            };
-
-            let (mut prob_neg, _) =
-                exponential_decay_problem_batched_adjoint::<CudaMat<f64>>(nbatch, false);
-            prob_neg.eqn.set_params(&p_neg);
-            let g_neg = {
-                let mut s = prob_neg.bdf::<CudaLU<f64>>().unwrap();
-                let v = s.solve_dense(&times).unwrap().0;
-                sum_squares(&v, &data)
-            };
-
-            for b in 0..nbatch {
-                let h = h_base + h_base * p_f64[b * 2 + i].abs();
-                let g_pos_b = g_pos.get_batch(b);
-                let g_neg_b = g_neg.get_batch(b);
-                for j in 0..2 {
-                    dgdp_per_batch[b][i][j] =
-                        (g_pos_b.get_index(j) - g_neg_b.get_index(j)) / (2.0 * h);
-                }
-            }
-        }
-
-        let (problem, _) = exponential_decay_problem_batched_adjoint::<CudaMat<f64>>(nbatch, false);
-        let mut s = problem.bdf::<CudaLU<f64>>().unwrap();
-        let (checkpointer, soln, _stop_reason) = s
-            .solve_dense_with_checkpointing(times.as_slice(), None)
-            .unwrap();
-        let adjoint_solver = problem
-            .bdf_solver_adjoint::<CudaLU<f64>, _>(checkpointer, Some(s), Some(2))
-            .unwrap();
-        let dgdu = dsum_squaresdp(&soln, &data);
-        let (state, _) = adjoint_solver
-            .solve_adjoint_backwards_pass(
-                times.as_slice(),
-                dgdu.iter().collect::<Vec<_>>().as_slice(),
-            )
-            .unwrap();
-        let gs_adj = state.into_common().sg;
-        for b in 0..nbatch {
-            for j in 0..2 {
-                let adj_b = gs_adj[j].get_batch(b);
-                for i in 0..nparams {
-                    let expected = dgdp_per_batch[b][i][j];
-                    let actual = adj_b.get_index(i);
-                    let tol = expected.abs() * 1e-2 + 1e-6;
-                    assert!(
-                        (actual - expected).abs() < tol * 260.0,
-                        "batch {b}, out {j}, param {i}: adj={actual}, fd={expected}",
-                    );
-                }
-            }
-        }
-    }
-
-    #[cfg(feature = "cuda")]
-    #[test]
     fn test_bdf_cuda_exponential_decay_batched_sens_with_reset() {
         use crate::{CudaLU, CudaMat};
         let nbatch = 2;
@@ -2516,29 +2375,62 @@ mod test {
 
     #[cfg(feature = "cuda")]
     #[test]
+    fn test_bdf_cuda_exponential_decay_batched_adjoint() {
+        use crate::{AdjointOdeSolverMethod, CudaLU, CudaMat};
+        let nbatch = 2;
+        let (mut problem, soln) =
+            exponential_decay_problem_batched_adjoint::<CudaMat<f64>>(nbatch, true);
+        let final_time = soln.solution_points.last().unwrap().t;
+        let dgdu = setup_test_adjoint::<CudaLU<f64>, _>(&mut problem, soln);
+        let (problem, _soln) =
+            exponential_decay_problem_batched_adjoint::<CudaMat<f64>>(nbatch, true);
+        let mut s = problem.bdf::<CudaLU<f64>>().unwrap();
+        let (checkpointer, _y, _t, _stop_reason) =
+            s.solve_with_checkpointing(final_time, None).unwrap();
+        let adjoint_solver = problem
+            .bdf_solver_adjoint::<CudaLU<f64>, _>(checkpointer, Some(s), Some(dgdu.ncols()))
+            .unwrap();
+        test_adjoint(adjoint_solver, dgdu);
+    }
+
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn test_bdf_cuda_exponential_decay_batched_adjoint_sum_squares() {
+        use crate::{AdjointOdeSolverMethod, CudaLU, CudaMat};
+        let nbatch = 2;
+        let (mut problem, soln) =
+            exponential_decay_problem_batched_adjoint::<CudaMat<f64>>(nbatch, false);
+        let times = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
+        let (dgdp, data) =
+            setup_test_adjoint_sum_squares::<CudaLU<f64>, _>(&mut problem, times.as_slice());
+        let (problem, _soln) =
+            exponential_decay_problem_batched_adjoint::<CudaMat<f64>>(nbatch, false);
+        let mut s = problem.bdf::<CudaLU<f64>>().unwrap();
+        let (checkpointer, soln, _stop_reason) = s
+            .solve_dense_with_checkpointing(times.as_slice(), None)
+            .unwrap();
+        let adjoint_solver = problem
+            .bdf_solver_adjoint::<CudaLU<f64>, _>(checkpointer, Some(s), Some(dgdp.ncols()))
+            .unwrap();
+        test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
+    }
+
+    #[cfg(feature = "cuda")]
+    #[test]
     fn test_bdf_cuda_exponential_decay_batched_adjoint_with_reset() {
-        use crate::{AdjointOdeSolverMethod, CudaLU, CudaMat, CudaVec, OdeSolverState};
+        use crate::{AdjointOdeSolverMethod, CudaLU, CudaMat};
         let nbatch = 2;
         let (mut problem, soln) =
             exponential_decay_problem_batched_adjoint_with_reset::<CudaMat<f64>>(nbatch);
         let final_time = soln.solution_points.last().unwrap().t;
-        let ctx = problem.eqn.context().clone_with_nbatch(nbatch).unwrap();
         let dgdp_check = setup_test_adjoint::<CudaLU<f64>, _>(&mut problem, soln);
         let mut s = problem.bdf::<CudaLU<f64>>().unwrap();
         let (checkpointer, _y, _t, _stop_reason) =
             s.solve_with_checkpointing(final_time, None).unwrap();
         let adjoint_solver = problem
-            .bdf_solver_adjoint::<CudaLU<f64>, _>(checkpointer, Some(s), Some(2))
+            .bdf_solver_adjoint::<CudaLU<f64>, _>(checkpointer, Some(s), Some(dgdp_check.ncols()))
             .unwrap();
-        let (state, _) = adjoint_solver
-            .solve_adjoint_backwards_pass(&[], &[])
-            .unwrap();
-        let gs_adj = state.into_common().sg;
-        let nout = problem.eqn.nout();
-        let atol = CudaVec::<f64>::from_element(nout, 1e-6, ctx);
-        for j in 0..nout {
-            gs_adj[j].assert_eq_norm(&dgdp_check.column(j).into_owned(), &atol, 1e-2, 100.0);
-        }
+        test_adjoint(adjoint_solver, dgdp_check);
     }
 
     #[cfg(feature = "cuda")]

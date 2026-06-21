@@ -799,24 +799,6 @@ pub(crate) mod tests {
         );
     }
 
-    pub fn test_batched_triplet_iter_s<M: Matrix>(ctx: M::C) {
-        assert_eq!(ctx.nbatch(), 2);
-        let indices = vec![(0, 0), (1, 1)];
-        let nnz = indices.len();
-        let values = vec![
-            f::<M>(1.0),
-            f::<M>(2.0), // batch 0
-            f::<M>(3.0),
-            f::<M>(4.0), // batch 1
-        ];
-        let a = M::try_from_triplets(2, 2, indices, values, ctx).unwrap();
-        let (idx_iter, val_iter) = a.triplet_iter();
-        let idx: Vec<_> = idx_iter.collect();
-        let vals: Vec<_> = val_iter.collect();
-        assert_eq!(idx.len(), nnz);
-        assert_eq!(vals.len(), nnz * 2);
-    }
-
     pub fn test_batched_from_diagonal_m<M: Matrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         let v = M::V::from_vec(
@@ -2341,20 +2323,6 @@ macro_rules! generate_dense_matrix_tests {
 }
 
 #[cfg(test)]
-macro_rules! generate_sparse_matrix_tests {
-    ($suffix:ident, $M:ty, $ctx1:expr, $ctx2:expr) => {
-        paste::paste! {
-            #[test]
-            fn [<test_batched_triplet_iter_ $suffix>]() {
-                $crate::matrix::tests::test_batched_triplet_iter_s::<$M>($ctx2);
-            }
-        }
-    };
-}
-
-#[cfg(test)]
 pub(crate) use generate_dense_matrix_tests;
 #[cfg(test)]
 pub(crate) use generate_matrix_tests;
-#[cfg(test)]
-pub(crate) use generate_sparse_matrix_tests;

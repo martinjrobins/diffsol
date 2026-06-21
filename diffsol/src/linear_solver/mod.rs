@@ -61,8 +61,8 @@ pub mod tests {
         op::{closure::Closure, ParameterisedOp},
         scalar::scale,
         vector::VectorRef,
-        Context, FaerMat, FaerVec, LinearSolver, Matrix, NalgebraContext, NalgebraVec,
-        NonLinearOpJacobian, Op, Vector,
+        Context, FaerMat, FaerVec, LinearSolver, Matrix, NalgebraVec, NonLinearOpJacobian, Op,
+        Vector,
     };
     use num_traits::{FromPrimitive, One, Zero};
 

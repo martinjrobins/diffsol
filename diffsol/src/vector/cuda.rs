@@ -69,27 +69,38 @@ impl CudaContext {
     }
 
     fn norm<T: ScalarCuda, D: DevicePtr<T>>(&self, x: &D, k: i32) -> T {
-        if k != 2 {
-            panic!("Unsupported norm type");
-        }
-        let blas = CudaBlas::new(self.stream.clone()).expect("Failed to create CudaBlas");
-        let n = x.len() as c_int;
-        let (x, _syn_x) = x.device_ptr(&self.stream);
-        let result: T;
-        match T::as_enum() {
-            CudaType::F64 => {
-                let x = x as *const f64;
-                let mut result_f64 = 0.0;
-                let status = unsafe {
-                    cublas::cublasDnrm2_v2(*blas.handle(), n, x, 1, &mut result_f64 as *mut f64)
-                };
-                result = T::from_f64(result_f64).unwrap();
-                status
+        if k == 2 {
+            let blas = CudaBlas::new(self.stream.clone()).expect("Failed to create CudaBlas");
+            let n = x.len() as c_int;
+            let (x, _syn_x) = x.device_ptr(&self.stream);
+            let result: T;
+            match T::as_enum() {
+                CudaType::F64 => {
+                    let x = x as *const f64;
+                    let mut result_f64 = 0.0;
+                    let status = unsafe {
+                        cublas::cublasDnrm2_v2(*blas.handle(), n, x, 1, &mut result_f64 as *mut f64)
+                    };
+                    result = T::from_f64(result_f64).unwrap();
+                    status
+                }
             }
+            .result()
+            .expect("Failed to call cublasDnrm2_v2");
+            return result;
         }
-        .result()
-        .expect("Failed to call cublasDnrm2_v2");
-        result
+        let n = x.len();
+        let mut host = vec![T::zero(); n];
+        self.stream
+            .memcpy_dtoh(x, &mut host)
+            .expect("Failed to copy data to host for norm computation");
+        if k == 1 {
+            host.iter().fold(T::zero(), |acc, &x| acc + x.abs())
+        } else {
+            host.iter()
+                .fold(T::zero(), |acc, &x| acc + x.pow(k))
+                .pow(T::one() / T::from_f64(k as f64).unwrap())
+        }
     }
 }
 
@@ -1240,9 +1251,16 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
             return T::zero();
         }
         if k != 2 {
-            panic!("Unsupported norm type");
+            let mut max_norm = T::zero();
+            for b in 0..nbatch {
+                let batch_data = self.data.slice(b * nstates..(b + 1) * nstates);
+                let norm = self.context.norm(&batch_data, k);
+                if norm > max_norm {
+                    max_norm = norm;
+                }
+            }
+            return max_norm;
         }
-
         let nstates_u32 = nstates as u32;
         let nbatch_u32 = nbatch as u32;
 

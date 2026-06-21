@@ -141,8 +141,8 @@ mod tests {
     use crate::op::init::InitOp;
     use crate::vector::Vector;
     use crate::{
-        DenseMatrix, LinearOp, Matrix, MatrixCommon, NalgebraContext, NalgebraMat, NalgebraVec,
-        NonLinearOp, NonLinearOpJacobian, OdeEquations, VectorIndex,
+        DenseMatrix, LinearOp, Matrix, NalgebraMat, NalgebraVec, NonLinearOp, NonLinearOpJacobian,
+        OdeEquations,
     };
 
     type Mcpu = NalgebraMat<f64>;
@@ -250,7 +250,6 @@ mod tests {
 
         let initop = InitOp::new(&problem.eqn, t, &y0, algebraic_indices);
 
-        let dy0 = CudaVec::from_vec(vec![4.0, 5.0, 6.0, 4.0, 5.0, 6.0], ctx.clone());
         let du_v = CudaVec::from_vec(vec![4.0, 5.0, 1.0, 4.0, 5.0, 1.0], ctx.clone());
         let mut y_out = CudaVec::zeros(3, ctx.clone());
         initop.call_inplace(&du_v, t, &mut y_out);
