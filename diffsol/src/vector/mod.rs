@@ -264,7 +264,7 @@ pub trait Vector:
     /// Compute the AXPY operation with a vector view: self = alpha * x + beta * self
     fn axpy_v(&mut self, alpha: Self::T, x: &Self::View<'_>, beta: Self::T);
 
-    /// Per-batch AXPY: self[i]_b = alpha[b] * x[i]_b + beta * self[i]_b
+    /// Per-batch AXPY: `self[i]_b = alpha[b] * x[i]_b + beta * self[i]_b`
     ///
     /// `alpha` must have length equal to `self.context().nbatch()`.
     /// Each batch uses its own scalar multiplier `alpha[b]`.

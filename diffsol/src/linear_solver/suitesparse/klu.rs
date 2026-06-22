@@ -44,7 +44,7 @@ impl MatrixKLU for FaerSparseMat<f64> {
     }
 
     fn values_ptr(&mut self) -> *mut f64 {
-        self.data.val_mut().as_mut_ptr() as *mut f64
+        self.data.val_mut().as_mut_ptr()
     }
 }
 
