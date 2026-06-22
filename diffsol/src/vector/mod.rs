@@ -701,6 +701,7 @@ pub(crate) mod tests {
         assert_eq!(v1.clone_as_vec(), fv::<V>(&[1.0, 2.0, 3.0]));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_len_and_total_len<V: Vector>(ctx: V::C) {
         let nbatch = ctx.nbatch();
         assert!(nbatch > 1);
@@ -709,6 +710,7 @@ pub(crate) mod tests {
         assert_eq!(v.total_len(), 4 * nbatch);
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_from_vec<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         let v = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]), ctx);
@@ -717,11 +719,13 @@ pub(crate) mod tests {
         assert_eq!(v.clone_as_vec(), fv::<V>(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_from_vec_bad_length<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         let _v = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0]), ctx);
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_from_element<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 3);
         let v = V::from_element(2, f::<V>(5.0), ctx);
@@ -729,6 +733,7 @@ pub(crate) mod tests {
         assert_eq!(v.clone_as_vec(), fv::<V>(&[5.0, 5.0, 5.0, 5.0, 5.0, 5.0]));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_axpy<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         let mut y = V::from_vec(fv::<V>(&[1.0, 2.0, 10.0, 20.0]), ctx.clone());
@@ -737,6 +742,7 @@ pub(crate) mod tests {
         assert_eq!(y.clone_as_vec(), fv::<V>(&[7.0, 10.0, 70.0, 100.0]));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_add<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         let a = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0]), ctx.clone());
@@ -746,6 +752,7 @@ pub(crate) mod tests {
         assert_eq!(c.clone_as_vec(), fv::<V>(&[11.0, 22.0, 33.0, 44.0]));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_norm_max_across_batches<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         let v = V::from_vec(fv::<V>(&[1.0, 0.0, 0.0, 3.0]), ctx);
@@ -754,6 +761,7 @@ pub(crate) mod tests {
         assert!(num_traits::abs(diff) < f::<V>(1e-12));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_norm_l1<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         let v = V::from_vec(fv::<V>(&[1.0, -2.0, 3.0, 0.0]), ctx);
@@ -763,6 +771,7 @@ pub(crate) mod tests {
         assert!(num_traits::abs(diff) < f::<V>(1e-12));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_squared_norm<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         let x = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0]), ctx.clone());
@@ -778,6 +787,7 @@ pub(crate) mod tests {
         assert!(num_traits::abs(diff) < f::<V>(1e-12));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_set_index<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 3);
         let mut v = V::zeros(2, ctx);
@@ -788,12 +798,14 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_get_index_panics<V: Vector>(ctx: V::C) {
         assert!(ctx.nbatch() > 1);
         let v = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0]), ctx);
         let _val = v.get_index(0);
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_fill<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         let mut v = V::zeros(3, ctx);
@@ -801,6 +813,7 @@ pub(crate) mod tests {
         assert_eq!(v.clone_as_vec(), fv::<V>(&[7.0, 7.0, 7.0, 7.0, 7.0, 7.0]));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_component_mul<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         let mut a = V::from_vec(fv::<V>(&[2.0, 3.0, 4.0, 5.0]), ctx.clone());
@@ -809,6 +822,7 @@ pub(crate) mod tests {
         assert_eq!(a.clone_as_vec(), fv::<V>(&[20.0, 60.0, 120.0, 200.0]));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_assign_at_indices<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         let mut v = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]), ctx);
@@ -817,6 +831,7 @@ pub(crate) mod tests {
         assert_eq!(v.clone_as_vec(), fv::<V>(&[0.0, 2.0, 0.0, 0.0, 5.0, 0.0]));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_root_finding_consistent<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         let g0 = V::from_vec(fv::<V>(&[1.0, -1.0, 1.0, -1.0]), ctx.clone());
@@ -826,6 +841,7 @@ pub(crate) mod tests {
         assert!(idx >= 0);
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_root_finding_inconsistent<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         let g0 = V::from_vec(fv::<V>(&[1.0, 1.0, 1.0, -1.0]), ctx.clone());
@@ -835,6 +851,7 @@ pub(crate) mod tests {
 
     // --- Broadcasting tests ---
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_axpy_broadcast<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         // self has nbatch=2, x has nbatch=1
@@ -845,6 +862,7 @@ pub(crate) mod tests {
         assert_eq!(y.clone_as_vec(), fv::<V>(&[7.0, 10.0, 16.0, 28.0]));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_copy_from_broadcast<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         let mut y = V::zeros(2, ctx);
@@ -854,6 +872,7 @@ pub(crate) mod tests {
         assert_eq!(y.clone_as_vec(), fv::<V>(&[5.0, 7.0, 5.0, 7.0]));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_component_div<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         let mut a = V::from_vec(fv::<V>(&[6.0, 8.0, 12.0, 20.0]), ctx.clone());
@@ -862,6 +881,7 @@ pub(crate) mod tests {
         assert_eq!(a.clone_as_vec(), fv::<V>(&[3.0, 2.0, 4.0, 4.0]));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_component_mul_broadcast<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         let mut a = V::from_vec(fv::<V>(&[2.0, 3.0, 4.0, 5.0]), ctx);
@@ -871,6 +891,7 @@ pub(crate) mod tests {
         assert_eq!(a.clone_as_vec(), fv::<V>(&[20.0, 60.0, 40.0, 100.0]));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_component_div_broadcast<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         let mut a = V::from_vec(fv::<V>(&[6.0, 8.0, 12.0, 20.0]), ctx);
@@ -880,6 +901,7 @@ pub(crate) mod tests {
         assert_eq!(a.clone_as_vec(), fv::<V>(&[3.0, 2.0, 6.0, 5.0]));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_add_assign_broadcast<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         let mut a = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0]), ctx);
@@ -888,6 +910,7 @@ pub(crate) mod tests {
         assert_eq!(a.clone_as_vec(), fv::<V>(&[11.0, 22.0, 13.0, 24.0]));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_sub_assign_broadcast<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         let mut a = V::from_vec(fv::<V>(&[10.0, 20.0, 30.0, 40.0]), ctx);
@@ -896,6 +919,7 @@ pub(crate) mod tests {
         assert_eq!(a.clone_as_vec(), fv::<V>(&[9.0, 18.0, 29.0, 38.0]));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_sub<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         let a = V::from_vec(fv::<V>(&[10.0, 20.0, 30.0, 40.0]), ctx.clone());
@@ -904,6 +928,7 @@ pub(crate) mod tests {
         assert_eq!(c.clone_as_vec(), fv::<V>(&[9.0, 18.0, 27.0, 36.0]));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_sub_assign<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         let mut a = V::from_vec(fv::<V>(&[10.0, 20.0, 30.0, 40.0]), ctx.clone());
@@ -912,6 +937,7 @@ pub(crate) mod tests {
         assert_eq!(a.clone_as_vec(), fv::<V>(&[9.0, 18.0, 27.0, 36.0]));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_from_slice<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         let slice = fv::<V>(&[1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
@@ -919,6 +945,7 @@ pub(crate) mod tests {
         assert_eq!(v.clone_as_vec(), fv::<V>(&[1.0, 2.0, 3.0, 1.0, 2.0, 3.0]));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_mul_scalar<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         let v = V::from_vec(fv::<V>(&[1.0, 2.0, 10.0, 20.0]), ctx);
@@ -926,6 +953,7 @@ pub(crate) mod tests {
         assert_eq!(result.clone_as_vec(), fv::<V>(&[2.0, 4.0, 20.0, 40.0]));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_div_scalar<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         let v = V::from_vec(fv::<V>(&[2.0, 4.0, 20.0, 40.0]), ctx);
@@ -933,6 +961,7 @@ pub(crate) mod tests {
         assert_eq!(result.clone_as_vec(), fv::<V>(&[1.0, 2.0, 10.0, 20.0]));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_copy_from_indices<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         let mut v1 = V::zeros(4, ctx.clone());
@@ -948,6 +977,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_gather<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         let mut result = V::zeros(3, ctx.clone());
@@ -963,6 +993,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_scatter<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         let v = V::from_vec(fv::<V>(&[40.0, 10.0, 30.0, 80.0, 50.0, 70.0]), ctx.clone());
@@ -975,6 +1006,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_get_batch<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         let v = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 10.0, 20.0, 30.0]), ctx);
@@ -988,6 +1020,7 @@ pub(crate) mod tests {
         assert_eq!(batch1.get_index(2), f::<V>(30.0));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_get_batch_mut<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         let mut v = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 10.0, 20.0, 30.0]), ctx);
@@ -1001,6 +1034,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_axpy_v<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         let mut y = V::from_vec(fv::<V>(&[1.0, 2.0, 10.0, 20.0]), ctx.clone());
@@ -1010,6 +1044,7 @@ pub(crate) mod tests {
         assert_eq!(y.clone_as_vec(), fv::<V>(&[7.0, 10.0, 70.0, 100.0]));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_mul_assign_scalar<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         let mut v = V::from_vec(fv::<V>(&[1.0, 2.0, 10.0, 20.0]), ctx);
@@ -1017,6 +1052,7 @@ pub(crate) mod tests {
         assert_eq!(v.clone_as_vec(), fv::<V>(&[2.0, 4.0, 20.0, 40.0]));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_copy_from_view<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         let mut v1 = V::zeros(2, ctx);
@@ -1028,6 +1064,7 @@ pub(crate) mod tests {
 
     // --- batched_axpy tests ---
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_axpy_new<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         let mut y = V::from_vec(fv::<V>(&[1.0, 2.0, 10.0, 20.0]), ctx.clone());
@@ -1038,6 +1075,7 @@ pub(crate) mod tests {
         assert_eq!(y.clone_as_vec(), fv::<V>(&[7.0, 10.0, 25.0, 40.0]));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_axpy_new_broadcast<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         let mut y = V::from_vec(fv::<V>(&[1.0, 2.0, 10.0, 20.0]), ctx);
@@ -1050,6 +1088,7 @@ pub(crate) mod tests {
     }
 
     #[allow(clippy::type_complexity)]
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_axpy_new_bad_length<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         let mut y = V::zeros(2, ctx);
@@ -1059,6 +1098,7 @@ pub(crate) mod tests {
 
     // --- Incompatible batch tests ---
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_axpy_incompatible<V: Vector>(ctx2: V::C, ctx3: V::C) {
         assert_eq!(ctx2.nbatch(), 2);
         assert_eq!(ctx3.nbatch(), 3);
@@ -1067,6 +1107,7 @@ pub(crate) mod tests {
         y.axpy(f::<V>(1.0), &x, f::<V>(1.0));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_copy_from_incompatible<V: Vector>(ctx2: V::C, ctx3: V::C) {
         assert_eq!(ctx2.nbatch(), 2);
         assert_eq!(ctx3.nbatch(), 3);
@@ -1075,6 +1116,7 @@ pub(crate) mod tests {
         y.copy_from(&x);
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_add_assign_incompatible<V: Vector>(ctx2: V::C, ctx3: V::C) {
         assert_eq!(ctx2.nbatch(), 2);
         assert_eq!(ctx3.nbatch(), 3);
@@ -1083,6 +1125,7 @@ pub(crate) mod tests {
         a += &b;
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_component_mul_incompatible<V: Vector>(ctx2: V::C, ctx3: V::C) {
         assert_eq!(ctx2.nbatch(), 2);
         assert_eq!(ctx3.nbatch(), 3);
@@ -1175,6 +1218,7 @@ pub(crate) mod tests {
 
     use crate::matrix::DenseMatrix;
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     fn make_strided_test_matrix<M: DenseMatrix>(nbatch: usize) -> M {
         let ctx = M::C::default().clone_with_nbatch(nbatch).unwrap();
         let nrows = 3;
@@ -1190,6 +1234,7 @@ pub(crate) mod tests {
         M::from_vec(nrows, ncols, data, ctx)
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_strided_view_set_index<M: DenseMatrix>(ctx: M::C) {
         let mut matrix = make_strided_test_matrix::<M>(ctx.nbatch());
         {
@@ -1203,6 +1248,7 @@ pub(crate) mod tests {
         assert_eq!(b1.get_index(1), f::<M::V>(99.0));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_strided_view_mut_copy_from<M: DenseMatrix>(ctx: M::C) {
         let mut matrix = make_strided_test_matrix::<M>(ctx.nbatch());
         let owned = M::V::from_vec(
@@ -1224,6 +1270,7 @@ pub(crate) mod tests {
         assert_eq!(b1.get_index(2), f::<M::V>(52.0));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_strided_view_mut_axpy<M: DenseMatrix>(ctx: M::C) {
         let mut matrix = make_strided_test_matrix::<M>(ctx.nbatch());
         let x = M::V::from_vec(
@@ -1241,6 +1288,7 @@ pub(crate) mod tests {
         assert_eq!(b1.get_index(2), f::<M::V>(132.0));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_strided_view_mut_mul_assign_scalar<M: DenseMatrix>(ctx: M::C) {
         let mut matrix = make_strided_test_matrix::<M>(ctx.nbatch());
         {
@@ -1254,6 +1302,7 @@ pub(crate) mod tests {
         assert_eq!(b1.get_index(0), f::<M::V>(220.0));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_strided_view_mut_add_assign<M: DenseMatrix>(ctx: M::C) {
         let mut matrix = make_strided_test_matrix::<M>(ctx.nbatch());
         let rhs = M::V::from_vec(
@@ -1282,6 +1331,7 @@ pub(crate) mod tests {
         assert_eq!(b1.get_index(2), f::<M::V>(122.0));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_strided_view_mut_sub_assign<M: DenseMatrix>(ctx: M::C) {
         let mut matrix = make_strided_test_matrix::<M>(ctx.nbatch());
         let rhs = M::V::from_vec(
@@ -1306,6 +1356,7 @@ pub(crate) mod tests {
         assert_eq!(b1.get_index(0), f::<M::V>(109.0));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_strided_view_add_assign_broadcast<M: DenseMatrix>(ctx: M::C) {
         let mut matrix = make_strided_test_matrix::<M>(ctx.nbatch());
         let rhs = M::V::from_vec(
@@ -1323,6 +1374,7 @@ pub(crate) mod tests {
         assert_eq!(b1.get_index(0), f::<M::V>(115.0));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_strided_view_add_owned<M: DenseMatrix>(ctx: M::C) {
         let matrix = make_strided_test_matrix::<M>(ctx.nbatch());
         let nbatch = ctx.nbatch();
@@ -1339,6 +1391,7 @@ pub(crate) mod tests {
         assert_eq!(b1.get_index(0), f::<M::V>(115.0));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_strided_view_squared_norm<M: DenseMatrix>(ctx: M::C) {
         let matrix = make_strided_test_matrix::<M>(ctx.nbatch());
         let nbatch = ctx.nbatch();
@@ -1356,6 +1409,7 @@ pub(crate) mod tests {
         assert!(norm > f::<M::V>(0.0));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_strided_view_into_owned<M: DenseMatrix>(ctx: M::C) {
         let matrix = make_strided_test_matrix::<M>(ctx.nbatch());
         let col1 = matrix.column(1);
@@ -1368,6 +1422,7 @@ pub(crate) mod tests {
         assert_eq!(b1.get_index(1), f::<M::V>(111.0));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_strided_view_component_mul<M: DenseMatrix>(ctx: M::C) {
         let matrix = make_strided_test_matrix::<M>(ctx.nbatch());
         let rhs = M::V::from_vec(
@@ -1385,6 +1440,7 @@ pub(crate) mod tests {
         assert_eq!(b1.get_index(1), f::<M::V>(111.0));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_strided_view_component_div<M: DenseMatrix>(ctx: M::C) {
         let matrix = make_strided_test_matrix::<M>(ctx.nbatch());
         let rhs = M::V::from_vec(
@@ -1400,6 +1456,7 @@ pub(crate) mod tests {
         assert_eq!(b1.get_index(0), f::<M::V>(11.0));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_strided_view_mul_scalar<M: DenseMatrix>(ctx: M::C) {
         let matrix = make_strided_test_matrix::<M>(ctx.nbatch());
         let col1 = matrix.column(1);
@@ -1410,6 +1467,7 @@ pub(crate) mod tests {
         assert_eq!(b1.get_index(0), f::<M::V>(220.0));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_strided_view_fill<M: DenseMatrix>(ctx: M::C) {
         let matrix = make_strided_test_matrix::<M>(ctx.nbatch());
         let col1 = matrix.column(1);
@@ -1421,6 +1479,7 @@ pub(crate) mod tests {
         assert_eq!(b1.get_index(0), f::<M::V>(7.0));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_strided_view_assign_at_indices<M: DenseMatrix>(ctx: M::C) {
         let matrix = make_strided_test_matrix::<M>(ctx.nbatch());
         let indices = <M::V as Vector>::Index::from_vec(vec![0, 2], M::C::default());
@@ -1433,6 +1492,7 @@ pub(crate) mod tests {
         assert_eq!(b1.get_index(0), f::<M::V>(0.0));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_strided_view_copy_from_indices<M: DenseMatrix>(ctx: M::C) {
         let matrix = make_strided_test_matrix::<M>(ctx.nbatch());
         let nbatch = ctx.nbatch();
@@ -1451,6 +1511,7 @@ pub(crate) mod tests {
         assert_eq!(b1.get_index(0), f::<M::V>(50.0));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_strided_view_gather<M: DenseMatrix>(ctx: M::C) {
         let matrix = make_strided_test_matrix::<M>(ctx.nbatch());
         let nbatch = ctx.nbatch();
@@ -1463,6 +1524,7 @@ pub(crate) mod tests {
         assert_eq!(b1.get_index(0), f::<M::V>(110.0));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_strided_view_scatter<M: DenseMatrix>(ctx: M::C) {
         let matrix = make_strided_test_matrix::<M>(ctx.nbatch());
         let nbatch = ctx.nbatch();
@@ -1625,6 +1687,7 @@ macro_rules! generate_vector_tests_nonbatched {
 }
 
 #[cfg(test)]
+#[cfg_attr(not(feature = "cuda"), allow(unused_macros))]
 macro_rules! generate_vector_tests_batched {
     ($suffix:ident, $V:ty, $ctx2:expr, $ctx3:expr) => {
         paste::paste! {
@@ -1886,6 +1949,7 @@ macro_rules! generate_vector_tests_batched {
     };
 }
 #[cfg(test)]
+#[cfg_attr(not(feature = "cuda"), allow(unused_imports))]
 pub(crate) use generate_vector_tests_batched;
 #[cfg(test)]
 pub(crate) use generate_vector_tests_nonbatched;

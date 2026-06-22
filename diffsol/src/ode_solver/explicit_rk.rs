@@ -280,13 +280,15 @@ where
 
 #[cfg(test)]
 mod test {
+    #[cfg(feature = "cuda")]
+    use crate::ode_equations::test_models::exponential_decay::exponential_decay_problem_batched;
     use crate::{
         matrix::dense_nalgebra_serial::NalgebraMat,
         ode_equations::test_models::{
             exponential_decay::{
                 exponential_decay_problem, exponential_decay_problem_adjoint,
-                exponential_decay_problem_batched, exponential_decay_problem_sens,
-                exponential_decay_problem_with_root, negative_exponential_decay_problem,
+                exponential_decay_problem_sens, exponential_decay_problem_with_root,
+                negative_exponential_decay_problem,
             },
             logistic::logistic_problem_adjoint_no_out,
             robertson_ode::robertson_ode,

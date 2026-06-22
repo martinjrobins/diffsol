@@ -1597,25 +1597,30 @@ where
 
 #[cfg(test)]
 mod test {
+    #[cfg(feature = "cuda")]
+    use crate::ode_equations::test_models::{
+        exponential_decay::{
+            exponential_decay_problem_batched, exponential_decay_problem_batched_adjoint,
+            exponential_decay_problem_batched_adjoint_with_reset,
+            exponential_decay_problem_batched_sens,
+            exponential_decay_problem_batched_sens_with_reset,
+            exponential_decay_problem_batched_with_reset,
+        },
+        exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem_batched,
+    };
     use crate::{
         matrix::dense_nalgebra_serial::NalgebraMat,
         ode_equations::test_models::{
             dydt_y2::dydt_y2_problem,
             exponential_decay::{
                 exponential_decay_problem, exponential_decay_problem_adjoint,
-                exponential_decay_problem_batched, exponential_decay_problem_batched_adjoint,
-                exponential_decay_problem_batched_adjoint_with_reset,
-                exponential_decay_problem_batched_sens,
-                exponential_decay_problem_batched_sens_with_reset,
-                exponential_decay_problem_batched_with_reset, exponential_decay_problem_sens,
-                exponential_decay_problem_with_root,
+                exponential_decay_problem_sens, exponential_decay_problem_with_root,
                 exponential_decay_with_single_reset_root_problem_adjoint,
                 negative_exponential_decay_problem,
             },
             exponential_decay_with_algebraic::{
                 exponential_decay_with_algebraic_adjoint_problem,
                 exponential_decay_with_algebraic_problem,
-                exponential_decay_with_algebraic_problem_batched,
                 exponential_decay_with_algebraic_problem_sens,
             },
             foodweb::foodweb_problem,

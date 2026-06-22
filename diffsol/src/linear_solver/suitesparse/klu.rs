@@ -25,7 +25,7 @@ use crate::{
     linear_solver::LinearSolver,
     linear_solver_error,
     vector::Vector,
-    Context, FaerSparseMat, FaerVec, Matrix, NonLinearOpJacobian,
+    FaerSparseMat, FaerVec, Matrix, NonLinearOpJacobian,
 };
 
 trait MatrixKLU: Matrix<T = f64> {

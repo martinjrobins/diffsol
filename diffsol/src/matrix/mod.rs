@@ -726,6 +726,7 @@ pub(crate) mod tests {
 
     // --- Batched Matrix-generic tests ---
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_zeros_m<M: Matrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         let a = M::zeros(2, 3, ctx);
@@ -735,6 +736,7 @@ pub(crate) mod tests {
         assert!(vals.is_empty() || vals.iter().all(|v| v.is_zero()));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_gemv_m<M: Matrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
@@ -761,6 +763,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_gemv_broadcast_x_m<M: Matrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
@@ -784,6 +787,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_gemv_broadcast_mat_m<M: Matrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
@@ -802,6 +806,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_from_diagonal_m<M: Matrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         let v = M::V::from_vec(
@@ -826,6 +831,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_copy_from_m<M: Matrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
@@ -858,6 +864,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_set_column_m<M: Matrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
@@ -893,6 +900,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_scale_add_and_assign_m<M: Matrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
@@ -939,6 +947,7 @@ pub(crate) mod tests {
 
     // --- Batched DenseMatrix-specific tests ---
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_from_vec<M: DenseMatrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         // 2x2 matrix, nbatch=2: physical is 2x4
@@ -966,6 +975,7 @@ pub(crate) mod tests {
         assert_eq!(a.get_index(1, 1), f::<M>(4.0));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_gemm<M: DenseMatrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         // batch0: A=[[1,0],[0,1]](identity), batch1: A=[[2,0],[0,2]]
@@ -1009,6 +1019,7 @@ pub(crate) mod tests {
         assert_eq!(c.get_index(1, 1), f::<M>(6.0));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_columns<M: DenseMatrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         // 2x3 matrix, nbatch=2
@@ -1053,6 +1064,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_gemv_o_on_columns<M: DenseMatrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         // 2x3 diff matrix, nbatch=2
@@ -1094,6 +1106,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_gemv_v_broadcast_mat<M: DenseMatrix>(ctx3: M::C) {
         assert_eq!(ctx3.nbatch(), 2);
         // matrix view with nbatch=1 broadcasts to x/y with nbatch=2
@@ -1129,6 +1142,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_gemv_o_broadcast_mat<M: DenseMatrix>(ctx3: M::C) {
         assert_eq!(ctx3.nbatch(), 2);
         // matrix view with nbatch=1 broadcasts to x/y with nbatch=2
@@ -1164,6 +1178,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_gemm_vo_on_columns<M: DenseMatrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         // 2x3 diff matrix, nbatch=2
@@ -1218,6 +1233,7 @@ pub(crate) mod tests {
 
     // --- Broadcasting tests ---
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_gemm_broadcast_b<M: DenseMatrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         // batch0: A=[[1,0],[0,1]], batch1: A=[[2,0],[0,3]]
@@ -1252,6 +1268,7 @@ pub(crate) mod tests {
         assert_eq!(c.get_index(1, 1), f::<M>(4.0));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_gemm_broadcast_a<M: DenseMatrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         // A with nbatch=1: [[1,0],[0,2]]
@@ -1286,6 +1303,7 @@ pub(crate) mod tests {
         assert_eq!(c.get_index(1, 1), f::<M>(12.0));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_gemv_o_broadcast_x<M: DenseMatrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         // 2x3 diff matrix, nbatch=2
@@ -1321,6 +1339,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_gemm_vo_broadcast_b<M: DenseMatrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         // 2x3 diff matrix, nbatch=2
@@ -1364,6 +1383,7 @@ pub(crate) mod tests {
         assert_eq!(result.get_index(1, 1), f::<M>(5.0));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_gemm_vo_broadcast_a<M: DenseMatrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         // diff with nbatch=1: 2x3 matrix [[1,2,3],[4,5,6]]
@@ -1411,6 +1431,7 @@ pub(crate) mod tests {
 
     // --- Incompatible batch tests ---
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_gemm_incompatible_a<M: DenseMatrix>(ctx2: M::C, ctx3: M::C) {
         assert_eq!(ctx2.nbatch(), 2);
         assert_eq!(ctx3.nbatch(), 3);
@@ -1420,6 +1441,7 @@ pub(crate) mod tests {
         c.gemm(f::<M>(1.0), &a, &b, f::<M>(0.0));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_gemv_incompatible<M: DenseMatrix>(ctx2: M::C, ctx3: M::C) {
         assert_eq!(ctx2.nbatch(), 2);
         assert_eq!(ctx3.nbatch(), 3);
@@ -1429,6 +1451,7 @@ pub(crate) mod tests {
         a.gemv(f::<M>(1.0), &x, f::<M>(0.0), &mut y);
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_gemm_incompatible<M: DenseMatrix>(ctx2: M::C, ctx3: M::C) {
         assert_eq!(ctx2.nbatch(), 2);
         assert_eq!(ctx3.nbatch(), 3);
@@ -1438,6 +1461,7 @@ pub(crate) mod tests {
         c.gemm(f::<M>(1.0), &a, &b, f::<M>(0.0));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_resize_cols<M: DenseMatrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         // 2x2, nbatch=2: batch0=[[1,2],[3,4]], batch1=[[5,6],[7,8]]
@@ -1654,6 +1678,7 @@ pub(crate) mod tests {
         assert_eq!(mat.get_index(1, 1), f::<M>(8.0));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_combine<M: DenseMatrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         #[rustfmt::skip]
@@ -1683,6 +1708,7 @@ pub(crate) mod tests {
         assert_eq!(orig_vals, recom_vals);
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_add_column_to_vector_m<M: Matrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
@@ -1705,6 +1731,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_set_data_with_indices_m<M: Matrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
@@ -1743,6 +1770,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_gather_m<M: Matrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         let indices: Vec<(IndexType, IndexType)> =
@@ -1800,6 +1828,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_mul_scalar_m<M: Matrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
@@ -1832,6 +1861,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_partition_indices<M: Matrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         let zero_val = M::T::zero();
@@ -1845,6 +1875,7 @@ pub(crate) mod tests {
         assert_eq!(nonzero_idx.clone_as_vec(), vec![0, 2]);
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_column_axpy<M: DenseMatrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         let mut a = M::from_vec(
@@ -1869,6 +1900,7 @@ pub(crate) mod tests {
         assert_eq!(a.get_index(1, 1), f::<M>(10.0));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_mat_mul<M: DenseMatrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         let a = M::from_vec(
@@ -1908,6 +1940,7 @@ pub(crate) mod tests {
         assert_eq!(c.get_index(1, 1), f::<M>(12.0));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_from_diagonal_dense<M: DenseMatrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         let v = M::V::from_vec(
@@ -1923,6 +1956,7 @@ pub(crate) mod tests {
         assert_eq!(a.get_index(1, 0), f::<M>(0.0));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     fn make_strided_matrix<M: DenseMatrix>(nbatch: usize) -> M {
         let ctx = M::C::default().clone_with_nbatch(nbatch).unwrap();
         let nrows = 3;
@@ -1938,6 +1972,7 @@ pub(crate) mod tests {
         M::from_vec(nrows, ncols, data, ctx)
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_strided_matrix_view_into_owned<M: DenseMatrix>(ctx: M::C) {
         let matrix = make_strided_matrix::<M>(ctx.nbatch());
         let view = matrix.columns(0, 2);
@@ -1954,6 +1989,7 @@ pub(crate) mod tests {
         assert_eq!(owned.get_index(2, 1), f::<M>(12.0));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_strided_matrix_view_add_owned<M: DenseMatrix>(ctx: M::C) {
         let matrix = make_strided_matrix::<M>(ctx.nbatch());
         let view = matrix.columns(0, 2);
@@ -1977,6 +2013,7 @@ pub(crate) mod tests {
         assert_eq!(result.get_index(0, 1), f::<M>(14.0));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_strided_matrix_view_sub_owned<M: DenseMatrix>(ctx: M::C) {
         let matrix = make_strided_matrix::<M>(ctx.nbatch());
         let view = matrix.columns(0, 2);
@@ -1999,6 +2036,7 @@ pub(crate) mod tests {
         assert_eq!(result.get_index(0, 1), f::<M>(0.0));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_strided_matrix_view_mul_scalar<M: DenseMatrix>(ctx: M::C) {
         let matrix = make_strided_matrix::<M>(ctx.nbatch());
         let view = matrix.columns(0, 2);
@@ -2008,6 +2046,7 @@ pub(crate) mod tests {
         assert_eq!(result.get_index(0, 1), f::<M>(20.0));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_strided_matrix_view_mut_add_assign_view<M: DenseMatrix>(ctx: M::C) {
         let mut a = make_strided_matrix::<M>(ctx.nbatch());
         let b = make_strided_matrix::<M>(ctx.nbatch());
@@ -2025,6 +2064,7 @@ pub(crate) mod tests {
         assert_eq!(a.get_index(0, 1), f::<M>(40.0));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_strided_matrix_view_mut_sub_assign_view<M: DenseMatrix>(ctx: M::C) {
         let mut a = make_strided_matrix::<M>(ctx.nbatch());
         let b = make_strided_matrix::<M>(ctx.nbatch());
@@ -2038,6 +2078,7 @@ pub(crate) mod tests {
         assert_eq!(a.get_index(1, 0), f::<M>(0.0));
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_strided_matrix_view_mut_mul_assign_scalar<M: DenseMatrix>(ctx: M::C) {
         let mut a = make_strided_matrix::<M>(ctx.nbatch());
         {
@@ -2095,6 +2136,7 @@ macro_rules! generate_matrix_tests_nonbatched {
 }
 
 #[cfg(test)]
+#[cfg_attr(not(feature = "cuda"), allow(unused_macros))]
 macro_rules! generate_matrix_tests_batched {
     ($suffix:ident, $M:ty, $ctx1:expr, $ctx2:expr) => {
         paste::paste! {
@@ -2223,6 +2265,7 @@ macro_rules! generate_dense_matrix_tests_nonbatched {
 }
 
 #[cfg(test)]
+#[cfg_attr(not(feature = "cuda"), allow(unused_macros))]
 macro_rules! generate_dense_matrix_tests_batched {
     ($suffix:ident, $M:ty, $ctx1:expr, $ctx2:expr) => {
         paste::paste! {
@@ -2342,10 +2385,12 @@ macro_rules! generate_dense_matrix_tests_batched {
 }
 
 #[cfg(test)]
+#[cfg_attr(not(feature = "cuda"), allow(unused_imports))]
 pub(crate) use generate_dense_matrix_tests_batched;
 #[cfg(test)]
 pub(crate) use generate_dense_matrix_tests_nonbatched;
 #[cfg(test)]
+#[cfg_attr(not(feature = "cuda"), allow(unused_imports))]
 pub(crate) use generate_matrix_tests_batched;
 #[cfg(test)]
 pub(crate) use generate_matrix_tests_nonbatched;
