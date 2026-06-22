@@ -55,7 +55,7 @@ impl<T: FaerScalar> LinearSolver<FaerSparseMat<T>> for FaerSparseLU<T> {
             .lu
             .as_ref()
             .ok_or_else(|| linear_solver_error!(LuNotInitialized))?;
-        lu.solve_in_place(x.data.as_mut());
+        lu.solve_in_place(&mut x.data);
         Ok(())
     }
 
