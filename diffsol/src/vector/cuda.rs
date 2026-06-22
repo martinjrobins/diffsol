@@ -4,9 +4,7 @@ use std::ops::{Add, AddAssign, Div, Mul, MulAssign, Sub, SubAssign};
 use super::{VectorIndex, VectorView, VectorViewMut};
 use cudarc::cublas::sys as cublas;
 use cudarc::cublas::CudaBlas;
-use cudarc::driver::{
-    CudaFunction, CudaSlice, CudaView, CudaViewMut, DevicePtr, LaunchConfig, PushKernelArg,
-};
+use cudarc::driver::{CudaFunction, CudaSlice, CudaView, CudaViewMut, LaunchConfig, PushKernelArg};
 
 use crate::{
     Context, CudaContext, CudaMat, CudaType, DefaultDenseMatrix, IndexType, ScalarCuda, Scale,
@@ -68,39 +66,51 @@ impl CudaContext {
         }
     }
 
-    fn norm<T: ScalarCuda, D: DevicePtr<T>>(&self, x: &D, k: i32) -> T {
-        if k == 2 {
-            let blas = CudaBlas::new(self.stream.clone()).expect("Failed to create CudaBlas");
-            let n = x.len() as c_int;
-            let (x, _syn_x) = x.device_ptr(&self.stream);
-            let result: T;
-            match T::as_enum() {
-                CudaType::F64 => {
-                    let x = x as *const f64;
-                    let mut result_f64 = 0.0;
-                    let status = unsafe {
-                        cublas::cublasDnrm2_v2(*blas.handle(), n, x, 1, &mut result_f64 as *mut f64)
-                    };
-                    result = T::from_f64(result_f64).unwrap();
-                    status
-                }
+    fn lk_norm<T: ScalarCuda>(&self, x: &CudaSlice<T>, nstates: usize, nbatch: usize, k: i32) -> T {
+        let nstates_u32 = nstates as u32;
+        let nbatch_u32 = nbatch as u32;
+        let kernel_name = if k == 2 { "vec_norm" } else { "vec_norm_lk" };
+        let f = self.function::<T>(kernel_name);
+        let config = self.launch_config_2d_reduce(nstates_u32, nbatch_u32, &f, norm_blk_size::<T>);
+        let blocks_per_batch = config.grid_dim.0 as usize;
+        let total_blocks = blocks_per_batch * nbatch;
+        let mut partial_sums = unsafe {
+            self.stream
+                .alloc::<T>(total_blocks)
+                .expect("Failed to allocate memory for partial sums")
+        };
+        let mut build = self.stream.launch_builder(&f);
+        let x_stride = nstates as i32;
+        build
+            .arg(x)
+            .arg(&nstates_u32)
+            .arg(&nbatch_u32)
+            .arg(&x_stride);
+        if k != 2 {
+            build.arg(&k);
+        }
+        build.arg(&mut partial_sums);
+        unsafe { build.launch(config) }.expect("Failed to launch kernel");
+        let partial_sums = self
+            .stream
+            .clone_dtoh(&partial_sums)
+            .expect("Failed to copy data from device to host");
+        let mut max_norm = T::zero();
+        for b in 0..nbatch {
+            let mut batch_sum = T::zero();
+            for i in 0..blocks_per_batch {
+                batch_sum += partial_sums[b * blocks_per_batch + i];
             }
-            .result()
-            .expect("Failed to call cublasDnrm2_v2");
-            return result;
+            let norm = if k == 2 {
+                batch_sum.sqrt()
+            } else {
+                batch_sum.pow(T::one() / T::from_f64(k as f64).unwrap())
+            };
+            if norm > max_norm {
+                max_norm = norm;
+            }
         }
-        let n = x.len();
-        let mut host = vec![T::zero(); n];
-        self.stream
-            .memcpy_dtoh(x, &mut host)
-            .expect("Failed to copy data to host for norm computation");
-        if k == 1 {
-            host.iter().fold(T::zero(), |acc, &x| acc + x.abs())
-        } else {
-            host.iter()
-                .fold(T::zero(), |acc, &x| acc + x.pow(k))
-                .pow(T::one() / T::from_f64(k as f64).unwrap())
-        }
+        max_norm
     }
 }
 
@@ -310,14 +320,29 @@ impl_mul_scalar_alloc!(&CudaVec<T>, CudaVec<T>, T, &self.data);
 impl_div_scalar!(CudaVec<T>, CudaVec<T>, T);
 impl_mul_assign_scalar!(CudaVec<T>, T, &mut self.data);
 
-impl_mul_scalar_alloc!(CudaVecRef<'_, T>, CudaVec<T>, T,
-    &self.data.slice(self.col_offset..));
-impl_mul_assign_scalar!(CudaVecMut<'_, T>, T,
-    &mut self.data.slice_mut(self.col_offset..));
-impl_mul_scalar!(CudaVecMut<'_, T>, CudaVec<T>, T,
-    &mut self.data.slice_mut(self.col_offset..));
-impl_mul_scalar_alloc!(CudaVecMut<'_, T>, CudaVec<T>, T,
-    &self.data.slice(self.col_offset..));
+impl_mul_scalar_alloc!(
+    CudaVecRef<'_, T>,
+    CudaVec<T>,
+    T,
+    &self.data.slice(self.col_offset..)
+);
+impl_mul_assign_scalar!(
+    CudaVecMut<'_, T>,
+    T,
+    &mut self.data.slice_mut(self.col_offset..)
+);
+impl_mul_scalar!(
+    CudaVecMut<'_, T>,
+    CudaVec<T>,
+    T,
+    &mut self.data.slice_mut(self.col_offset..)
+);
+impl_mul_scalar_alloc!(
+    CudaVecMut<'_, T>,
+    CudaVec<T>,
+    T,
+    &self.data.slice(self.col_offset..)
+);
 
 // ============================================================
 // ============================================================
@@ -340,8 +365,7 @@ macro_rules! impl_assign {
             fn $method(&mut self, rhs: $RhsRef) {
                 let self_nbatch = self.context.nbatch();
                 let other_nbatch = rhs.context.nbatch();
-                self.context
-                    .assert_compatible_nbatch(other_nbatch, $label);
+                self.context.assert_compatible_nbatch(other_nbatch, $label);
                 let nstates = self.len();
                 if nstates == 0 {
                     return;
@@ -358,8 +382,7 @@ macro_rules! impl_assign {
                     .arg(&(self.stride() as i32))
                     .arg(&(rhs.stride() as i32))
                     .arg(&(other_nbatch as i32));
-                unsafe { build.launch(config) }
-                    .expect(concat!("Failed to launch ", $kernel));
+                unsafe { build.launch(config) }.expect(concat!("Failed to launch ", $kernel));
             }
         }
     };
@@ -376,8 +399,7 @@ macro_rules! impl_binary {
             fn $method(self, rhs: $Rhs) -> CudaVec<T> {
                 let self_nbatch = self.context.nbatch();
                 let other_nbatch = rhs.context.nbatch();
-                self.context
-                    .assert_compatible_nbatch(other_nbatch, $label);
+                self.context.assert_compatible_nbatch(other_nbatch, $label);
                 let nstates = self.len();
                 let mut ret = CudaVec::zeros(nstates, self.context.clone());
                 if nstates == 0 {
@@ -398,8 +420,7 @@ macro_rules! impl_binary {
                     .arg(&(other_nbatch as i32))
                     .arg(&(nstates as i32))
                     .arg(&(self_nbatch as i32));
-                unsafe { build.launch(config) }
-                    .expect(concat!("Failed to launch ", $kernel));
+                unsafe { build.launch(config) }.expect(concat!("Failed to launch ", $kernel));
                 ret
             }
         }
@@ -410,152 +431,312 @@ macro_rules! impl_binary {
 // SubAssign
 // ============================================================
 
-impl_assign!(SubAssign, sub_assign, "vec_sub_assign", "sub_assign",
-    CudaVec<T>, &CudaVec<T>, CudaVec<T>,
-    &mut self.data, &rhs.data);
+impl_assign!(
+    SubAssign,
+    sub_assign,
+    "vec_sub_assign",
+    "sub_assign",
+    CudaVec<T>,
+    &CudaVec<T>,
+    CudaVec<T>,
+    &mut self.data,
+    &rhs.data
+);
 
-impl_assign!(SubAssign, sub_assign, "vec_sub_assign", "sub_assign",
-    CudaVec<T>, &CudaVecRef<T>, CudaVecRef<'_, T>,
-    &mut self.data, &rhs.data.slice(rhs.col_offset..));
+impl_assign!(
+    SubAssign,
+    sub_assign,
+    "vec_sub_assign",
+    "sub_assign",
+    CudaVec<T>,
+    &CudaVecRef<T>,
+    CudaVecRef<'_, T>,
+    &mut self.data,
+    &rhs.data.slice(rhs.col_offset..)
+);
 
-impl_assign!(SubAssign, sub_assign, "vec_sub_assign", "sub_assign",
-    CudaVecMut<T>, &CudaVec<T>, CudaVec<T>,
-    &mut self.data.slice_mut(self.col_offset..), &rhs.data);
+impl_assign!(
+    SubAssign,
+    sub_assign,
+    "vec_sub_assign",
+    "sub_assign",
+    CudaVecMut<T>,
+    &CudaVec<T>,
+    CudaVec<T>,
+    &mut self.data.slice_mut(self.col_offset..),
+    &rhs.data
+);
 
-impl_assign!(SubAssign, sub_assign, "vec_sub_assign", "sub_assign",
-    CudaVecMut<T>, &CudaVecRef<T>, CudaVecRef<'_, T>,
-    &mut self.data.slice_mut(self.col_offset..), &rhs.data.slice(rhs.col_offset..));
+impl_assign!(
+    SubAssign,
+    sub_assign,
+    "vec_sub_assign",
+    "sub_assign",
+    CudaVecMut<T>,
+    &CudaVecRef<T>,
+    CudaVecRef<'_, T>,
+    &mut self.data.slice_mut(self.col_offset..),
+    &rhs.data.slice(rhs.col_offset..)
+);
 
 // ============================================================
 // AddAssign
 // ============================================================
 
-impl_assign!(AddAssign, add_assign, "vec_add_assign", "add_assign",
-    CudaVec<T>, &CudaVec<T>, CudaVec<T>,
-    &mut self.data, &rhs.data);
+impl_assign!(
+    AddAssign,
+    add_assign,
+    "vec_add_assign",
+    "add_assign",
+    CudaVec<T>,
+    &CudaVec<T>,
+    CudaVec<T>,
+    &mut self.data,
+    &rhs.data
+);
 
-impl_assign!(AddAssign, add_assign, "vec_add_assign", "add_assign",
-    CudaVec<T>, &CudaVecRef<T>, CudaVecRef<'_, T>,
-    &mut self.data, &rhs.data.slice(rhs.col_offset..));
+impl_assign!(
+    AddAssign,
+    add_assign,
+    "vec_add_assign",
+    "add_assign",
+    CudaVec<T>,
+    &CudaVecRef<T>,
+    CudaVecRef<'_, T>,
+    &mut self.data,
+    &rhs.data.slice(rhs.col_offset..)
+);
 
-impl_assign!(AddAssign, add_assign, "vec_add_assign", "add_assign",
-    CudaVecMut<T>, &CudaVec<T>, CudaVec<T>,
-    &mut self.data.slice_mut(self.col_offset..), &rhs.data);
+impl_assign!(
+    AddAssign,
+    add_assign,
+    "vec_add_assign",
+    "add_assign",
+    CudaVecMut<T>,
+    &CudaVec<T>,
+    CudaVec<T>,
+    &mut self.data.slice_mut(self.col_offset..),
+    &rhs.data
+);
 
-impl_assign!(AddAssign, add_assign, "vec_add_assign", "add_assign",
-    CudaVecMut<T>, &CudaVecRef<T>, CudaVecRef<'_, T>,
-    &mut self.data.slice_mut(self.col_offset..), &rhs.data.slice(rhs.col_offset..));
+impl_assign!(
+    AddAssign,
+    add_assign,
+    "vec_add_assign",
+    "add_assign",
+    CudaVecMut<T>,
+    &CudaVecRef<T>,
+    CudaVecRef<'_, T>,
+    &mut self.data.slice_mut(self.col_offset..),
+    &rhs.data.slice(rhs.col_offset..)
+);
 
 // ============================================================
 // Sub operations: a - b -> CudaVec (new owned)
 // ============================================================
 
-impl_binary!(Sub, sub, "vec_sub", "sub",
-    &CudaVec<T>, &CudaVec<T>,
-    &self.data, &rhs.data);
+impl_binary!(
+    Sub,
+    sub,
+    "vec_sub",
+    "sub",
+    &CudaVec<T>,
+    &CudaVec<T>,
+    &self.data,
+    &rhs.data
+);
 
-impl_binary!(Sub, sub, "vec_sub", "sub",
-    &CudaVec<T>, &CudaVecRef<T>,
-    &self.data, &rhs.data.slice(rhs.col_offset..));
+impl_binary!(
+    Sub,
+    sub,
+    "vec_sub",
+    "sub",
+    &CudaVec<T>,
+    &CudaVecRef<T>,
+    &self.data,
+    &rhs.data.slice(rhs.col_offset..)
+);
 
-impl_binary!(Sub, sub, "vec_sub", "sub",
-    &CudaVecRef<T>, &CudaVec<T>,
-    &self.data.slice(self.col_offset..), &rhs.data);
+impl_binary!(
+    Sub,
+    sub,
+    "vec_sub",
+    "sub",
+    &CudaVecRef<T>,
+    &CudaVec<T>,
+    &self.data.slice(self.col_offset..),
+    &rhs.data
+);
 
-impl_binary!(Sub, sub, "vec_sub", "sub",
-    &CudaVecRef<T>, &CudaVecRef<T>,
-    &self.data.slice(self.col_offset..), &rhs.data.slice(rhs.col_offset..));
+impl_binary!(
+    Sub,
+    sub,
+    "vec_sub",
+    "sub",
+    &CudaVecRef<T>,
+    &CudaVecRef<T>,
+    &self.data.slice(self.col_offset..),
+    &rhs.data.slice(rhs.col_offset..)
+);
 
 // consuming-self (delegates to SubAssign)
 impl<T: ScalarCuda> Sub<CudaVec<T>> for CudaVec<T> {
     type Output = CudaVec<T>;
-    fn sub(mut self, rhs: CudaVec<T>) -> CudaVec<T> { self.sub_assign(&rhs); self }
+    fn sub(mut self, rhs: CudaVec<T>) -> CudaVec<T> {
+        self.sub_assign(&rhs);
+        self
+    }
 }
 impl<T: ScalarCuda> Sub<&CudaVec<T>> for CudaVec<T> {
     type Output = CudaVec<T>;
-    fn sub(mut self, rhs: &CudaVec<T>) -> CudaVec<T> { self.sub_assign(rhs); self }
+    fn sub(mut self, rhs: &CudaVec<T>) -> CudaVec<T> {
+        self.sub_assign(rhs);
+        self
+    }
 }
 impl<T: ScalarCuda> Sub<CudaVecRef<'_, T>> for CudaVec<T> {
     type Output = CudaVec<T>;
-    fn sub(mut self, rhs: CudaVecRef<'_, T>) -> CudaVec<T> { self.sub_assign(&rhs); self }
+    fn sub(mut self, rhs: CudaVecRef<'_, T>) -> CudaVec<T> {
+        self.sub_assign(&rhs);
+        self
+    }
 }
 impl<T: ScalarCuda> Sub<&CudaVecRef<'_, T>> for CudaVec<T> {
     type Output = CudaVec<T>;
-    fn sub(mut self, rhs: &CudaVecRef<'_, T>) -> CudaVec<T> { self.sub_assign(rhs); self }
+    fn sub(mut self, rhs: &CudaVecRef<'_, T>) -> CudaVec<T> {
+        self.sub_assign(rhs);
+        self
+    }
 }
 
 // by-value delegation to &self impls
 impl<T: ScalarCuda> Sub<CudaVec<T>> for &CudaVec<T> {
     type Output = CudaVec<T>;
-    fn sub(self, rhs: CudaVec<T>) -> CudaVec<T> { self.sub(&rhs) }
+    fn sub(self, rhs: CudaVec<T>) -> CudaVec<T> {
+        self.sub(&rhs)
+    }
 }
 impl<T: ScalarCuda> Sub<CudaVecRef<'_, T>> for &CudaVec<T> {
     type Output = CudaVec<T>;
-    fn sub(self, rhs: CudaVecRef<'_, T>) -> CudaVec<T> { self.sub(&rhs) }
+    fn sub(self, rhs: CudaVecRef<'_, T>) -> CudaVec<T> {
+        self.sub(&rhs)
+    }
 }
 impl<T: ScalarCuda> Sub<CudaVec<T>> for CudaVecRef<'_, T> {
     type Output = CudaVec<T>;
-    fn sub(self, rhs: CudaVec<T>) -> CudaVec<T> { &self - &rhs }
+    fn sub(self, rhs: CudaVec<T>) -> CudaVec<T> {
+        &self - &rhs
+    }
 }
 impl<T: ScalarCuda> Sub<CudaVecRef<'_, T>> for CudaVecRef<'_, T> {
     type Output = CudaVec<T>;
-    fn sub(self, rhs: CudaVecRef<'_, T>) -> CudaVec<T> { &self - &rhs }
+    fn sub(self, rhs: CudaVecRef<'_, T>) -> CudaVec<T> {
+        &self - &rhs
+    }
 }
 
 // ============================================================
 // Add operations: a + b -> CudaVec (new owned)
 // ============================================================
 
-impl_binary!(Add, add, "vec_add", "add",
-    &CudaVec<T>, &CudaVec<T>,
-    &self.data, &rhs.data);
+impl_binary!(
+    Add,
+    add,
+    "vec_add",
+    "add",
+    &CudaVec<T>,
+    &CudaVec<T>,
+    &self.data,
+    &rhs.data
+);
 
-impl_binary!(Add, add, "vec_add", "add",
-    &CudaVec<T>, &CudaVecRef<T>,
-    &self.data, &rhs.data.slice(rhs.col_offset..));
+impl_binary!(
+    Add,
+    add,
+    "vec_add",
+    "add",
+    &CudaVec<T>,
+    &CudaVecRef<T>,
+    &self.data,
+    &rhs.data.slice(rhs.col_offset..)
+);
 
-impl_binary!(Add, add, "vec_add", "add",
-    &CudaVecRef<T>, &CudaVec<T>,
-    &self.data.slice(self.col_offset..), &rhs.data);
+impl_binary!(
+    Add,
+    add,
+    "vec_add",
+    "add",
+    &CudaVecRef<T>,
+    &CudaVec<T>,
+    &self.data.slice(self.col_offset..),
+    &rhs.data
+);
 
-impl_binary!(Add, add, "vec_add", "add",
-    &CudaVecRef<T>, &CudaVecRef<T>,
-    &self.data.slice(self.col_offset..), &rhs.data.slice(rhs.col_offset..));
+impl_binary!(
+    Add,
+    add,
+    "vec_add",
+    "add",
+    &CudaVecRef<T>,
+    &CudaVecRef<T>,
+    &self.data.slice(self.col_offset..),
+    &rhs.data.slice(rhs.col_offset..)
+);
 
 // consuming-self (delegates to AddAssign)
 impl<T: ScalarCuda> Add<CudaVec<T>> for CudaVec<T> {
     type Output = CudaVec<T>;
-    fn add(mut self, rhs: CudaVec<T>) -> CudaVec<T> { self.add_assign(&rhs); self }
+    fn add(mut self, rhs: CudaVec<T>) -> CudaVec<T> {
+        self.add_assign(&rhs);
+        self
+    }
 }
 impl<T: ScalarCuda> Add<&CudaVec<T>> for CudaVec<T> {
     type Output = CudaVec<T>;
-    fn add(mut self, rhs: &CudaVec<T>) -> CudaVec<T> { self.add_assign(rhs); self }
+    fn add(mut self, rhs: &CudaVec<T>) -> CudaVec<T> {
+        self.add_assign(rhs);
+        self
+    }
 }
 impl<T: ScalarCuda> Add<CudaVecRef<'_, T>> for CudaVec<T> {
     type Output = CudaVec<T>;
-    fn add(mut self, rhs: CudaVecRef<'_, T>) -> CudaVec<T> { self.add_assign(&rhs); self }
+    fn add(mut self, rhs: CudaVecRef<'_, T>) -> CudaVec<T> {
+        self.add_assign(&rhs);
+        self
+    }
 }
 impl<T: ScalarCuda> Add<&CudaVecRef<'_, T>> for CudaVec<T> {
     type Output = CudaVec<T>;
-    fn add(mut self, rhs: &CudaVecRef<'_, T>) -> CudaVec<T> { self.add_assign(rhs); self }
+    fn add(mut self, rhs: &CudaVecRef<'_, T>) -> CudaVec<T> {
+        self.add_assign(rhs);
+        self
+    }
 }
 
 // by-value delegation to &self impls
 impl<T: ScalarCuda> Add<CudaVec<T>> for &CudaVec<T> {
     type Output = CudaVec<T>;
-    fn add(self, rhs: CudaVec<T>) -> CudaVec<T> { self.add(&rhs) }
+    fn add(self, rhs: CudaVec<T>) -> CudaVec<T> {
+        self.add(&rhs)
+    }
 }
 impl<T: ScalarCuda> Add<CudaVecRef<'_, T>> for &CudaVec<T> {
     type Output = CudaVec<T>;
-    fn add(self, rhs: CudaVecRef<'_, T>) -> CudaVec<T> { self.add(&rhs) }
+    fn add(self, rhs: CudaVecRef<'_, T>) -> CudaVec<T> {
+        self.add(&rhs)
+    }
 }
 impl<T: ScalarCuda> Add<CudaVec<T>> for CudaVecRef<'_, T> {
     type Output = CudaVec<T>;
-    fn add(self, rhs: CudaVec<T>) -> CudaVec<T> { &self + &rhs }
+    fn add(self, rhs: CudaVec<T>) -> CudaVec<T> {
+        &self + &rhs
+    }
 }
 impl<T: ScalarCuda> Add<CudaVecRef<'_, T>> for CudaVecRef<'_, T> {
     type Output = CudaVec<T>;
-    fn add(self, rhs: CudaVecRef<'_, T>) -> CudaVec<T> { &self + &rhs }
+    fn add(self, rhs: CudaVecRef<'_, T>) -> CudaVec<T> {
+        &self + &rhs
+    }
 }
 impl VectorIndex for CudaIndex {
     type C = CudaContext;
@@ -632,65 +813,30 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
     fn norm(&self, k: i32) -> Self::T {
         let nbatch = self.context.nbatch();
         let nstates = self.len();
-        if nbatch == 1 {
-            return self.context.norm(&self.data, k);
-        }
         if nstates == 0 {
             return T::zero();
         }
-        if k != 2 {
-            let mut max_norm = T::zero();
-            for b in 0..nbatch {
-                let batch_data = self.data.slice(b * nstates..(b + 1) * nstates);
-                let norm = self.context.norm(&batch_data, k);
-                if norm > max_norm {
-                    max_norm = norm;
+        if k == 2 && nbatch == 1 {
+            let blas =
+                CudaBlas::new(self.context.stream.clone()).expect("Failed to create CudaBlas");
+            let n = self.data.len() as c_int;
+            let (x, _) = self.data.device_ptr(&self.context.stream);
+            let result: T;
+            match T::as_enum() {
+                CudaType::F64 => {
+                    let x = x as *const f64;
+                    let mut result_f64 = 0.0;
+                    unsafe {
+                        cublas::cublasDnrm2_v2(*blas.handle(), n, x, 1, &mut result_f64 as *mut f64)
+                    }
+                    .result()
+                    .expect("Failed to call cublasDnrm2_v2");
+                    result = T::from_f64(result_f64).unwrap();
                 }
             }
-            return max_norm;
+            return result;
         }
-        let nstates_u32 = nstates as u32;
-        let nbatch_u32 = nbatch as u32;
-
-        let f = self.context.function::<T>("vec_norm");
-        let config =
-            self.context
-                .launch_config_2d_reduce(nstates_u32, nbatch_u32, &f, norm_blk_size::<T>);
-        let blocks_per_batch = config.grid_dim.0 as usize;
-        let total_blocks = blocks_per_batch * nbatch;
-        let mut partial_sums = unsafe {
-            self.context
-                .stream
-                .alloc::<T>(total_blocks)
-                .expect("Failed to allocate memory for partial sums")
-        };
-        let mut build = self.context.stream.launch_builder(&f);
-
-        let x_stride = nstates as i32;
-        build
-            .arg(&self.data)
-            .arg(&nstates_u32)
-            .arg(&nbatch_u32)
-            .arg(&x_stride)
-            .arg(&mut partial_sums);
-        unsafe { build.launch(config) }.expect("Failed to launch kernel");
-        let partial_sums = self
-            .context
-            .stream
-            .clone_dtoh(&partial_sums)
-            .expect("Failed to copy data from device to host");
-        let mut max_norm = T::zero();
-        for b in 0..nbatch {
-            let mut batch_sum = T::zero();
-            for i in 0..blocks_per_batch {
-                batch_sum += partial_sums[b * blocks_per_batch + i];
-            }
-            let norm = batch_sum.sqrt();
-            if norm > max_norm {
-                max_norm = norm;
-            }
-        }
-        max_norm
+        self.context.lk_norm(&self.data, nstates, nbatch, k)
     }
     fn squared_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T {
         self.as_view().squared_norm(y, atol, rtol)

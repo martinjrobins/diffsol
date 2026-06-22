@@ -20,6 +20,7 @@ extern "C" {
 #include "vec_mul_assign.cu"
 #include "vec_mul_scalar.cu"
 #include "vec_norm.cu"
+#include "vec_norm_lk.cu"
 #include "vec_root_finding.cu"
 #include "vec_scatter.cu"
 #include "vec_squared_norm.cu"

@@ -520,6 +520,13 @@ pub(crate) mod tests {
         assert!(num_traits::abs(diff) < f::<V>(1e-12));
     }
 
+    pub fn test_norm_l1<V: Vector>() {
+        let v = V::from_vec(fv::<V>(&[3.0, -4.0]), Default::default());
+        let norm = v.norm(1);
+        let diff = norm - f::<V>(7.0);
+        assert!(num_traits::abs(diff) < f::<V>(1e-12));
+    }
+
     pub fn test_squared_norm<V: Vector>() {
         let x = V::from_vec(fv::<V>(&[1.0, 2.0]), Default::default());
         let y = V::from_vec(fv::<V>(&[1.0, 1.0]), Default::default());
@@ -743,6 +750,15 @@ pub(crate) mod tests {
         assert_eq!(ctx.nbatch(), 2);
         let v = V::from_vec(fv::<V>(&[1.0, 0.0, 0.0, 3.0]), ctx);
         let norm = v.norm(2);
+        let diff = norm - f::<V>(3.0);
+        assert!(num_traits::abs(diff) < f::<V>(1e-12));
+    }
+
+    pub fn test_batched_norm_l1<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let v = V::from_vec(fv::<V>(&[1.0, -2.0, 3.0, 0.0]), ctx);
+        let norm = v.norm(1);
+        // batch0: |1|+|-2| = 3, batch1: |3|+|0| = 3, max = 3
         let diff = norm - f::<V>(3.0);
         assert!(num_traits::abs(diff) < f::<V>(1e-12));
     }
@@ -1513,6 +1529,10 @@ macro_rules! generate_vector_tests_nonbatched {
                 $crate::vector::tests::test_norm::<$V>();
             }
             #[test]
+            fn [<test_norm_l1_ $suffix>]() {
+                $crate::vector::tests::test_norm_l1::<$V>();
+            }
+            #[test]
             fn [<test_squared_norm_ $suffix>]() {
                 $crate::vector::tests::test_squared_norm::<$V>();
             }
@@ -1636,6 +1656,10 @@ macro_rules! generate_vector_tests_batched {
             #[test]
             fn [<test_batched_norm_max_across_batches_ $suffix>]() {
                 $crate::vector::tests::test_batched_norm_max_across_batches::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_norm_l1_ $suffix>]() {
+                $crate::vector::tests::test_batched_norm_l1::<$V>($ctx2);
             }
             #[test]
             fn [<test_batched_squared_norm_ $suffix>]() {
