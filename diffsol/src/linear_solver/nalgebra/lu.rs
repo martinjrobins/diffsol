@@ -7,6 +7,7 @@ use crate::{
     LinearSolver, Matrix, NalgebraContext, NalgebraScalar, NalgebraVec, NonLinearOpJacobian,
 };
 
+/// A [LinearSolver] that uses the LU decomposition in the [`nalgebra` library](https://nalgebra.org/) to solve the linear system.
 #[derive(Clone)]
 pub struct LU<T>
 where
@@ -30,15 +31,14 @@ where
 
 impl<T: NalgebraScalar> LinearSolver<NalgebraMat<T>> for LU<T> {
     fn solve_in_place(&self, state: &mut NalgebraVec<T>) -> Result<(), DiffsolError> {
-        let lu = self
-            .lu
-            .as_ref()
-            .ok_or_else(|| linear_solver_error!(LuNotInitialized))?;
-        match lu.solve_mut(&mut state.data) {
-            true => {}
-            false => return Err(linear_solver_error!(LuSolveFailed))?,
+        if self.lu.is_none() {
+            return Err(linear_solver_error!(LuNotInitialized))?;
         }
-        Ok(())
+        let lu = self.lu.as_ref().unwrap();
+        match lu.solve_mut(&mut state.data) {
+            true => Ok(()),
+            false => Err(linear_solver_error!(LuSolveFailed))?,
+        }
     }
 
     fn set_linearisation<C: NonLinearOpJacobian<T = T, V = NalgebraVec<T>, M = NalgebraMat<T>>>(

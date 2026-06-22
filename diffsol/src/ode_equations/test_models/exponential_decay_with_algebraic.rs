@@ -259,8 +259,8 @@ pub fn exponential_decay_with_algebraic_mass_batched<M: Matrix>(
         saved_yz.push(beta * yb.get_index(nstates - 1));
     }
     y.axpy(M::T::one(), x, beta);
-    for b in 0..nbatch {
-        y.get_batch_mut(b).set_index(nstates - 1, saved_yz[b]);
+    for (b, val) in saved_yz.iter().enumerate() {
+        y.get_batch_mut(b).set_index(nstates - 1, *val);
     }
 }
 
@@ -332,8 +332,8 @@ pub fn exponential_decay_with_algebraic_problem_batched<M: Matrix + 'static>(
     for i in 0..10 {
         let t = M::T::from_f64(i as f64 / 10.0).unwrap();
         let mut y_data = Vec::with_capacity(3 * nbatch);
-        for b in 0..nbatch {
-            let k = M::T::from_f64(p_f64[b]).unwrap();
+        for &k in p_f64.iter().take(nbatch) {
+            let k = M::T::from_f64(k).unwrap();
             let val = (-k * t).exp();
             y_data.push(val);
             y_data.push(val);

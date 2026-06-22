@@ -156,6 +156,12 @@ impl<T: ScalarCuda> DefaultDenseMatrix for CudaVec<T> {
     type M = CudaMat<T>;
 }
 
+impl<T: ScalarCuda> CudaVec<T> {
+    pub(crate) fn stride(&self) -> IndexType {
+        self.len()
+    }
+}
+
 impl<'a, T: ScalarCuda> CudaVecRef<'a, T> {
     pub(crate) fn stride(&self) -> IndexType {
         self.data.len() as IndexType / self.context.nbatch()
@@ -197,26 +203,26 @@ impl_vector_common_ref!(CudaVecRef<'a, T>, CudaContext, CudaView<'a, T>);
 impl_vector_common_ref!(CudaVecMut<'a, T>, CudaContext, CudaViewMut<'a, T>);
 
 macro_rules! impl_mul_scalar {
-    ($lhs:ty, $out:ty, $scalar:ty) => {
+    ($lhs:ty, $out:ty, $scalar:ty, $self_data:expr) => {
         impl<T: ScalarCuda> Mul<Scale<T>> for $lhs {
             type Output = $out;
             fn mul(mut self, rhs: Scale<T>) -> Self::Output {
                 let f = self.context.function::<T>("vec_mul_assign_scalar");
                 let nbatch = self.context.nbatch();
-                let nstates = (self.data.len() / nbatch) as u32;
+                let nstates = self.len() as u32;
                 if nstates == 0 {
                     return self;
                 }
                 let nbatch_u32 = nbatch as u32;
-                let stride = nstates as i32;
+                let stride_i32 = self.stride() as i32;
                 let scalar = rhs.value();
                 let mut build = self.context.stream.launch_builder(&f);
                 build
-                    .arg(&mut self.data)
+                    .arg($self_data)
                     .arg(&scalar)
                     .arg(&nstates)
                     .arg(&nbatch_u32)
-                    .arg(&stride);
+                    .arg(&stride_i32);
                 let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
                 unsafe { build.launch(config) }.expect("Failed to launch kernel");
                 self
@@ -226,12 +232,12 @@ macro_rules! impl_mul_scalar {
 }
 
 macro_rules! impl_mul_scalar_alloc {
-    ($lhs:ty, $out:ty, $scalar:ty) => {
+    ($lhs:ty, $out:ty, $scalar:ty, $self_data:expr) => {
         impl<T: ScalarCuda> Mul<Scale<T>> for $lhs {
             type Output = $out;
             fn mul(self, rhs: Scale<T>) -> Self::Output {
                 let nbatch = self.context.nbatch();
-                let nstates = self.data.len() / nbatch;
+                let nstates = self.len();
                 let mut ret = Self::Output::zeros(nstates, self.context.clone());
                 let f = self.context.function::<T>("vec_mul_scalar");
                 let nstates_u32 = nstates as u32;
@@ -239,13 +245,13 @@ macro_rules! impl_mul_scalar_alloc {
                     return ret;
                 }
                 let nbatch_u32 = nbatch as u32;
-                let src_stride = nstates as i32;
+                let src_stride = self.stride() as i32;
                 let src_nbatch = nbatch as i32;
                 let ret_stride = nstates as i32;
                 let mut build = self.context.stream.launch_builder(&f);
                 let scalar = rhs.value();
                 build
-                    .arg(&self.data)
+                    .arg($self_data)
                     .arg(&scalar)
                     .arg(&mut ret.data)
                     .arg(&nstates_u32)
@@ -273,25 +279,25 @@ macro_rules! impl_div_scalar {
 }
 
 macro_rules! impl_mul_assign_scalar {
-    ($col_type:ty, $scalar:ty) => {
+    ($col_type:ty, $scalar:ty, $self_data:expr) => {
         impl<'a, T: ScalarCuda> MulAssign<Scale<T>> for $col_type {
             fn mul_assign(&mut self, rhs: Scale<T>) {
                 let f = self.context.function::<T>("vec_mul_assign_scalar");
                 let nbatch = self.context.nbatch();
-                let nstates = (self.data.len() / nbatch) as u32;
+                let nstates = self.len() as u32;
                 if nstates == 0 {
                     return;
                 }
                 let nbatch_u32 = nbatch as u32;
-                let stride = nstates as i32;
+                let stride_i32 = self.stride() as i32;
                 let mut build = self.context.stream.launch_builder(&f);
                 let scalar = rhs.value();
                 build
-                    .arg(&mut self.data)
+                    .arg($self_data)
                     .arg(&scalar)
                     .arg(&nstates)
                     .arg(&nbatch_u32)
-                    .arg(&stride);
+                    .arg(&stride_i32);
                 let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
                 unsafe { build.launch(config) }.expect("Failed to launch kernel");
             }
@@ -299,876 +305,258 @@ macro_rules! impl_mul_assign_scalar {
     };
 }
 
-impl_mul_scalar!(CudaVec<T>, CudaVec<T>, T);
-impl_mul_scalar_alloc!(&CudaVec<T>, CudaVec<T>, T);
+impl_mul_scalar!(CudaVec<T>, CudaVec<T>, T, &mut self.data);
+impl_mul_scalar_alloc!(&CudaVec<T>, CudaVec<T>, T, &self.data);
 impl_div_scalar!(CudaVec<T>, CudaVec<T>, T);
-impl_mul_assign_scalar!(CudaVec<T>, T);
+impl_mul_assign_scalar!(CudaVec<T>, T, &mut self.data);
 
-// Explicit batched-aware Mul<Scale> for CudaVecRef -> CudaVec
-impl<T: ScalarCuda> Mul<Scale<T>> for CudaVecRef<'_, T> {
-    type Output = CudaVec<T>;
-    fn mul(self, rhs: Scale<T>) -> Self::Output {
-        let nbatch = self.context.nbatch();
-        let mut ret = CudaVec::zeros(self.nstates, self.context.clone());
-        let f = self.context.function::<T>("vec_mul_scalar");
-        let scalar = rhs.value();
-        let nstates_u32 = self.nstates as u32;
-        if nstates_u32 == 0 {
-            return ret;
+impl_mul_scalar_alloc!(CudaVecRef<'_, T>, CudaVec<T>, T,
+    &self.data.slice(self.col_offset..));
+impl_mul_assign_scalar!(CudaVecMut<'_, T>, T,
+    &mut self.data.slice_mut(self.col_offset..));
+impl_mul_scalar!(CudaVecMut<'_, T>, CudaVec<T>, T,
+    &mut self.data.slice_mut(self.col_offset..));
+impl_mul_scalar_alloc!(CudaVecMut<'_, T>, CudaVec<T>, T,
+    &self.data.slice(self.col_offset..));
+
+// ============================================================
+// ============================================================
+// Unified kernel launch helpers — the only places kernel launch
+// code for add/sub operations exists.
+// ============================================================
+
+/// In-place assign: `lhs -= rhs` or `lhs += rhs`.
+macro_rules! impl_assign {
+    ($Op:ident, $method:ident, $kernel:expr, $label:expr,
+     $Lhs:ty, $RhsRef:ty, $RhsOwned:ty,
+     $self_data:expr, $rhs_data:expr
+    ) => {
+        impl<T: ScalarCuda> $Op<$RhsOwned> for $Lhs {
+            fn $method(&mut self, rhs: $RhsOwned) {
+                self.$method(&rhs);
+            }
         }
-        let config = self
-            .context
-            .launch_config_2d(nstates_u32, nbatch as u32, &f);
-        let mut build = self.context.stream.launch_builder(&f);
-        let src_data = self.data.slice(self.col_offset..);
-        let src_stride = self.stride() as i32;
-        let ret_stride = self.nstates as i32;
-        let nbatch_i32 = nbatch as i32;
-        build
-            .arg(&src_data)
-            .arg(&scalar)
-            .arg(&mut ret.data)
-            .arg(&nstates_u32)
-            .arg(&ret_stride)
-            .arg(&src_stride)
-            .arg(&nbatch_i32);
-        unsafe { build.launch(config) }.expect("Failed to launch kernel");
-        ret
-    }
+        impl<T: ScalarCuda> $Op<$RhsRef> for $Lhs {
+            fn $method(&mut self, rhs: $RhsRef) {
+                let self_nbatch = self.context.nbatch();
+                let other_nbatch = rhs.context.nbatch();
+                self.context
+                    .assert_compatible_nbatch(other_nbatch, $label);
+                let nstates = self.len();
+                if nstates == 0 {
+                    return;
+                }
+                let f = self.context.function::<T>($kernel);
+                let n_u32 = nstates as u32;
+                let nb_u32 = self_nbatch as u32;
+                let config = self.context.launch_config_2d(n_u32, nb_u32, &f);
+                let mut build = self.context.stream.launch_builder(&f);
+                build
+                    .arg($self_data)
+                    .arg($rhs_data)
+                    .arg(&n_u32)
+                    .arg(&(self.stride() as i32))
+                    .arg(&(rhs.stride() as i32))
+                    .arg(&(other_nbatch as i32));
+                unsafe { build.launch(config) }
+                    .expect(concat!("Failed to launch ", $kernel));
+            }
+        }
+    };
 }
 
-// Stride-aware MulAssign<Scale> for CudaVecMut
-impl<T: ScalarCuda> MulAssign<Scale<T>> for CudaVecMut<'_, T> {
-    fn mul_assign(&mut self, rhs: Scale<T>) {
-        let nbatch = self.context.nbatch();
-        let f = self.context.function::<T>("vec_mul_assign_scalar");
-        let scalar = rhs.value();
-        let n = self.nstates as u32;
-        if n == 0 {
-            return;
+/// Allocating binary op: `lhs - rhs -> CudaVec` or `lhs + rhs -> CudaVec`.
+macro_rules! impl_binary {
+    ($Op:ident, $method:ident, $kernel:expr, $label:expr,
+     $Lhs:ty, $Rhs:ty,
+     $lhs_data:expr, $rhs_data:expr
+    ) => {
+        impl<T: ScalarCuda> $Op<$Rhs> for $Lhs {
+            type Output = CudaVec<T>;
+            fn $method(self, rhs: $Rhs) -> CudaVec<T> {
+                let self_nbatch = self.context.nbatch();
+                let other_nbatch = rhs.context.nbatch();
+                self.context
+                    .assert_compatible_nbatch(other_nbatch, $label);
+                let nstates = self.len();
+                let mut ret = CudaVec::zeros(nstates, self.context.clone());
+                if nstates == 0 {
+                    return ret;
+                }
+                let f = self.context.function::<T>($kernel);
+                let n_u32 = nstates as u32;
+                let nb_u32 = self_nbatch as u32;
+                let config = self.context.launch_config_2d(n_u32, nb_u32, &f);
+                let mut build = self.context.stream.launch_builder(&f);
+                build
+                    .arg($lhs_data)
+                    .arg($rhs_data)
+                    .arg(&mut ret.data)
+                    .arg(&n_u32)
+                    .arg(&(self.stride() as i32))
+                    .arg(&(rhs.stride() as i32))
+                    .arg(&(other_nbatch as i32))
+                    .arg(&(nstates as i32))
+                    .arg(&(self_nbatch as i32));
+                unsafe { build.launch(config) }
+                    .expect(concat!("Failed to launch ", $kernel));
+                ret
+            }
         }
-        let nbatch_u32 = nbatch as u32;
-        let config = self.context.launch_config_2d(n, nbatch_u32, &f);
-        let mut build = self.context.stream.launch_builder(&f);
-        let stride_i32 = self.stride() as i32;
-        let col_offset = self.col_offset;
-        let mut self_data = self.data.slice_mut(col_offset..);
-        build
-            .arg(&mut self_data)
-            .arg(&scalar)
-            .arg(&n)
-            .arg(&nbatch_u32)
-            .arg(&stride_i32);
-        unsafe { build.launch(config) }.expect("Failed to launch kernel");
-    }
-}
-
-// Stride-aware Mul<Scale> for CudaVecMut -> CudaVec
-impl<T: ScalarCuda> Mul<Scale<T>> for CudaVecMut<'_, T> {
-    type Output = CudaVec<T>;
-    fn mul(self, rhs: Scale<T>) -> Self::Output {
-        let nbatch = self.context.nbatch();
-        let mut ret = CudaVec::zeros(self.nstates, self.context.clone());
-        let f = self.context.function::<T>("vec_mul_scalar");
-        let scalar = rhs.value();
-        let nstates_u32 = self.nstates as u32;
-        if nstates_u32 == 0 {
-            return ret;
-        }
-        let config = self
-            .context
-            .launch_config_2d(nstates_u32, nbatch as u32, &f);
-        let mut build = self.context.stream.launch_builder(&f);
-        let self_data = self.data.slice(self.col_offset..);
-        let ret_stride = self.nstates as i32;
-        let nbatch_i32 = nbatch as i32;
-        let stride_i32 = self.stride() as i32;
-        build
-            .arg(&self_data)
-            .arg(&scalar)
-            .arg(&mut ret.data)
-            .arg(&nstates_u32)
-            .arg(&ret_stride)
-            .arg(&stride_i32)
-            .arg(&nbatch_i32);
-        unsafe { build.launch(config) }.expect("Failed to launch kernel");
-        ret
-    }
+    };
 }
 
 // ============================================================
-// Per-batch Add/Sub operations on CudaVec (owned, always contiguous)
-//
-// RHS may be: &CudaVec (potentially broadcast nbatch=1),
-//             CudaVecRef (potentially strided with col_offset)
+// SubAssign
 // ============================================================
 
-impl<T: ScalarCuda> SubAssign<CudaVec<T>> for CudaVec<T> {
-    fn sub_assign(&mut self, rhs: CudaVec<T>) {
-        self.sub_assign(&rhs);
-    }
-}
-impl<T: ScalarCuda> SubAssign<&CudaVec<T>> for CudaVec<T> {
-    fn sub_assign(&mut self, rhs: &CudaVec<T>) {
-        let self_nbatch = self.context.nbatch();
-        let other_nbatch = rhs.context.nbatch();
-        self.context
-            .assert_compatible_nbatch(other_nbatch, "sub_assign");
-        let nstates = (self.data.len() as IndexType / self_nbatch) as u32;
-        let other_nstates = rhs.data.len() as IndexType / other_nbatch;
-        if nstates == 0 {
-            return;
-        }
-        let f = self.context.function::<T>("vec_sub_assign");
-        let nbatch = self_nbatch as u32;
-        let self_stride = nstates as i32;
-        let rhs_stride = other_nstates as i32;
-        let other_nbatch_i32 = other_nbatch as i32;
-        let config = self.context.launch_config_2d(nstates, nbatch, &f);
-        let mut build = self.context.stream.launch_builder(&f);
-        build
-            .arg(&mut self.data)
-            .arg(&rhs.data)
-            .arg(&nstates)
-            .arg(&self_stride)
-            .arg(&rhs_stride)
-            .arg(&other_nbatch_i32);
-        unsafe { build.launch(config) }.expect("Failed to launch kernel");
-    }
-}
-impl<T: ScalarCuda> SubAssign<CudaVecRef<'_, T>> for CudaVec<T> {
-    fn sub_assign(&mut self, rhs: CudaVecRef<'_, T>) {
-        self.sub_assign(&rhs);
-    }
-}
-impl<T: ScalarCuda> SubAssign<&CudaVecRef<'_, T>> for CudaVec<T> {
-    fn sub_assign(&mut self, rhs: &CudaVecRef<'_, T>) {
-        let self_nbatch = self.context.nbatch();
-        let other_nbatch = rhs.context.nbatch();
-        self.context
-            .assert_compatible_nbatch(other_nbatch, "sub_assign");
-        let nstates = (self.data.len() as IndexType / self_nbatch) as u32;
-        let _rhs_nstates = rhs.nstates;
-        if nstates == 0 {
-            return;
-        }
-        let f = self.context.function::<T>("vec_sub_assign");
-        let nbatch = self_nbatch as u32;
-        let self_stride = nstates as i32;
-        let rhs_stride = rhs.stride() as i32;
-        let rhs_data = rhs.data.slice(rhs.col_offset..);
-        let other_nbatch_i32 = other_nbatch as i32;
-        let config = self.context.launch_config_2d(nstates, nbatch, &f);
-        let mut build = self.context.stream.launch_builder(&f);
-        build
-            .arg(&mut self.data)
-            .arg(&rhs_data)
-            .arg(&nstates)
-            .arg(&self_stride)
-            .arg(&rhs_stride)
-            .arg(&other_nbatch_i32);
-        unsafe { build.launch(config) }.expect("Failed to launch kernel");
-    }
-}
+impl_assign!(SubAssign, sub_assign, "vec_sub_assign", "sub_assign",
+    CudaVec<T>, &CudaVec<T>, CudaVec<T>,
+    &mut self.data, &rhs.data);
 
-impl<T: ScalarCuda> AddAssign<CudaVec<T>> for CudaVec<T> {
-    fn add_assign(&mut self, rhs: CudaVec<T>) {
-        self.add_assign(&rhs);
-    }
-}
-impl<T: ScalarCuda> AddAssign<&CudaVec<T>> for CudaVec<T> {
-    fn add_assign(&mut self, rhs: &CudaVec<T>) {
-        let self_nbatch = self.context.nbatch();
-        let other_nbatch = rhs.context.nbatch();
-        self.context
-            .assert_compatible_nbatch(other_nbatch, "add_assign");
-        let nstates = (self.data.len() as IndexType / self_nbatch) as u32;
-        let other_nstates = rhs.data.len() as IndexType / other_nbatch;
-        if nstates == 0 {
-            return;
-        }
-        let f = self.context.function::<T>("vec_add_assign");
-        let nbatch = self_nbatch as u32;
-        let self_stride = nstates as i32;
-        let rhs_stride = other_nstates as i32;
-        let other_nbatch_i32 = other_nbatch as i32;
-        let config = self.context.launch_config_2d(nstates, nbatch, &f);
-        let mut build = self.context.stream.launch_builder(&f);
-        build
-            .arg(&mut self.data)
-            .arg(&rhs.data)
-            .arg(&nstates)
-            .arg(&self_stride)
-            .arg(&rhs_stride)
-            .arg(&other_nbatch_i32);
-        unsafe { build.launch(config) }.expect("Failed to launch kernel");
-    }
-}
-impl<T: ScalarCuda> AddAssign<CudaVecRef<'_, T>> for CudaVec<T> {
-    fn add_assign(&mut self, rhs: CudaVecRef<'_, T>) {
-        self.add_assign(&rhs);
-    }
-}
-impl<T: ScalarCuda> AddAssign<&CudaVecRef<'_, T>> for CudaVec<T> {
-    fn add_assign(&mut self, rhs: &CudaVecRef<'_, T>) {
-        let self_nbatch = self.context.nbatch();
-        let other_nbatch = rhs.context.nbatch();
-        self.context
-            .assert_compatible_nbatch(other_nbatch, "add_assign");
-        let nstates = (self.data.len() as IndexType / self_nbatch) as u32;
-        if nstates == 0 {
-            return;
-        }
-        let f = self.context.function::<T>("vec_add_assign");
-        let nbatch = self_nbatch as u32;
-        let self_stride = nstates as i32;
-        let rhs_stride = rhs.stride() as i32;
-        let other_nbatch_i32 = other_nbatch as i32;
-        let rhs_data = rhs.data.slice(rhs.col_offset..);
-        let config = self.context.launch_config_2d(nstates, nbatch, &f);
-        let mut build = self.context.stream.launch_builder(&f);
-        build
-            .arg(&mut self.data)
-            .arg(&rhs_data)
-            .arg(&nstates)
-            .arg(&self_stride)
-            .arg(&rhs_stride)
-            .arg(&other_nbatch_i32);
-        unsafe { build.launch(config) }.expect("Failed to launch kernel");
-    }
-}
+impl_assign!(SubAssign, sub_assign, "vec_sub_assign", "sub_assign",
+    CudaVec<T>, &CudaVecRef<T>, CudaVecRef<'_, T>,
+    &mut self.data, &rhs.data.slice(rhs.col_offset..));
 
-// Stride-aware SubAssign for CudaVecMut with owned CudaVec
-impl<T: ScalarCuda> SubAssign<CudaVec<T>> for CudaVecMut<'_, T> {
-    fn sub_assign(&mut self, rhs: CudaVec<T>) {
-        self.sub_assign(&rhs);
-    }
-}
-impl<T: ScalarCuda> SubAssign<&CudaVec<T>> for CudaVecMut<'_, T> {
-    fn sub_assign(&mut self, rhs: &CudaVec<T>) {
-        let nbatch = self.context.nbatch();
-        let other_nbatch = rhs.context.nbatch();
-        self.context
-            .assert_compatible_nbatch(other_nbatch, "sub_assign");
-        let other_nstates = rhs.data.len() as IndexType / other_nbatch;
-        let nstates_u32 = self.nstates as u32;
-        if nstates_u32 == 0 {
-            return;
-        }
-        let f = self.context.function::<T>("vec_sub_assign");
-        let nbatch_u32 = nbatch as u32;
-        let other_nbatch_i32 = other_nbatch as i32;
-        let config = self.context.launch_config_2d(nstates_u32, nbatch_u32, &f);
-        let mut build = self.context.stream.launch_builder(&f);
-        let self_stride = self.stride() as i32;
-        let col_offset = self.col_offset;
-        let mut self_data = self.data.slice_mut(col_offset..);
-        let rhs_stride = other_nstates as i32;
-        build
-            .arg(&mut self_data)
-            .arg(&rhs.data)
-            .arg(&nstates_u32)
-            .arg(&self_stride)
-            .arg(&rhs_stride)
-            .arg(&other_nbatch_i32);
-        unsafe { build.launch(config) }.expect("Failed to launch kernel");
-    }
-}
+impl_assign!(SubAssign, sub_assign, "vec_sub_assign", "sub_assign",
+    CudaVecMut<T>, &CudaVec<T>, CudaVec<T>,
+    &mut self.data.slice_mut(self.col_offset..), &rhs.data);
 
-// Stride-aware AddAssign for CudaVecMut with owned CudaVec
-impl<T: ScalarCuda> AddAssign<CudaVec<T>> for CudaVecMut<'_, T> {
-    fn add_assign(&mut self, rhs: CudaVec<T>) {
-        self.add_assign(&rhs);
-    }
-}
-impl<T: ScalarCuda> AddAssign<&CudaVec<T>> for CudaVecMut<'_, T> {
-    fn add_assign(&mut self, rhs: &CudaVec<T>) {
-        let nbatch = self.context.nbatch();
-        let other_nbatch = rhs.context.nbatch();
-        self.context
-            .assert_compatible_nbatch(other_nbatch, "add_assign");
-        let other_nstates = rhs.data.len() as IndexType / other_nbatch;
-        let nstates_u32 = self.nstates as u32;
-        if nstates_u32 == 0 {
-            return;
-        }
-        let f = self.context.function::<T>("vec_add_assign");
-        let nbatch_u32 = nbatch as u32;
-        let other_nbatch_i32 = other_nbatch as i32;
-        let config = self.context.launch_config_2d(nstates_u32, nbatch_u32, &f);
-        let mut build = self.context.stream.launch_builder(&f);
-        let self_stride = self.stride() as i32;
-        let col_offset = self.col_offset;
-        let mut self_data = self.data.slice_mut(col_offset..);
-        let rhs_stride = other_nstates as i32;
-        build
-            .arg(&mut self_data)
-            .arg(&rhs.data)
-            .arg(&nstates_u32)
-            .arg(&self_stride)
-            .arg(&rhs_stride)
-            .arg(&other_nbatch_i32);
-        unsafe { build.launch(config) }.expect("Failed to launch kernel");
-    }
-}
-impl<T: ScalarCuda> SubAssign<CudaVecRef<'_, T>> for CudaVecMut<'_, T> {
-    fn sub_assign(&mut self, rhs: CudaVecRef<'_, T>) {
-        self.sub_assign(&rhs);
-    }
-}
-impl<T: ScalarCuda> SubAssign<&CudaVecRef<'_, T>> for CudaVecMut<'_, T> {
-    fn sub_assign(&mut self, rhs: &CudaVecRef<'_, T>) {
-        let nbatch = self.context.nbatch();
-        let other_nbatch = rhs.context.nbatch();
-        self.context
-            .assert_compatible_nbatch(other_nbatch, "sub_assign");
-        let nstates_u32 = self.nstates as u32;
-        if nstates_u32 == 0 {
-            return;
-        }
-        let f = self.context.function::<T>("vec_sub_assign");
-        let nbatch_u32 = nbatch as u32;
-        let other_nbatch_i32 = other_nbatch as i32;
-        let config = self.context.launch_config_2d(nstates_u32, nbatch_u32, &f);
-        let mut build = self.context.stream.launch_builder(&f);
-        let self_stride = self.stride() as i32;
-        let col_offset = self.col_offset;
-        let mut self_data = self.data.slice_mut(col_offset..);
-        let rhs_data = rhs.data.slice(rhs.col_offset..);
-        let rhs_stride = rhs.stride() as i32;
-        build
-            .arg(&mut self_data)
-            .arg(&rhs_data)
-            .arg(&nstates_u32)
-            .arg(&self_stride)
-            .arg(&rhs_stride)
-            .arg(&other_nbatch_i32);
-        unsafe { build.launch(config) }.expect("Failed to launch kernel");
-    }
-}
+impl_assign!(SubAssign, sub_assign, "vec_sub_assign", "sub_assign",
+    CudaVecMut<T>, &CudaVecRef<T>, CudaVecRef<'_, T>,
+    &mut self.data.slice_mut(self.col_offset..), &rhs.data.slice(rhs.col_offset..));
 
-// Stride-aware AddAssign for CudaVecMut with CudaVecRef RHS
-impl<T: ScalarCuda> AddAssign<CudaVecRef<'_, T>> for CudaVecMut<'_, T> {
-    fn add_assign(&mut self, rhs: CudaVecRef<'_, T>) {
-        self.add_assign(&rhs);
-    }
-}
-impl<T: ScalarCuda> AddAssign<&CudaVecRef<'_, T>> for CudaVecMut<'_, T> {
-    fn add_assign(&mut self, rhs: &CudaVecRef<'_, T>) {
-        let nbatch = self.context.nbatch();
-        let other_nbatch = rhs.context.nbatch();
-        self.context
-            .assert_compatible_nbatch(other_nbatch, "add_assign");
-        let nstates_u32 = self.nstates as u32;
-        if nstates_u32 == 0 {
-            return;
-        }
-        let f = self.context.function::<T>("vec_add_assign");
-        let nbatch_u32 = nbatch as u32;
-        let other_nbatch_i32 = other_nbatch as i32;
-        let config = self.context.launch_config_2d(nstates_u32, nbatch_u32, &f);
-        let mut build = self.context.stream.launch_builder(&f);
-        let self_stride = self.stride() as i32;
-        let col_offset = self.col_offset;
-        let mut self_data = self.data.slice_mut(col_offset..);
-        let rhs_data = rhs.data.slice(rhs.col_offset..);
-        let rhs_stride = rhs.stride() as i32;
-        build
-            .arg(&mut self_data)
-            .arg(&rhs_data)
-            .arg(&nstates_u32)
-            .arg(&self_stride)
-            .arg(&rhs_stride)
-            .arg(&other_nbatch_i32);
-        unsafe { build.launch(config) }.expect("Failed to launch kernel");
-    }
-}
+// ============================================================
+// AddAssign
+// ============================================================
+
+impl_assign!(AddAssign, add_assign, "vec_add_assign", "add_assign",
+    CudaVec<T>, &CudaVec<T>, CudaVec<T>,
+    &mut self.data, &rhs.data);
+
+impl_assign!(AddAssign, add_assign, "vec_add_assign", "add_assign",
+    CudaVec<T>, &CudaVecRef<T>, CudaVecRef<'_, T>,
+    &mut self.data, &rhs.data.slice(rhs.col_offset..));
+
+impl_assign!(AddAssign, add_assign, "vec_add_assign", "add_assign",
+    CudaVecMut<T>, &CudaVec<T>, CudaVec<T>,
+    &mut self.data.slice_mut(self.col_offset..), &rhs.data);
+
+impl_assign!(AddAssign, add_assign, "vec_add_assign", "add_assign",
+    CudaVecMut<T>, &CudaVecRef<T>, CudaVecRef<'_, T>,
+    &mut self.data.slice_mut(self.col_offset..), &rhs.data.slice(rhs.col_offset..));
 
 // ============================================================
 // Sub operations: a - b -> CudaVec (new owned)
 // ============================================================
 
-// &CudaVec - &CudaVec -> CudaVec
-impl<T: ScalarCuda> Sub<&CudaVec<T>> for &CudaVec<T> {
-    type Output = CudaVec<T>;
-    fn sub(self, rhs: &CudaVec<T>) -> CudaVec<T> {
-        let self_nbatch = self.context.nbatch();
-        let other_nbatch = rhs.context.nbatch();
-        self.context.assert_compatible_nbatch(other_nbatch, "sub");
-        let nstates_usize = self.data.len() as IndexType / self_nbatch;
-        let nstates = nstates_usize as u32;
-        let other_nstates = rhs.data.len() as IndexType / other_nbatch;
-        let mut ret = CudaVec::zeros(nstates_usize, self.context.clone());
-        if nstates == 0 {
-            return ret;
-        }
-        let nbatch = self_nbatch as u32;
-        let f = self.context.function::<T>("vec_sub");
-        let config = self.context.launch_config_2d(nstates, nbatch, &f);
-        let mut build = self.context.stream.launch_builder(&f);
-        let self_stride = nstates as i32;
-        let rhs_stride = other_nstates as i32;
-        let ret_stride = nstates as i32;
-        let other_nbatch_i32 = other_nbatch as i32;
-        let self_nbatch_i32 = self_nbatch as i32;
-        build
-            .arg(&self.data)
-            .arg(&rhs.data)
-            .arg(&mut ret.data)
-            .arg(&nstates)
-            .arg(&self_stride)
-            .arg(&rhs_stride)
-            .arg(&other_nbatch_i32)
-            .arg(&ret_stride)
-            .arg(&self_nbatch_i32);
-        unsafe { build.launch(config) }.expect("Failed to launch kernel");
-        ret
-    }
-}
+impl_binary!(Sub, sub, "vec_sub", "sub",
+    &CudaVec<T>, &CudaVec<T>,
+    &self.data, &rhs.data);
 
-// &CudaVec - CudaVecRef -> CudaVec
-impl<T: ScalarCuda> Sub<CudaVecRef<'_, T>> for &CudaVec<T> {
-    type Output = CudaVec<T>;
-    fn sub(self, rhs: CudaVecRef<'_, T>) -> CudaVec<T> {
-        self.sub(&rhs)
-    }
-}
-impl<T: ScalarCuda> Sub<&CudaVecRef<'_, T>> for &CudaVec<T> {
-    type Output = CudaVec<T>;
-    fn sub(self, rhs: &CudaVecRef<'_, T>) -> CudaVec<T> {
-        let self_nbatch = self.context.nbatch();
-        let other_nbatch = rhs.context.nbatch();
-        self.context.assert_compatible_nbatch(other_nbatch, "sub");
-        let nstates_usize = self.data.len() as IndexType / self_nbatch;
-        let nstates = nstates_usize as u32;
-        if nstates == 0 {
-            return CudaVec::zeros(nstates_usize, self.context.clone());
-        }
-        let mut ret = CudaVec::zeros(nstates_usize, self.context.clone());
-        let nbatch = self_nbatch as u32;
-        let f = self.context.function::<T>("vec_sub");
-        let config = self.context.launch_config_2d(nstates, nbatch, &f);
-        let mut build = self.context.stream.launch_builder(&f);
-        let self_stride = nstates as i32;
-        let rhs_stride = rhs.stride() as i32;
-        let rhs_data = rhs.data.slice(rhs.col_offset..);
-        let ret_stride = nstates as i32;
-        let other_nbatch_i32 = other_nbatch as i32;
-        let self_nbatch_i32 = self_nbatch as i32;
-        build
-            .arg(&self.data)
-            .arg(&rhs_data)
-            .arg(&mut ret.data)
-            .arg(&nstates)
-            .arg(&self_stride)
-            .arg(&rhs_stride)
-            .arg(&other_nbatch_i32)
-            .arg(&ret_stride)
-            .arg(&self_nbatch_i32);
-        unsafe { build.launch(config) }.expect("Failed to launch kernel");
-        ret
-    }
-}
+impl_binary!(Sub, sub, "vec_sub", "sub",
+    &CudaVec<T>, &CudaVecRef<T>,
+    &self.data, &rhs.data.slice(rhs.col_offset..));
 
-// CudaVec - CudaVec -> CudaVec (owned by value)
+impl_binary!(Sub, sub, "vec_sub", "sub",
+    &CudaVecRef<T>, &CudaVec<T>,
+    &self.data.slice(self.col_offset..), &rhs.data);
+
+impl_binary!(Sub, sub, "vec_sub", "sub",
+    &CudaVecRef<T>, &CudaVecRef<T>,
+    &self.data.slice(self.col_offset..), &rhs.data.slice(rhs.col_offset..));
+
+// consuming-self (delegates to SubAssign)
 impl<T: ScalarCuda> Sub<CudaVec<T>> for CudaVec<T> {
     type Output = CudaVec<T>;
-    fn sub(mut self, rhs: CudaVec<T>) -> CudaVec<T> {
-        self.sub_assign(&rhs);
-        self
-    }
+    fn sub(mut self, rhs: CudaVec<T>) -> CudaVec<T> { self.sub_assign(&rhs); self }
 }
-
-// CudaVec + CudaVec -> CudaVec (owned by value)
-impl<T: ScalarCuda> Add<CudaVec<T>> for CudaVec<T> {
-    type Output = CudaVec<T>;
-    fn add(mut self, rhs: CudaVec<T>) -> CudaVec<T> {
-        self.add_assign(&rhs);
-        self
-    }
-}
-
-// CudaVec - &CudaVec -> CudaVec (in-place on self)
 impl<T: ScalarCuda> Sub<&CudaVec<T>> for CudaVec<T> {
     type Output = CudaVec<T>;
-    fn sub(mut self, rhs: &CudaVec<T>) -> CudaVec<T> {
-        self.sub_assign(rhs);
-        self
-    }
+    fn sub(mut self, rhs: &CudaVec<T>) -> CudaVec<T> { self.sub_assign(rhs); self }
 }
-
-// CudaVec - CudaVecRef -> CudaVec (in-place on self)
 impl<T: ScalarCuda> Sub<CudaVecRef<'_, T>> for CudaVec<T> {
     type Output = CudaVec<T>;
-    fn sub(mut self, rhs: CudaVecRef<'_, T>) -> CudaVec<T> {
-        self.sub_assign(&rhs);
-        self
-    }
+    fn sub(mut self, rhs: CudaVecRef<'_, T>) -> CudaVec<T> { self.sub_assign(&rhs); self }
 }
 impl<T: ScalarCuda> Sub<&CudaVecRef<'_, T>> for CudaVec<T> {
     type Output = CudaVec<T>;
-    fn sub(mut self, rhs: &CudaVecRef<'_, T>) -> CudaVec<T> {
-        self.sub_assign(rhs);
-        self
-    }
+    fn sub(mut self, rhs: &CudaVecRef<'_, T>) -> CudaVec<T> { self.sub_assign(rhs); self }
 }
 
-// CudaVecRef - CudaVec -> CudaVec
+// by-value delegation to &self impls
+impl<T: ScalarCuda> Sub<CudaVec<T>> for &CudaVec<T> {
+    type Output = CudaVec<T>;
+    fn sub(self, rhs: CudaVec<T>) -> CudaVec<T> { self.sub(&rhs) }
+}
+impl<T: ScalarCuda> Sub<CudaVecRef<'_, T>> for &CudaVec<T> {
+    type Output = CudaVec<T>;
+    fn sub(self, rhs: CudaVecRef<'_, T>) -> CudaVec<T> { self.sub(&rhs) }
+}
 impl<T: ScalarCuda> Sub<CudaVec<T>> for CudaVecRef<'_, T> {
     type Output = CudaVec<T>;
-    fn sub(self, rhs: CudaVec<T>) -> CudaVec<T> {
-        &self - &rhs
-    }
+    fn sub(self, rhs: CudaVec<T>) -> CudaVec<T> { &self - &rhs }
 }
-
-// CudaVecRef - &CudaVec -> CudaVec
-impl<T: ScalarCuda> Sub<&CudaVec<T>> for CudaVecRef<'_, T> {
-    type Output = CudaVec<T>;
-    fn sub(self, rhs: &CudaVec<T>) -> CudaVec<T> {
-        sub_view_minus_owned(&self, rhs)
-    }
-}
-impl<T: ScalarCuda> Sub<&CudaVec<T>> for &CudaVecRef<'_, T> {
-    type Output = CudaVec<T>;
-    fn sub(self, rhs: &CudaVec<T>) -> CudaVec<T> {
-        sub_view_minus_owned(self, rhs)
-    }
-}
-
-// CudaVecRef - CudaVecRef -> CudaVec
 impl<T: ScalarCuda> Sub<CudaVecRef<'_, T>> for CudaVecRef<'_, T> {
     type Output = CudaVec<T>;
-    fn sub(self, rhs: CudaVecRef<'_, T>) -> CudaVec<T> {
-        &self - &rhs
-    }
-}
-impl<T: ScalarCuda> Sub<&CudaVecRef<'_, T>> for CudaVecRef<'_, T> {
-    type Output = CudaVec<T>;
-    fn sub(self, rhs: &CudaVecRef<'_, T>) -> CudaVec<T> {
-        sub_view_minus_view(&self, rhs)
-    }
-}
-impl<T: ScalarCuda> Sub<&CudaVecRef<'_, T>> for &CudaVecRef<'_, T> {
-    type Output = CudaVec<T>;
-    fn sub(self, rhs: &CudaVecRef<'_, T>) -> CudaVec<T> {
-        sub_view_minus_view(self, rhs)
-    }
-}
-
-fn sub_view_minus_owned<T: ScalarCuda>(lhs: &CudaVecRef<'_, T>, rhs: &CudaVec<T>) -> CudaVec<T> {
-    let self_nbatch = lhs.context.nbatch();
-    let other_nbatch = rhs.context.nbatch();
-    lhs.context.assert_compatible_nbatch(other_nbatch, "sub");
-    let nstates = lhs.nstates;
-    let nstates_u32 = nstates as u32;
-    let other_nstates = rhs.data.len() as IndexType / other_nbatch;
-    let mut ret = CudaVec::zeros(nstates, lhs.context.clone());
-    if nstates_u32 == 0 {
-        return ret;
-    }
-    let nbatch = self_nbatch as u32;
-    let f = lhs.context.function::<T>("vec_sub");
-    let config = lhs.context.launch_config_2d(nstates_u32, nbatch, &f);
-    let mut build = lhs.context.stream.launch_builder(&f);
-    let self_data = lhs.data.slice(lhs.col_offset..);
-    let self_stride = lhs.stride() as i32;
-    let rhs_stride = other_nstates as i32;
-    let ret_stride = nstates as i32;
-    let other_nbatch_i32 = other_nbatch as i32;
-    let self_nbatch_i32 = self_nbatch as i32;
-    build
-        .arg(&self_data)
-        .arg(&rhs.data)
-        .arg(&mut ret.data)
-        .arg(&nstates_u32)
-        .arg(&self_stride)
-        .arg(&rhs_stride)
-        .arg(&other_nbatch_i32)
-        .arg(&ret_stride)
-        .arg(&self_nbatch_i32);
-    unsafe { build.launch(config) }.expect("Failed to launch kernel");
-    ret
-}
-
-fn sub_view_minus_view<T: ScalarCuda>(
-    lhs: &CudaVecRef<'_, T>,
-    rhs: &CudaVecRef<'_, T>,
-) -> CudaVec<T> {
-    let self_nbatch = lhs.context.nbatch();
-    let other_nbatch = rhs.context.nbatch();
-    lhs.context.assert_compatible_nbatch(other_nbatch, "sub");
-    let nstates = lhs.nstates;
-    let nstates_u32 = nstates as u32;
-    let mut ret = CudaVec::zeros(nstates, lhs.context.clone());
-    if nstates_u32 == 0 {
-        return ret;
-    }
-    let nbatch = self_nbatch as u32;
-    let f = lhs.context.function::<T>("vec_sub");
-    let config = lhs.context.launch_config_2d(nstates_u32, nbatch, &f);
-    let mut build = lhs.context.stream.launch_builder(&f);
-    let self_data = lhs.data.slice(lhs.col_offset..);
-    let rhs_data = rhs.data.slice(rhs.col_offset..);
-    let self_stride = lhs.stride() as i32;
-    let rhs_stride = rhs.stride() as i32;
-    let ret_stride = nstates as i32;
-    let other_nbatch_i32 = other_nbatch as i32;
-    let self_nbatch_i32 = self_nbatch as i32;
-    build
-        .arg(&self_data)
-        .arg(&rhs_data)
-        .arg(&mut ret.data)
-        .arg(&nstates_u32)
-        .arg(&self_stride)
-        .arg(&rhs_stride)
-        .arg(&other_nbatch_i32)
-        .arg(&ret_stride)
-        .arg(&self_nbatch_i32);
-    unsafe { build.launch(config) }.expect("Failed to launch kernel");
-    ret
+    fn sub(self, rhs: CudaVecRef<'_, T>) -> CudaVec<T> { &self - &rhs }
 }
 
 // ============================================================
 // Add operations: a + b -> CudaVec (new owned)
 // ============================================================
 
-// &CudaVec + CudaVec -> CudaVec
-impl<T: ScalarCuda> Add<CudaVec<T>> for &CudaVec<T> {
-    type Output = CudaVec<T>;
-    fn add(self, rhs: CudaVec<T>) -> CudaVec<T> {
-        self.add(&rhs)
-    }
-}
-// &CudaVec - CudaVec -> CudaVec
-impl<T: ScalarCuda> Sub<CudaVec<T>> for &CudaVec<T> {
-    type Output = CudaVec<T>;
-    fn sub(self, rhs: CudaVec<T>) -> CudaVec<T> {
-        self.sub(&rhs)
-    }
-}
+impl_binary!(Add, add, "vec_add", "add",
+    &CudaVec<T>, &CudaVec<T>,
+    &self.data, &rhs.data);
 
-// &CudaVec + &CudaVec -> CudaVec
-impl<T: ScalarCuda> Add<&CudaVec<T>> for &CudaVec<T> {
-    type Output = CudaVec<T>;
-    fn add(self, rhs: &CudaVec<T>) -> CudaVec<T> {
-        let self_nbatch = self.context.nbatch();
-        let other_nbatch = rhs.context.nbatch();
-        self.context.assert_compatible_nbatch(other_nbatch, "add");
-        let nstates_usize = self.data.len() as IndexType / self_nbatch;
-        let nstates = nstates_usize as u32;
-        let other_nstates = rhs.data.len() as IndexType / other_nbatch;
-        let mut ret = CudaVec::zeros(nstates_usize, self.context.clone());
-        if nstates == 0 {
-            return ret;
-        }
-        let nbatch = self_nbatch as u32;
-        let f = self.context.function::<T>("vec_add");
-        let config = self.context.launch_config_2d(nstates, nbatch, &f);
-        let mut build = self.context.stream.launch_builder(&f);
-        let self_stride = nstates as i32;
-        let rhs_stride = other_nstates as i32;
-        let ret_stride = nstates as i32;
-        let other_nbatch_i32 = other_nbatch as i32;
-        let self_nbatch_i32 = self_nbatch as i32;
-        build
-            .arg(&self.data)
-            .arg(&rhs.data)
-            .arg(&mut ret.data)
-            .arg(&nstates)
-            .arg(&self_stride)
-            .arg(&rhs_stride)
-            .arg(&other_nbatch_i32)
-            .arg(&ret_stride)
-            .arg(&self_nbatch_i32);
-        unsafe { build.launch(config) }.expect("Failed to launch kernel");
-        ret
-    }
-}
+impl_binary!(Add, add, "vec_add", "add",
+    &CudaVec<T>, &CudaVecRef<T>,
+    &self.data, &rhs.data.slice(rhs.col_offset..));
 
-// &CudaVec + CudaVecRef -> CudaVec
-impl<T: ScalarCuda> Add<CudaVecRef<'_, T>> for &CudaVec<T> {
-    type Output = CudaVec<T>;
-    fn add(self, rhs: CudaVecRef<'_, T>) -> CudaVec<T> {
-        self.add(&rhs)
-    }
-}
-impl<T: ScalarCuda> Add<&CudaVecRef<'_, T>> for &CudaVec<T> {
-    type Output = CudaVec<T>;
-    fn add(self, rhs: &CudaVecRef<'_, T>) -> CudaVec<T> {
-        let self_nbatch = self.context.nbatch();
-        let other_nbatch = rhs.context.nbatch();
-        self.context.assert_compatible_nbatch(other_nbatch, "add");
-        let nstates_usize = self.data.len() as IndexType / self_nbatch;
-        let nstates = nstates_usize as u32;
-        if nstates == 0 {
-            return CudaVec::zeros(nstates_usize, self.context.clone());
-        }
-        let mut ret = CudaVec::zeros(nstates_usize, self.context.clone());
-        let nbatch = self_nbatch as u32;
-        let f = self.context.function::<T>("vec_add");
-        let config = self.context.launch_config_2d(nstates, nbatch, &f);
-        let mut build = self.context.stream.launch_builder(&f);
-        let self_stride = nstates as i32;
-        let rhs_stride = rhs.stride() as i32;
-        let rhs_data = rhs.data.slice(rhs.col_offset..);
-        let ret_stride = nstates as i32;
-        let other_nbatch_i32 = other_nbatch as i32;
-        let self_nbatch_i32 = self_nbatch as i32;
-        build
-            .arg(&self.data)
-            .arg(&rhs_data)
-            .arg(&mut ret.data)
-            .arg(&nstates)
-            .arg(&self_stride)
-            .arg(&rhs_stride)
-            .arg(&other_nbatch_i32)
-            .arg(&ret_stride)
-            .arg(&self_nbatch_i32);
-        unsafe { build.launch(config) }.expect("Failed to launch kernel");
-        ret
-    }
-}
+impl_binary!(Add, add, "vec_add", "add",
+    &CudaVecRef<T>, &CudaVec<T>,
+    &self.data.slice(self.col_offset..), &rhs.data);
 
-// CudaVec + &CudaVec -> CudaVec (in-place on self)
+impl_binary!(Add, add, "vec_add", "add",
+    &CudaVecRef<T>, &CudaVecRef<T>,
+    &self.data.slice(self.col_offset..), &rhs.data.slice(rhs.col_offset..));
+
+// consuming-self (delegates to AddAssign)
+impl<T: ScalarCuda> Add<CudaVec<T>> for CudaVec<T> {
+    type Output = CudaVec<T>;
+    fn add(mut self, rhs: CudaVec<T>) -> CudaVec<T> { self.add_assign(&rhs); self }
+}
 impl<T: ScalarCuda> Add<&CudaVec<T>> for CudaVec<T> {
     type Output = CudaVec<T>;
-    fn add(mut self, rhs: &CudaVec<T>) -> CudaVec<T> {
-        self.add_assign(rhs);
-        self
-    }
+    fn add(mut self, rhs: &CudaVec<T>) -> CudaVec<T> { self.add_assign(rhs); self }
 }
-
-// CudaVec + CudaVecRef -> CudaVec (in-place on self)
 impl<T: ScalarCuda> Add<CudaVecRef<'_, T>> for CudaVec<T> {
     type Output = CudaVec<T>;
-    fn add(mut self, rhs: CudaVecRef<'_, T>) -> CudaVec<T> {
-        self.add_assign(&rhs);
-        self
-    }
+    fn add(mut self, rhs: CudaVecRef<'_, T>) -> CudaVec<T> { self.add_assign(&rhs); self }
 }
 impl<T: ScalarCuda> Add<&CudaVecRef<'_, T>> for CudaVec<T> {
     type Output = CudaVec<T>;
-    fn add(mut self, rhs: &CudaVecRef<'_, T>) -> CudaVec<T> {
-        self.add_assign(rhs);
-        self
-    }
+    fn add(mut self, rhs: &CudaVecRef<'_, T>) -> CudaVec<T> { self.add_assign(rhs); self }
 }
 
-// CudaVecRef + CudaVec -> CudaVec
+// by-value delegation to &self impls
+impl<T: ScalarCuda> Add<CudaVec<T>> for &CudaVec<T> {
+    type Output = CudaVec<T>;
+    fn add(self, rhs: CudaVec<T>) -> CudaVec<T> { self.add(&rhs) }
+}
+impl<T: ScalarCuda> Add<CudaVecRef<'_, T>> for &CudaVec<T> {
+    type Output = CudaVec<T>;
+    fn add(self, rhs: CudaVecRef<'_, T>) -> CudaVec<T> { self.add(&rhs) }
+}
 impl<T: ScalarCuda> Add<CudaVec<T>> for CudaVecRef<'_, T> {
     type Output = CudaVec<T>;
-    fn add(self, rhs: CudaVec<T>) -> CudaVec<T> {
-        &self + &rhs
-    }
+    fn add(self, rhs: CudaVec<T>) -> CudaVec<T> { &self + &rhs }
 }
-
-// CudaVecRef + &CudaVec -> CudaVec
-impl<T: ScalarCuda> Add<&CudaVec<T>> for CudaVecRef<'_, T> {
-    type Output = CudaVec<T>;
-    fn add(self, rhs: &CudaVec<T>) -> CudaVec<T> {
-        add_view_plus_owned(&self, rhs)
-    }
-}
-impl<T: ScalarCuda> Add<&CudaVec<T>> for &CudaVecRef<'_, T> {
-    type Output = CudaVec<T>;
-    fn add(self, rhs: &CudaVec<T>) -> CudaVec<T> {
-        add_view_plus_owned(self, rhs)
-    }
-}
-
-// CudaVecRef + CudaVecRef -> CudaVec
 impl<T: ScalarCuda> Add<CudaVecRef<'_, T>> for CudaVecRef<'_, T> {
     type Output = CudaVec<T>;
-    fn add(self, rhs: CudaVecRef<'_, T>) -> CudaVec<T> {
-        &self + &rhs
-    }
+    fn add(self, rhs: CudaVecRef<'_, T>) -> CudaVec<T> { &self + &rhs }
 }
-impl<T: ScalarCuda> Add<&CudaVecRef<'_, T>> for CudaVecRef<'_, T> {
-    type Output = CudaVec<T>;
-    fn add(self, rhs: &CudaVecRef<'_, T>) -> CudaVec<T> {
-        add_view_plus_view(&self, rhs)
-    }
-}
-impl<T: ScalarCuda> Add<&CudaVecRef<'_, T>> for &CudaVecRef<'_, T> {
-    type Output = CudaVec<T>;
-    fn add(self, rhs: &CudaVecRef<'_, T>) -> CudaVec<T> {
-        add_view_plus_view(self, rhs)
-    }
-}
-
-fn add_view_plus_owned<T: ScalarCuda>(lhs: &CudaVecRef<'_, T>, rhs: &CudaVec<T>) -> CudaVec<T> {
-    let self_nbatch = lhs.context.nbatch();
-    let other_nbatch = rhs.context.nbatch();
-    lhs.context.assert_compatible_nbatch(other_nbatch, "add");
-    let nstates = lhs.nstates;
-    let nstates_u32 = nstates as u32;
-    let other_nstates = rhs.data.len() as IndexType / other_nbatch;
-    let mut ret = CudaVec::zeros(nstates, lhs.context.clone());
-    if nstates_u32 == 0 {
-        return ret;
-    }
-    let nbatch = self_nbatch as u32;
-    let f = lhs.context.function::<T>("vec_add");
-    let config = lhs.context.launch_config_2d(nstates_u32, nbatch, &f);
-    let mut build = lhs.context.stream.launch_builder(&f);
-    let self_data = lhs.data.slice(lhs.col_offset..);
-    let self_stride = lhs.stride() as i32;
-    let rhs_stride = other_nstates as i32;
-    let ret_stride = nstates as i32;
-    let other_nbatch_i32 = other_nbatch as i32;
-    let self_nbatch_i32 = self_nbatch as i32;
-    build
-        .arg(&self_data)
-        .arg(&rhs.data)
-        .arg(&mut ret.data)
-        .arg(&nstates_u32)
-        .arg(&self_stride)
-        .arg(&rhs_stride)
-        .arg(&other_nbatch_i32)
-        .arg(&ret_stride)
-        .arg(&self_nbatch_i32);
-    unsafe { build.launch(config) }.expect("Failed to launch kernel");
-    ret
-}
-
-fn add_view_plus_view<T: ScalarCuda>(
-    lhs: &CudaVecRef<'_, T>,
-    rhs: &CudaVecRef<'_, T>,
-) -> CudaVec<T> {
-    let self_nbatch = lhs.context.nbatch();
-    let other_nbatch = rhs.context.nbatch();
-    lhs.context.assert_compatible_nbatch(other_nbatch, "add");
-    let nstates = lhs.nstates;
-    let nstates_u32 = nstates as u32;
-    let mut ret = CudaVec::zeros(nstates, lhs.context.clone());
-    if nstates_u32 == 0 {
-        return ret;
-    }
-    let nbatch = self_nbatch as u32;
-    let f = lhs.context.function::<T>("vec_add");
-    let config = lhs.context.launch_config_2d(nstates_u32, nbatch, &f);
-    let mut build = lhs.context.stream.launch_builder(&f);
-    let self_data = lhs.data.slice(lhs.col_offset..);
-    let rhs_data = rhs.data.slice(rhs.col_offset..);
-    let self_stride = lhs.stride() as i32;
-    let rhs_stride = rhs.stride() as i32;
-    let ret_stride = nstates as i32;
-    let other_nbatch_i32 = other_nbatch as i32;
-    let self_nbatch_i32 = self_nbatch as i32;
-    build
-        .arg(&self_data)
-        .arg(&rhs_data)
-        .arg(&mut ret.data)
-        .arg(&nstates_u32)
-        .arg(&self_stride)
-        .arg(&rhs_stride)
-        .arg(&other_nbatch_i32)
-        .arg(&ret_stride)
-        .arg(&self_nbatch_i32);
-    unsafe { build.launch(config) }.expect("Failed to launch kernel");
-    ret
-}
-
 impl VectorIndex for CudaIndex {
     type C = CudaContext;
     fn context(&self) -> &Self::C {
@@ -1230,7 +618,7 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
     }
     fn set_index(&mut self, index: IndexType, value: Self::T) {
         let nbatch = self.context.nbatch();
-        let nstates = self.data.len() as IndexType / nbatch;
+        let nstates = self.len();
         assert!(index < nstates, "Index out of bounds");
         let data = vec![value];
         for b in 0..nbatch {
@@ -1243,7 +631,7 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
     }
     fn norm(&self, k: i32) -> Self::T {
         let nbatch = self.context.nbatch();
-        let nstates = self.data.len() as IndexType / nbatch;
+        let nstates = self.len();
         if nbatch == 1 {
             return self.context.norm(&self.data, k);
         }
@@ -1305,75 +693,7 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
         max_norm
     }
     fn squared_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T {
-        let nbatch = self.context.nbatch();
-        let nstates = self.data.len() as IndexType / nbatch;
-        if nstates == 0 {
-            return Self::T::zero();
-        }
-        let atol_nbatch = atol.context.nbatch();
-        let y_nbatch = y.context.nbatch();
-
-        let nstates_u32 = nstates as u32;
-        let nbatch_u32 = nbatch as u32;
-
-        let f = self.context.function::<T>("vec_squared_norm");
-        let config = self.context.launch_config_2d_reduce(
-            nstates_u32,
-            nbatch_u32,
-            &f,
-            squared_norm_blk_size::<T>,
-        );
-        let blocks_per_batch = config.grid_dim.0 as usize;
-        let total_blocks = blocks_per_batch * nbatch;
-        let mut partial_sums = unsafe {
-            self.context
-                .stream
-                .alloc::<T>(total_blocks)
-                .expect("Failed to allocate memory for partial sums")
-        };
-        let mut build = self.context.stream.launch_builder(&f);
-
-        let y_stride = (self.data.len() as IndexType / nbatch) as i32;
-        let y_nbatch_i32 = nbatch as i32;
-        let y0_stride = (y.data.len() as IndexType / y_nbatch) as i32;
-        let y0_nbatch_i32 = y_nbatch as i32;
-        let atol_stride = (atol.data.len() as IndexType / atol_nbatch) as i32;
-        let atol_nbatch_i32 = atol_nbatch as i32;
-        let rtol_val = rtol;
-
-        build
-            .arg(&self.data)
-            .arg(&y.data)
-            .arg(&atol.data)
-            .arg(&rtol_val)
-            .arg(&nstates_u32)
-            .arg(&nbatch_u32)
-            .arg(&y_stride)
-            .arg(&y_nbatch_i32)
-            .arg(&y0_stride)
-            .arg(&y0_nbatch_i32)
-            .arg(&atol_stride)
-            .arg(&atol_nbatch_i32)
-            .arg(&mut partial_sums);
-        unsafe { build.launch(config) }.expect("Failed to launch kernel");
-        let partial_sums = self
-            .context
-            .stream
-            .clone_dtoh(&partial_sums)
-            .expect("Failed to copy data from device to host");
-        let nstates_t = T::from_f64(nstates as f64).unwrap();
-        let mut max_norm = T::zero();
-        for b in 0..nbatch {
-            let start = b * blocks_per_batch;
-            let sum = partial_sums[start..start + blocks_per_batch]
-                .iter()
-                .fold(T::zero(), |acc, x| acc + *x);
-            let norm = sum / nstates_t;
-            if norm > max_norm {
-                max_norm = norm;
-            }
-        }
-        max_norm
+        self.as_view().squared_norm(y, atol, rtol)
     }
     fn len(&self) -> IndexType {
         self.data.len() as IndexType / self.context.nbatch()
@@ -1439,7 +759,7 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
 
     fn fill(&mut self, value: Self::T) {
         let nbatch = self.context.nbatch();
-        let nstates = self.data.len() as IndexType / nbatch;
+        let nstates = self.len();
         let nstates_u32 = nstates as u32;
         let nbatch_u32 = nbatch as u32;
         if nstates_u32 == 0 {
@@ -1458,7 +778,7 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
     }
     fn as_view(&self) -> Self::View<'_> {
-        let nstates = self.data.len() as IndexType / self.context.nbatch();
+        let nstates = self.len();
         CudaVecRef {
             data: self.data.as_view(),
             context: self.context.clone(),
@@ -1467,7 +787,7 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
         }
     }
     fn as_view_mut(&mut self) -> Self::ViewMut<'_> {
-        let nstates = self.data.len() as IndexType / self.context.nbatch();
+        let nstates = self.len();
         CudaVecMut {
             data: self.data.as_view_mut(),
             context: self.context.clone(),
@@ -1476,37 +796,14 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
         }
     }
     fn copy_from(&mut self, other: &Self) {
-        let self_nbatch = self.context.nbatch();
-        let other_nbatch = other.context.nbatch();
-        self.context
-            .assert_compatible_nbatch(other_nbatch, "copy_from");
-        let nstates = (self.data.len() as IndexType / self_nbatch) as u32;
-        let other_nstates = other.data.len() as IndexType / other_nbatch;
-        if nstates == 0 {
-            return;
-        }
-        let nbatch = self_nbatch as u32;
-        let f = self.context.function::<T>("vec_copy");
-        let config = self.context.launch_config_2d(nstates, nbatch, &f);
-        let mut build = self.context.stream.launch_builder(&f);
-        let self_stride = nstates as i32;
-        let rhs_stride = other_nstates as i32;
-        let other_nbatch_i32 = other_nbatch as i32;
-        build
-            .arg(&mut self.data)
-            .arg(&other.data)
-            .arg(&nstates)
-            .arg(&self_stride)
-            .arg(&rhs_stride)
-            .arg(&other_nbatch_i32);
-        unsafe { build.launch(config) }.expect("Failed to launch kernel");
+        self.copy_from_view(&other.as_view());
     }
     fn copy_from_view(&mut self, other: &Self::View<'_>) {
         let self_nbatch = self.context.nbatch();
         let other_nbatch = other.context.nbatch();
         self.context
             .assert_compatible_nbatch(other_nbatch, "copy_from_view");
-        let nstates = (self.data.len() as IndexType / self_nbatch) as u32;
+        let nstates = self.len() as u32;
         if nstates == 0 {
             return;
         }
@@ -1528,40 +825,13 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
     }
     fn axpy(&mut self, alpha: Self::T, x: &Self, beta: Self::T) {
-        let self_nbatch = self.context.nbatch();
-        let x_nbatch = x.context.nbatch();
-        self.context.assert_compatible_nbatch(x_nbatch, "axpy");
-        let nstates = self.data.len() as IndexType / self_nbatch;
-        if nstates == 0 {
-            return;
-        }
-        let x_nstates = x.data.len() as IndexType / x_nbatch;
-        let nstates_u32 = nstates as u32;
-        let nbatch_u32 = self_nbatch as u32;
-        let f = self.context.function::<T>("vec_axpy");
-        let config = self.context.launch_config_2d(nstates_u32, nbatch_u32, &f);
-        let mut build = self.context.stream.launch_builder(&f);
-        let self_stride = nstates as i32;
-        let x_stride = x_nstates as i32;
-        let x_nbatch_i32 = x_nbatch as i32;
-        let alpha_val = alpha;
-        let beta_val = beta;
-        build
-            .arg(&mut self.data)
-            .arg(&x.data)
-            .arg(&alpha_val)
-            .arg(&beta_val)
-            .arg(&nstates_u32)
-            .arg(&self_stride)
-            .arg(&x_stride)
-            .arg(&x_nbatch_i32);
-        unsafe { build.launch(config) }.expect("Failed to launch kernel");
+        self.axpy_v(alpha, &x.as_view(), beta);
     }
     fn axpy_v(&mut self, alpha: Self::T, x: &Self::View<'_>, beta: Self::T) {
         let self_nbatch = self.context.nbatch();
         let x_nbatch = x.context.nbatch();
         self.context.assert_compatible_nbatch(x_nbatch, "axpy_v");
-        let nstates = self.data.len() as IndexType / self_nbatch;
+        let nstates = self.len();
         if nstates == 0 {
             return;
         }
@@ -1597,11 +867,11 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
         );
         self.context
             .assert_compatible_nbatch(x_nbatch, "batched_axpy");
-        let nstates = self.data.len() as IndexType / self_nbatch;
+        let nstates = self.len();
         if nstates == 0 {
             return;
         }
-        let x_nstates = x.data.len() as IndexType / x_nbatch;
+        let x_nstates = x.len();
 
         let mut alpha_dev = unsafe {
             self.context
@@ -1644,8 +914,8 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
         let other_nbatch = other.context.nbatch();
         self.context
             .assert_compatible_nbatch(other_nbatch, "component_mul_assign");
-        let nstates = (self.data.len() as IndexType / self_nbatch) as u32;
-        let other_nstates = other.data.len() as IndexType / other_nbatch;
+        let nstates = self.len() as u32;
+        let other_nstates = other.len();
         if nstates == 0 {
             return;
         }
@@ -1670,8 +940,8 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
         let other_nbatch = other.context.nbatch();
         self.context
             .assert_compatible_nbatch(other_nbatch, "component_div_assign");
-        let nstates = (self.data.len() as IndexType / self_nbatch) as u32;
-        let other_nstates = other.data.len() as IndexType / other_nbatch;
+        let nstates = self.len() as u32;
+        let other_nstates = other.len();
         if nstates == 0 {
             return;
         }
@@ -1693,12 +963,12 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
     }
     fn root_finding(&self, g1: &Self) -> (bool, Self::T, i32) {
         let nbatch = self.context.nbatch();
-        let nstates = self.data.len() as IndexType / nbatch;
+        let nstates = self.len();
         if nstates == 0 {
             return (false, Self::T::zero(), -1);
         }
         let g1_nbatch = g1.context.nbatch();
-        let g1_nstates = g1.data.len() as IndexType / g1_nbatch;
+        let g1_nstates = g1.len();
         assert_eq!(
             nstates, g1_nstates,
             "Vector length mismatch: {} != {}",
@@ -1805,7 +1075,7 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
         if nindices_u32 == 0 {
             return;
         }
-        let nstates = self.data.len() as IndexType / self_nbatch;
+        let nstates = self.len();
         let nbatch_u32 = self_nbatch as u32;
         let f = self.context.function::<T>("vec_assign_at_indices");
         let config = self.context.launch_config_2d(nindices_u32, nbatch_u32, &f);
@@ -1828,14 +1098,14 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
         if nindices_u32 == 0 {
             return;
         }
-        let nstates = self.data.len() as IndexType / self_nbatch;
+        let nstates = self.len();
         let nbatch_u32 = self_nbatch as u32;
         let f = self.context.function::<T>("vec_copy_from_indices");
         let config = self.context.launch_config_2d(nindices_u32, nbatch_u32, &f);
         let mut build = self.context.stream.launch_builder(&f);
         let self_stride = nstates as i32;
         let self_nbatch_i32 = self_nbatch as i32;
-        let other_nstates = other.data.len() as IndexType / other_nbatch;
+        let other_nstates = other.len();
         let other_stride = other_nstates as i32;
         let other_nbatch_i32 = other_nbatch as i32;
         build
@@ -1856,14 +1126,14 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
         if nindices_u32 == 0 {
             return;
         }
-        let nstates = self.data.len() as IndexType / self_nbatch;
+        let nstates = self.len();
         let nbatch_u32 = self_nbatch as u32;
         let f = self.context.function::<T>("vec_gather");
         let config = self.context.launch_config_2d(nindices_u32, nbatch_u32, &f);
         let mut build = self.context.stream.launch_builder(&f);
         let self_stride = nstates as i32;
         let self_nbatch_i32 = self_nbatch as i32;
-        let other_nstates = other.data.len() as IndexType / other_nbatch;
+        let other_nstates = other.len();
         let other_stride = other_nstates as i32;
         let other_nbatch_i32 = other_nbatch as i32;
         build
@@ -1884,14 +1154,14 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
         if nindices_u32 == 0 {
             return;
         }
-        let nstates = self.data.len() as IndexType / self_nbatch;
+        let nstates = self.len();
         let nbatch_u32 = self_nbatch as u32;
         let f = self.context.function::<T>("vec_scatter");
         let config = self.context.launch_config_2d(nindices_u32, nbatch_u32, &f);
         let mut build = self.context.stream.launch_builder(&f);
         let self_stride = nstates as i32;
         let self_nbatch_i32 = self_nbatch as i32;
-        let other_nstates = other.data.len() as IndexType / other_nbatch;
+        let other_nstates = other.len();
         let other_stride = other_nstates as i32;
         let other_nbatch_i32 = other_nbatch as i32;
         build
@@ -1907,7 +1177,7 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
     }
     fn get_batch(&self, batch: usize) -> Self::View<'_> {
         let nbatch = self.context.nbatch();
-        let nstates = self.data.len() as IndexType / nbatch;
+        let nstates = self.len();
         assert!(batch < nbatch, "Batch index out of bounds");
         let start = batch * nstates;
         CudaVecRef {
@@ -1919,7 +1189,7 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
     }
     fn get_batch_mut(&mut self, batch: usize) -> Self::ViewMut<'_> {
         let nbatch = self.context.nbatch();
-        let nstates = self.data.len() as IndexType / nbatch;
+        let nstates = self.len();
         assert!(batch < nbatch, "Batch index out of bounds");
         let start = batch * nstates;
         CudaVecMut {
@@ -2014,9 +1284,9 @@ impl<T: ScalarCuda> VectorView<'_> for CudaVecRef<'_, T> {
         let self_data = self.data.slice(self.col_offset..);
         let y_stride = self.stride() as i32;
         let y_nbatch_i32 = nbatch as i32;
-        let y0_stride = (y.data.len() as IndexType / y_nbatch) as i32;
+        let y0_stride = y.len() as i32;
         let y0_nbatch_i32 = y_nbatch as i32;
-        let atol_stride = (atol.data.len() as IndexType / atol_nbatch) as i32;
+        let atol_stride = atol.len() as i32;
         let atol_nbatch_i32 = atol_nbatch as i32;
         let rtol_val = rtol;
 
@@ -2061,32 +1331,7 @@ impl<'a, T: ScalarCuda> VectorViewMut<'a> for CudaVecMut<'a, T> {
     type View = CudaVecRef<'a, T>;
     type Index = CudaIndex;
     fn copy_from(&mut self, other: &Self::Owned) {
-        let nbatch = self.context.nbatch();
-        let other_nbatch = other.context.nbatch();
-        self.context
-            .assert_compatible_nbatch(other_nbatch, "copy_from");
-        let nstates_u32 = self.nstates as u32;
-        let other_nstates = other.data.len() as IndexType / other_nbatch;
-        if nstates_u32 == 0 {
-            return;
-        }
-        let nbatch_u32 = nbatch as u32;
-        let other_nbatch_i32 = other_nbatch as i32;
-        let f = self.context.function::<T>("vec_copy");
-        let config = self.context.launch_config_2d(nstates_u32, nbatch_u32, &f);
-        let mut build = self.context.stream.launch_builder(&f);
-        let self_stride = self.stride() as i32;
-        let col_offset = self.col_offset;
-        let mut self_data = self.data.slice_mut(col_offset..);
-        let rhs_stride = other_nstates as i32;
-        build
-            .arg(&mut self_data)
-            .arg(&other.data)
-            .arg(&nstates_u32)
-            .arg(&self_stride)
-            .arg(&rhs_stride)
-            .arg(&other_nbatch_i32);
-        unsafe { build.launch(config) }.expect("Failed to launch kernel");
+        self.copy_from_view(&other.as_view());
     }
     fn copy_from_view(&mut self, other: &Self::View) {
         let nbatch = self.context.nbatch();
@@ -2142,7 +1387,7 @@ impl<'a, T: ScalarCuda> VectorViewMut<'a> for CudaVecMut<'a, T> {
         let mut build = self.context.stream.launch_builder(&f);
         let self_stride = self.stride() as i32;
         let col_offset = self.col_offset;
-        let x_nstates = x.data.len() as IndexType / x_nbatch;
+        let x_nstates = x.len();
         let x_stride = x_nstates as i32;
         let x_nbatch_i32 = x_nbatch as i32;
         let mut self_data = self.data.slice_mut(col_offset..);

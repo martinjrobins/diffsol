@@ -225,7 +225,7 @@ macro_rules! impl_mul_scalar {
             fn mul(mut self, rhs: Scale<T>) -> Self::Output {
                 let f = self.context.function::<T>("vec_mul_assign_scalar");
                 let nbatch = self.context.nbatch();
-                let nstates = (self.data.len() / nbatch) as u32;
+                let nstates = (self.nrows() * self.ncols()) as u32;
                 let nbatch_u32 = nbatch as u32;
                 let stride = nstates as i32;
                 let scalar = rhs.value();
@@ -252,7 +252,7 @@ macro_rules! impl_mul_scalar_alloc {
                 let mut ret = Self::Output::zeros(self.nrows(), self.ncols(), self.context.clone());
                 let f = self.context.function::<T>("vec_mul_scalar");
                 let nbatch = self.context.nbatch();
-                let nstates = (self.data.len() / nbatch) as u32;
+                let nstates = (self.nrows() * self.ncols()) as u32;
                 let nbatch_u32 = nbatch as u32;
                 let src_stride = nstates as i32;
                 let src_nbatch = nbatch as i32;
@@ -285,7 +285,7 @@ macro_rules! impl_mul_assign_scalar {
             fn mul_assign(&mut self, rhs: Scale<T>) {
                 let f = self.context.function::<T>("vec_mul_assign_scalar");
                 let nbatch = self.context.nbatch();
-                let nstates = (self.data.len() / nbatch) as u32;
+                let nstates = (self.nrows() * self.ncols()) as u32;
                 let nbatch_u32 = nbatch as u32;
                 let stride = nstates as i32;
                 let mut build = self.context.stream.launch_builder(&f);
@@ -311,11 +311,11 @@ macro_rules! impl_sub_assign {
             fn sub_assign(&mut self, rhs: $rhs) {
                 let f = self.context.function::<T>("vec_sub_assign");
                 let nbatch = self.context.nbatch();
-                let nstates = (self.data.len() / nbatch) as u32;
+                let nstates = (self.nrows() * self.ncols()) as u32;
                 let nbatch_u32 = nbatch as u32;
                 let self_stride = nstates as i32;
                 let rhs_nbatch = rhs.context.nbatch() as i32;
-                let rhs_nstates = (rhs.data.len() / rhs_nbatch as usize) as u32;
+                let rhs_nstates = (rhs.nrows() * rhs.ncols()) as u32;
                 let rhs_stride = rhs_nstates as i32;
                 let mut build = self.context.stream.launch_builder(&f);
                 build
@@ -338,11 +338,11 @@ macro_rules! impl_add_assign {
             fn add_assign(&mut self, rhs: $rhs) {
                 let f = self.context.function::<T>("vec_add_assign");
                 let nbatch = self.context.nbatch();
-                let nstates = (self.data.len() / nbatch) as u32;
+                let nstates = (self.nrows() * self.ncols()) as u32;
                 let nbatch_u32 = nbatch as u32;
                 let self_stride = nstates as i32;
                 let rhs_nbatch = rhs.context.nbatch() as i32;
-                let rhs_nstates = (rhs.data.len() / rhs_nbatch as usize) as u32;
+                let rhs_nstates = (rhs.nrows() * rhs.ncols()) as u32;
                 let rhs_stride = rhs_nstates as i32;
                 let mut build = self.context.stream.launch_builder(&f);
                 build
@@ -365,11 +365,11 @@ macro_rules! impl_sub_assign_mut {
             fn sub_assign(&mut self, rhs: $rhs) {
                 let f = self.context.function::<T>("vec_sub_assign");
                 let nbatch = self.context.nbatch();
-                let nstates = (self.data.len() / nbatch) as u32;
+                let nstates = (self.nrows() * self.ncols()) as u32;
                 let nbatch_u32 = nbatch as u32;
                 let self_stride = nstates as i32;
                 let rhs_nbatch = rhs.context.nbatch() as i32;
-                let rhs_nstates = (rhs.data.len() / rhs_nbatch as usize) as u32;
+                let rhs_nstates = (rhs.nrows() * rhs.ncols()) as u32;
                 let rhs_stride = rhs_nstates as i32;
                 let mut build = self.context.stream.launch_builder(&f);
                 let rhs_data = rhs.data.as_view();
@@ -393,11 +393,11 @@ macro_rules! impl_add_assign_mut {
             fn add_assign(&mut self, rhs: $rhs) {
                 let f = self.context.function::<T>("vec_add_assign");
                 let nbatch = self.context.nbatch();
-                let nstates = (self.data.len() / nbatch) as u32;
+                let nstates = (self.nrows() * self.ncols()) as u32;
                 let nbatch_u32 = nbatch as u32;
                 let self_stride = nstates as i32;
                 let rhs_nbatch = rhs.context.nbatch() as i32;
-                let rhs_nstates = (rhs.data.len() / rhs_nbatch as usize) as u32;
+                let rhs_nstates = (rhs.nrows() * rhs.ncols()) as u32;
                 let rhs_stride = rhs_nstates as i32;
                 let mut build = self.context.stream.launch_builder(&f);
                 let rhs_data = rhs.data.as_view();
@@ -479,11 +479,11 @@ macro_rules! impl_sub_lhs {
                 );
                 let f = self.context.function::<T>("vec_sub_assign");
                 let nbatch = self.context.nbatch();
-                let nstates = (self.data.len() / nbatch) as u32;
+                let nstates = (self.nrows() * self.ncols()) as u32;
                 let nbatch_u32 = nbatch as u32;
                 let self_stride = nstates as i32;
                 let rhs_nbatch = rhs.context.nbatch() as i32;
-                let rhs_nstates = (rhs.data.len() / rhs_nbatch as usize) as u32;
+                let rhs_nstates = (rhs.nrows() * rhs.ncols()) as u32;
                 let rhs_stride = rhs_nstates as i32;
                 let mut build = self.context.stream.launch_builder(&f);
                 build
@@ -559,11 +559,11 @@ macro_rules! impl_add_lhs {
                 );
                 let f = self.context.function::<T>("vec_add_assign");
                 let nbatch = self.context.nbatch();
-                let nstates = (self.data.len() / nbatch) as u32;
+                let nstates = (self.nrows() * self.ncols()) as u32;
                 let nbatch_u32 = nbatch as u32;
                 let self_stride = nstates as i32;
                 let rhs_nbatch = rhs.context.nbatch() as i32;
-                let rhs_nstates = (rhs.data.len() / rhs_nbatch as usize) as u32;
+                let rhs_nstates = (rhs.nrows() * rhs.ncols()) as u32;
                 let rhs_stride = rhs_nstates as i32;
                 let mut build = self.context.stream.launch_builder(&f);
                 build
@@ -627,7 +627,7 @@ impl<'a, T: ScalarCuda> MatrixView<'a> for CudaMatRef<'a, T> {
         for b in 0..effective_nbatch {
             let self_b = if nbatch == 1 { 0 } else { b };
             let x_b = if x_nbatch == 1 { 0 } else { b };
-            let x_nstates = x.data.len() as IndexType / x_nbatch;
+            let x_nstates = self.ncols;
             let a_start = self_b * self.batch_stride;
             let x_start = x_b * x_nstates;
             let y_start = b * self.nrows;
@@ -659,7 +659,7 @@ impl<'a, T: ScalarCuda> MatrixView<'a> for CudaMatRef<'a, T> {
         for b in 0..effective_nbatch {
             let self_b = if nbatch == 1 { 0 } else { b };
             let x_b = if x_nbatch == 1 { 0 } else { b };
-            let x_stride_val = x.data.len() as IndexType / x_nbatch;
+            let x_stride_val = self.ncols;
             let a_start = self_b * self.batch_stride;
             let x_start = x_b * x_stride_val + x.col_offset;
             let y_start = b * self.nrows;
@@ -1159,7 +1159,7 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
         let mut build = self.context.stream.launch_builder(&f);
         let self_stride = (self.nrows * self.ncols) as i32;
         let self_nbatch_i32 = nbatch as i32;
-        let data_nstates = data.data.len() as IndexType / data_nbatch;
+        let data_nstates = data.len();
         let other_stride = data_nstates as i32;
         let other_nbatch_i32 = data_nbatch as i32;
         build
@@ -1182,7 +1182,7 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
             .assert_compatible_nbatch(v_nbatch, "add_column_to_vector");
         let nrows = self.nrows();
         let ncols = self.ncols();
-        let v_nstates = v.data.len() as IndexType / v_nbatch;
+        let v_nstates = v.len();
         let f = self.context.function::<T>("vec_axpy_offset");
         let nrows_u32 = nrows as u32;
         let nbatch_u32 = nbatch as u32;
@@ -1274,7 +1274,7 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
         for b in 0..effective_nbatch {
             let self_b = if nbatch == 1 { 0 } else { b };
             let x_b = if x_nbatch == 1 { 0 } else { b };
-            let x_nstates = x.data.len() as IndexType / x_nbatch;
+            let x_nstates = self.ncols;
             let self_batch_size = self.nrows * self.ncols;
             let a_start = self_b * self_batch_size;
             let x_start = x_b * x_nstates;
@@ -1335,7 +1335,7 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
     fn from_diagonal(v: &Self::V) -> Self {
         let ctx = v.context.clone();
         let nbatch = ctx.nbatch();
-        let nstates = v.data.len() as IndexType / nbatch;
+        let nstates = v.len();
         let mut data = ctx
             .stream
             .alloc_zeros(nstates * nstates * nbatch)
@@ -1371,7 +1371,7 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
     ) -> (<Self::V as Vector>::Index, <Self::V as Vector>::Index) {
         let nbatch = self.context.nbatch();
         let diagonal = self.diagonal().clone_as_vec();
-        let nstates = diagonal.len() / nbatch;
+        let nstates = self.nrows();
         let (zero_indices, nonzero_indices) = (0..nstates).fold(
             (Vec::new(), Vec::new()),
             |(mut zero_indices, mut nonzero_indices), i| {
@@ -1395,7 +1395,7 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
         self.context
             .assert_compatible_nbatch(v_nbatch, "set_column");
         let nrows = self.nrows();
-        let v_nstates = v.data.len() as IndexType / v_nbatch;
+        let v_nstates = v.len();
         assert_eq!(
             v_nstates, nrows,
             "Column length mismatch: {} != {}",

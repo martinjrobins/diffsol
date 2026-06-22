@@ -12,6 +12,7 @@ use faer::{
     sparse::linalg::{solvers::Lu, solvers::SymbolicLu},
 };
 
+/// A [LinearSolver] that uses the LU decomposition in the [`faer`](https://github.com/sarah-ek/faer-rs) library to solve the linear system.
 pub struct FaerSparseLU<T>
 where
     T: FaerScalar,

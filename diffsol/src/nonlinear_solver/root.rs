@@ -46,6 +46,7 @@ impl<V: Vector> RootFinder<V> {
         let g_b0 = g.get_batch(0);
         let mut min_idx = 0usize;
         let mut min_val = abs(g_b0.get_index(0));
+        // TODO: could be a vector trait method for efficiency
         for i in 1..g.len() {
             let v = abs(g_b0.get_index(i));
             if v < min_val {

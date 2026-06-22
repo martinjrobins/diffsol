@@ -16,6 +16,9 @@ pub mod greedy_coloring;
 macro_rules! gen_find_non_zeros_nonlinear {
     ($name:ident, $op_fn:ident, $op_trait:ident, $nrows:ident, $ncols:ident) => {
         /// Find the non-zero entries of the $name matrix of a non-linear operator.
+        /// TODO: This function is not efficient for non-host vectors and could be part of the Vector trait
+        ///       to allow for more efficient implementations. It's ok for now since this is only used once
+        ///       during the setup phase.
         pub fn $name<F: NonLinearOp + $op_trait + ?Sized>(
             op: &F,
             x: &F::V,
@@ -28,6 +31,7 @@ macro_rules! gen_find_non_zeros_nonlinear {
                 v.set_index(j, F::T::NAN);
                 op.$op_fn(x, t, &v, &mut col);
                 {
+                    // assume that every batch has the same non-zeros
                     let col_b0 = col.get_batch(0);
                     for i in 0..op.$nrows() {
                         if col_b0.get_index(i).is_nan() {
@@ -74,7 +78,10 @@ gen_find_non_zeros_nonlinear!(
 
 macro_rules! gen_find_non_zeros_linear {
     ($name:ident, $op_fn:ident $(, $op_trait:tt )?) => {
-        /// Find the non-zero entries of the matrix of a linear operator.
+        /// Find the non-zero entries of the $name matrix of a non-linear operator.
+        /// TODO: This function is not efficient for non-host vectors and could be part of the Vector trait
+        ///       to allow for more efficient implementations. It's ok for now since this is only used once
+        ///       during the setup phase.
         pub fn $name<F: LinearOp + ?Sized $(+ $op_trait)?>(op: &F, t: F::T) -> Vec<(usize, usize)> {
             let mut v = F::V::zeros(op.nstates(), op.context().clone());
             let mut col = F::V::zeros(op.nout(), op.context().clone());
@@ -83,6 +90,7 @@ macro_rules! gen_find_non_zeros_linear {
                 v.set_index(j, F::T::NAN);
                 op.$op_fn(&v, t, &mut col);
                 {
+                    // assume non-zeros are the same for all batches
                     let col_b0 = col.get_batch(0);
                     for i in 0..op.nout() {
                         if col_b0.get_index(i).is_nan() {

@@ -31,7 +31,7 @@ use crate::{
 trait MatrixKLU: Matrix<T = f64> {
     fn column_pointers(&self) -> *const KluIndextype;
     fn row_indices(&self) -> *const KluIndextype;
-    fn values_ptr(&self) -> *const f64;
+    fn values_ptr(&mut self) -> *mut f64;
 }
 
 impl MatrixKLU for FaerSparseMat<f64> {
@@ -43,8 +43,8 @@ impl MatrixKLU for FaerSparseMat<f64> {
         self.data.symbolic().row_idx().as_ptr() as *const KluIndextype
     }
 
-    fn values_ptr(&self) -> *const f64 {
-        self.data.val().as_ptr() as *const f64
+    fn values_ptr(&mut self) -> *mut f64 {
+        self.data.val_mut().as_mut_ptr() as *mut f64
     }
 }
 
@@ -191,7 +191,7 @@ where
         op.jacobian_inplace(x, t, matrix);
         let col_ptrs = matrix.column_pointers() as *mut KluIndextype;
         let row_indices = matrix.row_indices() as *mut KluIndextype;
-        let values = matrix.values_ptr() as *mut f64;
+        let values = matrix.values_ptr();
         self.klu_numeric = Some(
             KluNumeric::try_from_raw(
                 self.klu_symbolic.as_mut().expect("Symbolic not set"),
@@ -204,10 +204,10 @@ where
     }
 
     fn solve_in_place(&self, x: &mut M::V) -> Result<(), DiffsolError> {
-        let klu_numeric = self
-            .klu_numeric
-            .as_ref()
-            .ok_or_else(|| linear_solver_error!(LuNotInitialized))?;
+        if self.klu_numeric.is_none() {
+            return Err(linear_solver_error!(LuNotInitialized));
+        }
+        let klu_numeric = self.klu_numeric.as_ref().unwrap();
         let klu_symbolic = self.klu_symbolic.as_ref().unwrap();
         let n = self.matrix.as_ref().unwrap().nrows() as KluIndextype;
         let mut klu_common = self.klu_common.borrow_mut();

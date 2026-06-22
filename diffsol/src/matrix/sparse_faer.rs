@@ -445,35 +445,52 @@ mod tests {
     }
 
     #[test]
-    fn test_inner_mut() {
+    fn test_set_data_with_indices() {
         use crate::{FaerVec, FaerVecIndex, Vector, VectorIndex};
 
         // CSC data-array order: column-major, ascending row within each column.
-        let triplets = vec![
+        let triplets_full = vec![
             (0, 0, 1.0),
             (2, 0, 2.0),
             (1, 1, 3.0),
             (0, 2, 4.0),
             (2, 2, 5.0),
         ];
-        let mut mat =
-            FaerSparseMat::<f64>::try_from_triplets(3, 3, triplets.clone(), Default::default())
-                .unwrap();
+        let (indices, init_values): (Vec<_>, Vec<_>) =
+            triplets_full.iter().map(|&(i, j, v)| ((i, j), v)).unzip();
+        let mut mat = FaerSparseMat::<f64>::try_from_triplets(
+            3,
+            3,
+            indices.clone(),
+            init_values,
+            Default::default(),
+        )
+        .unwrap();
 
-        assert_eq!(mat.inner_mut().val_mut().len(), triplets.len());
+        assert_eq!(mat.inner_mut().val_mut().len(), indices.len());
 
         let new_values = [10.0, 11.0, 12.0, 13.0, 14.0];
         mat.inner_mut().val_mut().copy_from_slice(&new_values);
-        let got: Vec<(usize, usize, f64)> = mat.triplet_iter().collect();
-        let expected: Vec<(usize, usize, f64)> = triplets
+        let (indices_iter, values_iter) = mat.triplet_iter();
+        let got: Vec<(usize, usize, f64)> = indices_iter
+            .zip(values_iter)
+            .map(|((i, j), v)| (i, j, v))
+            .collect();
+        let expected: Vec<(usize, usize, f64)> = triplets_full
             .iter()
             .zip(new_values.iter())
             .map(|(&(i, j, _), &v)| (i, j, v))
             .collect();
         assert_eq!(got, expected);
 
-        let mut via_set_data =
-            FaerSparseMat::<f64>::try_from_triplets(3, 3, triplets, Default::default()).unwrap();
+        let mut via_set_data = FaerSparseMat::<f64>::try_from_triplets(
+            3,
+            3,
+            indices,
+            new_values.iter().map(|_| 0.0).collect(),
+            Default::default(),
+        )
+        .unwrap();
         let nnz = new_values.len();
         let identity = FaerVecIndex::from_vec((0..nnz).collect(), Default::default());
         let data = FaerVec::from_vec(new_values.to_vec(), Default::default());

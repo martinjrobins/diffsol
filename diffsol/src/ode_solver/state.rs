@@ -358,14 +358,17 @@ impl<V: Vector> StateRefMut<'_, V> {
 
         let mut root_flow = V::zeros(nroots, ctx.clone());
         root_op.jac_mul_inplace(&y_before, t, &f_minus, &mut root_flow);
-        let denom =
-            root_flow.get_batch(0).get_index(root_idx) + root_t.get_batch(0).get_index(root_idx);
         let denom_tol = V::T::from_f64(100.0).unwrap() * V::T::EPSILON;
-        if denom.abs() <= denom_tol {
-            return Err(ode_solver_error!(
-                Other,
-                "reset sensitivity correction undefined: active root derivative along flow is zero"
-            ));
+        let nbatch_denom = root_flow.context().nbatch();
+        for b in 0..nbatch_denom {
+            let denom = root_flow.get_batch(b).get_index(root_idx)
+                + root_t.get_batch(b).get_index(root_idx);
+            if denom.abs() <= denom_tol {
+                return Err(ode_solver_error!(
+                    Other,
+                    "reset sensitivity correction undefined: active root derivative along flow is zero"
+                ));
+            }
         }
 
         let mut basis = V::zeros(nparams, ctx.clone());
@@ -389,6 +392,8 @@ impl<V: Vector> StateRefMut<'_, V> {
 
             let mut tau_p = Vec::with_capacity(nbatch);
             for b in 0..nbatch {
+                let denom = root_flow.get_batch(b).get_index(root_idx)
+                    + root_t.get_batch(b).get_index(root_idx);
                 let num = root_jac_s.get_batch(b).get_index(root_idx)
                     + root_sens.get_batch(b).get_index(root_idx);
                 tau_p.push(-num / denom);
@@ -459,14 +464,17 @@ impl<V: Vector> StateRefMut<'_, V> {
 
         let mut root_flow = V::zeros(nroots, ctx.clone());
         root_op.jac_mul_inplace(&y_before, t, &f_minus, &mut root_flow);
-        let denom =
-            root_flow.get_batch(0).get_index(root_idx) + root_t.get_batch(0).get_index(root_idx);
         let denom_tol = V::T::from_f64(100.0).unwrap() * V::T::EPSILON;
-        if denom.abs() <= denom_tol {
-            return Err(ode_solver_error!(
-                Other,
-                "reset sensitivity correction undefined: active root derivative along flow is zero"
-            ));
+        let nbatch_denom = root_flow.context().nbatch();
+        for b in 0..nbatch_denom {
+            let denom = root_flow.get_batch(b).get_index(root_idx)
+                + root_t.get_batch(b).get_index(root_idx);
+            if denom.abs() <= denom_tol {
+                return Err(ode_solver_error!(
+                    Other,
+                    "reset sensitivity correction undefined: active root derivative along flow is zero"
+                ));
+            }
         }
 
         let mut basis = V::zeros(nparams, ctx.clone());
@@ -490,6 +498,8 @@ impl<V: Vector> StateRefMut<'_, V> {
 
             let mut tau_p = Vec::with_capacity(nbatch);
             for b in 0..nbatch {
+                let denom = root_flow.get_batch(b).get_index(root_idx)
+                    + root_t.get_batch(b).get_index(root_idx);
                 let num = root_jac_s.get_batch(b).get_index(root_idx)
                     + root_sens.get_batch(b).get_index(root_idx);
                 tau_p.push(-num / denom);
@@ -599,14 +609,17 @@ impl<V: Vector> StateRefMut<'_, V> {
 
         let mut root_flow = V::zeros(nroots, ctx.clone());
         root_op.jac_mul_inplace(y_minus, t_event, f_minus, &mut root_flow);
-        let denom =
-            root_flow.get_batch(0).get_index(root_idx) + root_t.get_batch(0).get_index(root_idx);
         let denom_tol = V::T::from_f64(100.0).unwrap() * V::T::EPSILON;
-        if denom.abs() <= denom_tol {
-            return Err(ode_solver_error!(
-                Other,
-                "reset adjoint correction undefined: active root derivative along flow is zero"
-            ));
+        let nbatch_denom = root_flow.context().nbatch();
+        for b in 0..nbatch_denom {
+            let denom = root_flow.get_batch(b).get_index(root_idx)
+                + root_t.get_batch(b).get_index(root_idx);
+            if denom.abs() <= denom_tol {
+                return Err(ode_solver_error!(
+                    Other,
+                    "reset adjoint correction undefined: active root derivative along flow is zero"
+                ));
+            }
         }
 
         let (l_minus, l_plus) = if integrate_out {
@@ -644,6 +657,8 @@ impl<V: Vector> StateRefMut<'_, V> {
                     alpha_num +=
                         l_minus.get_batch(b).get_index(i) - l_plus.get_batch(b).get_index(i);
                 }
+                let denom = root_flow.get_batch(b).get_index(root_idx)
+                    + root_t.get_batch(b).get_index(root_idx);
                 let alpha_b = alpha_num / denom;
                 root_basis.get_batch_mut(b).set_index(root_idx, alpha_b);
             }
@@ -739,14 +754,17 @@ impl<V: Vector> StateRefMut<'_, V> {
         let root_t = root_op.time_derive(forward.y, forward.t);
         let mut root_flow = V::zeros(nroots, ctx.clone());
         root_op.jac_mul_inplace(forward.y, forward.t, forward.dy, &mut root_flow);
-        let denom =
-            root_flow.get_batch(0).get_index(root_idx) + root_t.get_batch(0).get_index(root_idx);
         let denom_tol = V::T::from_f64(100.0).unwrap() * V::T::EPSILON;
-        if denom.abs() <= denom_tol {
-            return Err(ode_solver_error!(
-                Other,
-                "terminal root adjoint correction undefined: active root derivative along flow is zero"
-            ));
+        let nbatch_denom = root_flow.context().nbatch();
+        for b in 0..nbatch_denom {
+            let denom = root_flow.get_batch(b).get_index(root_idx)
+                + root_t.get_batch(b).get_index(root_idx);
+            if denom.abs() <= denom_tol {
+                return Err(ode_solver_error!(
+                    Other,
+                    "terminal root adjoint correction undefined: active root derivative along flow is zero"
+                ));
+            }
         }
 
         let nstates = eqn.rhs().nstates();
@@ -757,6 +775,8 @@ impl<V: Vector> StateRefMut<'_, V> {
         let mut q_corr = V::zeros(nparams, ctx.clone());
         for i in 0..nout {
             for b in 0..nbatch {
+                let denom = root_flow.get_batch(b).get_index(root_idx)
+                    + root_t.get_batch(b).get_index(root_idx);
                 let val = out.get_batch(b).get_index(i) / denom;
                 root_basis.get_batch_mut(b).set_index(root_idx, val);
             }

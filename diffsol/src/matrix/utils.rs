@@ -36,6 +36,7 @@ macro_rules! impl_matrix_common {
         }
     };
 }
+
 pub(crate) use impl_matrix_common;
 
 macro_rules! impl_matrix_common_ref {
@@ -76,6 +77,7 @@ macro_rules! impl_matrix_common_ref {
         }
     };
 }
+
 pub(crate) use impl_matrix_common_ref;
 
 macro_rules! impl_add {

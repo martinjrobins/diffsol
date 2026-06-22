@@ -686,14 +686,6 @@ where
 }
 
 // ═════════════════════════════════════════════════════════
-// Backend instantiation — add new backends by copying a block
-// ═════════════════════════════════════════════════════════
-
-// ═════════════════════════════════════════════════════════
-// Backend group functions — add new backends with one call each
-// ═════════════════════════════════════════════════════════
-
-// ═════════════════════════════════════════════════════════
 // Backend macros — add new backends with one call each
 // ═════════════════════════════════════════════════════════
 
@@ -771,6 +763,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     {
         bench_vector_backend!(c, "cuda", CudaVec<f64>);
         bench_matrix_backend!(c, "cuda", CudaMat<f64>);
+        bench_dense_matrix_backend!(c, "cuda", CudaMat<f64>);
     }
 }
 
