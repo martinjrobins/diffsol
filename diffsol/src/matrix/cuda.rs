@@ -1369,7 +1369,6 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
     fn partition_indices_by_zero_diagonal(
         &self,
     ) -> (<Self::V as Vector>::Index, <Self::V as Vector>::Index) {
-        let nbatch = self.context.nbatch();
         let diagonal = self.diagonal().clone_as_vec();
         let nstates = self.nrows();
         let (zero_indices, nonzero_indices) = (0..nstates).fold(
