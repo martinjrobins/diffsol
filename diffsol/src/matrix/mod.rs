@@ -2089,6 +2089,329 @@ pub(crate) mod tests {
         assert_eq!(a.get_index(1, 0), f::<M>(2.0));
         assert_eq!(a.get_index(0, 1), f::<M>(20.0));
     }
+
+    // --- View-mut tests (into_owned, gemm_oo, += / -= between two mutable views) ---
+
+    pub fn test_view_mut_into_owned<M: DenseMatrix>() {
+        let mut a = M::from_vec(
+            2,
+            3,
+            vec![
+                f::<M>(1.0),
+                f::<M>(2.0),
+                f::<M>(3.0),
+                f::<M>(4.0),
+                f::<M>(5.0),
+                f::<M>(6.0),
+            ],
+            Default::default(),
+        );
+        let owned = a.columns_mut(0, 2).into_owned();
+        assert_eq!(owned.nrows(), 2);
+        assert_eq!(owned.ncols(), 2);
+        assert_eq!(owned.get_index(0, 0), f::<M>(1.0));
+        assert_eq!(owned.get_index(1, 0), f::<M>(2.0));
+        assert_eq!(owned.get_index(0, 1), f::<M>(3.0));
+        assert_eq!(owned.get_index(1, 1), f::<M>(4.0));
+    }
+
+    pub fn test_view_mut_add_assign_view_mut<M: DenseMatrix>() {
+        let mut a = M::from_vec(
+            2,
+            2,
+            vec![f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0)],
+            Default::default(),
+        );
+        let mut b = M::from_vec(
+            2,
+            2,
+            vec![f::<M>(10.0), f::<M>(30.0), f::<M>(20.0), f::<M>(40.0)],
+            Default::default(),
+        );
+        {
+            let mut a_view = a.columns_mut(0, 2);
+            let b_view = b.columns_mut(0, 2);
+            a_view += &b_view;
+        }
+        assert_eq!(a.get_index(0, 0), f::<M>(11.0));
+        assert_eq!(a.get_index(1, 0), f::<M>(33.0));
+        assert_eq!(a.get_index(0, 1), f::<M>(22.0));
+        assert_eq!(a.get_index(1, 1), f::<M>(44.0));
+    }
+
+    pub fn test_view_mut_sub_assign_view_mut<M: DenseMatrix>() {
+        let mut a = M::from_vec(
+            2,
+            2,
+            vec![f::<M>(10.0), f::<M>(30.0), f::<M>(20.0), f::<M>(40.0)],
+            Default::default(),
+        );
+        let mut b = M::from_vec(
+            2,
+            2,
+            vec![f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0)],
+            Default::default(),
+        );
+        {
+            let mut a_view = a.columns_mut(0, 2);
+            let b_view = b.columns_mut(0, 2);
+            a_view -= &b_view;
+        }
+        assert_eq!(a.get_index(0, 0), f::<M>(9.0));
+        assert_eq!(a.get_index(1, 0), f::<M>(27.0));
+        assert_eq!(a.get_index(0, 1), f::<M>(18.0));
+        assert_eq!(a.get_index(1, 1), f::<M>(36.0));
+    }
+
+    pub fn test_gemm_oo_on_columns<M: DenseMatrix>() {
+        // a = [[1,2],[3,4]] (col-major [1,3,2,4])
+        let a = M::from_vec(
+            2,
+            2,
+            vec![f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0)],
+            Default::default(),
+        );
+        // b = identity
+        let b = M::from_vec(
+            2,
+            2,
+            vec![f::<M>(1.0), f::<M>(0.0), f::<M>(0.0), f::<M>(1.0)],
+            Default::default(),
+        );
+        let mut result = M::zeros(2, 3, Default::default());
+        {
+            let mut r_view = result.columns_mut(0, 2);
+            r_view.gemm_oo(f::<M>(1.0), &a, &b, f::<M>(0.0));
+        }
+        // result columns 0-1 = a * I = a; column 2 untouched (zero)
+        assert_eq!(result.get_index(0, 0), f::<M>(1.0));
+        assert_eq!(result.get_index(1, 0), f::<M>(3.0));
+        assert_eq!(result.get_index(0, 1), f::<M>(2.0));
+        assert_eq!(result.get_index(1, 1), f::<M>(4.0));
+        assert_eq!(result.get_index(0, 2), f::<M>(0.0));
+        assert_eq!(result.get_index(1, 2), f::<M>(0.0));
+    }
+
+    pub fn test_try_from_triplets_wrong_length<M: Matrix>() {
+        let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
+        // one value too few: triggers the length assertion inside try_from_triplets
+        let values = vec![f::<M>(1.0), f::<M>(2.0), f::<M>(3.0)];
+        let _ = M::try_from_triplets(2, 2, indices, values, Default::default());
+    }
+
+    // --- Batched view-mut tests ---
+
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_strided_matrix_view_mut_into_owned<M: DenseMatrix>(ctx: M::C) {
+        let mut matrix = make_strided_matrix::<M>(ctx.nbatch());
+        let owned = matrix.columns_mut(0, 2).into_owned();
+        assert_eq!(owned.nrows(), 3);
+        assert_eq!(owned.ncols(), 2);
+        // batch 0 col0=[0,1,2], col1=[10,11,12]
+        assert_eq!(owned.get_index(0, 0), f::<M>(0.0));
+        assert_eq!(owned.get_index(1, 0), f::<M>(1.0));
+        assert_eq!(owned.get_index(2, 0), f::<M>(2.0));
+        assert_eq!(owned.get_index(0, 1), f::<M>(10.0));
+        assert_eq!(owned.get_index(1, 1), f::<M>(11.0));
+        assert_eq!(owned.get_index(2, 1), f::<M>(12.0));
+        // verify both batches via triplet_iter
+        let (_, vals) = owned.triplet_iter();
+        let vals: Vec<_> = vals.collect();
+        assert_eq!(
+            vals,
+            vec![
+                f::<M>(0.0),
+                f::<M>(1.0),
+                f::<M>(2.0),
+                f::<M>(10.0),
+                f::<M>(11.0),
+                f::<M>(12.0),
+                f::<M>(100.0),
+                f::<M>(101.0),
+                f::<M>(102.0),
+                f::<M>(110.0),
+                f::<M>(111.0),
+                f::<M>(112.0),
+            ]
+        );
+    }
+
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_batched_view_mut_add_assign_view_mut<M: DenseMatrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        // a 2x2 nbatch=2: batch0 [[1,2],[3,4]], batch1 [[5,6],[7,8]]
+        let mut a = M::from_vec(
+            2,
+            2,
+            vec![
+                f::<M>(1.0),
+                f::<M>(3.0),
+                f::<M>(2.0),
+                f::<M>(4.0),
+                f::<M>(5.0),
+                f::<M>(7.0),
+                f::<M>(6.0),
+                f::<M>(8.0),
+            ],
+            ctx.clone(),
+        );
+        let mut b = M::from_vec(
+            2,
+            2,
+            vec![
+                f::<M>(10.0),
+                f::<M>(30.0),
+                f::<M>(20.0),
+                f::<M>(40.0),
+                f::<M>(50.0),
+                f::<M>(70.0),
+                f::<M>(60.0),
+                f::<M>(80.0),
+            ],
+            ctx,
+        );
+        {
+            let mut a_view = a.columns_mut(0, 2);
+            let b_view = b.columns_mut(0, 2);
+            a_view += &b_view;
+        }
+        let (_, vals) = a.triplet_iter();
+        let vals: Vec<_> = vals.collect();
+        assert_eq!(
+            vals,
+            vec![
+                f::<M>(11.0),
+                f::<M>(33.0),
+                f::<M>(22.0),
+                f::<M>(44.0),
+                f::<M>(55.0),
+                f::<M>(77.0),
+                f::<M>(66.0),
+                f::<M>(88.0),
+            ]
+        );
+    }
+
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_batched_view_mut_sub_assign_view_mut<M: DenseMatrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let mut a = M::from_vec(
+            2,
+            2,
+            vec![
+                f::<M>(10.0),
+                f::<M>(30.0),
+                f::<M>(20.0),
+                f::<M>(40.0),
+                f::<M>(50.0),
+                f::<M>(70.0),
+                f::<M>(60.0),
+                f::<M>(80.0),
+            ],
+            ctx.clone(),
+        );
+        let mut b = M::from_vec(
+            2,
+            2,
+            vec![
+                f::<M>(1.0),
+                f::<M>(3.0),
+                f::<M>(2.0),
+                f::<M>(4.0),
+                f::<M>(5.0),
+                f::<M>(7.0),
+                f::<M>(6.0),
+                f::<M>(8.0),
+            ],
+            ctx,
+        );
+        {
+            let mut a_view = a.columns_mut(0, 2);
+            let b_view = b.columns_mut(0, 2);
+            a_view -= &b_view;
+        }
+        let (_, vals) = a.triplet_iter();
+        let vals: Vec<_> = vals.collect();
+        assert_eq!(
+            vals,
+            vec![
+                f::<M>(9.0),
+                f::<M>(27.0),
+                f::<M>(18.0),
+                f::<M>(36.0),
+                f::<M>(45.0),
+                f::<M>(63.0),
+                f::<M>(54.0),
+                f::<M>(72.0),
+            ]
+        );
+    }
+
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_batched_gemm_oo_on_columns<M: DenseMatrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        // a 2x2 nbatch=2: batch0 [[1,2],[3,4]], batch1 [[5,6],[7,8]]
+        let a = M::from_vec(
+            2,
+            2,
+            vec![
+                f::<M>(1.0),
+                f::<M>(3.0),
+                f::<M>(2.0),
+                f::<M>(4.0),
+                f::<M>(5.0),
+                f::<M>(7.0),
+                f::<M>(6.0),
+                f::<M>(8.0),
+            ],
+            ctx.clone(),
+        );
+        // b 2x2 nbatch=2: batch0 identity, batch1 2*identity
+        let b = M::from_vec(
+            2,
+            2,
+            vec![
+                f::<M>(1.0),
+                f::<M>(0.0),
+                f::<M>(0.0),
+                f::<M>(1.0),
+                f::<M>(2.0),
+                f::<M>(0.0),
+                f::<M>(0.0),
+                f::<M>(2.0),
+            ],
+            ctx.clone(),
+        );
+        let mut result = M::zeros(2, 3, ctx);
+        {
+            let mut r_view = result.columns_mut(0, 2);
+            r_view.gemm_oo(f::<M>(1.0), &a, &b, f::<M>(0.0));
+        }
+        // batch0: a*I = [[1,2],[3,4]]; batch1: a*2I = [[10,12],[14,16]]; col2 = 0
+        assert_eq!(result.get_index(0, 0), f::<M>(1.0));
+        assert_eq!(result.get_index(1, 0), f::<M>(3.0));
+        assert_eq!(result.get_index(0, 1), f::<M>(2.0));
+        assert_eq!(result.get_index(1, 1), f::<M>(4.0));
+        let (_, vals) = result.triplet_iter();
+        let vals: Vec<_> = vals.collect();
+        assert_eq!(
+            vals,
+            vec![
+                f::<M>(1.0),
+                f::<M>(3.0),
+                f::<M>(2.0),
+                f::<M>(4.0),
+                f::<M>(0.0),
+                f::<M>(0.0),
+                f::<M>(10.0),
+                f::<M>(14.0),
+                f::<M>(12.0),
+                f::<M>(16.0),
+                f::<M>(0.0),
+                f::<M>(0.0),
+            ]
+        );
+    }
 }
 
 #[cfg(test)]
@@ -2130,6 +2453,11 @@ macro_rules! generate_matrix_tests_nonbatched {
             #[test]
             fn [<test_add_column_to_vector_ $suffix>]() {
                 $crate::matrix::tests::test_add_column_to_vector::<$M>();
+            }
+            #[test]
+            #[should_panic]
+            fn [<test_try_from_triplets_wrong_length_ $suffix>]() {
+                $crate::matrix::tests::test_try_from_triplets_wrong_length::<$M>();
             }
         }
     };
@@ -2260,6 +2588,22 @@ macro_rules! generate_dense_matrix_tests_nonbatched {
             fn [<test_mul_assign_scalar_ $suffix>]() {
                 $crate::matrix::tests::test_mul_assign_scalar::<$M>();
             }
+            #[test]
+            fn [<test_view_mut_into_owned_ $suffix>]() {
+                $crate::matrix::tests::test_view_mut_into_owned::<$M>();
+            }
+            #[test]
+            fn [<test_view_mut_add_assign_view_mut_ $suffix>]() {
+                $crate::matrix::tests::test_view_mut_add_assign_view_mut::<$M>();
+            }
+            #[test]
+            fn [<test_view_mut_sub_assign_view_mut_ $suffix>]() {
+                $crate::matrix::tests::test_view_mut_sub_assign_view_mut::<$M>();
+            }
+            #[test]
+            fn [<test_gemm_oo_on_columns_ $suffix>]() {
+                $crate::matrix::tests::test_gemm_oo_on_columns::<$M>();
+            }
         }
     };
 }
@@ -2379,6 +2723,22 @@ macro_rules! generate_dense_matrix_tests_batched {
             #[test]
             fn [<test_strided_matrix_view_mut_mul_assign_scalar_ $suffix>]() {
                 $crate::matrix::tests::test_strided_matrix_view_mut_mul_assign_scalar::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_strided_matrix_view_mut_into_owned_ $suffix>]() {
+                $crate::matrix::tests::test_strided_matrix_view_mut_into_owned::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_view_mut_add_assign_view_mut_ $suffix>]() {
+                $crate::matrix::tests::test_batched_view_mut_add_assign_view_mut::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_view_mut_sub_assign_view_mut_ $suffix>]() {
+                $crate::matrix::tests::test_batched_view_mut_sub_assign_view_mut::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_gemm_oo_on_columns_ $suffix>]() {
+                $crate::matrix::tests::test_batched_gemm_oo_on_columns::<$M>($ctx2);
             }
         }
     };
