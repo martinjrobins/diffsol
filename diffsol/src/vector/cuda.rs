@@ -783,8 +783,7 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
                 CudaBlas::new(self.context.stream.clone()).expect("Failed to create CudaBlas");
             let n = self.data.len() as c_int;
             let (x, _) = self.data.device_ptr(&self.context.stream);
-            let result: T;
-            match T::as_enum() {
+            let result: T = match T::as_enum() {
                 CudaType::F64 => {
                     let x = x as *const f64;
                     let mut result_f64 = 0.0;
@@ -793,9 +792,9 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
                     }
                     .result()
                     .expect("Failed to call cublasDnrm2_v2");
-                    result = T::from_f64(result_f64).unwrap();
+                    T::from_f64(result_f64).unwrap()
                 }
-            }
+            };
             return result;
         }
         self.context.lk_norm(&self.data, nstates, nbatch, k)
@@ -1152,8 +1151,8 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
             .expect("Failed to copy data from device to host");
 
         let mut first_result: Option<(bool, T, i32)> = None;
-        for b in 0..nbatch {
-            let found_root = h_root_flag[b] != 0;
+        for (b, &flag) in h_root_flag.iter().enumerate().take(nbatch) {
+            let found_root = flag != 0;
             let start = b * blocks_per_batch;
             let mut max_val = T::zero();
             let mut max_idx = -1;

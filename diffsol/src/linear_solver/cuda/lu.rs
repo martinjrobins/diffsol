@@ -116,7 +116,7 @@ impl<T: ScalarCuda> LinearSolver<CudaMat<T>> for CudaLU<T> {
         let nbatch = x.context.nbatch();
         let nrows = matrix.nrows();
         let ncols = matrix.ncols();
-        let x_nstates = x.data.len() as usize / nbatch;
+        let x_nstates = x.data.len() / nbatch;
         if x_nstates != nrows {
             return Err(linear_solver_error!(LinearSolverMatrixVectorNotCompatible))?;
         }
