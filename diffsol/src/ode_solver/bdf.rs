@@ -4,8 +4,8 @@ use std::ops::AddAssign;
 
 use crate::{
     error::{DiffsolError, OdeSolverError},
-    AugmentedOdeEquationsImplicit, Convergence, DefaultDenseMatrix, DefaultSolver, NoAug, StateRef,
-    StateRefMut,
+    AugmentedOdeEquationsImplicit, Context, Convergence, DefaultDenseMatrix, DefaultSolver, NoAug,
+    StateRef, StateRefMut,
 };
 
 use num_traits::{abs, FromPrimitive, One, Pow, Signed, ToPrimitive, Zero};
@@ -441,6 +441,7 @@ where
         //found using factor = 1, which corresponds to R with a constant step size
         let ncols = order + 1;
         let nrows = order + 1;
+        let solver_ctx = ctx.clone_with_nbatch(1).unwrap();
         let mut r = vec![M::T::zero(); ncols * nrows];
 
         // r[0, 0:order] = 1
@@ -458,7 +459,7 @@ where
             }
         }
 
-        M::from_vec(order + 1, order + 1, r, ctx)
+        M::from_vec(order + 1, order + 1, r, solver_ctx)
     }
 
     fn _jacobian_updates(&mut self, c: Eqn::T, state: SolverState) {
@@ -1596,6 +1597,17 @@ where
 
 #[cfg(test)]
 mod test {
+    #[cfg(feature = "cuda")]
+    use crate::ode_equations::test_models::{
+        exponential_decay::{
+            exponential_decay_problem_batched, exponential_decay_problem_batched_adjoint,
+            exponential_decay_problem_batched_adjoint_with_reset,
+            exponential_decay_problem_batched_sens,
+            exponential_decay_problem_batched_sens_with_reset,
+            exponential_decay_problem_batched_with_reset,
+        },
+        exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem_batched,
+    };
     use crate::{
         matrix::dense_nalgebra_serial::NalgebraMat,
         ode_equations::test_models::{
@@ -2389,6 +2401,143 @@ mod test {
         test_ode_solver(&mut s, soln, None, true, false);
     }
 
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn test_bdf_cuda_exponential_decay_batched() {
+        use crate::{CudaLU, CudaMat};
+        let (problem, soln) = exponential_decay_problem_batched::<CudaMat<f64>>(2);
+        let mut s = problem.bdf::<CudaLU<f64>>().unwrap();
+        test_ode_solver(&mut s, soln, None, false, false);
+    }
+
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn test_bdf_cuda_exponential_decay_batched_with_reset() {
+        use crate::{CudaLU, CudaMat, OdeSolverStopReason};
+        let nbatch = 2;
+        let (problem, p_f64) = exponential_decay_problem_batched_with_reset::<CudaMat<f64>>(nbatch);
+        let final_time = 10.0;
+        let t_event = 5.0;
+        let mut solver = problem.bdf::<CudaLU<f64>>().unwrap();
+        let (ys, ts, stop_reason) = solver.solve(final_time).unwrap();
+        assert_eq!(stop_reason, OdeSolverStopReason::TstopReached);
+        let t_last = *ts.last().unwrap();
+        assert!(
+            (t_last - final_time).abs() < 1e-2,
+            "expected solve to reach final_time ≈ {final_time}, got {t_last}",
+        );
+        let reset_val = 0.4;
+        let reset_tol = 0.1;
+        let reset_col = (0..ts.len())
+            .find(|&i| {
+                let col = ys.column(i).into_owned();
+                (ts[i] - t_event).abs() < 0.5
+                    && (col.get_batch(0).get_index(0) - reset_val).abs() < reset_tol
+            })
+            .expect("expected reset state near t_event");
+        let actual_reset_time = ts[reset_col];
+        for b in 0..nbatch {
+            let k = p_f64[b * 2];
+            let expected_final = reset_val * (-k * (final_time - actual_reset_time)).exp();
+            let final_col = ys.column(ts.len() - 1).into_owned();
+            let actual_final = final_col.get_batch(b).get_index(0);
+            let err = (actual_final - expected_final).abs();
+            assert!(
+                err < 0.05,
+                "batch {b}: expected final ≈ {expected_final}, got {actual_final} (err={err})",
+            );
+        }
+    }
+
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn test_bdf_cuda_exponential_decay_batched_sens() {
+        use crate::{CudaLU, CudaMat};
+        let (problem, soln) = exponential_decay_problem_batched_sens::<CudaMat<f64>>(2);
+        let mut s = problem.bdf_sens::<CudaLU<f64>>().unwrap();
+        test_ode_solver(&mut s, soln, None, false, true);
+    }
+
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn test_bdf_cuda_exponential_decay_batched_sens_with_reset() {
+        use crate::{CudaLU, CudaMat};
+        let nbatch = 2;
+        let (problem, soln) =
+            exponential_decay_problem_batched_sens_with_reset::<CudaMat<f64>>(nbatch);
+        let mut s = problem.bdf_sens::<CudaLU<f64>>().unwrap();
+        test_ode_solver(&mut s, soln, None, false, true);
+    }
+
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn test_bdf_cuda_exponential_decay_batched_adjoint() {
+        use crate::{CudaLU, CudaMat};
+        let nbatch = 2;
+        let (mut problem, soln) =
+            exponential_decay_problem_batched_adjoint::<CudaMat<f64>>(nbatch, true);
+        let final_time = soln.solution_points.last().unwrap().t;
+        let dgdu = setup_test_adjoint::<CudaLU<f64>, _>(&mut problem, soln);
+        let (problem, _soln) =
+            exponential_decay_problem_batched_adjoint::<CudaMat<f64>>(nbatch, true);
+        let mut s = problem.bdf::<CudaLU<f64>>().unwrap();
+        let (checkpointer, _y, _t, _stop_reason) =
+            s.solve_with_checkpointing(final_time, None).unwrap();
+        let adjoint_solver = problem
+            .bdf_solver_adjoint::<CudaLU<f64>, _>(checkpointer, Some(s), Some(dgdu.ncols()))
+            .unwrap();
+        test_adjoint(adjoint_solver, dgdu);
+    }
+
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn test_bdf_cuda_exponential_decay_batched_adjoint_sum_squares() {
+        use crate::{CudaLU, CudaMat};
+        let nbatch = 2;
+        let (mut problem, soln) =
+            exponential_decay_problem_batched_adjoint::<CudaMat<f64>>(nbatch, false);
+        let times = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
+        let (dgdp, data) =
+            setup_test_adjoint_sum_squares::<CudaLU<f64>, _>(&mut problem, times.as_slice());
+        let (problem, _soln) =
+            exponential_decay_problem_batched_adjoint::<CudaMat<f64>>(nbatch, false);
+        let mut s = problem.bdf::<CudaLU<f64>>().unwrap();
+        let (checkpointer, soln, _stop_reason) = s
+            .solve_dense_with_checkpointing(times.as_slice(), None)
+            .unwrap();
+        let adjoint_solver = problem
+            .bdf_solver_adjoint::<CudaLU<f64>, _>(checkpointer, Some(s), Some(dgdp.ncols()))
+            .unwrap();
+        test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
+    }
+
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn test_bdf_cuda_exponential_decay_batched_adjoint_with_reset() {
+        use crate::{CudaLU, CudaMat};
+        let nbatch = 2;
+        let (mut problem, soln) =
+            exponential_decay_problem_batched_adjoint_with_reset::<CudaMat<f64>>(nbatch);
+        let final_time = soln.solution_points.last().unwrap().t;
+        let dgdp_check = setup_test_adjoint::<CudaLU<f64>, _>(&mut problem, soln);
+        let mut s = problem.bdf::<CudaLU<f64>>().unwrap();
+        let (checkpointer, _y, _t, _stop_reason) =
+            s.solve_with_checkpointing(final_time, None).unwrap();
+        let adjoint_solver = problem
+            .bdf_solver_adjoint::<CudaLU<f64>, _>(checkpointer, Some(s), Some(dgdp_check.ncols()))
+            .unwrap();
+        test_adjoint(adjoint_solver, dgdp_check);
+    }
+
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn test_bdf_cuda_exponential_decay_with_algebraic_batched() {
+        use crate::{CudaLU, CudaMat};
+        let (problem, soln) = exponential_decay_with_algebraic_problem_batched::<CudaMat<f64>>(2);
+        let mut s = problem.bdf::<CudaLU<f64>>().unwrap();
+        test_ode_solver(&mut s, soln, None, false, false);
+    }
+
     #[test]
     fn test_root_finder_bdf() {
         let (problem, soln) = exponential_decay_problem_with_root::<M>(false, true);
@@ -2496,7 +2645,7 @@ mod test {
         use crate::ode_solver::tests::test_solve_with_reset;
         let (problem, soln) = exponential_decay_with_reset_problem::<M>();
         let solver = problem.bdf::<LS>().unwrap();
-        test_solve_with_reset(solver, &soln);
+        test_solve_with_reset(solver, &soln, 100.0);
     }
 
     /// Test that `solve_dense()` applies resets and continues to the final evaluation time.

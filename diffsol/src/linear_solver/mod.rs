@@ -61,7 +61,8 @@ pub mod tests {
         op::{closure::Closure, ParameterisedOp},
         scalar::scale,
         vector::VectorRef,
-        FaerMat, FaerVec, LinearSolver, Matrix, NalgebraVec, NonLinearOpJacobian, Op, Vector,
+        Context, FaerMat, FaerVec, LinearSolver, Matrix, NalgebraVec, NonLinearOpJacobian, Op,
+        Vector,
     };
     use num_traits::{FromPrimitive, One, Zero};
 
@@ -136,6 +137,53 @@ pub mod tests {
         }
     }
 
+    #[allow(clippy::type_complexity)]
+    pub fn linear_problem_batched<M: Matrix + 'static>(
+        ctx: M::C,
+    ) -> (
+        Closure<
+            M,
+            impl Fn(&M::V, &M::V, M::T, &mut M::V),
+            impl Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        >,
+        M::T,
+        M::V,
+        Vec<LinearSolveSolution<M::V>>,
+    ) {
+        assert_eq!(ctx.nbatch(), 2);
+        let two = M::T::from_f64(2.0).unwrap();
+        let three = M::T::from_f64(3.0).unwrap();
+        let diag = M::V::from_vec(vec![two, two, three, three], ctx.clone());
+        let jac1 = M::from_diagonal(&diag);
+        let jac2 = M::from_diagonal(&diag);
+        let p = M::V::zeros(0, ctx.clone());
+        let mut op = Closure::new(
+            move |x, _p, _t, y| jac1.gemv(M::T::one(), x, M::T::zero(), y),
+            move |_x, _p, _t, v, y| jac2.gemv(M::T::one(), v, M::T::zero(), y),
+            2,
+            2,
+            p.len(),
+            ctx.clone(),
+        );
+        op.calculate_sparsity(
+            &M::V::from_element(2, M::T::one(), ctx.clone()),
+            M::T::zero(),
+            &p,
+        );
+        let rtol = M::T::from_f64(1e-6).unwrap();
+        let atol_val = M::T::from_f64(1e-6).unwrap();
+        let atol = M::V::from_vec(vec![atol_val; 4], ctx.clone());
+        let one = M::T::one();
+        let four = M::T::from_f64(4.0).unwrap();
+        let six = M::T::from_f64(6.0).unwrap();
+        let nine = M::T::from_f64(9.0).unwrap();
+        let solns = vec![LinearSolveSolution::new(
+            M::V::from_vec(vec![two, four, six, nine], ctx.clone()),
+            M::V::from_vec(vec![one, two, two, three], ctx),
+        )];
+        (op, rtol, atol, solns)
+    }
+
     #[test]
     fn test_lu_nalgebra() {
         let (op, rtol, atol, solns) = linear_problem::<NalgebraMat<f64>>();
@@ -144,6 +192,7 @@ pub mod tests {
         let s = NalgebraLU::default();
         test_linear_solver(s, op, rtol, &atol, solns);
     }
+
     #[test]
     fn test_lu_faer() {
         let (op, rtol, atol, solns) = linear_problem::<FaerMat<f64>>();
@@ -158,6 +207,18 @@ pub mod tests {
     fn test_lu_cuda() {
         use crate::{CudaLU, CudaMat, CudaVec};
         let (op, rtol, atol, solns) = linear_problem::<CudaMat<f64>>();
+        let p = CudaVec::zeros(0, op.context().clone());
+        let op = ParameterisedOp::new(&op, &p);
+        let s = CudaLU::default();
+        test_linear_solver(s, op, rtol, &atol, solns);
+    }
+
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn test_lu_cuda_batched() {
+        use crate::{CudaContext, CudaLU, CudaMat, CudaVec};
+        let ctx = CudaContext::default().with_nbatch(2);
+        let (op, rtol, atol, solns) = linear_problem_batched::<CudaMat<f64>>(ctx);
         let p = CudaVec::zeros(0, op.context().clone());
         let op = ParameterisedOp::new(&op, &p);
         let s = CudaLU::default();

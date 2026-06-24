@@ -3,14 +3,14 @@ use cudarc::{
     cublas::{sys::cublasOperation_t, CudaBlas},
     driver::{CudaSlice, CudaView, CudaViewMut, DevicePtr, DevicePtrMut, PushKernelArg},
 };
-use std::ffi::c_int;
+use std::ffi::{c_int, c_longlong};
 use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
 
 use crate::{
     error::{DiffsolError, MatrixError},
     linear_solver::cuda::lu::CudaLU,
     matrix::default_solver::DefaultSolver,
-    matrix_error, CudaContext, CudaType, CudaVec, CudaVecMut, CudaVecRef, IndexType, MatrixCommon,
+    matrix_error, Context, CudaContext, CudaVec, CudaVecMut, CudaVecRef, IndexType, MatrixCommon,
     ScalarCuda, Scale, Vector, VectorIndex,
 };
 
@@ -19,47 +19,17 @@ use super::{
     DenseMatrix, Matrix, MatrixView, MatrixViewMut,
 };
 
-/// triplet iterator for a dense matrix held in column-major order
-struct DenseMatTripletIter<T: ScalarCuda> {
-    data: Vec<T>,
-    nrows: IndexType,
-    ncols: IndexType,
-    current_row: IndexType,
-    current_col: IndexType,
-}
-
-impl<T: ScalarCuda> DenseMatTripletIter<T> {
-    fn new(data: Vec<T>, nrows: IndexType, ncols: IndexType) -> Self {
-        Self {
-            data,
-            nrows,
-            ncols,
-            current_row: 0,
-            current_col: 0,
-        }
-    }
-}
-
-impl<T: ScalarCuda> Iterator for DenseMatTripletIter<T> {
-    type Item = (IndexType, IndexType, T);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.current_col >= self.ncols {
-            return None;
-        }
-        let index = self.current_row + self.current_col * self.nrows;
-        let value = self.data[index];
-        let triplet = (self.current_row, self.current_col, value);
-        self.current_row += 1;
-        if self.current_row >= self.nrows {
-            self.current_row = 0;
-            self.current_col += 1;
-        }
-        Some(triplet)
-    }
-}
-
-/// a CUDA matrix in column-major order
+/// Dense matrix stored in GPU memory via [`CudaSlice`].
+///
+/// # Data layout
+///
+/// Data is stored in **column-major** order as a flat contiguous array of
+/// `nrows * ncols * nbatch` elements.  With `nbatch > 1`, all elements of
+/// batch 0 appear first, then all elements of batch 1, etc.
+///
+/// ```text
+/// Device memory: [b0(all), b1(all), ..., bN(all)]
+/// ```
 #[derive(Clone, Debug)]
 pub struct CudaMat<T: ScalarCuda> {
     pub(crate) data: CudaSlice<T>,
@@ -68,105 +38,68 @@ pub struct CudaMat<T: ScalarCuda> {
     ncols: IndexType,
 }
 
+/// Immutable reference to a [`CudaMat`], possibly with a strided layout.
+///
+/// When the view spans a subset of columns, `batch_stride` records the
+/// parent matrix's total elements per batch (`nrows * ncols`) so that
+/// CUDA kernels can correctly compute per-batch offsets.
 #[derive(Debug)]
 pub struct CudaMatRef<'a, T: ScalarCuda> {
     pub(crate) data: CudaView<'a, T>,
     pub(crate) context: CudaContext,
     nrows: IndexType,
     ncols: IndexType,
+    batch_stride: IndexType,
 }
 
+/// Mutable reference to a [`CudaMat`], possibly with a strided layout.
+///
+/// See [`CudaMatRef`] for the layout description.
 #[derive(Debug)]
 pub struct CudaMatMut<'a, T: ScalarCuda> {
     pub(crate) data: CudaViewMut<'a, T>,
     pub(crate) context: CudaContext,
     nrows: IndexType,
     ncols: IndexType,
+    batch_stride: IndexType,
 }
 
 impl CudaContext {
     #[allow(clippy::too_many_arguments)]
-    fn gemv<T: ScalarCuda, A: DevicePtr<T>, X: DevicePtr<T>, Y: DevicePtrMut<T>>(
+    fn gemv<T: ScalarCuda>(
         &self,
         nrows: IndexType,
         ncols: IndexType,
         alpha: T,
         beta: T,
-        a: &A,
-        x: &X,
-        y: &mut Y,
+        a: &CudaView<'_, T>,
+        x: &CudaView<'_, T>,
+        y: &mut CudaViewMut<'_, T>,
     ) {
-        let (a, _syn_a) = a.device_ptr(&self.stream);
-        let (x, _syn_x) = x.device_ptr(&self.stream);
-        let (y, _syn_y) = y.device_ptr_mut(&self.stream);
+        let (a, _) = a.device_ptr(&self.stream);
+        let (x, _) = x.device_ptr(&self.stream);
+        let (y, _) = y.device_ptr_mut(&self.stream);
         let blas = CudaBlas::new(self.stream.clone()).expect("Failed to create CudaBlas");
-        match T::as_enum() {
-            CudaType::F64 => {
-                unsafe {
-                    cublas::cublasDgemv_v2(
-                        *blas.handle(),
-                        cublasOperation_t::CUBLAS_OP_N,
-                        nrows as c_int,
-                        ncols as c_int,
-                        &alpha.as_f64(),
-                        a as *const f64,
-                        nrows as c_int,
-                        x as *const f64,
-                        1,
-                        &beta.as_f64(),
-                        y as *mut f64,
-                        1,
-                    )
-                }
-                .result()
-                .expect("Failed to launch gemv");
-            }
+        let alpha = alpha.as_f64();
+        let beta = beta.as_f64();
+        unsafe {
+            cublas::cublasDgemv_v2(
+                *blas.handle(),
+                cublasOperation_t::CUBLAS_OP_N,
+                nrows as c_int,
+                ncols as c_int,
+                &alpha as *const f64,
+                a as *const f64,
+                nrows as c_int,
+                x as *const f64,
+                1,
+                &beta as *const f64,
+                y as *mut f64,
+                1,
+            )
         }
-    }
-    #[allow(clippy::too_many_arguments)]
-    fn gemm<T: ScalarCuda, A: DevicePtr<T>, B: DevicePtr<T>, C: DevicePtrMut<T>>(
-        &self,
-        nrows_a: IndexType,
-        ncols_a: IndexType,
-        nrows_b: IndexType,
-        ncols_b: IndexType,
-        nrows_c: IndexType,
-        alpha: T,
-        beta: T,
-        a: &A,
-        b: &B,
-        c: &mut C,
-    ) {
-        assert_eq!(nrows_a, nrows_c);
-        assert_eq!(ncols_a, nrows_b);
-        let (a, _syn_a) = a.device_ptr(&self.stream);
-        let (b, _syn_b) = b.device_ptr(&self.stream);
-        let (c, _syn_c) = c.device_ptr_mut(&self.stream);
-        let blas = CudaBlas::new(self.stream.clone()).expect("Failed to create CudaBlas");
-        match T::as_enum() {
-            CudaType::F64 => {
-                unsafe {
-                    cublas::cublasDgemm_v2(
-                        *blas.handle(),
-                        cublasOperation_t::CUBLAS_OP_N,
-                        cublasOperation_t::CUBLAS_OP_N,
-                        nrows_a as c_int,
-                        ncols_b as c_int,
-                        ncols_a as c_int,
-                        &alpha.as_f64(),
-                        a as *const f64,
-                        nrows_a as c_int,
-                        b as *const f64,
-                        nrows_b as c_int,
-                        &beta.as_f64(),
-                        c as *mut f64,
-                        nrows_c as c_int,
-                    )
-                }
-                .result()
-                .expect("Failed to launch gemm");
-            }
-        }
+        .result()
+        .expect("Failed to launch gemv");
     }
 }
 
@@ -200,13 +133,27 @@ impl<T: ScalarCuda> CudaMat<T> {
             self.nrows, self.ncols,
             "Matrix must be square to get diagonal"
         );
-        let mut data: CudaSlice<T> = unsafe { self.context.stream.alloc(self.nrows) }
+        let nbatch = self.context.nbatch();
+        let n = self.nrows();
+        let total = n * nbatch;
+        let mut data: CudaSlice<T> = unsafe { self.context.stream.alloc(total) }
             .expect("Failed to allocate memory for diagonal");
         let f = self.context.function::<T>("mat_get_diagonal");
-        let n = self.nrows() as u32;
+        let n_u32 = n as u32;
+        let nbatch_u32 = nbatch as u32;
+        let config = self.context.launch_config_2d(n_u32, nbatch_u32, &f);
         let mut build = self.context.stream.launch_builder(&f);
-        build.arg(&self.data).arg(&mut data).arg(&n);
-        let config = self.context.launch_config_1d(n, &f);
+        let mat_stride = (n * n) as i32;
+        let diag_stride = n as i32;
+        let nbatch_i32 = nbatch as i32;
+        build
+            .arg(&self.data)
+            .arg(&mut data)
+            .arg(&n_u32)
+            .arg(&mat_stride)
+            .arg(&nbatch_i32)
+            .arg(&diag_stride)
+            .arg(&nbatch_i32);
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
         CudaVec {
             data,
@@ -277,11 +224,19 @@ macro_rules! impl_mul_scalar {
 
             fn mul(mut self, rhs: Scale<T>) -> Self::Output {
                 let f = self.context.function::<T>("vec_mul_assign_scalar");
-                let n = self.data.len() as u32;
+                let nbatch = self.context.nbatch();
+                let nstates = (self.nrows() * self.ncols()) as u32;
+                let nbatch_u32 = nbatch as u32;
+                let stride = nstates as i32;
                 let scalar = rhs.value();
                 let mut build = self.context.stream.launch_builder(&f);
-                build.arg(&mut self.data).arg(&scalar).arg(&n);
-                let config = self.context.launch_config_1d(n, &f);
+                build
+                    .arg(&mut self.data)
+                    .arg(&scalar)
+                    .arg(&nstates)
+                    .arg(&nbatch_u32)
+                    .arg(&stride);
+                let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
                 unsafe { build.launch(config) }.expect("Failed to launch kernel");
                 self
             }
@@ -296,15 +251,23 @@ macro_rules! impl_mul_scalar_alloc {
             fn mul(self, rhs: Scale<T>) -> Self::Output {
                 let mut ret = Self::Output::zeros(self.nrows(), self.ncols(), self.context.clone());
                 let f = self.context.function::<T>("vec_mul_scalar");
-                let n = self.data.len() as u32;
+                let nbatch = self.context.nbatch();
+                let nstates = (self.nrows() * self.ncols()) as u32;
+                let nbatch_u32 = nbatch as u32;
+                let src_stride = nstates as i32;
+                let src_nbatch = nbatch as i32;
+                let ret_stride = nstates as i32;
                 let mut build = self.context.stream.launch_builder(&f);
                 let scalar = rhs.value();
                 build
                     .arg(&self.data)
                     .arg(&scalar)
                     .arg(&mut ret.data)
-                    .arg(&n);
-                let config = self.context.launch_config_1d(n, &f);
+                    .arg(&nstates)
+                    .arg(&ret_stride)
+                    .arg(&src_stride)
+                    .arg(&src_nbatch);
+                let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
                 unsafe { build.launch(config) }.expect("Failed to launch kernel");
                 ret
             }
@@ -321,11 +284,19 @@ macro_rules! impl_mul_assign_scalar {
         impl<'a, T: ScalarCuda> MulAssign<Scale<T>> for $col_type {
             fn mul_assign(&mut self, rhs: Scale<T>) {
                 let f = self.context.function::<T>("vec_mul_assign_scalar");
-                let n = self.data.len() as u32;
+                let nbatch = self.context.nbatch();
+                let nstates = (self.nrows() * self.ncols()) as u32;
+                let nbatch_u32 = nbatch as u32;
+                let stride = nstates as i32;
                 let mut build = self.context.stream.launch_builder(&f);
                 let scalar = rhs.value();
-                build.arg(&mut self.data).arg(&scalar).arg(&n);
-                let config = self.context.launch_config_1d(n, &f);
+                build
+                    .arg(&mut self.data)
+                    .arg(&scalar)
+                    .arg(&nstates)
+                    .arg(&nbatch_u32)
+                    .arg(&stride);
+                let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
                 unsafe { build.launch(config) }.expect("Failed to launch kernel");
             }
         }
@@ -339,10 +310,22 @@ macro_rules! impl_sub_assign {
         impl<T: ScalarCuda> SubAssign<$rhs> for $lhs {
             fn sub_assign(&mut self, rhs: $rhs) {
                 let f = self.context.function::<T>("vec_sub_assign");
-                let n = self.data.len() as u32;
+                let nbatch = self.context.nbatch();
+                let nstates = (self.nrows() * self.ncols()) as u32;
+                let nbatch_u32 = nbatch as u32;
+                let self_stride = nstates as i32;
+                let rhs_nbatch = rhs.context.nbatch() as i32;
+                let rhs_nstates = (rhs.nrows() * rhs.ncols()) as u32;
+                let rhs_stride = rhs_nstates as i32;
                 let mut build = self.context.stream.launch_builder(&f);
-                build.arg(&mut self.data).arg(&rhs.data).arg(&n);
-                let config = self.context.launch_config_1d(n, &f);
+                build
+                    .arg(&mut self.data)
+                    .arg(&rhs.data)
+                    .arg(&nstates)
+                    .arg(&self_stride)
+                    .arg(&rhs_stride)
+                    .arg(&rhs_nbatch);
+                let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
                 unsafe { build.launch(config) }.expect("Failed to launch kernel");
             }
         }
@@ -354,10 +337,22 @@ macro_rules! impl_add_assign {
         impl<T: ScalarCuda> AddAssign<$rhs> for $lhs {
             fn add_assign(&mut self, rhs: $rhs) {
                 let f = self.context.function::<T>("vec_add_assign");
-                let n = self.data.len() as u32;
+                let nbatch = self.context.nbatch();
+                let nstates = (self.nrows() * self.ncols()) as u32;
+                let nbatch_u32 = nbatch as u32;
+                let self_stride = nstates as i32;
+                let rhs_nbatch = rhs.context.nbatch() as i32;
+                let rhs_nstates = (rhs.nrows() * rhs.ncols()) as u32;
+                let rhs_stride = rhs_nstates as i32;
                 let mut build = self.context.stream.launch_builder(&f);
-                build.arg(&mut self.data).arg(&rhs.data).arg(&n);
-                let config = self.context.launch_config_1d(n, &f);
+                build
+                    .arg(&mut self.data)
+                    .arg(&rhs.data)
+                    .arg(&nstates)
+                    .arg(&self_stride)
+                    .arg(&rhs_stride)
+                    .arg(&rhs_nbatch);
+                let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
                 unsafe { build.launch(config) }.expect("Failed to launch kernel");
             }
         }
@@ -369,11 +364,23 @@ macro_rules! impl_sub_assign_mut {
         impl<T: ScalarCuda> SubAssign<$rhs> for $lhs {
             fn sub_assign(&mut self, rhs: $rhs) {
                 let f = self.context.function::<T>("vec_sub_assign");
-                let n = self.data.len() as u32;
+                let nbatch = self.context.nbatch();
+                let nstates = (self.nrows() * self.ncols()) as u32;
+                let nbatch_u32 = nbatch as u32;
+                let self_stride = nstates as i32;
+                let rhs_nbatch = rhs.context.nbatch() as i32;
+                let rhs_nstates = (rhs.nrows() * rhs.ncols()) as u32;
+                let rhs_stride = rhs_nstates as i32;
                 let mut build = self.context.stream.launch_builder(&f);
                 let rhs_data = rhs.data.as_view();
-                build.arg(&mut self.data).arg(&rhs_data).arg(&n);
-                let config = self.context.launch_config_1d(n, &f);
+                build
+                    .arg(&mut self.data)
+                    .arg(&rhs_data)
+                    .arg(&nstates)
+                    .arg(&self_stride)
+                    .arg(&rhs_stride)
+                    .arg(&rhs_nbatch);
+                let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
                 unsafe { build.launch(config) }.expect("Failed to launch kernel");
             }
         }
@@ -385,11 +392,23 @@ macro_rules! impl_add_assign_mut {
         impl<T: ScalarCuda> AddAssign<$rhs> for $lhs {
             fn add_assign(&mut self, rhs: $rhs) {
                 let f = self.context.function::<T>("vec_add_assign");
-                let n = self.data.len() as u32;
+                let nbatch = self.context.nbatch();
+                let nstates = (self.nrows() * self.ncols()) as u32;
+                let nbatch_u32 = nbatch as u32;
+                let self_stride = nstates as i32;
+                let rhs_nbatch = rhs.context.nbatch() as i32;
+                let rhs_nstates = (rhs.nrows() * rhs.ncols()) as u32;
+                let rhs_stride = rhs_nstates as i32;
                 let mut build = self.context.stream.launch_builder(&f);
                 let rhs_data = rhs.data.as_view();
-                build.arg(&mut self.data).arg(&rhs_data).arg(&n);
-                let config = self.context.launch_config_1d(n, &f);
+                build
+                    .arg(&mut self.data)
+                    .arg(&rhs_data)
+                    .arg(&nstates)
+                    .arg(&self_stride)
+                    .arg(&rhs_stride)
+                    .arg(&rhs_nbatch);
+                let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
                 unsafe { build.launch(config) }.expect("Failed to launch kernel");
             }
         }
@@ -411,23 +430,34 @@ macro_rules! impl_sub_both_ref {
         impl<T: ScalarCuda> Sub<$rhs> for $lhs {
             type Output = $out;
             fn sub(self, rhs: $rhs) -> Self::Output {
-                assert_eq!(
-                    self.data.len(),
-                    rhs.data.len(),
-                    "Vector length mismatch: {} != {}",
-                    self.data.len(),
-                    rhs.data.len()
+                let nbatch = self.context.nbatch();
+                let rhs_nbatch = rhs.context.nbatch();
+                let max_nbatch = nbatch.max(rhs_nbatch);
+                let nstates = (self.nrows() * self.ncols()) as u32;
+                let nbatch_u32 = max_nbatch as u32;
+                let self_stride = self.batch_stride as i32;
+                let rhs_nbatch_i32 = rhs_nbatch as i32;
+                let rhs_stride = (rhs.nrows() * rhs.ncols()) as i32;
+                let mut ret = Self::Output::zeros(
+                    self.nrows(),
+                    self.ncols(),
+                    self.context.clone_with_nbatch(max_nbatch).unwrap(),
                 );
-                let mut ret = Self::Output::zeros(self.nrows(), self.ncols(), self.context.clone());
+                let ret_nbatch = max_nbatch as i32;
+                let ret_stride = (ret.nrows() * ret.ncols()) as i32;
                 let f = self.context.function::<T>("vec_sub");
-                let n = self.data.len() as u32;
                 let mut build = self.context.stream.launch_builder(&f);
                 build
                     .arg(&self.data)
                     .arg(&rhs.data)
                     .arg(&mut ret.data)
-                    .arg(&n);
-                let config = self.context.launch_config_1d(n, &f);
+                    .arg(&nstates)
+                    .arg(&self_stride)
+                    .arg(&rhs_stride)
+                    .arg(&rhs_nbatch_i32)
+                    .arg(&ret_stride)
+                    .arg(&ret_nbatch);
+                let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
                 unsafe { build.launch(config) }.expect("Failed to launch kernel");
                 ret
             }
@@ -448,10 +478,22 @@ macro_rules! impl_sub_lhs {
                     rhs.data.len()
                 );
                 let f = self.context.function::<T>("vec_sub_assign");
-                let n = self.data.len() as u32;
+                let nbatch = self.context.nbatch();
+                let nstates = (self.nrows() * self.ncols()) as u32;
+                let nbatch_u32 = nbatch as u32;
+                let self_stride = nstates as i32;
+                let rhs_nbatch = rhs.context.nbatch() as i32;
+                let rhs_nstates = (rhs.nrows() * rhs.ncols()) as u32;
+                let rhs_stride = rhs_nstates as i32;
                 let mut build = self.context.stream.launch_builder(&f);
-                build.arg(&mut self.data).arg(&rhs.data).arg(&n);
-                let config = self.context.launch_config_1d(n, &f);
+                build
+                    .arg(&mut self.data)
+                    .arg(&rhs.data)
+                    .arg(&nstates)
+                    .arg(&self_stride)
+                    .arg(&rhs_stride)
+                    .arg(&rhs_nbatch);
+                let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
                 unsafe { build.launch(config) }.expect("Failed to launch kernel");
                 self
             }
@@ -468,23 +510,34 @@ macro_rules! impl_add_both_ref {
         impl<T: ScalarCuda> Add<$rhs> for $lhs {
             type Output = $out;
             fn add(self, rhs: $rhs) -> Self::Output {
-                assert_eq!(
-                    self.data.len(),
-                    rhs.data.len(),
-                    "Vector length mismatch: {} != {}",
-                    self.data.len(),
-                    rhs.data.len()
+                let nbatch = self.context.nbatch();
+                let rhs_nbatch = rhs.context.nbatch();
+                let max_nbatch = nbatch.max(rhs_nbatch);
+                let nstates = (self.nrows() * self.ncols()) as u32;
+                let nbatch_u32 = max_nbatch as u32;
+                let self_stride = self.batch_stride as i32;
+                let rhs_nbatch_i32 = rhs_nbatch as i32;
+                let rhs_stride = (rhs.nrows() * rhs.ncols()) as i32;
+                let mut ret = Self::Output::zeros(
+                    self.nrows(),
+                    self.ncols(),
+                    self.context.clone_with_nbatch(max_nbatch).unwrap(),
                 );
-                let mut ret = Self::Output::zeros(self.nrows(), self.ncols(), self.context.clone());
+                let ret_nbatch = max_nbatch as i32;
+                let ret_stride = (ret.nrows() * ret.ncols()) as i32;
                 let f = self.context.function::<T>("vec_add");
-                let n = self.data.len() as u32;
                 let mut build = self.context.stream.launch_builder(&f);
                 build
                     .arg(&self.data)
                     .arg(&rhs.data)
                     .arg(&mut ret.data)
-                    .arg(&n);
-                let config = self.context.launch_config_1d(n, &f);
+                    .arg(&nstates)
+                    .arg(&self_stride)
+                    .arg(&rhs_stride)
+                    .arg(&rhs_nbatch_i32)
+                    .arg(&ret_stride)
+                    .arg(&ret_nbatch);
+                let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
                 unsafe { build.launch(config) }.expect("Failed to launch kernel");
                 ret
             }
@@ -505,10 +558,22 @@ macro_rules! impl_add_lhs {
                     rhs.data.len()
                 );
                 let f = self.context.function::<T>("vec_add_assign");
-                let n = self.data.len() as u32;
+                let nbatch = self.context.nbatch();
+                let nstates = (self.nrows() * self.ncols()) as u32;
+                let nbatch_u32 = nbatch as u32;
+                let self_stride = nstates as i32;
+                let rhs_nbatch = rhs.context.nbatch() as i32;
+                let rhs_nstates = (rhs.nrows() * rhs.ncols()) as u32;
+                let rhs_stride = rhs_nstates as i32;
                 let mut build = self.context.stream.launch_builder(&f);
-                build.arg(&mut self.data).arg(&rhs.data).arg(&n);
-                let config = self.context.launch_config_1d(n, &f);
+                build
+                    .arg(&mut self.data)
+                    .arg(&rhs.data)
+                    .arg(&nstates)
+                    .arg(&self_stride)
+                    .arg(&rhs_stride)
+                    .arg(&rhs_nbatch);
+                let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
                 unsafe { build.launch(config) }.expect("Failed to launch kernel");
                 self
             }
@@ -524,30 +589,61 @@ impl<'a, T: ScalarCuda> MatrixView<'a> for CudaMatRef<'a, T> {
     type Owned = CudaMat<T>;
 
     fn into_owned(self) -> Self::Owned {
-        let mut data = unsafe { self.context.stream.alloc(self.nrows * self.ncols) }
+        let nrows = self.nrows;
+        let ncols = self.ncols;
+        let nbatch = self.context.nbatch();
+        let total = nrows * ncols * nbatch;
+        let mut data = unsafe { self.context.stream.alloc(total) }
             .expect("Failed to allocate memory for CudaVec");
-        self.context
-            .stream
-            .memcpy_dtod(&self.data, &mut data)
-            .expect("Failed to copy data from device to host");
+        let nstates = (nrows * ncols) as u32;
+        let nbatch_u32 = nbatch as u32;
+        let f = self.context.function::<T>("vec_copy");
+        let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
+        let mut build = self.context.stream.launch_builder(&f);
+        let src_stride = self.batch_stride as i32;
+        let dst_stride = (nrows * ncols) as i32;
+        let nbatch_i32 = nbatch as i32;
+        build
+            .arg(&mut data)
+            .arg(&self.data)
+            .arg(&nstates)
+            .arg(&dst_stride)
+            .arg(&src_stride)
+            .arg(&nbatch_i32);
+        unsafe { build.launch(config) }.expect("Failed to launch kernel");
         CudaMat {
             data,
             context: self.context.clone(),
-            nrows: self.nrows,
-            ncols: self.ncols,
+            nrows,
+            ncols,
         }
     }
 
     fn gemv_o(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
-        self.context.gemv(
-            self.nrows(),
-            self.ncols(),
-            alpha,
-            beta,
-            &self.data,
-            &x.data,
-            &mut y.data,
-        );
+        let nbatch = self.context.nbatch();
+        let x_nbatch = x.context.nbatch();
+        self.context.assert_compatible_nbatch(x_nbatch, "gemv_o");
+        let effective_nbatch = nbatch.max(x_nbatch);
+        for b in 0..effective_nbatch {
+            let self_b = if nbatch == 1 { 0 } else { b };
+            let x_b = if x_nbatch == 1 { 0 } else { b };
+            let x_nstates = self.ncols;
+            let a_start = self_b * self.batch_stride;
+            let x_start = x_b * x_nstates;
+            let y_start = b * self.nrows;
+            let a_slice = self.data.slice(a_start..a_start + self.nrows * self.ncols);
+            let x_slice = x.data.slice(x_start..x_start + self.ncols);
+            let mut y_slice = y.data.slice_mut(y_start..y_start + self.nrows);
+            self.context.gemv(
+                self.nrows,
+                self.ncols,
+                alpha,
+                beta,
+                &a_slice,
+                &x_slice,
+                &mut y_slice,
+            );
+        }
     }
     fn gemv_v(
         &self,
@@ -556,15 +652,30 @@ impl<'a, T: ScalarCuda> MatrixView<'a> for CudaMatRef<'a, T> {
         beta: Self::T,
         y: &mut Self::V,
     ) {
-        self.context.gemv(
-            self.nrows(),
-            self.ncols(),
-            alpha,
-            beta,
-            &self.data,
-            &x.data,
-            &mut y.data,
-        );
+        let nbatch = self.context.nbatch();
+        let x_nbatch = x.context.nbatch();
+        self.context.assert_compatible_nbatch(x_nbatch, "gemv_v");
+        let effective_nbatch = nbatch.max(x_nbatch);
+        for b in 0..effective_nbatch {
+            let self_b = if nbatch == 1 { 0 } else { b };
+            let x_b = if x_nbatch == 1 { 0 } else { b };
+            let x_stride_val = self.ncols;
+            let a_start = self_b * self.batch_stride;
+            let x_start = x_b * x_stride_val + x.col_offset;
+            let y_start = b * self.nrows;
+            let a_slice = self.data.slice(a_start..a_start + self.nrows * self.ncols);
+            let x_slice = x.data.slice(x_start..x_start + self.ncols);
+            let mut y_slice = y.data.slice_mut(y_start..y_start + self.nrows);
+            self.context.gemv(
+                self.nrows,
+                self.ncols,
+                alpha,
+                beta,
+                &a_slice,
+                &x_slice,
+                &mut y_slice,
+            );
+        }
     }
 }
 
@@ -573,47 +684,166 @@ impl<'a, T: ScalarCuda> MatrixViewMut<'a> for CudaMatMut<'a, T> {
     type View = CudaMatRef<'a, T>;
 
     fn into_owned(self) -> Self::Owned {
-        let mut data = unsafe { self.context.stream.alloc(self.nrows * self.ncols) }
+        let total = self.nrows * self.ncols * self.context.nbatch();
+        let mut data = unsafe { self.context.stream.alloc(total) }
             .expect("Failed to allocate memory for CudaVec");
-        self.context
-            .stream
-            .memcpy_dtod(&self.data, &mut data)
-            .expect("Failed to copy data from device to host");
+        let nrows = self.nrows;
+        let ncols = self.ncols;
+        let nbatch = self.context.nbatch();
+        let nstates = (nrows * ncols) as u32;
+        let nbatch_u32 = nbatch as u32;
+        let f = self.context.function::<T>("vec_copy");
+        let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
+        let mut build = self.context.stream.launch_builder(&f);
+        let src_stride = self.batch_stride as i32;
+        let dst_stride = (nrows * ncols) as i32;
+        let nbatch_i32 = nbatch as i32;
+        let src_data = self.data.slice(..);
+        build
+            .arg(&mut data)
+            .arg(&src_data)
+            .arg(&nstates)
+            .arg(&dst_stride)
+            .arg(&src_stride)
+            .arg(&nbatch_i32);
+        unsafe { build.launch(config) }.expect("Failed to launch kernel");
         CudaMat {
             data,
             context: self.context.clone(),
-            nrows: self.nrows,
-            ncols: self.ncols,
+            nrows,
+            ncols,
         }
     }
 
     fn gemm_oo(&mut self, alpha: Self::T, a: &Self::Owned, b: &Self::Owned, beta: Self::T) {
-        self.context.gemm(
-            a.nrows(),
-            a.ncols(),
-            b.nrows(),
-            b.ncols(),
-            self.nrows(),
-            alpha,
-            beta,
-            &a.data,
-            &b.data,
-            &mut self.data,
-        );
+        let nbatch = self.context.nbatch();
+        let a_nbatch = a.context.nbatch();
+        let b_nbatch = b.context.nbatch();
+        let self_nrows = self.nrows;
+        let _self_ncols = self.ncols;
+        let self_batch_stride = self.batch_stride;
+        self.context.assert_compatible_nbatch(a_nbatch, "gemm_oo_a");
+        self.context.assert_compatible_nbatch(b_nbatch, "gemm_oo_b");
+        let effective_nbatch = nbatch.max(a_nbatch).max(b_nbatch) as c_int;
+        let blas = CudaBlas::new(self.context.stream.clone()).expect("Failed to create CudaBlas");
+
+        let nrows_a = a.nrows as c_int;
+        let ncols_a = a.ncols as c_int;
+        let nrows_b = b.nrows as c_int;
+        let ncols_b = b.ncols as c_int;
+        let nrows_c = self_nrows as c_int;
+
+        let stride_a: c_longlong = if a_nbatch == 1 {
+            0
+        } else {
+            (a.nrows * a.ncols) as c_longlong
+        };
+        let stride_b: c_longlong = if b_nbatch == 1 {
+            0
+        } else {
+            (b.nrows * b.ncols) as c_longlong
+        };
+        let stride_c: c_longlong = if nbatch == 1 {
+            0
+        } else {
+            self_batch_stride as c_longlong
+        };
+
+        let (a_ptr, _) = a.data.device_ptr(&self.context.stream);
+        let (b_ptr, _) = b.data.device_ptr(&self.context.stream);
+        let (c_ptr, _) = self.data.device_ptr_mut(&self.context.stream);
+
+        let alpha_f64 = alpha.as_f64();
+        let beta_f64 = beta.as_f64();
+        unsafe {
+            cublas::cublasDgemmStridedBatched(
+                *blas.handle(),
+                cublasOperation_t::CUBLAS_OP_N,
+                cublasOperation_t::CUBLAS_OP_N,
+                nrows_a,
+                ncols_b,
+                ncols_a,
+                &alpha_f64 as *const f64,
+                a_ptr as *const f64,
+                nrows_a,
+                stride_a,
+                b_ptr as *const f64,
+                nrows_b,
+                stride_b,
+                &beta_f64 as *const f64,
+                c_ptr as *mut f64,
+                nrows_c,
+                stride_c,
+                effective_nbatch,
+            )
+        }
+        .result()
+        .expect("Failed to launch gemm");
     }
     fn gemm_vo(&mut self, alpha: Self::T, a: &Self::View, b: &Self::Owned, beta: Self::T) {
-        self.context.gemm(
-            a.nrows(),
-            a.ncols(),
-            b.nrows(),
-            b.ncols(),
-            self.nrows(),
-            alpha,
-            beta,
-            &a.data,
-            &b.data,
-            &mut self.data,
-        );
+        let nbatch = self.context.nbatch();
+        let a_nbatch = a.context.nbatch();
+        let b_nbatch = b.context.nbatch();
+        let self_nrows = self.nrows;
+        let _self_ncols = self.ncols;
+        let self_batch_stride = self.batch_stride;
+        self.context.assert_compatible_nbatch(a_nbatch, "gemm_vo_a");
+        self.context.assert_compatible_nbatch(b_nbatch, "gemm_vo_b");
+        let effective_nbatch = nbatch.max(a_nbatch).max(b_nbatch) as c_int;
+        let blas = CudaBlas::new(self.context.stream.clone()).expect("Failed to create CudaBlas");
+
+        let nrows_a = a.nrows as c_int;
+        let ncols_a = a.ncols as c_int;
+        let nrows_b = b.nrows as c_int;
+        let ncols_b = b.ncols as c_int;
+        let nrows_c = self_nrows as c_int;
+
+        let stride_a: c_longlong = if a_nbatch == 1 {
+            0
+        } else {
+            a.batch_stride as c_longlong
+        };
+        let stride_b: c_longlong = if b_nbatch == 1 {
+            0
+        } else {
+            (b.nrows * b.ncols) as c_longlong
+        };
+        let stride_c: c_longlong = if nbatch == 1 {
+            0
+        } else {
+            self_batch_stride as c_longlong
+        };
+
+        let (a_ptr, _) = a.data.device_ptr(&self.context.stream);
+        let (b_ptr, _) = b.data.device_ptr(&self.context.stream);
+        let (c_ptr, _) = self.data.device_ptr_mut(&self.context.stream);
+
+        let alpha_f64 = alpha.as_f64();
+        let beta_f64 = beta.as_f64();
+        unsafe {
+            cublas::cublasDgemmStridedBatched(
+                *blas.handle(),
+                cublasOperation_t::CUBLAS_OP_N,
+                cublasOperation_t::CUBLAS_OP_N,
+                nrows_a,
+                ncols_b,
+                ncols_a,
+                &alpha_f64 as *const f64,
+                a_ptr as *const f64,
+                nrows_a,
+                stride_a,
+                b_ptr as *const f64,
+                nrows_b,
+                stride_b,
+                &beta_f64 as *const f64,
+                c_ptr as *mut f64,
+                nrows_c,
+                stride_c,
+                effective_nbatch,
+            )
+        }
+        .result()
+        .expect("Failed to launch gemm");
     }
 }
 
@@ -622,40 +852,53 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
     type ViewMut<'a> = CudaMatMut<'a, T>;
 
     fn resize_cols(&mut self, new_ncols: IndexType) {
+        let nbatch = self.context.nbatch();
         if new_ncols == self.ncols {
             return;
         }
+        let old_ncols = self.ncols;
+        let nrows = self.nrows;
+        let cols_to_copy = old_ncols.min(new_ncols);
+        let old_batch_elems = nrows * old_ncols;
+        let new_batch_elems = nrows * new_ncols;
+        let total_new = nrows * new_ncols * nbatch;
         let mut new_data = unsafe {
             self.context
                 .stream
-                .alloc(self.nrows * new_ncols)
+                .alloc(total_new)
                 .expect("Failed to allocate memory for resized CudaMat")
         };
-        let cols_to_copy = self.ncols.min(new_ncols);
-        let elements_to_copy = self.nrows * cols_to_copy;
-        if new_ncols > self.ncols {
-            self.context
-                .stream
-                .memcpy_dtod(&self.data, &mut new_data.slice_mut(0..elements_to_copy))
-                .expect("Failed to copy data from old matrix to resized matrix");
-
-            // if we're increasing the number of columns, we need to zero out the new columns
-            self.context
-                .stream
-                .memset_zeros(&mut new_data.slice_mut(elements_to_copy..new_data.len()))
-                .expect("Failed to zero out new columns in resized CudaMat");
-        } else {
-            self.context
-                .stream
-                .memcpy_dtod(&self.data.slice(0..elements_to_copy), &mut new_data)
-                .expect("Failed to copy data from old matrix to resized matrix");
+        let elements_per_batch = nrows * cols_to_copy;
+        for b in 0..nbatch {
+            let old_offset = b * old_batch_elems;
+            let new_offset = b * new_batch_elems;
+            if elements_per_batch > 0 {
+                self.context
+                    .stream
+                    .memcpy_dtod(
+                        &self.data.slice(old_offset..old_offset + elements_per_batch),
+                        &mut new_data.slice_mut(new_offset..new_offset + elements_per_batch),
+                    )
+                    .expect("Failed to copy data during resize_cols");
+            }
+            if new_ncols > old_ncols {
+                let zero_start = new_offset + elements_per_batch;
+                let zero_len = nrows * (new_ncols - old_ncols);
+                if zero_len > 0 {
+                    self.context
+                        .stream
+                        .memset_zeros(&mut new_data.slice_mut(zero_start..zero_start + zero_len))
+                        .expect("Failed to zero out new columns in resized CudaMat");
+                }
+            }
         }
         self.data = new_data;
         self.ncols = new_ncols;
     }
 
     fn from_vec(nrows: IndexType, ncols: IndexType, data: Vec<Self::T>, ctx: Self::C) -> Self {
-        assert_eq!(data.len(), nrows * ncols);
+        let nbatch = ctx.nbatch();
+        assert_eq!(data.len(), nrows * ncols * nbatch);
         let mut device_data = unsafe {
             ctx.stream
                 .alloc(data.len())
@@ -677,26 +920,77 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
     }
 
     fn gemm(&mut self, alpha: Self::T, a: &Self, b: &Self, beta: Self::T) {
-        self.context.gemm(
-            a.nrows(),
-            a.ncols(),
-            b.nrows(),
-            b.ncols(),
-            self.nrows(),
-            alpha,
-            beta,
-            &a.data,
-            &b.data,
-            &mut self.data,
-        );
+        let nbatch = self.context.nbatch();
+        let a_nbatch = a.context.nbatch();
+        let b_nbatch = b.context.nbatch();
+        let self_nrows = self.nrows;
+        let self_ncols = self.ncols;
+        self.context.assert_compatible_nbatch(a_nbatch, "gemm_a");
+        self.context.assert_compatible_nbatch(b_nbatch, "gemm_b");
+        let effective_nbatch = nbatch.max(a_nbatch).max(b_nbatch) as c_int;
+        let blas = CudaBlas::new(self.context.stream.clone()).expect("Failed to create CudaBlas");
+
+        let nrows_a = a.nrows as c_int;
+        let ncols_a = a.ncols as c_int;
+        let nrows_b = b.nrows as c_int;
+        let ncols_b = b.ncols as c_int;
+        let nrows_c = self_nrows as c_int;
+
+        let stride_a: c_longlong = if a_nbatch == 1 {
+            0
+        } else {
+            (a.nrows * a.ncols) as c_longlong
+        };
+        let stride_b: c_longlong = if b_nbatch == 1 {
+            0
+        } else {
+            (b.nrows * b.ncols) as c_longlong
+        };
+        let stride_c: c_longlong = if nbatch == 1 {
+            0
+        } else {
+            (self_nrows * self_ncols) as c_longlong
+        };
+
+        let (a_ptr, _) = a.data.device_ptr(&self.context.stream);
+        let (b_ptr, _) = b.data.device_ptr(&self.context.stream);
+        let (c_ptr, _) = self.data.device_ptr_mut(&self.context.stream);
+
+        let alpha_f64 = alpha.as_f64();
+        let beta_f64 = beta.as_f64();
+        unsafe {
+            cublas::cublasDgemmStridedBatched(
+                *blas.handle(),
+                cublasOperation_t::CUBLAS_OP_N,
+                cublasOperation_t::CUBLAS_OP_N,
+                nrows_a,
+                ncols_b,
+                ncols_a,
+                &alpha_f64 as *const f64,
+                a_ptr as *const f64,
+                nrows_a,
+                stride_a,
+                b_ptr as *const f64,
+                nrows_b,
+                stride_b,
+                &beta_f64 as *const f64,
+                c_ptr as *mut f64,
+                nrows_c,
+                stride_c,
+                effective_nbatch,
+            )
+        }
+        .result()
+        .expect("Failed to launch gemm");
     }
     fn column_mut(&mut self, i: usize) -> <Self::V as Vector>::ViewMut<'_> {
-        let start_i = self.col_major_index(0, i);
-        let end_i = self.col_major_index(self.nrows(), i);
-        let data = self.data.slice_mut(start_i..end_i);
+        let nrows = self.nrows();
+        let context = self.context.clone();
         CudaVecMut {
-            data,
-            context: self.context.clone(),
+            data: self.data.as_view_mut(),
+            context,
+            nstates: nrows,
+            col_offset: i * nrows,
         }
     }
 
@@ -704,16 +998,19 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
         assert!(start < end, "Start index must be less than end index");
         assert!(end <= self.ncols(), "End index out of bounds");
         assert!(start < self.ncols(), "Start index out of bounds");
-        let start_i = self.col_major_index(0, start);
-        let end_i = self.col_major_index(0, end);
+        let nbatch = self.context.nbatch();
         let nrows = self.nrows();
-        let ncols = end - start;
+        let ncols = self.ncols();
+        let num_cols = end - start;
+        let start_i = start * nrows;
+        let end_i = (nbatch - 1) * nrows * ncols + end * nrows;
         let data = self.data.slice_mut(start_i..end_i);
         CudaMatMut {
             data,
             context: self.context.clone(),
             nrows,
-            ncols,
+            ncols: num_cols,
+            batch_stride: nrows * ncols,
         }
     }
 
@@ -722,26 +1019,31 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
     }
 
     fn column(&self, i: usize) -> <Self::V as Vector>::View<'_> {
-        let start_i = self.col_major_index(0, i);
-        let end_i = self.col_major_index(self.nrows(), i);
-        let data = self.data.slice(start_i..end_i);
+        let nrows = self.nrows();
         CudaVecRef {
-            data,
+            data: self.data.as_view(),
             context: self.context.clone(),
+            nstates: nrows,
+            col_offset: i * nrows,
         }
     }
     fn columns(&self, start: usize, end: usize) -> Self::View<'_> {
         assert!(start < end, "Start index must be less than end index");
         assert!(end <= self.ncols(), "End index out of bounds");
         assert!(start < self.ncols(), "Start index out of bounds");
-        let start_i = self.col_major_index(0, start);
-        let end_i = self.col_major_index(0, end);
+        let nbatch = self.context.nbatch();
+        let nrows = self.nrows();
+        let _ncols = self.ncols();
+        let num_cols = end - start;
+        let start_i = start * nrows;
+        let end_i = (nbatch - 1) * nrows * _ncols + end * nrows;
         let data = self.data.slice(start_i..end_i);
         CudaMatRef {
             data,
             context: self.context.clone(),
-            nrows: self.nrows(),
-            ncols: end - start,
+            nrows,
+            ncols: num_cols,
+            batch_stride: nrows * _ncols,
         }
     }
 
@@ -756,23 +1058,35 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
             panic!("Column index cannot be the same");
         }
 
-        let start_x = self.col_major_index(0, j);
-        let end_x = self.col_major_index(self.nrows(), j);
-        let start_y = self.col_major_index(0, i);
-        let end_y = self.col_major_index(self.nrows(), i);
-        // need to use unsafe api since we're accessing different columns in the same matrix
-        let x = {
-            let x = self.data.slice(start_x..end_x);
-            let (x, _syn_x) = x.device_ptr(&self.context.stream);
-            x
-        };
-        let y = {
-            let y = self.data.slice(start_y..end_y);
-            let (y, _syn_y) = y.device_ptr(&self.context.stream);
-            y
-        };
-        self.context
-            .axpy_inner::<T>(alpha, x, y, self.nrows() as c_int);
+        let nbatch = self.context.nbatch();
+        let nrows = self.nrows();
+        let ncols = self.ncols();
+        let f = self.context.function::<T>("vec_axpy_offset");
+        let nrows_u32 = nrows as u32;
+        let nbatch_u32 = nbatch as u32;
+        let config = self.context.launch_config_2d(nrows_u32, nbatch_u32, &f);
+        let mut build = self.context.stream.launch_builder(&f);
+        let alpha_val = alpha;
+        let beta_val = T::one();
+        let stride = (nrows * ncols) as i32;
+        let nbatch_i32 = nbatch as i32;
+        let x_offset = (j * nrows) as i32;
+        let y_offset = (i * nrows) as i32;
+        let data_ptr = &mut self.data as *mut CudaSlice<T>;
+        unsafe {
+            build
+                .arg(&mut *data_ptr)
+                .arg(&*data_ptr)
+                .arg(&alpha_val)
+                .arg(&beta_val)
+                .arg(&y_offset)
+                .arg(&x_offset)
+                .arg(&nrows_u32)
+                .arg(&stride)
+                .arg(&stride)
+                .arg(&nbatch_i32);
+        }
+        unsafe { build.launch(config) }.expect("Failed to launch kernel");
     }
 }
 
@@ -792,15 +1106,33 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
     }
 
     fn gather(&mut self, other: &Self, indices: &<Self::V as Vector>::Index) {
+        let nbatch = self.context.nbatch();
+        let other_nbatch = other.context.nbatch();
+        let self_nrows = self.nrows;
+        let self_ncols = self.ncols;
+        let other_nrows = other.nrows;
+        let other_ncols = other.ncols;
         let f = self.context.function::<T>("vec_gather");
-        let n = indices.len() as u32;
+        let n_indices = indices.len() as u32;
+        if n_indices == 0 {
+            return;
+        }
+        let nbatch_u32 = nbatch as u32;
+        let config = self.context.launch_config_2d(n_indices, nbatch_u32, &f);
         let mut build = self.context.stream.launch_builder(&f);
+        let self_stride = (self_nrows * self_ncols) as i32;
+        let self_nbatch_i32 = nbatch as i32;
+        let other_stride = (other_nrows * other_ncols) as i32;
+        let other_nbatch_i32 = other_nbatch as i32;
         build
             .arg(&mut self.data)
             .arg(&other.data)
             .arg(&indices.data)
-            .arg(&n);
-        let config = self.context.launch_config_1d(n, &f);
+            .arg(&n_indices)
+            .arg(&self_stride)
+            .arg(&self_nbatch_i32)
+            .arg(&other_stride)
+            .arg(&other_nbatch_i32);
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
     }
 
@@ -815,63 +1147,157 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
             src_indices.len(),
             "Destination and source indices must have the same length"
         );
+        let nbatch = self.context.nbatch();
+        let data_nbatch = data.context.nbatch();
         let f = self.context.function::<T>("mat_set_data_with_indices");
         let n = dst_indices.len() as u32;
+        if n == 0 {
+            return;
+        }
+        let nbatch_u32 = nbatch as u32;
+        let config = self.context.launch_config_2d(n, nbatch_u32, &f);
         let mut build = self.context.stream.launch_builder(&f);
+        let self_stride = (self.nrows * self.ncols) as i32;
+        let self_nbatch_i32 = nbatch as i32;
+        let data_nstates = data.len();
+        let other_stride = data_nstates as i32;
+        let other_nbatch_i32 = data_nbatch as i32;
         build
             .arg(&mut self.data)
             .arg(&data.data)
             .arg(&dst_indices.data)
             .arg(&src_indices.data)
-            .arg(&n);
-        let config = self.context.launch_config_1d(n, &f);
+            .arg(&n)
+            .arg(&self_stride)
+            .arg(&self_nbatch_i32)
+            .arg(&other_stride)
+            .arg(&other_nbatch_i32);
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
     }
 
     fn add_column_to_vector(&self, j: IndexType, v: &mut Self::V) {
-        v.add_assign(&self.column(j));
+        let nbatch = self.context.nbatch();
+        let v_nbatch = v.context.nbatch();
+        self.context
+            .assert_compatible_nbatch(v_nbatch, "add_column_to_vector");
+        let nrows = self.nrows();
+        let ncols = self.ncols();
+        let v_nstates = v.len();
+        let f = self.context.function::<T>("vec_axpy_offset");
+        let nrows_u32 = nrows as u32;
+        let nbatch_u32 = nbatch as u32;
+        let config = self.context.launch_config_2d(nrows_u32, nbatch_u32, &f);
+        let mut build = self.context.stream.launch_builder(&f);
+        let alpha_val = T::one();
+        let beta_val = T::one();
+        let v_stride = v_nstates as i32;
+        let mat_stride = (nrows * ncols) as i32;
+        let mat_nbatch_i32 = nbatch as i32;
+        let y_offset: i32 = 0;
+        let x_offset = (j * nrows) as i32;
+        build
+            .arg(&mut v.data)
+            .arg(&self.data)
+            .arg(&alpha_val)
+            .arg(&beta_val)
+            .arg(&y_offset)
+            .arg(&x_offset)
+            .arg(&nrows_u32)
+            .arg(&v_stride)
+            .arg(&mat_stride)
+            .arg(&mat_nbatch_i32);
+        unsafe { build.launch(config) }.expect("Failed to launch kernel");
     }
 
-    fn triplet_iter(&self) -> impl Iterator<Item = (IndexType, IndexType, Self::T)> {
+    fn triplet_iter(
+        &self,
+    ) -> (
+        impl Iterator<Item = (IndexType, IndexType)> + '_,
+        impl Iterator<Item = Self::T> + '_,
+    ) {
+        let nrows = self.nrows();
+        let ncols = self.ncols();
+        let nbatch = self.context.nbatch();
         let data = self
             .context
             .stream
             .clone_dtoh(&self.data)
             .expect("Failed to copy data from device to host");
-        DenseMatTripletIter::new(data, self.nrows(), self.ncols())
+        let indices = (0..ncols).flat_map(move |j| (0..nrows).map(move |i| (i, j)));
+        let mut values = Vec::with_capacity(nrows * ncols * nbatch);
+        for b in 0..nbatch {
+            let offset = b * nrows * ncols;
+            for j in 0..ncols {
+                for i in 0..nrows {
+                    values.push(data[offset + i + j * nrows]);
+                }
+            }
+        }
+        (indices, values.into_iter())
     }
 
     fn try_from_triplets(
         nrows: IndexType,
         ncols: IndexType,
-        triplets: Vec<(IndexType, IndexType, T)>,
+        indices: Vec<(IndexType, IndexType)>,
+        values: Vec<T>,
         ctx: Self::C,
     ) -> Result<Self, DiffsolError> {
-        let mut m = vec![T::zero(); nrows * ncols];
-        for (i, j, v) in triplets {
-            if i >= nrows || j >= ncols {
-                return Err(matrix_error!(IndexOutOfBounds));
+        let nbatch = ctx.nbatch();
+        let nnz = indices.len();
+        assert_eq!(
+            values.len(),
+            nnz * nbatch,
+            "Expected {} values ({} triplets * {} batches), got {}",
+            nnz * nbatch,
+            nnz,
+            nbatch,
+            values.len()
+        );
+        let mut m = vec![T::zero(); nrows * ncols * nbatch];
+        for b in 0..nbatch {
+            let batch_offset = b * nrows * ncols;
+            for (k, &(i, j)) in indices.iter().enumerate() {
+                if i >= nrows || j >= ncols {
+                    return Err(matrix_error!(IndexOutOfBounds));
+                }
+                m[batch_offset + i + j * nrows] = values[b * nnz + k];
             }
-            let idx = i + j * nrows;
-            m[idx] = v;
         }
         Ok(Self::from_vec(nrows, ncols, m, ctx))
     }
     fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
-        self.context.gemv(
-            self.nrows(),
-            self.ncols(),
-            alpha,
-            beta,
-            &self.data,
-            &x.data,
-            &mut y.data,
-        );
+        let nbatch = self.context.nbatch();
+        let x_nbatch = x.context.nbatch();
+        self.context.assert_compatible_nbatch(x_nbatch, "gemv");
+        let effective_nbatch = nbatch.max(x_nbatch);
+        for b in 0..effective_nbatch {
+            let self_b = if nbatch == 1 { 0 } else { b };
+            let x_b = if x_nbatch == 1 { 0 } else { b };
+            let x_nstates = self.ncols;
+            let self_batch_size = self.nrows * self.ncols;
+            let a_start = self_b * self_batch_size;
+            let x_start = x_b * x_nstates;
+            let y_start = b * self.nrows;
+            let a_slice = self.data.slice(a_start..a_start + self_batch_size);
+            let x_slice = x.data.slice(x_start..x_start + self.ncols);
+            let mut y_slice = y.data.slice_mut(y_start..y_start + self.nrows);
+            self.context.gemv(
+                self.nrows,
+                self.ncols,
+                alpha,
+                beta,
+                &a_slice,
+                &x_slice,
+                &mut y_slice,
+            );
+        }
     }
     fn zeros(nrows: IndexType, ncols: IndexType, ctx: Self::C) -> Self {
+        let nbatch = ctx.nbatch();
         let data = ctx
             .stream
-            .alloc_zeros(nrows * ncols)
+            .alloc_zeros(nrows * ncols * nbatch)
             .expect("Failed to allocate memory for CudaMat");
         Self {
             data,
@@ -881,31 +1307,62 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
         }
     }
     fn copy_from(&mut self, other: &Self) {
+        let self_nbatch = self.context.nbatch();
+        let other_nbatch = other.context.nbatch();
+        self.context
+            .assert_compatible_nbatch(other_nbatch, "copy_from");
+        let nrows = self.nrows;
+        let self_ncols = self.ncols;
+        let other_ncols = other.ncols;
         let f = self.context.function::<T>("vec_copy");
-        let n = self.data.len() as u32;
+        let nstates = (nrows * self_ncols) as u32;
+        let nbatch_u32 = self_nbatch as u32;
+        let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
         let mut build = self.context.stream.launch_builder(&f);
-        build.arg(&mut self.data).arg(&other.data).arg(&n);
-        let config = self.context.launch_config_1d(n, &f);
+        let self_stride = (nrows * self_ncols) as i32;
+        let other_stride = (nrows * other_ncols) as i32;
+        let other_nbatch_i32 = other_nbatch as i32;
+        build
+            .arg(&mut self.data)
+            .arg(&other.data)
+            .arg(&nstates)
+            .arg(&self_stride)
+            .arg(&other_stride)
+            .arg(&other_nbatch_i32);
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
     }
 
     fn from_diagonal(v: &Self::V) -> Self {
         let ctx = v.context.clone();
+        let nbatch = ctx.nbatch();
+        let nstates = v.len();
         let mut data = ctx
             .stream
-            .alloc_zeros(v.len() * v.len())
+            .alloc_zeros(nstates * nstates * nbatch)
             .expect("Failed to allocate memory for CudaMat");
         let f = ctx.function::<T>("mat_from_diagonal");
-        let n = v.len() as u32;
+        let n_u32 = nstates as u32;
+        let nbatch_u32 = nbatch as u32;
+        let config = ctx.launch_config_2d(n_u32, nbatch_u32, &f);
         let mut build = ctx.stream.launch_builder(&f);
-        build.arg(&mut data).arg(&v.data).arg(&n);
-        let config = ctx.launch_config_1d(n, &f);
+        let mat_stride = (nstates * nstates) as i32;
+        let mat_nbatch_i32 = nbatch as i32;
+        let diag_stride = nstates as i32;
+        let diag_nbatch_i32 = v.context.nbatch() as i32;
+        build
+            .arg(&mut data)
+            .arg(&v.data)
+            .arg(&n_u32)
+            .arg(&mat_stride)
+            .arg(&mat_nbatch_i32)
+            .arg(&diag_stride)
+            .arg(&diag_nbatch_i32);
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
         Self {
             data,
             context: ctx,
-            nrows: v.len(),
-            ncols: v.len(),
+            nrows: nstates,
+            ncols: nstates,
         }
     }
 
@@ -913,10 +1370,12 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
         &self,
     ) -> (<Self::V as Vector>::Index, <Self::V as Vector>::Index) {
         let diagonal = self.diagonal().clone_as_vec();
-        let (zero_indices, nonzero_indices) = diagonal.iter().enumerate().fold(
+        let nstates = self.nrows();
+        let (zero_indices, nonzero_indices) = (0..nstates).fold(
             (Vec::new(), Vec::new()),
-            |(mut zero_indices, mut nonzero_indices), (i, &v)| {
-                if v.is_zero() {
+            |(mut zero_indices, mut nonzero_indices), i| {
+                let val = diagonal[i];
+                if val.is_zero() {
                     zero_indices.push(i);
                 } else {
                     nonzero_indices.push(i);
@@ -930,34 +1389,73 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
         )
     }
     fn set_column(&mut self, j: IndexType, v: &Self::V) {
+        let nbatch = self.context.nbatch();
+        let v_nbatch = v.context.nbatch();
+        self.context
+            .assert_compatible_nbatch(v_nbatch, "set_column");
+        let nrows = self.nrows();
+        let v_nstates = v.len();
         assert_eq!(
-            v.len(),
-            self.nrows(),
+            v_nstates, nrows,
             "Column length mismatch: {} != {}",
-            v.len(),
-            self.nrows()
+            v_nstates, nrows
         );
         let f = self.context.function::<T>("mat_set_column");
-        let n = self.nrows() as u32;
-        let j = j as c_int;
+        let n_u32 = nrows as u32;
+        let nbatch_u32 = nbatch as u32;
+        let config = self.context.launch_config_2d(n_u32, nbatch_u32, &f);
         let mut build = self.context.stream.launch_builder(&f);
-        build.arg(&mut self.data).arg(&v.data).arg(&j).arg(&n);
-        let config = self.context.launch_config_1d(n, &f);
+        let j_cint = j as c_int;
+        let mat_stride = (nrows * self.ncols) as i32;
+        let mat_nbatch_i32 = nbatch as i32;
+        let col_stride = v_nstates as i32;
+        let col_nbatch_i32 = v_nbatch as i32;
+        build
+            .arg(&mut self.data)
+            .arg(&v.data)
+            .arg(&j_cint)
+            .arg(&n_u32)
+            .arg(&mat_stride)
+            .arg(&mat_nbatch_i32)
+            .arg(&col_stride)
+            .arg(&col_nbatch_i32);
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
     }
 
     /// Perform the assignment self = x + beta * y where x and y are matrices and beta is a scalar
     fn scale_add_and_assign(&mut self, x: &Self, beta: Self::T, y: &Self) {
+        let nbatch = self.context.nbatch();
+        let x_nbatch = x.context.nbatch();
+        let y_nbatch = y.context.nbatch();
+        self.context
+            .assert_compatible_nbatch(x_nbatch, "scale_add_and_assign_x");
+        self.context
+            .assert_compatible_nbatch(y_nbatch, "scale_add_and_assign_y");
         let f = self.context.function::<T>("mat_scale_add_assign");
-        let n = (self.nrows() * self.ncols()) as u32;
+        let nrows = self.nrows;
+        let self_ncols = self.ncols;
+        let x_ncols = x.ncols;
+        let y_ncols = y.ncols;
+        let nstates = (nrows * self_ncols) as u32;
+        let nbatch_u32 = nbatch as u32;
+        let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
         let mut build = self.context.stream.launch_builder(&f);
+        let self_stride = (nrows * self_ncols) as i32;
+        let x_stride = (nrows * x_ncols) as i32;
+        let x_nbatch_i32 = x_nbatch as i32;
+        let y_stride = (nrows * y_ncols) as i32;
+        let y_nbatch_i32 = y_nbatch as i32;
         build
             .arg(&mut self.data)
             .arg(&x.data)
             .arg(&y.data)
             .arg(&beta)
-            .arg(&n);
-        let config = self.context.launch_config_1d(n, &f);
+            .arg(&nstates)
+            .arg(&self_stride)
+            .arg(&x_stride)
+            .arg(&x_nbatch_i32)
+            .arg(&y_stride)
+            .arg(&y_nbatch_i32);
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
     }
 
@@ -974,288 +1472,22 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{vector::Vector, CudaIndex};
 
-    #[test]
-    fn test_cudamat_creation() {
-        let ctx = CudaContext::default();
-        let data = vec![1.0, 2.0, 3.0, 4.0];
-        let mat = CudaMat::from_vec(2, 2, data.clone(), ctx.clone());
-        assert_eq!(mat.nrows(), 2);
-        assert_eq!(mat.ncols(), 2);
-        assert_eq!(mat.get_index(0, 0), 1.0);
-        assert_eq!(mat.get_index(1, 1), 4.0);
-    }
+    super::super::generate_matrix_tests_nonbatched!(cuda, CudaMat<f64>);
 
-    #[test]
-    fn test_cudamat_set_index() {
-        let ctx = CudaContext::default();
-        let mut mat = CudaMat::zeros(2, 2, ctx.clone());
-        mat.set_index(0, 0, 5.0);
-        assert_eq!(mat.get_index(0, 0), 5.0);
-    }
+    super::super::generate_matrix_tests_batched!(
+        cuda,
+        CudaMat<f64>,
+        CudaContext::default(),
+        CudaContext::default().with_nbatch(2)
+    );
 
-    #[test]
-    fn test_cudamat_diagonal() {
-        let ctx = CudaContext::default();
-        let data = vec![1.0, 0.0, 0.0, 2.0];
-        let mat = CudaMat::from_vec(2, 2, data, ctx.clone());
-        let diag = mat.diagonal();
-        assert_eq!(diag.clone_as_vec(), vec![1.0, 2.0]);
-    }
+    super::super::generate_dense_matrix_tests_nonbatched!(cuda, CudaMat<f64>);
 
-    #[test]
-    fn test_cudamatref_gemv() {
-        let ctx = CudaContext::default();
-        let data = vec![1.0, 2.0, 3.0, 4.0];
-        let mat = CudaMat::from_vec(2, 2, data, ctx.clone());
-        let x = CudaVec::from_vec(vec![1.0, 1.0], ctx.clone());
-        let mut y = CudaVec::from_vec(vec![0.0, 0.0], ctx.clone());
-        mat.columns(0, 2).gemv_o(1.0, &x, 0.0, &mut y);
-        assert_eq!(y.clone_as_vec(), vec![4.0, 6.0]);
-    }
-
-    #[test]
-    fn test_cudamatmut_gemm() {
-        let ctx = CudaContext::default();
-        let a = CudaMat::from_vec(2, 2, vec![1.0, 2.0, 3.0, 4.0], ctx.clone());
-        let b = CudaMat::from_vec(2, 2, vec![5.0, 6.0, 7.0, 8.0], ctx.clone());
-        let mut c = CudaMat::zeros(2, 2, ctx.clone());
-        c.columns_mut(0, 2).gemm_oo(1.0, &a, &b, 0.0);
-        // Check the result
-        // [ 1, 3 ] *  [ 5, 7 ] = [ 23, 31 ]
-        // [ 2, 4 ]    [ 6, 8 ]   [ 34, 46 ]
-        assert_eq!(c.get_index(0, 0), 23.0);
-        assert_eq!(c.get_index(1, 1), 46.0);
-        assert_eq!(c.get_index(0, 1), 31.0);
-        assert_eq!(c.get_index(1, 0), 34.0);
-    }
-
-    #[test]
-    fn test_cudamat_try_from_triplets() {
-        let ctx = CudaContext::default();
-        let triplets = vec![(0, 0, 1.0), (1, 1, 2.0)];
-        let mat = CudaMat::try_from_triplets(2, 2, triplets, ctx.clone()).unwrap();
-        assert_eq!(mat.get_index(0, 0), 1.0);
-        assert_eq!(mat.get_index(1, 1), 2.0);
-    }
-
-    #[test]
-    fn test_cudamat_scale_add_and_assign() {
-        let ctx = CudaContext::default();
-        let mut mat = CudaMat::from_vec(2, 2, vec![1.0, 2.0, 3.0, 4.0], ctx.clone());
-        let x = CudaMat::from_vec(2, 2, vec![5.0, 6.0, 7.0, 8.0], ctx.clone());
-        let y = CudaMat::from_vec(2, 2, vec![1.0, 1.0, 1.0, 1.0], ctx.clone());
-        mat.scale_add_and_assign(&x, 2.0, &y);
-        // Check the result
-        // [ 5, 7 ] + 2 * [ 1, 1 ] = [ 7, 9 ]
-        // [ 6, 8 ]       [ 1, 1 ] = [ 8, 10 ]
-        assert_eq!(mat.get_index(0, 0), 7.0);
-        assert_eq!(mat.get_index(1, 1), 10.0);
-        assert_eq!(mat.get_index(0, 1), 9.0);
-        assert_eq!(mat.get_index(1, 0), 8.0);
-    }
-
-    #[test]
-    fn test_column_axpy() {
-        super::super::tests::test_column_axpy::<CudaMat<f64>>();
-    }
-
-    #[test]
-    fn test_partition_indices_by_zero_diagonal() {
-        super::super::tests::test_partition_indices_by_zero_diagonal::<CudaMat<f64>>();
-    }
-
-    #[test]
-    fn test_cudamat_mul() {
-        let ctx = CudaContext::default();
-        let mat = CudaMat::from_vec(2, 2, vec![1.0, 2.0, 3.0, 4.0], ctx.clone());
-        let scaled_mat = mat * Scale(2.0);
-        assert_eq!(scaled_mat.get_index(0, 0), 2.0);
-        assert_eq!(scaled_mat.get_index(1, 1), 8.0);
-    }
-
-    #[test]
-    fn test_cudamat_mul_assign() {
-        let ctx = CudaContext::default();
-        let mut mat = CudaMat::from_vec(2, 2, vec![1.0, 2.0, 3.0, 4.0], ctx.clone());
-        let mut mat_mut = mat.columns_mut(0, 2);
-        mat_mut *= Scale(2.0);
-        assert_eq!(mat.get_index(0, 0), 2.0);
-        assert_eq!(mat.get_index(1, 1), 8.0);
-    }
-
-    #[test]
-    fn test_cudamat_add() {
-        let ctx = CudaContext::default();
-        let mat1 = CudaMat::from_vec(2, 2, vec![1.0, 2.0, 3.0, 4.0], ctx.clone());
-        let mat2 = CudaMat::from_vec(2, 2, vec![5.0, 6.0, 7.0, 8.0], ctx.clone());
-        let result = mat1 + &mat2;
-        assert_eq!(result.get_index(0, 0), 6.0);
-        assert_eq!(result.get_index(1, 1), 12.0);
-    }
-
-    #[test]
-    fn test_cudamat_add_assign() {
-        let ctx = CudaContext::default();
-        let mut mat1 = CudaMat::from_vec(2, 2, vec![1.0, 2.0, 3.0, 4.0], ctx.clone());
-        let mat2 = CudaMat::from_vec(2, 2, vec![5.0, 6.0, 7.0, 8.0], ctx.clone());
-        mat1 += &mat2;
-        assert_eq!(mat1.get_index(0, 0), 6.0);
-        assert_eq!(mat1.get_index(1, 1), 12.0);
-    }
-
-    #[test]
-    fn test_cudamat_sub() {
-        let ctx = CudaContext::default();
-        let mat1 = CudaMat::from_vec(2, 2, vec![5.0, 6.0, 7.0, 8.0], ctx.clone());
-        let mat2 = CudaMat::from_vec(2, 2, vec![1.0, 2.0, 3.0, 4.0], ctx.clone());
-        let result = mat1 - &mat2;
-        assert_eq!(result.get_index(0, 0), 4.0);
-        assert_eq!(result.get_index(1, 1), 4.0);
-    }
-
-    #[test]
-    fn test_cudamat_sub_assign() {
-        let ctx = CudaContext::default();
-        let mut mat1 = CudaMat::from_vec(2, 2, vec![5.0, 6.0, 7.0, 8.0], ctx.clone());
-        let mat2 = CudaMat::from_vec(2, 2, vec![1.0, 2.0, 3.0, 4.0], ctx.clone());
-        mat1 -= &mat2;
-        assert_eq!(mat1.get_index(0, 0), 4.0);
-        assert_eq!(mat1.get_index(1, 1), 4.0);
-    }
-
-    #[test]
-    fn test_cudamat_copy_from() {
-        let ctx = CudaContext::default();
-        let mat1 = CudaMat::from_vec(2, 2, vec![1.0, 2.0, 3.0, 4.0], ctx.clone());
-        let mut mat2 = CudaMat::zeros(2, 2, ctx.clone());
-        mat2.copy_from(&mat1);
-        assert_eq!(mat2.get_index(0, 0), 1.0);
-        assert_eq!(mat2.get_index(1, 1), 4.0);
-    }
-
-    #[test]
-    fn test_cudamat_gather() {
-        let ctx = CudaContext::default();
-        // M = [ 1, 4, 7 ]
-        //     [ 2, 5, 8 ]
-        //     [ 3, 6, 9 ]
-        let mat1 = CudaMat::from_vec(
-            3,
-            3,
-            vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
-            ctx.clone(),
-        );
-        let mut mat2 = CudaMat::zeros(2, 2, ctx.clone());
-        let indices = CudaIndex::from_vec(vec![0, 1, 3, 4], ctx.clone());
-        mat2.gather(&mat1, &indices);
-        assert_eq!(mat2.get_index(0, 0), 1.0);
-        assert_eq!(mat2.get_index(0, 1), 4.0);
-        assert_eq!(mat2.get_index(1, 1), 5.0);
-        assert_eq!(mat2.get_index(1, 0), 2.0);
-    }
-
-    #[test]
-    fn test_cudamat_set_data_with_indices() {
-        let ctx = CudaContext::default();
-        let mut mat = CudaMat::zeros(2, 2, ctx.clone());
-        let dst_indices = CudaIndex::from_vec(vec![0, 3], ctx.clone());
-        let src_indices = CudaIndex::from_vec(vec![0, 1], ctx.clone());
-        let data = CudaVec::from_vec(vec![5.0, 6.0], ctx.clone());
-        mat.set_data_with_indices(&dst_indices, &src_indices, &data);
-        assert_eq!(mat.get_index(0, 0), 5.0);
-        assert_eq!(mat.get_index(1, 1), 6.0);
-    }
-
-    #[test]
-    fn test_cudamat_add_column_to_vector() {
-        let ctx = CudaContext::default();
-        let mat = CudaMat::from_vec(2, 2, vec![1.0, 2.0, 3.0, 4.0], ctx.clone());
-        let mut vec = CudaVec::from_vec(vec![0.0, 0.0], ctx.clone());
-        mat.add_column_to_vector(1, &mut vec);
-        assert_eq!(vec.clone_as_vec(), vec![3.0, 4.0]);
-    }
-
-    #[test]
-    fn test_cudamat_set_column() {
-        let ctx = CudaContext::default();
-        let mut mat = CudaMat::zeros(2, 2, ctx.clone());
-        let vec = CudaVec::from_vec(vec![5.0, 6.0], ctx.clone());
-        mat.set_column(1, &vec);
-        assert_eq!(mat.get_index(0, 1), 5.0);
-        assert_eq!(mat.get_index(1, 1), 6.0);
-    }
-
-    #[test]
-    fn test_cudamat_into_owned() {
-        let ctx = CudaContext::default();
-        let mut mat = CudaMat::from_vec(2, 2, vec![1.0, 2.0, 3.0, 4.0], ctx.clone());
-        let mat_ref = mat.columns(0, 2);
-        assert_eq!(mat_ref.nrows(), 2);
-        assert_eq!(mat_ref.ncols(), 2);
-        let mat_copy = mat_ref.into_owned();
-        assert_eq!(mat_copy.nrows(), 2);
-        assert_eq!(mat_copy.ncols(), 2);
-        assert_eq!(mat_copy.get_index(0, 0), 1.0);
-        assert_eq!(mat_copy.get_index(1, 1), 4.0);
-        let mat_ref = mat.columns_mut(0, 2);
-        assert_eq!(mat_ref.nrows(), 2);
-        assert_eq!(mat_ref.ncols(), 2);
-        let mat_copy = mat_ref.into_owned();
-        assert_eq!(mat_copy.nrows(), 2);
-        assert_eq!(mat_copy.ncols(), 2);
-        assert_eq!(mat_copy.get_index(0, 0), 1.0);
-        assert_eq!(mat_copy.get_index(1, 1), 4.0);
-
-        // Check that the original matrix is unchanged
-        assert_eq!(mat.nrows(), 2);
-        assert_eq!(mat.ncols(), 2);
-        assert_eq!(mat.get_index(0, 0), 1.0);
-        assert_eq!(mat.get_index(1, 1), 4.0);
-    }
-
-    #[test]
-    fn test_cudamat_columns() {
-        let ctx = CudaContext::default();
-        let mut mat = CudaMat::from_vec(
-            2,
-            4,
-            vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
-            ctx.clone(),
-        );
-        let cols = mat.columns(1, 3);
-        assert_eq!(cols.nrows(), 2);
-        assert_eq!(cols.ncols(), 2);
-        let cols = cols.into_owned();
-        assert_eq!(cols.get_index(0, 0), 3.0);
-        assert_eq!(cols.get_index(1, 1), 6.0);
-        let cols = mat.columns_mut(1, 3);
-        assert_eq!(cols.nrows(), 2);
-        assert_eq!(cols.ncols(), 2);
-        let cols = cols.into_owned();
-        assert_eq!(cols.get_index(0, 0), 3.0);
-        assert_eq!(cols.get_index(1, 1), 6.0);
-    }
-
-    #[test]
-    fn test_cudamat_resize_cols() {
-        let ctx = CudaContext::default();
-        let mut mat = CudaMat::from_vec(2, 2, vec![1.0, 3.0, 2.0, 4.0], ctx.clone());
-        mat.resize_cols(3);
-        assert_eq!(mat.nrows(), 2);
-        assert_eq!(mat.ncols(), 3);
-        assert_eq!(mat.get_index(0, 0), 1.0);
-        assert_eq!(mat.get_index(0, 1), 2.0);
-        assert_eq!(mat.get_index(1, 0), 3.0);
-        assert_eq!(mat.get_index(1, 1), 4.0);
-        assert_eq!(mat.get_index(0, 2), 0.0);
-        assert_eq!(mat.get_index(1, 2), 0.0);
-
-        mat.resize_cols(1);
-        assert_eq!(mat.nrows(), 2);
-        assert_eq!(mat.ncols(), 1);
-        assert_eq!(mat.get_index(0, 0), 1.0);
-        assert_eq!(mat.get_index(1, 0), 3.0);
-    }
+    super::super::generate_dense_matrix_tests_batched!(
+        cuda,
+        CudaMat<f64>,
+        CudaContext::default(),
+        CudaContext::default().with_nbatch(2)
+    );
 }

@@ -47,14 +47,14 @@ impl<T: FaerScalar> LinearSolver<FaerSparseMat<T>> for FaerSparseLU<T> {
         self.lu = Some(
             Lu::try_new_with_symbolic(self.lu_symbolic.as_ref().unwrap().clone(), matrix.data.rb())
                 .expect("Failed to factorise matrix"),
-        )
+        );
     }
 
     fn solve_in_place(&self, x: &mut FaerVec<T>) -> Result<(), DiffsolError> {
-        if self.lu.is_none() {
-            return Err(linear_solver_error!(LuNotInitialized))?;
-        }
-        let lu = self.lu.as_ref().unwrap();
+        let lu = self
+            .lu
+            .as_ref()
+            .ok_or_else(|| linear_solver_error!(LuNotInitialized))?;
         lu.solve_in_place(&mut x.data);
         Ok(())
     }
@@ -68,10 +68,29 @@ impl<T: FaerScalar> LinearSolver<FaerSparseMat<T>> for FaerSparseLU<T> {
         let ncols = op.nstates();
         let nrows = op.nout();
         let matrix = C::M::new_from_sparsity(nrows, ncols, op.jacobian_sparsity(), *op.context());
-        self.matrix = Some(matrix);
         self.lu_symbolic = Some(
-            SymbolicLu::try_new(self.matrix.as_ref().unwrap().data.symbolic())
-                .expect("Failed to create symbolic LU"),
+            SymbolicLu::try_new(matrix.data.symbolic()).expect("Failed to create symbolic LU"),
         );
+        self.matrix = Some(matrix);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        linear_solver::tests::{linear_problem, test_linear_solver},
+        op::ParameterisedOp,
+        FaerSparseMat, Op, Vector,
+    };
+
+    use super::*;
+
+    #[test]
+    fn test_sparse_lu() {
+        let (op, rtol, atol, solns) = linear_problem::<FaerSparseMat<f64>>();
+        let p = FaerVec::zeros(0, *op.context());
+        let op = ParameterisedOp::new(&op, &p);
+        let s = FaerSparseLU::default();
+        test_linear_solver(s, op, rtol, &atol, solns);
     }
 }

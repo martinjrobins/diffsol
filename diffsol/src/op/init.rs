@@ -207,4 +207,59 @@ mod tests {
         assert_eq!(jac.get_index(2, 1), 0.0);
         assert_eq!(jac.get_index(2, 2), 1.0);
     }
+
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn test_initop_batched() {
+        use crate::{
+            ode_equations::test_models::exponential_decay_with_algebraic::{
+                exponential_decay_with_algebraic_batched,
+                exponential_decay_with_algebraic_init_batched,
+                exponential_decay_with_algebraic_jacobian_batched,
+                exponential_decay_with_algebraic_mass_batched,
+            },
+            CudaContext, CudaMat, CudaVec, OdeBuilder,
+        };
+
+        let nbatch = 2;
+        let ctx = CudaContext::default().with_nbatch(nbatch);
+        let p_f64 = vec![0.1, 0.2];
+        let problem = OdeBuilder::<CudaMat<f64>>::new()
+            .context(ctx.clone())
+            .p(p_f64)
+            .rhs_implicit(
+                exponential_decay_with_algebraic_batched::<CudaMat<f64>>,
+                exponential_decay_with_algebraic_jacobian_batched::<CudaMat<f64>>,
+            )
+            .mass(exponential_decay_with_algebraic_mass_batched::<CudaMat<f64>>)
+            .init(
+                exponential_decay_with_algebraic_init_batched::<CudaMat<f64>>,
+                3,
+            )
+            .build()
+            .unwrap();
+
+        let y0 = CudaVec::from_vec(vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0], ctx.clone());
+        let t = 0.0;
+        let (algebraic_indices, _) = problem
+            .eqn()
+            .mass()
+            .unwrap()
+            .matrix(t)
+            .partition_indices_by_zero_diagonal();
+
+        let initop = InitOp::new(&problem.eqn, t, &y0, algebraic_indices);
+
+        let du_v = CudaVec::from_vec(vec![4.0, 5.0, 1.0, 4.0, 5.0, 1.0], ctx.clone());
+        let mut y_out = CudaVec::zeros(3, ctx.clone());
+        initop.call_inplace(&du_v, t, &mut y_out);
+        let expect = CudaVec::from_vec(vec![-4.1, -5.1, 0.0, -4.2, -5.2, 0.0], ctx.clone());
+        y_out.assert_eq_st(&expect, 1e-10);
+
+        let x0 = CudaVec::from_vec(vec![-0.1, -0.1, 1.0, -0.2, -0.2, 1.0], ctx.clone());
+        let mut zero_out = CudaVec::zeros(3, ctx);
+        initop.call_inplace(&x0, t, &mut zero_out);
+        let expect_zero = CudaVec::from_vec(vec![0.0; 6], zero_out.context().clone());
+        zero_out.assert_eq_st(&expect_zero, 1e-10);
+    }
 }

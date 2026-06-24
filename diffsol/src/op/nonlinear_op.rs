@@ -264,7 +264,7 @@ mod tests {
                     2.0 * x.get_index(0) + 3.0 * x.get_index(1),
                     -x.get_index(0) + 4.0 * x.get_index(1),
                 ],
-                NalgebraContext,
+                NalgebraContext::default(),
             ));
         }
     }
@@ -296,7 +296,7 @@ mod tests {
                     2.0 * x.get_index(0) + t,
                     -x.get_index(0) + 4.0 * x.get_index(1) - 3.0 * t,
                 ],
-                NalgebraContext,
+                NalgebraContext::default(),
             ));
         }
     }
@@ -308,7 +308,7 @@ mod tests {
                     2.0 * v.get_index(0) + 3.0 * v.get_index(1),
                     -v.get_index(0) + 4.0 * v.get_index(1),
                 ],
-                NalgebraContext,
+                NalgebraContext::default(),
             ));
         }
     }
@@ -326,7 +326,7 @@ mod tests {
                     -2.0 * v.get_index(0) + v.get_index(1),
                     -3.0 * v.get_index(0) - 4.0 * v.get_index(1),
                 ],
-                NalgebraContext,
+                NalgebraContext::default(),
             ));
         }
     }
@@ -338,7 +338,7 @@ mod tests {
                     v.get_index(0) + 2.0 * v.get_index(1),
                     3.0 * v.get_index(0) + 4.0 * v.get_index(1),
                 ],
-                NalgebraContext,
+                NalgebraContext::default(),
             ));
         }
     }
@@ -356,7 +356,7 @@ mod tests {
                     -v.get_index(0) - 3.0 * v.get_index(1),
                     -2.0 * v.get_index(0) - 4.0 * v.get_index(1),
                 ],
-                NalgebraContext,
+                NalgebraContext::default(),
             ));
         }
     }
@@ -364,21 +364,21 @@ mod tests {
     #[test]
     fn nonlinear_op_default_helpers_construct_expected_vectors_and_matrices() {
         let op = FakeNonLinearOp {
-            ctx: NalgebraContext,
+            ctx: NalgebraContext::default(),
         };
-        let x = crate::NalgebraVec::from_vec(vec![1.0, 2.0], NalgebraContext);
-        let v = crate::NalgebraVec::from_vec(vec![3.0, -1.0], NalgebraContext);
+        let x = crate::NalgebraVec::from_vec(vec![1.0, 2.0], NalgebraContext::default());
+        let v = crate::NalgebraVec::from_vec(vec![3.0, -1.0], NalgebraContext::default());
 
         op.call(&x, 0.0).assert_eq_st(
-            &crate::NalgebraVec::from_vec(vec![8.0, 7.0], NalgebraContext),
+            &crate::NalgebraVec::from_vec(vec![8.0, 7.0], NalgebraContext::default()),
             1e-12,
         );
         op.jac_mul(&x, 0.0, &v).assert_eq_st(
-            &crate::NalgebraVec::from_vec(vec![3.0, -7.0], NalgebraContext),
+            &crate::NalgebraVec::from_vec(vec![3.0, -7.0], NalgebraContext::default()),
             1e-12,
         );
         op.sens_mul(&x, 0.0, &v).assert_eq_st(
-            &crate::NalgebraVec::from_vec(vec![1.0, 5.0], NalgebraContext),
+            &crate::NalgebraVec::from_vec(vec![1.0, 5.0], NalgebraContext::default()),
             1e-12,
         );
 
@@ -410,19 +410,19 @@ mod tests {
     #[test]
     fn nonlinear_op_time_partial_default_helper_uses_finite_differences() {
         let op = TimeDependentFakeNonLinearOp {
-            ctx: NalgebraContext,
+            ctx: NalgebraContext::default(),
         };
-        let x = crate::NalgebraVec::from_vec(vec![1.0, 2.0], NalgebraContext);
+        let x = crate::NalgebraVec::from_vec(vec![1.0, 2.0], NalgebraContext::default());
 
         op.time_derive(&x, 0.5).assert_eq_st(
-            &crate::NalgebraVec::from_vec(vec![1.0, -3.0], NalgebraContext),
+            &crate::NalgebraVec::from_vec(vec![1.0, -3.0], NalgebraContext::default()),
             1e-8,
         );
 
-        let mut y = crate::NalgebraVec::zeros(2, NalgebraContext);
+        let mut y = crate::NalgebraVec::zeros(2, NalgebraContext::default());
         op.time_derive_inplace(&x, 0.5, &mut y);
         y.assert_eq_st(
-            &crate::NalgebraVec::from_vec(vec![1.0, -3.0], NalgebraContext),
+            &crate::NalgebraVec::from_vec(vec![1.0, -3.0], NalgebraContext::default()),
             1e-8,
         );
     }

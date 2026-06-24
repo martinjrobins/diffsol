@@ -37,13 +37,15 @@ pub fn heat2d_diffsl_problem<
         .map(|v| format!("            {}", *v))
         .collect::<Vec<_>>()
         .join(",\n");
-    let jac_diffsl = jac
-        .triplet_iter()
-        .map(|(i, j, v)| format!("            ({i}, {j}): {v}"))
+    let (jac_idx, jac_vals) = jac.triplet_iter();
+    let jac_diffsl = jac_idx
+        .zip(jac_vals)
+        .map(|((i, j), v)| format!("            ({i}, {j}): {v}"))
         .collect::<Vec<_>>()
         .join(",\n");
 
-    let mass_ones = mass.triplet_iter().map(|(i, _j, _v)| i).collect::<Vec<_>>();
+    let (mass_idx, _mass_vals) = mass.triplet_iter();
+    let mass_ones = mass_idx.map(|(i, _j)| i).collect::<Vec<_>>();
     let mut mass_diffsl = Vec::new();
     for i in 0..MGRID * MGRID {
         // check if i in mass_ones

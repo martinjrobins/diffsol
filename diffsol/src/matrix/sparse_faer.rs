@@ -290,24 +290,43 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
         }
     }
 
-    fn triplet_iter(&self) -> impl Iterator<Item = (IndexType, IndexType, Self::T)> {
-        (0..self.ncols()).flat_map(move |j| {
-            self.data.col_range(j).map(move |i| {
-                let row = self.data.row_idx()[i];
-                (row, j, self.data.val()[i])
+    fn triplet_iter(
+        &self,
+    ) -> (
+        impl Iterator<Item = (IndexType, IndexType)> + '_,
+        impl Iterator<Item = Self::T> + '_,
+    ) {
+        let indices: Vec<_> = (0..self.ncols())
+            .flat_map(move |j| {
+                self.data
+                    .col_range(j)
+                    .map(move |i| (self.data.row_idx()[i], j))
             })
-        })
+            .collect();
+        let values: Vec<_> = indices
+            .iter()
+            .enumerate()
+            .map(|(k, _)| self.data.val()[k])
+            .collect();
+        (indices.into_iter(), values.into_iter())
     }
 
     fn try_from_triplets(
         nrows: IndexType,
         ncols: IndexType,
-        triplets: Vec<(IndexType, IndexType, T)>,
+        indices: Vec<(IndexType, IndexType)>,
+        values: Vec<Self::T>,
         ctx: Self::C,
     ) -> Result<Self, DiffsolError> {
-        let triplets = triplets
+        assert_eq!(
+            values.len(),
+            indices.len(),
+            "values.len() must equal indices.len() for non-batched backend"
+        );
+        let triplets = indices
             .iter()
-            .map(|(i, j, v)| Triplet::new(*i, *j, *v))
+            .zip(values)
+            .map(|((i, j), v)| Triplet::new(*i, *j, v))
             .collect::<Vec<_>>();
         match faer::sparse::SparseColMat::try_new_from_triplets(nrows, ncols, triplets.as_slice()) {
             Ok(mat) => Ok(Self {
@@ -407,49 +426,71 @@ mod tests {
     use crate::{FaerSparseMat, Matrix};
     #[test]
     fn test_triplet_iter() {
-        let triplets = vec![(0, 0, 1.0), (1, 0, 2.0), (2, 2, 3.0), (3, 2, 4.0)];
-        let mat =
-            FaerSparseMat::<f64>::try_from_triplets(4, 3, triplets.clone(), Default::default())
-                .unwrap();
-        let mut iter = mat.triplet_iter();
-        for triplet in triplets {
-            let (i, j, val) = iter.next().unwrap();
-            assert_eq!(i, triplet.0);
-            assert_eq!(j, triplet.1);
-            assert_eq!(val, triplet.2);
-        }
+        let indices = vec![(0, 0), (1, 0), (2, 2), (3, 2)];
+        let values = vec![1.0, 2.0, 3.0, 4.0];
+        let mat = FaerSparseMat::<f64>::try_from_triplets(
+            4,
+            3,
+            indices.clone(),
+            values.clone(),
+            Default::default(),
+        )
+        .unwrap();
+        let (iter_indices, iter_values): (Vec<_>, Vec<_>) = {
+            let (i, v) = mat.triplet_iter();
+            (i.collect(), v.collect())
+        };
+        assert_eq!(iter_indices, indices);
+        assert_eq!(iter_values, values);
     }
 
     #[test]
-    fn test_inner_mut() {
+    fn test_set_data_with_indices() {
         use crate::{FaerVec, FaerVecIndex, Vector, VectorIndex};
 
         // CSC data-array order: column-major, ascending row within each column.
-        let triplets = vec![
+        let triplets_full = vec![
             (0, 0, 1.0),
             (2, 0, 2.0),
             (1, 1, 3.0),
             (0, 2, 4.0),
             (2, 2, 5.0),
         ];
-        let mut mat =
-            FaerSparseMat::<f64>::try_from_triplets(3, 3, triplets.clone(), Default::default())
-                .unwrap();
+        let (indices, init_values): (Vec<_>, Vec<_>) =
+            triplets_full.iter().map(|&(i, j, v)| ((i, j), v)).unzip();
+        let mut mat = FaerSparseMat::<f64>::try_from_triplets(
+            3,
+            3,
+            indices.clone(),
+            init_values,
+            Default::default(),
+        )
+        .unwrap();
 
-        assert_eq!(mat.inner_mut().val_mut().len(), triplets.len());
+        assert_eq!(mat.inner_mut().val_mut().len(), indices.len());
 
         let new_values = [10.0, 11.0, 12.0, 13.0, 14.0];
         mat.inner_mut().val_mut().copy_from_slice(&new_values);
-        let got: Vec<(usize, usize, f64)> = mat.triplet_iter().collect();
-        let expected: Vec<(usize, usize, f64)> = triplets
+        let (indices_iter, values_iter) = mat.triplet_iter();
+        let got: Vec<(usize, usize, f64)> = indices_iter
+            .zip(values_iter)
+            .map(|((i, j), v)| (i, j, v))
+            .collect();
+        let expected: Vec<(usize, usize, f64)> = triplets_full
             .iter()
             .zip(new_values.iter())
             .map(|(&(i, j, _), &v)| (i, j, v))
             .collect();
         assert_eq!(got, expected);
 
-        let mut via_set_data =
-            FaerSparseMat::<f64>::try_from_triplets(3, 3, triplets, Default::default()).unwrap();
+        let mut via_set_data = FaerSparseMat::<f64>::try_from_triplets(
+            3,
+            3,
+            indices,
+            new_values.iter().map(|_| 0.0).collect(),
+            Default::default(),
+        )
+        .unwrap();
         let nnz = new_values.len();
         let identity = FaerVecIndex::from_vec((0..nnz).collect(), Default::default());
         let data = FaerVec::from_vec(new_values.to_vec(), Default::default());
@@ -464,4 +505,6 @@ mod tests {
     fn test_partition_indices_by_zero_diagonal() {
         super::super::tests::test_partition_indices_by_zero_diagonal::<FaerSparseMat<f64>>();
     }
+
+    super::super::generate_matrix_tests_nonbatched!(faer_sparse, FaerSparseMat<f64>);
 }

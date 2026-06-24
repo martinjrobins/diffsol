@@ -35,7 +35,7 @@ impl<T: NalgebraScalar> From<DVector<T>> for NalgebraVec<T> {
     fn from(data: DVector<T>) -> Self {
         Self {
             data,
-            context: NalgebraContext,
+            context: NalgebraContext::default(),
         }
     }
 }
@@ -317,6 +317,10 @@ impl VectorIndex for NalgebraIndex {
 impl<'a, T: NalgebraScalar> VectorView<'a> for NalgebraVecRef<'a, T> {
     type Owned = NalgebraVec<T>;
 
+    fn get_index(&self, index: IndexType) -> Self::T {
+        self.data[index]
+    }
+
     fn into_owned(self) -> Self::Owned {
         Self::Owned {
             data: self.data.into_owned(),
@@ -348,6 +352,9 @@ impl<'a, T: NalgebraScalar> VectorViewMut<'a> for NalgebraVecMut<'a, T> {
     }
     fn copy_from_view(&mut self, other: &Self::View) {
         self.data.copy_from(&other.data);
+    }
+    fn set_index(&mut self, index: IndexType, value: Self::T) {
+        self.data[index] = value;
     }
     fn axpy(&mut self, alpha: Self::T, x: &Self::Owned, beta: Self::T) {
         self.data.axpy(alpha, &x.data, beta);
@@ -411,6 +418,20 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
             context: self.context,
         }
     }
+    fn get_batch(&self, batch: usize) -> Self::View<'_> {
+        assert!(
+            batch == 0,
+            "NalgebraVec does not support batching (nbatch > 1)."
+        );
+        self.as_view()
+    }
+    fn get_batch_mut(&mut self, batch: usize) -> Self::ViewMut<'_> {
+        assert!(
+            batch == 0,
+            "NalgebraVec does not support batching (nbatch > 1)."
+        );
+        self.as_view_mut()
+    }
     fn copy_from(&mut self, other: &Self) {
         self.data.copy_from(&other.data);
     }
@@ -444,6 +465,14 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
     }
     fn axpy_v(&mut self, alpha: Self::T, x: &Self::View<'_>, beta: Self::T) {
         self.data.axpy(alpha, &x.data, beta);
+    }
+    fn batched_axpy(&mut self, alpha: &[Self::T], x: &Self, beta: Self::T) {
+        assert_eq!(
+            alpha.len(),
+            1,
+            "NalgebraVec does not support batching (nbatch > 1)."
+        );
+        self.axpy(alpha[0], x, beta);
     }
     fn component_div_assign(&mut self, other: &Self) {
         self.data.component_div_assign(&other.data);
@@ -501,7 +530,6 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
     }
 }
 
-// tests
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -543,4 +571,6 @@ mod tests {
         let v: NalgebraVec<f64> = vec.into();
         assert_eq!(v.clone_as_vec(), vec![1.0, 2.0, 3.0]);
     }
+
+    super::super::generate_vector_tests_nonbatched!(nalgebra, NalgebraVec<f64>);
 }

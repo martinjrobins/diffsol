@@ -10,7 +10,9 @@
 __global__
 void vec_root_finding_f64(const double* __restrict__ g0,
                                 const double* __restrict__ g1,
-                                int n,
+                                int nstates, int nbatch,
+                                int g0_stride, int g0_nbatch,
+                                int g1_stride, int g1_nbatch,
                                 int* root_flag,
                                 double* max_vals,
                                 int* max_idxs) {
@@ -19,20 +21,21 @@ void vec_root_finding_f64(const double* __restrict__ g0,
     double* svals = sdata;
     int* sidxs = (int*)&svals[blockDim.x];
 
+    int b = blockIdx.y;
     int tid = threadIdx.x;
-    int global_idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int stride = blockDim.x * gridDim.x;
+    int idx = blockIdx.x * blockDim.x + tid;
 
     double local_max = 0.0;
     int local_index = -1;
 
-    // Grid-stride loop
-    for (int i = global_idx; i < n; i += stride) {
-        double v0 = g0[i];
-        double v1 = g1[i];
+    for (int i = idx; i < nstates; i += blockDim.x * gridDim.x) {
+        int g0i = (b % g0_nbatch) * g0_stride + i;
+        int g1i = (b % g1_nbatch) * g1_stride + i;
+        double v0 = g0[g0i];
+        double v1 = g1[g1i];
 
         if (v1 == 0.0) {
-            atomicExch(root_flag, 1);
+            atomicExch(&root_flag[b], 1);
         }
 
         if (v0 * v1 < 0.0) {
@@ -61,7 +64,7 @@ void vec_root_finding_f64(const double* __restrict__ g0,
     }
 
     if (tid == 0) {
-        max_vals[blockIdx.x] = svals[0];
-        max_idxs[blockIdx.x] = sidxs[0];
+        max_vals[b * gridDim.x + blockIdx.x] = svals[0];
+        max_idxs[b * gridDim.x + blockIdx.x] = sidxs[0];
     }
 }

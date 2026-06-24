@@ -1,6 +1,6 @@
 [package]
 name = "diffsol"
-version = "0.14.2"
+version = "0.15.0"
 edition.workspace = true
 description = "A library for solving ordinary differential equations (ODEs) in Rust."
 license.workspace = true
@@ -77,6 +77,10 @@ cc = { version = "1.2", optional = true }
 
 [[bench]]
 name = "ode_solvers"
+harness = false
+
+[[bench]]
+name = "lin_alg_ops"
 harness = false
 
 [[bench]]

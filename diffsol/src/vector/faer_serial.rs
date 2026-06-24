@@ -247,6 +247,20 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
             context: self.context,
         }
     }
+    fn get_batch(&self, batch: usize) -> Self::View<'_> {
+        assert!(
+            batch == 0,
+            "FaerVec does not support batching (nbatch > 1)."
+        );
+        self.as_view()
+    }
+    fn get_batch_mut(&mut self, batch: usize) -> Self::ViewMut<'_> {
+        assert!(
+            batch == 0,
+            "FaerVec does not support batching (nbatch > 1)."
+        );
+        self.as_view_mut()
+    }
     fn copy_from(&mut self, other: &Self) {
         self.data.copy_from(&other.data)
     }
@@ -280,6 +294,14 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
     }
     fn axpy_v(&mut self, alpha: Self::T, x: &Self::View<'_>, beta: Self::T) {
         zip!(self.data.as_mut(), x.data).for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha);
+    }
+    fn batched_axpy(&mut self, alpha: &[Self::T], x: &Self, beta: Self::T) {
+        assert_eq!(
+            alpha.len(),
+            1,
+            "FaerVec does not support batching (nbatch > 1)."
+        );
+        self.axpy(alpha[0], x, beta);
     }
     fn component_mul_assign(&mut self, other: &Self) {
         zip!(self.data.as_mut(), other.data.as_ref()).for_each(|unzip!(s, o)| *s *= *o);
@@ -364,6 +386,9 @@ impl VectorIndex for FaerVecIndex {
 
 impl<'a, T: FaerScalar> VectorView<'a> for FaerVecRef<'a, T> {
     type Owned = FaerVec<T>;
+    fn get_index(&self, index: IndexType) -> Self::T {
+        self.data[index]
+    }
     fn into_owned(self) -> FaerVec<T> {
         FaerVec {
             data: self.data.to_owned(),
@@ -397,13 +422,15 @@ impl<'a, T: FaerScalar> VectorViewMut<'a> for FaerVecMut<'a, T> {
     fn copy_from_view(&mut self, other: &Self::View) {
         self.data.copy_from(&other.data);
     }
+    fn set_index(&mut self, index: IndexType, value: Self::T) {
+        self.data[index] = value;
+    }
     fn axpy(&mut self, alpha: Self::T, x: &Self::Owned, beta: Self::T) {
         zip!(self.data.as_mut(), x.data.as_ref())
             .for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha);
     }
 }
 
-// tests
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -443,12 +470,6 @@ mod tests {
             v.squared_norm(&y, &atol, rtol),
             errorn_check
         );
-        assert!(
-            (v.squared_norm(&y, &atol, rtol) - errorn_check).abs() < 1e-10,
-            "{} vs {}",
-            v.squared_norm(&y, &atol, rtol),
-            errorn_check
-        );
     }
 
     #[test]
@@ -469,4 +490,6 @@ mod tests {
         let v: FaerVec<f64> = col.into();
         assert_eq!(v.clone_as_vec(), vec![1.0, 2.0, 3.0]);
     }
+
+    super::super::generate_vector_tests_nonbatched!(faer, FaerVec<f64>);
 }

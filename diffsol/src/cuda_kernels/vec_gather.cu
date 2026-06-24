@@ -1,15 +1,14 @@
-/// gather values from `other` at the indices specified by `indices`
-/// i.e. `self[i] = other[indices[i]]` for all i
 __global__
 void vec_gather_f64(double* self,
                    const double* __restrict__ other,
                    const int* __restrict__ indices,
-                   int n) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-
-    // Grid-stride loop for flexibility
-    for (int i = idx; i < n; i += blockDim.x * gridDim.x) {
-        int src_idx = indices[i];
-        self[i] = other[src_idx];
-    }
+                   int nindices,
+                   int self_stride, int self_nbatch,
+                   int other_stride, int other_nbatch) {
+    int j, si, oi;
+    if (!batch_gather_scatter_setup(&j, nindices,
+                                    &si, self_stride, self_nbatch,
+                                    &oi, other_stride, other_nbatch,
+                                    indices)) return;
+    self[si] = other[oi];
 }

@@ -251,7 +251,7 @@ mod tests {
 
     #[test]
     fn unit_callable_behaves_as_identity_and_zero_sens_operator() {
-        let ctx = NalgebraContext;
+        let ctx = NalgebraContext::default();
         let mut op = UnitCallable::<M>::default();
         assert_eq!(op.nstates(), 1);
         assert_eq!(op.nout(), 1);
@@ -271,7 +271,7 @@ mod tests {
 
     #[test]
     fn unit_callable_new_uses_supplied_context() {
-        let op = UnitCallable::<M>::new(3, NalgebraContext);
+        let op = UnitCallable::<M>::new(3, NalgebraContext::default());
         assert_eq!(op.nstates(), 3);
         assert_eq!(op.nout(), 3);
         assert_eq!(op.nparams(), 0);

@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use crate::{
     LinearOp, LinearOpTranspose, Matrix, MatrixSparsity, NonLinearOp, NonLinearOpAdjoint,
     NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, Scalar, Vector, VectorIndex,
+    VectorView,
 };
 use num_traits::{One, Zero};
 
@@ -29,11 +30,14 @@ macro_rules! gen_find_non_zeros_nonlinear {
             for j in 0..op.$ncols() {
                 v.set_index(j, F::T::NAN);
                 op.$op_fn(x, t, &v, &mut col);
-                for i in 0..op.nout() {
-                    if col.get_index(i).is_nan() {
-                        triplets.push((i, j));
+                {
+                    // assume that every batch has the same non-zeros
+                    let col_b0 = col.get_batch(0);
+                    for i in 0..op.$nrows() {
+                        if col_b0.get_index(i).is_nan() {
+                            triplets.push((i, j));
+                        }
                     }
-                    col.set_index(i, F::T::zero());
                 }
                 col.fill(F::T::zero());
                 v.set_index(j, F::T::zero());
@@ -85,18 +89,16 @@ macro_rules! gen_find_non_zeros_linear {
             for j in 0..op.nstates() {
                 v.set_index(j, F::T::NAN);
                 op.$op_fn(&v, t, &mut col);
-                for i in 0..op.nout() {
-                    if col.get_index(i).is_nan() {
-                        triplets.push((i, j));
+                {
+                    // assume non-zeros are the same for all batches
+                    let col_b0 = col.get_batch(0);
+                    for i in 0..op.nout() {
+                        if col_b0.get_index(i).is_nan() {
+                            triplets.push((i, j));
+                        }
                     }
-                    col.set_index(i, F::T::zero());
                 }
-                // OR:
-                //col.clone_as_vec().into_iter().for_each(|v| {
-                //    if v.is_nan() {
-                //        triplets.push((0, 0));
-                //    }
-                //});
+                col.fill(F::T::zero());
                 v.set_index(j, F::T::zero());
             }
             triplets

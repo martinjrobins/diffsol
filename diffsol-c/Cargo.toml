@@ -43,7 +43,7 @@ suitesparse = ["diffsol/suitesparse"]
 
 [dependencies]
 diffsl = { workspace = true }
-diffsol = { path = "../diffsol", version = "0.14.2", features = ["diffsl"] }
+diffsol = { path = "../diffsol", version = "0.15.0", features = ["diffsl"] }
 dlmalloc = { version = "0.2", features = ["global"] }
 nalgebra = { workspace = true, features = ["std"] }
 ndarray = { version = "0.17.2" }

@@ -1116,6 +1116,14 @@ where
     }
 
     /// Set the initial time.
+    /// Set the execution context (e.g. for batching or GPU placement).
+    ///
+    /// Use `CudaContext::with_nbatch(n)` to enable batched solving of `n` independent ODE instances.
+    pub fn context(mut self, ctx: M::C) -> Self {
+        self.ctx = ctx;
+        self
+    }
+
     pub fn t0(mut self, t0: f64) -> Self {
         self.t0 = M::T::from_f64(t0).unwrap();
         self

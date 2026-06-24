@@ -1,9 +1,10 @@
 use crate::{
     ode_solver::problem::OdeSolverSolution,
     scalar::{scale, Scalar},
-    ConstantOp, Matrix, MatrixHost, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens,
-    NonLinearOpSensAdjoint, NonLinearOpTimePartial, OdeBuilder, OdeEquations, OdeEquationsImplicit,
-    OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeSolverProblem, Op, Vector,
+    ConstantOp, Context, Matrix, MatrixHost, NonLinearOpAdjoint, NonLinearOpJacobian,
+    NonLinearOpSens, NonLinearOpSensAdjoint, NonLinearOpTimePartial, OdeBuilder, OdeEquations,
+    OdeEquationsImplicit, OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeSolverProblem,
+    Op, Vector, VectorView, VectorViewMut,
 };
 use num_traits::{FromPrimitive, One, Zero};
 use std::ops::MulAssign;
@@ -12,7 +13,11 @@ use std::ops::MulAssign;
 // dy/dt = -ay (p = [a, y0])
 fn exponential_decay<M: Matrix>(x: &M::V, p: &M::V, _t: M::T, y: &mut M::V) {
     y.copy_from(x);
-    y.mul_assign(scale(-p.get_index(0)));
+    let nbatch = y.context().nbatch();
+    for b in 0..nbatch {
+        let k = p.get_batch(b).get_index(0);
+        y.get_batch_mut(b).mul_assign(scale(-k));
+    }
 }
 
 // mass matrix is identity
@@ -48,7 +53,11 @@ fn exponential_decay_sens_transpose<M: MatrixHost>(
 // Jv = -av
 fn exponential_decay_jacobian<M: Matrix>(_x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
     y.copy_from(v);
-    y.mul_assign(scale(-p.get_index(0)));
+    let nbatch = y.context().nbatch();
+    for b in 0..nbatch {
+        let k = p.get_batch(b).get_index(0);
+        y.get_batch_mut(b).mul_assign(scale(-k));
+    }
 }
 
 // -J^Tv = av
@@ -64,7 +73,14 @@ fn exponential_decay_jacobian_adjoint<M: MatrixHost>(
 }
 
 fn exponential_decay_init<M: Matrix>(p: &M::V, _t: M::T, y: &mut M::V) {
-    y.fill(p.get_index(1));
+    let nstates = y.len();
+    let nbatch = y.context().nbatch();
+    let ctx1 = y.context().clone_with_nbatch(1).unwrap();
+    for b in 0..nbatch {
+        let y0 = p.get_batch(b).get_index(1);
+        let val = M::V::from_element(nstates, y0, ctx1.clone());
+        y.get_batch_mut(b).copy_from(&val);
+    }
 }
 
 // dy0/dp = | 0 1 |
@@ -261,6 +277,50 @@ pub fn exponential_decay_problem<M: Matrix + 'static>(
         let t = M::T::from_f64(i as f64).unwrap();
         let y0: M::V = problem.eqn.init().call(M::T::zero());
         let y = y0.clone() * scale((-p[0] * t).exp());
+        soln.push(y, t);
+    }
+    (problem, soln)
+}
+
+#[allow(clippy::type_complexity)]
+pub fn exponential_decay_problem_batched<M: Matrix + 'static>(
+    nbatch: usize,
+) -> (
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
+    OdeSolverSolution<M::V>,
+) {
+    let ctx = M::C::default().clone_with_nbatch(nbatch).unwrap();
+    let mut p_f64 = Vec::new();
+    for b in 0..nbatch {
+        let k = 0.1 * (b + 1) as f64;
+        let y0 = (b + 1) as f64;
+        p_f64.push(k);
+        p_f64.push(y0);
+    }
+    let problem = OdeBuilder::<M>::new()
+        .h0(1.0)
+        .context(ctx.clone())
+        .p(p_f64.clone())
+        .rhs_implicit(exponential_decay::<M>, exponential_decay_jacobian::<M>)
+        .init(exponential_decay_init::<M>, 2)
+        .build()
+        .unwrap();
+    let mut soln = OdeSolverSolution {
+        atol: problem.atol.clone(),
+        rtol: problem.rtol,
+        ..Default::default()
+    };
+    for i in 0..10 {
+        let t = M::T::from_f64(i as f64).unwrap();
+        let mut y_data = Vec::new();
+        for b in 0..nbatch {
+            let k = M::T::from_f64(p_f64[b * 2]).unwrap();
+            let y0 = M::T::from_f64(p_f64[b * 2 + 1]).unwrap();
+            let val = y0 * (-k * t).exp();
+            y_data.push(val);
+            y_data.push(val);
+        }
+        let y = M::V::from_vec(y_data, ctx.clone());
         soln.push(y, t);
     }
     (problem, soln)
@@ -992,6 +1052,340 @@ pub fn exponential_decay_with_reset_problem_sens<M: MatrixHost + 'static>() -> (
     (problem, soln)
 }
 
+// ------------------------------------------------------------------
+// Batch-aware helper functions for batched tests
+//
+// These use `M: Matrix` (not `MatrixHost`) and iterate over batches
+// via `get_batch`/`get_batch_mut` to support `nbatch > 1`.
+// ------------------------------------------------------------------
+
+fn exponential_decay_time_root_batched<M: Matrix>(_x: &M::V, _p: &M::V, t: M::T, y: &mut M::V) {
+    y.fill(t - M::T::from_f64(5.0).unwrap());
+}
+
+fn exponential_decay_sens_batched<M: Matrix>(
+    x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    v: &M::V,
+    y: &mut M::V,
+) {
+    y.copy_from(x);
+    let nbatch = y.context().nbatch();
+    for b in 0..nbatch {
+        let vb = v.get_batch(b);
+        y.get_batch_mut(b).mul_assign(scale(-vb.get_index(0)));
+    }
+}
+
+fn exponential_decay_init_sens_batched<M: Matrix>(_p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
+    let nbatch = y.context().nbatch();
+    for b in 0..nbatch {
+        let vb = v.get_batch(b);
+        let v1 = vb.get_index(1);
+        let mut yb = y.get_batch_mut(b);
+        yb.set_index(0, v1);
+        yb.set_index(1, v1);
+    }
+}
+
+fn exponential_decay_jacobian_adjoint_batched<M: Matrix>(
+    _x: &M::V,
+    p: &M::V,
+    _t: M::T,
+    v: &M::V,
+    y: &mut M::V,
+) {
+    y.copy_from(v);
+    let nbatch = y.context().nbatch();
+    for b in 0..nbatch {
+        let pb = p.get_batch(b);
+        y.get_batch_mut(b).mul_assign(scale(pb.get_index(0)));
+    }
+}
+
+fn exponential_decay_sens_transpose_batched<M: Matrix>(
+    x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    v: &M::V,
+    y: &mut M::V,
+) {
+    let nbatch = y.context().nbatch();
+    for b in 0..nbatch {
+        let xb = x.get_batch(b);
+        let vb = v.get_batch(b);
+        let mut yb = y.get_batch_mut(b);
+        yb.set_index(
+            0,
+            xb.get_index(0) * vb.get_index(0) + xb.get_index(1) * vb.get_index(1),
+        );
+        yb.set_index(1, M::T::zero());
+    }
+}
+
+fn exponential_decay_init_sens_adjoint_batched<M: Matrix>(
+    _p: &M::V,
+    _t: M::T,
+    v: &M::V,
+    y: &mut M::V,
+) {
+    let nbatch = y.context().nbatch();
+    for b in 0..nbatch {
+        let vb = v.get_batch(b);
+        let mut yb = y.get_batch_mut(b);
+        yb.set_index(0, M::T::zero());
+        yb.set_index(1, -vb.get_index(0) - vb.get_index(1));
+    }
+}
+
+fn exponential_decay_out_batched<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
+    let nbatch = y.context().nbatch();
+    for b in 0..nbatch {
+        let xb = x.get_batch(b);
+        let mut yb = y.get_batch_mut(b);
+        yb.set_index(
+            0,
+            xb.get_index(0) + M::T::from_f64(2.0).unwrap() * xb.get_index(1),
+        );
+        yb.set_index(
+            1,
+            M::T::from_f64(3.0).unwrap() * xb.get_index(0)
+                + M::T::from_f64(4.0).unwrap() * xb.get_index(1),
+        );
+    }
+}
+
+fn exponential_decay_out_jac_mul_batched<M: Matrix>(
+    _x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    v: &M::V,
+    y: &mut M::V,
+) {
+    let nbatch = y.context().nbatch();
+    for b in 0..nbatch {
+        let vb = v.get_batch(b);
+        let mut yb = y.get_batch_mut(b);
+        yb.set_index(
+            0,
+            vb.get_index(0) + M::T::from_f64(2.0).unwrap() * vb.get_index(1),
+        );
+        yb.set_index(
+            1,
+            M::T::from_f64(3.0).unwrap() * vb.get_index(0)
+                + M::T::from_f64(4.0).unwrap() * vb.get_index(1),
+        );
+    }
+}
+
+fn exponential_decay_out_adj_mul_batched<M: Matrix>(
+    _x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    v: &M::V,
+    y: &mut M::V,
+) {
+    let nbatch = y.context().nbatch();
+    for b in 0..nbatch {
+        let vb = v.get_batch(b);
+        let mut yb = y.get_batch_mut(b);
+        yb.set_index(
+            0,
+            -vb.get_index(0) - M::T::from_f64(3.0).unwrap() * vb.get_index(1),
+        );
+        yb.set_index(
+            1,
+            -M::T::from_f64(2.0).unwrap() * vb.get_index(0)
+                - M::T::from_f64(4.0).unwrap() * vb.get_index(1),
+        );
+    }
+}
+
+fn exponential_decay_out_sens_adj_batched<M: Matrix>(
+    _x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    _v: &M::V,
+    y: &mut M::V,
+) {
+    y.fill(M::T::zero());
+}
+
+// ------------------------------------------------------------------
+// Batched problem constructors
+// ------------------------------------------------------------------
+
+#[allow(clippy::type_complexity)]
+pub fn exponential_decay_problem_batched_with_reset<M: Matrix + 'static>(
+    nbatch: usize,
+) -> (
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
+    Vec<f64>,
+) {
+    let ctx = M::C::default().clone_with_nbatch(nbatch).unwrap();
+    let mut p_f64 = Vec::new();
+    for b in 0..nbatch {
+        let k = 0.1 * (b + 1) as f64;
+        let y0 = (b + 1) as f64;
+        p_f64.push(k);
+        p_f64.push(y0);
+    }
+    let problem = OdeBuilder::<M>::new()
+        .context(ctx.clone())
+        .p(p_f64.clone())
+        .rhs_implicit(exponential_decay::<M>, exponential_decay_jacobian::<M>)
+        .init(exponential_decay_init::<M>, 2)
+        .root(exponential_decay_time_root_batched::<M>, 1)
+        .reset(exponential_decay_reset::<M>)
+        .build()
+        .unwrap();
+    (problem, p_f64)
+}
+
+#[allow(clippy::type_complexity)]
+pub fn exponential_decay_problem_batched_sens<M: Matrix + 'static>(
+    nbatch: usize,
+) -> (
+    OdeSolverProblem<impl OdeEquationsImplicitSens<M = M, V = M::V, T = M::T, C = M::C>>,
+    OdeSolverSolution<M::V>,
+) {
+    let ctx = M::C::default().clone_with_nbatch(nbatch).unwrap();
+    let mut p_f64 = Vec::new();
+    for b in 0..nbatch {
+        let k = 0.1 * (b + 1) as f64;
+        let y0 = (b + 1) as f64;
+        p_f64.push(k);
+        p_f64.push(y0);
+    }
+    let problem = OdeBuilder::<M>::new()
+        .context(ctx.clone())
+        .p(p_f64.clone())
+        .sens_rtol(1e-6)
+        .sens_atol([1e-6])
+        .rhs_sens_implicit(
+            exponential_decay::<M>,
+            exponential_decay_jacobian::<M>,
+            exponential_decay_sens_batched::<M>,
+        )
+        .init_sens(
+            exponential_decay_init::<M>,
+            exponential_decay_init_sens_batched::<M>,
+            2,
+        )
+        .build()
+        .unwrap();
+    let mut soln = OdeSolverSolution::default();
+    for i in 0..10 {
+        let t = M::T::from_f64(i as f64).unwrap();
+        let mut y_data = Vec::new();
+        let mut ypk_data = Vec::new();
+        let mut ypy0_data = Vec::new();
+        for b in 0..nbatch {
+            let k = M::T::from_f64(p_f64[b * 2]).unwrap();
+            let y0 = M::T::from_f64(p_f64[b * 2 + 1]).unwrap();
+            let val = y0 * (-k * t).exp();
+            y_data.push(val);
+            y_data.push(val);
+            let sens_k_val = -t * y0 * (-k * t).exp();
+            ypk_data.push(sens_k_val);
+            ypk_data.push(sens_k_val);
+            let sens_y0_val = (-k * t).exp();
+            ypy0_data.push(sens_y0_val);
+            ypy0_data.push(sens_y0_val);
+        }
+        let y = M::V::from_vec(y_data, ctx.clone());
+        let ypk = M::V::from_vec(ypk_data, ctx.clone());
+        let ypy0 = M::V::from_vec(ypy0_data, ctx.clone());
+        soln.push_sens(y, t, &[ypk, ypy0]);
+    }
+    (problem, soln)
+}
+
+#[allow(clippy::type_complexity)]
+pub fn exponential_decay_problem_batched_adjoint<M: Matrix + 'static>(
+    nbatch: usize,
+    integrate_out: bool,
+) -> (
+    OdeSolverProblem<impl OdeEquationsImplicitAdjoint<M = M, V = M::V, T = M::T, C = M::C>>,
+    OdeSolverSolution<M::V>,
+) {
+    let ctx = M::C::default().clone_with_nbatch(nbatch).unwrap();
+    let mut p_f64 = Vec::new();
+    for b in 0..nbatch {
+        let k = 0.1 * (b + 1) as f64;
+        let y0 = (b + 1) as f64;
+        p_f64.push(k);
+        p_f64.push(y0);
+    }
+    let problem = OdeBuilder::<M>::new()
+        .context(ctx.clone())
+        .p(p_f64.clone())
+        .integrate_out(integrate_out)
+        .rhs_adjoint_implicit(
+            exponential_decay::<M>,
+            exponential_decay_jacobian::<M>,
+            exponential_decay_jacobian_adjoint_batched::<M>,
+            exponential_decay_sens_transpose_batched::<M>,
+        )
+        .init_adjoint(
+            exponential_decay_init::<M>,
+            exponential_decay_init_sens_adjoint_batched::<M>,
+            2,
+        )
+        .out_adjoint_implicit(
+            exponential_decay_out_batched::<M>,
+            exponential_decay_out_jac_mul_batched::<M>,
+            exponential_decay_out_adj_mul_batched::<M>,
+            exponential_decay_out_sens_adj_batched::<M>,
+            2,
+        )
+        .build()
+        .unwrap();
+    let t0 = M::T::zero();
+    let t1 = M::T::from_f64(9.0).unwrap();
+    let mut soln = OdeSolverSolution {
+        atol: problem.atol.clone(),
+        rtol: problem.rtol,
+        ..Default::default()
+    };
+    for i in 0..10 {
+        let t = M::T::from_f64(i as f64).unwrap();
+        let mut g_data = Vec::new();
+        let mut dg1_data = Vec::new();
+        let mut dg2_data = Vec::new();
+        for b in 0..nbatch {
+            let k = M::T::from_f64(p_f64[b * 2]).unwrap();
+            let y0 = M::T::from_f64(p_f64[b * 2 + 1]).unwrap();
+            let g_val = y0 * ((-k * t0).exp() - (-k * t).exp()) / k;
+            g_data.push(g_val + M::T::from_f64(2.0).unwrap() * g_val);
+            g_data
+                .push(M::T::from_f64(3.0).unwrap() * g_val + M::T::from_f64(4.0).unwrap() * g_val);
+            let dydk_val = y0
+                * (-(k * (t1 + t0))).exp()
+                * ((t0 * k).exp() * (k * t1 + M::T::one())
+                    - (t1 * k).exp() * (k * t0 + M::T::one()))
+                / (k * k);
+            let dydy0 = ((-k * t0).exp() - (-k * t1).exp()) / k;
+            let dg1dk = dydk_val + M::T::from_f64(2.0).unwrap() * dydk_val;
+            let dg2dk =
+                M::T::from_f64(3.0).unwrap() * dydk_val + M::T::from_f64(4.0).unwrap() * dydk_val;
+            let dg1dy0 = dydy0 + M::T::from_f64(2.0).unwrap() * dydy0;
+            let dg2dy0 =
+                M::T::from_f64(3.0).unwrap() * dydy0 + M::T::from_f64(4.0).unwrap() * dydy0;
+            dg1_data.push(dg1dk);
+            dg1_data.push(dg1dy0);
+            dg2_data.push(dg2dk);
+            dg2_data.push(dg2dy0);
+        }
+        let g = M::V::from_vec(g_data, ctx.clone());
+        let dg1 = M::V::from_vec(dg1_data, ctx.clone());
+        let dg2 = M::V::from_vec(dg2_data, ctx.clone());
+        soln.push_sens(g, t, &[dg1, dg2]);
+    }
+    (problem, soln)
+}
+
 fn exponential_decay_constant_reset_jac<M: Matrix>(
     _x: &M::V,
     _p: &M::V,
@@ -1003,6 +1397,66 @@ fn exponential_decay_constant_reset_jac<M: Matrix>(
 }
 
 fn exponential_decay_constant_reset_sens<M: Matrix>(
+    _x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    _v: &M::V,
+    y: &mut M::V,
+) {
+    y.fill(M::T::zero());
+}
+
+fn exponential_decay_time_root_jac_batched<M: Matrix>(
+    _x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    _v: &M::V,
+    y: &mut M::V,
+) {
+    y.fill(M::T::zero());
+}
+
+fn exponential_decay_time_root_sens_batched<M: Matrix>(
+    _x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    _v: &M::V,
+    y: &mut M::V,
+) {
+    y.fill(M::T::zero());
+}
+
+fn exponential_decay_time_root_adj_batched<M: Matrix>(
+    _x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    _v: &M::V,
+    y: &mut M::V,
+) {
+    y.fill(M::T::zero());
+}
+
+fn exponential_decay_time_root_sens_adj_batched<M: Matrix>(
+    _x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    _v: &M::V,
+    y: &mut M::V,
+) {
+    y.fill(M::T::zero());
+}
+
+fn exponential_decay_constant_reset_adj_batched<M: Matrix>(
+    _x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    _v: &M::V,
+    y: &mut M::V,
+) {
+    y.fill(M::T::zero());
+}
+
+fn exponential_decay_constant_reset_sens_adj_batched<M: Matrix>(
     _x: &M::V,
     _p: &M::V,
     _t: M::T,
@@ -1088,6 +1542,189 @@ pub fn exponential_decay_with_constant_reset_problem_sens<M: MatrixHost + 'stati
     };
     soln.push(M::V::from_element(nstates, M::T::zero(), ctx), M::T::zero());
 
+    (problem, soln)
+}
+
+#[allow(clippy::type_complexity)]
+pub fn exponential_decay_problem_batched_sens_with_reset<M: Matrix + 'static>(
+    nbatch: usize,
+) -> (
+    OdeSolverProblem<
+        impl OdeEquationsImplicitSens<
+            M = M,
+            V = M::V,
+            T = M::T,
+            C = M::C,
+            Reset: NonLinearOpJacobian<M = M, V = M::V, T = M::T, C = M::C>
+                       + NonLinearOpSens<M = M, V = M::V, T = M::T, C = M::C>
+                       + NonLinearOpTimePartial<M = M, V = M::V, T = M::T, C = M::C>,
+            Root: NonLinearOpJacobian<M = M, V = M::V, T = M::T, C = M::C>
+                      + NonLinearOpSens<M = M, V = M::V, T = M::T, C = M::C>
+                      + NonLinearOpTimePartial<M = M, V = M::V, T = M::T, C = M::C>,
+        >,
+    >,
+    OdeSolverSolution<M::V>,
+) {
+    let ctx = M::C::default().clone_with_nbatch(nbatch).unwrap();
+    let mut p_f64 = Vec::new();
+    for b in 0..nbatch {
+        let k = 0.1 * (b + 1) as f64;
+        let y0 = (b + 1) as f64;
+        p_f64.push(k);
+        p_f64.push(y0);
+    }
+    let problem = OdeBuilder::<M>::new()
+        .context(ctx.clone())
+        .p(p_f64.clone())
+        .sens_rtol(1e-6)
+        .sens_atol([1e-6])
+        .rhs_sens_implicit(
+            exponential_decay::<M>,
+            exponential_decay_jacobian::<M>,
+            exponential_decay_sens_batched::<M>,
+        )
+        .init_sens(
+            exponential_decay_init::<M>,
+            exponential_decay_init_sens_batched::<M>,
+            2,
+        )
+        .root_sens_implicit(
+            exponential_decay_time_root_batched::<M>,
+            exponential_decay_time_root_jac_batched::<M>,
+            exponential_decay_time_root_sens_batched::<M>,
+            1,
+        )
+        .reset_sens_implicit(
+            exponential_decay_reset::<M>,
+            exponential_decay_constant_reset_jac::<M>,
+            exponential_decay_constant_reset_sens::<M>,
+        )
+        .build()
+        .unwrap();
+    let t_reset = M::T::from_f64(5.0).unwrap();
+    let mut soln = OdeSolverSolution {
+        atol: problem.atol.clone(),
+        rtol: problem.rtol,
+        ..Default::default()
+    };
+    for i in 0..11 {
+        let t = M::T::from_f64(i as f64).unwrap();
+        let mut y_data = Vec::new();
+        let mut s_k_data = Vec::new();
+        let mut s_y0_data = Vec::new();
+        for b in 0..nbatch {
+            let k = M::T::from_f64(p_f64[b * 2]).unwrap();
+            let y0 = M::T::from_f64(p_f64[b * 2 + 1]).unwrap();
+            let t_val = if t > t_reset {
+                let dt = t - t_reset;
+                M::T::from_f64(0.4).unwrap() * (-k * dt).exp()
+            } else {
+                y0 * (-k * t).exp()
+            };
+            y_data.push(t_val);
+            y_data.push(t_val);
+            let s_k = if t > t_reset {
+                let dt = t - t_reset;
+                -M::T::from_f64(0.4).unwrap() * dt * (-k * dt).exp()
+            } else {
+                -y0 * t * (-k * t).exp()
+            };
+            s_k_data.push(s_k);
+            s_k_data.push(s_k);
+            let s_y0 = if t > t_reset {
+                M::T::zero()
+            } else {
+                (-k * t).exp()
+            };
+            s_y0_data.push(s_y0);
+            s_y0_data.push(s_y0);
+        }
+        let y = M::V::from_vec(y_data, ctx.clone());
+        let s_k = M::V::from_vec(s_k_data, ctx.clone());
+        let s_y0 = M::V::from_vec(s_y0_data, ctx.clone());
+        soln.push_sens(y, t, &[s_k, s_y0]);
+    }
+    (problem, soln)
+}
+
+#[allow(clippy::type_complexity)]
+pub fn exponential_decay_problem_batched_adjoint_with_reset<M: Matrix + 'static>(
+    nbatch: usize,
+) -> (
+    OdeSolverProblem<
+        impl OdeEquationsImplicitAdjoint<
+            M = M,
+            V = M::V,
+            T = M::T,
+            C = M::C,
+            Reset: NonLinearOpJacobian<M = M, V = M::V, T = M::T, C = M::C>
+                       + NonLinearOpAdjoint<M = M, V = M::V, T = M::T, C = M::C>
+                       + NonLinearOpSensAdjoint<M = M, V = M::V, T = M::T, C = M::C>
+                       + NonLinearOpTimePartial<M = M, V = M::V, T = M::T, C = M::C>,
+            Root: NonLinearOpJacobian<M = M, V = M::V, T = M::T, C = M::C>
+                      + NonLinearOpAdjoint<M = M, V = M::V, T = M::T, C = M::C>
+                      + NonLinearOpSensAdjoint<M = M, V = M::V, T = M::T, C = M::C>
+                      + NonLinearOpTimePartial<M = M, V = M::V, T = M::T, C = M::C>,
+        >,
+    >,
+    OdeSolverSolution<M::V>,
+) {
+    let ctx = M::C::default().clone_with_nbatch(nbatch).unwrap();
+    let mut p_f64 = Vec::new();
+    for b in 0..nbatch {
+        let k = 0.1 * (b + 1) as f64;
+        let y0 = (b + 1) as f64;
+        p_f64.push(k);
+        p_f64.push(y0);
+    }
+    let problem = OdeBuilder::<M>::new()
+        .context(ctx.clone())
+        .p(p_f64.clone())
+        .integrate_out(true)
+        .rhs_adjoint_implicit(
+            exponential_decay::<M>,
+            exponential_decay_jacobian::<M>,
+            exponential_decay_jacobian_adjoint_batched::<M>,
+            exponential_decay_sens_transpose_batched::<M>,
+        )
+        .init_adjoint(
+            exponential_decay_init::<M>,
+            exponential_decay_init_sens_adjoint_batched::<M>,
+            2,
+        )
+        .root_adjoint_implicit(
+            exponential_decay_time_root_batched::<M>,
+            exponential_decay_time_root_jac_batched::<M>,
+            exponential_decay_time_root_adj_batched::<M>,
+            exponential_decay_time_root_sens_adj_batched::<M>,
+            1,
+        )
+        .reset_adjoint_implicit(
+            exponential_decay_reset::<M>,
+            exponential_decay_constant_reset_jac::<M>,
+            exponential_decay_constant_reset_adj_batched::<M>,
+            exponential_decay_constant_reset_sens_adj_batched::<M>,
+        )
+        .out_adjoint_implicit(
+            exponential_decay_out_batched::<M>,
+            exponential_decay_out_jac_mul_batched::<M>,
+            exponential_decay_out_adj_mul_batched::<M>,
+            exponential_decay_out_sens_adj_batched::<M>,
+            2,
+        )
+        .build()
+        .unwrap();
+    // Single solution point at final time; dgdp computed via setup_test_adjoint
+    let mut soln = OdeSolverSolution {
+        atol: problem.atol.clone(),
+        rtol: problem.rtol,
+        ..Default::default()
+    };
+    let t_final = M::T::from_f64(10.0).unwrap();
+    soln.push(
+        M::V::from_element(2, M::T::from_f64(0.0).unwrap(), ctx.clone()),
+        t_final,
+    );
     (problem, soln)
 }
 

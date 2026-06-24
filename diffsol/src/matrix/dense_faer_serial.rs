@@ -309,20 +309,34 @@ impl<T: FaerScalar> Matrix for FaerMat<T> {
         v.add_assign(&self.column(j));
     }
 
-    fn triplet_iter(&self) -> impl Iterator<Item = (IndexType, IndexType, Self::T)> {
-        (0..self.ncols())
-            .flat_map(move |j| (0..self.nrows()).map(move |i| (i, j, self.data[(i, j)])))
+    fn triplet_iter(
+        &self,
+    ) -> (
+        impl Iterator<Item = (IndexType, IndexType)> + '_,
+        impl Iterator<Item = Self::T> + '_,
+    ) {
+        let indices: Vec<_> = (0..self.ncols())
+            .flat_map(move |j| (0..self.nrows()).map(move |i| (i, j)))
+            .collect();
+        let values: Vec<_> = indices.iter().map(|&(i, j)| self.data[(i, j)]).collect();
+        (indices.into_iter(), values.into_iter())
     }
 
     fn try_from_triplets(
         nrows: IndexType,
         ncols: IndexType,
-        triplets: Vec<(IndexType, IndexType, T)>,
+        indices: Vec<(IndexType, IndexType)>,
+        values: Vec<Self::T>,
         ctx: Self::C,
     ) -> Result<Self, DiffsolError> {
+        assert_eq!(
+            values.len(),
+            indices.len(),
+            "values.len() must equal indices.len() for non-batched backend"
+        );
         let mut m = Mat::zeros(nrows, ncols);
-        for (i, j, v) in triplets {
-            m[(i, j)] = v;
+        for ((i, j), v) in indices.iter().zip(values) {
+            m[(*i, *j)] = v;
         }
         Ok(Self {
             data: m,
@@ -412,4 +426,7 @@ mod tests {
     fn test_resize_cols() {
         super::super::tests::test_resize_cols::<FaerMat<f64>>();
     }
+
+    super::super::generate_matrix_tests_nonbatched!(faer, FaerMat<f64>);
+    super::super::generate_dense_matrix_tests_nonbatched!(faer, FaerMat<f64>);
 }

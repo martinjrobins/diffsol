@@ -280,6 +280,8 @@ where
 
 #[cfg(test)]
 mod test {
+    #[cfg(feature = "cuda")]
+    use crate::ode_equations::test_models::exponential_decay::exponential_decay_problem_batched;
     use crate::{
         matrix::dense_nalgebra_serial::NalgebraMat,
         ode_equations::test_models::{
@@ -538,6 +540,15 @@ mod test {
         test_ode_solver(&mut s, soln, None, true, false);
     }
 
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn test_tsit45_cuda_exponential_decay_batched() {
+        use crate::CudaMat;
+        let (problem, soln) = exponential_decay_problem_batched::<CudaMat<f64>>(2);
+        let mut s = problem.tsit45().unwrap();
+        test_ode_solver(&mut s, soln, None, false, false);
+    }
+
     #[test]
     fn test_root_finder_tsit45() {
         let (problem, soln) = exponential_decay_problem_with_root::<M>(false, true);
@@ -621,7 +632,7 @@ mod test {
         use crate::ode_solver::tests::test_solve_with_reset;
         let (problem, soln) = exponential_decay_with_reset_problem::<M>();
         let solver = problem.tsit45().unwrap();
-        test_solve_with_reset(solver, &soln);
+        test_solve_with_reset(solver, &soln, 100.0);
     }
 
     /// Test that `solve_dense()` applies resets and continues to the final evaluation time.

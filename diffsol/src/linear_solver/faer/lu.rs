@@ -45,7 +45,7 @@ impl<T: FaerScalar> LinearSolver<FaerMat<T>> for LU<T> {
             return Err(linear_solver_error!(LuNotInitialized))?;
         }
         let lu = self.lu.as_ref().unwrap();
-        lu.solve_in_place(x.data.as_mut());
+        lu.solve_in_place(&mut x.data);
         Ok(())
     }
 
@@ -59,5 +59,25 @@ impl<T: FaerScalar> LinearSolver<FaerMat<T>> for LU<T> {
         let nrows = op.nout();
         let matrix = C::M::new_from_sparsity(nrows, ncols, op.jacobian_sparsity(), *op.context());
         self.matrix = Some(matrix);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        linear_solver::tests::{linear_problem, test_linear_solver},
+        op::ParameterisedOp,
+        FaerMat, Op, Vector,
+    };
+
+    use super::*;
+
+    #[test]
+    fn test_lu() {
+        let (op, rtol, atol, solns) = linear_problem::<FaerMat<f64>>();
+        let p = FaerVec::zeros(0, *op.context());
+        let op = ParameterisedOp::new(&op, &p);
+        let s = LU::default();
+        test_linear_solver(s, op, rtol, &atol, solns);
     }
 }
