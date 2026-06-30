@@ -8,41 +8,39 @@ bench_dirs = glob.glob('target/criterion/*')
 sundials_reference = {}
 problems = [
     {
-        "name": "robertson", 
-        "reference_name": "roberts_dns",
+        "name": "robertson",
+        "reference_name": "dns",
         "arg": None,
         "solvers": ["nalgebra_esdirk34", "nalgebra_tr_bdf2", "nalgebra_bdf", "nalgebra_bdf_diffsl"]
     },
     {
         "name": "robertson_ode",
-        "reference_name": "robertson_ode_klu",
+        "reference_name": "klu",
         "arg": [25, 100, 400, 900],
-        #"solvers": ["faer_sparse_bdf_klu"],
         "solvers": ["faer_sparse_bdf"],
     },
     {
         "name": "heat2d",
-        "reference_name": "heat2d_klu",
+        "reference_name": "klu",
         "arg": [5, 10, 20, 30],
         "solvers": ["faer_sparse_esdirk", "faer_sparse_tr_bdf2", "faer_sparse_bdf", "faer_sparse_bdf_diffsl"]
-        #"solvers": ["faer_sparse_esdirk_klu", "faer_sparse_tr_bdf2_klu", "faer_sparse_bdf_klu", "faer_sparse_bdf_klu_diffsl"]
     },
     {
         "name": "foodweb",
-        "reference_name": "foodweb_bnd",
+        "reference_name": "bnd",
         "arg": [5, 10, 20, 30],
         "solvers": ["faer_sparse_esdirk", "faer_sparse_tr_bdf2", "faer_sparse_bdf", "faer_sparse_bdf_diffsl"]
-        #"solvers": ["faer_sparse_esdirk_klu", "faer_sparse_tr_bdf2_klu", "faer_sparse_bdf_klu", "faer_sparse_bdf_klu_diffsl"]
     },
 ]
 estimates = {}
 for problem in problems:
     estimates[problem['name']] = {}
     estimates[problem['name']]['reference'] = []
+    group = problem['name']
     if problem['arg'] is None:
-        reference_dirs = [f"target/criterion/sundials_{problem['reference_name']}"]
+        reference_dirs = [f"target/criterion/{group}/sundials_{problem['reference_name']}"]
     else:
-        reference_dirs = [f"target/criterion/sundials_{problem['reference_name']}_{arg}" for arg in problem['arg']]
+        reference_dirs = [f"target/criterion/{group}/sundials_{problem['reference_name']}_{arg}" for arg in problem['arg']]
     for reference_dir in reference_dirs:
         with open(f"{reference_dir}/new/estimates.json") as f:
             bench = json.load(f)
@@ -52,9 +50,9 @@ for problem in problems:
         estimates[problem['name']][solver]['diffsol'] = []
         estimates[problem['name']][solver]['args'] = []
         if problem['arg'] is None:
-            diffsol_dirs = [f"target/criterion/{solver}_{problem['name']}"]
+            diffsol_dirs = [f"target/criterion/{group}/{solver}"]
         else:
-            diffsol_dirs = [f"target/criterion/{solver}_{problem['name']}_{arg}" for arg in problem['arg']]
+            diffsol_dirs = [f"target/criterion/{group}/{solver}_{arg}" for arg in problem['arg']]
 
         for diffsol_dir in diffsol_dirs:
             with open(f"{diffsol_dir}/new/estimates.json") as f:
