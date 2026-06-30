@@ -27,13 +27,17 @@ import numpy as np
 def load_estimates(root, baseline_name):
     """Load criterion estimates for a given baseline."""
     estimates = {}
-    # Each benchmark is a subdirectory under root
-    pattern = os.path.join(root, "*", baseline_name, "estimates.json")
+    # Benchmarks are nested: root/<group>/<bench>/<baseline>/estimates.json
+    pattern = os.path.join(root, "*", "*", baseline_name, "estimates.json")
     for path in glob.glob(pattern):
-        bench_name = os.path.basename(os.path.dirname(os.path.dirname(path)))
+        parts = path.split(os.sep)
+        # parts: [..., root, group, bench, baseline, "estimates.json"]
+        group = parts[-4]
+        bench = parts[-3]
+        full_name = f"{group}/{bench}"
         with open(path) as f:
             data = json.load(f)
-        estimates[bench_name] = {
+        estimates[full_name] = {
             "mean": data["mean"]["point_estimate"],
             "std_dev": data["std_dev"]["point_estimate"],
         }
