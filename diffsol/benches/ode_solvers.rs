@@ -10,10 +10,8 @@ use diffsol::{
 #[cfg(feature = "diffsl-llvm")]
 use diffsol::{
     ode_equations::test_models::{
-        foodweb::foodweb_diffsl_problem,
-        heat1d::heat1d_diffsl_problem,
-        heat2d::heat2d_diffsl_problem,
-        robertson::robertson_diffsl_problem,
+        foodweb::foodweb_diffsl_problem, heat1d::heat1d_diffsl_problem,
+        heat2d::heat2d_diffsl_problem, robertson::robertson_diffsl_problem,
     },
     LlvmModule,
 };
@@ -170,25 +168,59 @@ fn criterion_benchmark(c: &mut Criterion) {
     {
         let mut g = c.benchmark_group("exponential_decay");
         bench_implicit!(
-            g, nalgebra_bdf, bdf, NalgebraLU, exponential_decay_problem, NalgebraMat<f64>
+            g,
+            nalgebra_bdf,
+            bdf,
+            NalgebraLU,
+            exponential_decay_problem,
+            NalgebraMat<f64>
         );
         bench_implicit!(
-            g, nalgebra_esdirk34, esdirk34, NalgebraLU, exponential_decay_problem, NalgebraMat<f64>
+            g,
+            nalgebra_esdirk34,
+            esdirk34,
+            NalgebraLU,
+            exponential_decay_problem,
+            NalgebraMat<f64>
         );
         bench_implicit!(
-            g, nalgebra_tr_bdf2, tr_bdf2, NalgebraLU, exponential_decay_problem, NalgebraMat<f64>
+            g,
+            nalgebra_tr_bdf2,
+            tr_bdf2,
+            NalgebraLU,
+            exponential_decay_problem,
+            NalgebraMat<f64>
         );
         bench_explicit!(
-            g, nalgebra_tsit45, tsit45, exponential_decay_problem, NalgebraMat<f64>
+            g,
+            nalgebra_tsit45,
+            tsit45,
+            exponential_decay_problem,
+            NalgebraMat<f64>
         );
         bench_implicit!(
-            g, faer_bdf, bdf, FaerLU, exponential_decay_problem, FaerMat<f64>
+            g,
+            faer_bdf,
+            bdf,
+            FaerLU,
+            exponential_decay_problem,
+            FaerMat<f64>
         );
         bench_implicit!(
-            g, faer_esdirk34, esdirk34, FaerLU, exponential_decay_problem, FaerMat<f64>
+            g,
+            faer_esdirk34,
+            esdirk34,
+            FaerLU,
+            exponential_decay_problem,
+            FaerMat<f64>
         );
         bench_implicit!(
-            g, faer_tr_bdf2, tr_bdf2, FaerLU, exponential_decay_problem, FaerMat<f64>
+            g,
+            faer_tr_bdf2,
+            tr_bdf2,
+            FaerLU,
+            exponential_decay_problem,
+            FaerMat<f64>
         );
         g.finish();
     }
@@ -198,12 +230,29 @@ fn criterion_benchmark(c: &mut Criterion) {
     // -------------------------------------------------------------------------
     {
         let mut g = c.benchmark_group("robertson");
-        bench_implicit!(g, nalgebra_bdf, bdf, NalgebraLU, robertson, NalgebraMat<f64>);
         bench_implicit!(
-            g, nalgebra_esdirk34, esdirk34, NalgebraLU, robertson, NalgebraMat<f64>
+            g,
+            nalgebra_bdf,
+            bdf,
+            NalgebraLU,
+            robertson,
+            NalgebraMat<f64>
         );
         bench_implicit!(
-            g, nalgebra_tr_bdf2, tr_bdf2, NalgebraLU, robertson, NalgebraMat<f64>
+            g,
+            nalgebra_esdirk34,
+            esdirk34,
+            NalgebraLU,
+            robertson,
+            NalgebraMat<f64>
+        );
+        bench_implicit!(
+            g,
+            nalgebra_tr_bdf2,
+            tr_bdf2,
+            NalgebraLU,
+            robertson,
+            NalgebraMat<f64>
         );
         bench_implicit!(g, faer_bdf, bdf, FaerLU, robertson, FaerMat<f64>);
         bench_implicit!(g, faer_esdirk34, esdirk34, FaerLU, robertson, FaerMat<f64>);
