@@ -11,23 +11,12 @@ permissions:
 jobs:
   benchmark_base:
     name: Benchmark Base Branch with Bencher
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: diffsol
-
-      - name: Build benchmarks
-        run: cargo bench --no-run --bench ode_solvers_ci
-
       - name: Build and push Docker image
         run: |
-          BIN=$(find target/release/deps -name 'ode_solvers_ci-*' -not -name '*.d' -type f -executable | head -1)
-          cp "$BIN" ode_solvers_ci
           docker build -t registry.bencher.dev/diffsol:latest .
           docker login registry.bencher.dev -u diffsol --password-stdin <<< "${{ secrets.BENCHER_API_KEY }}"
           docker push registry.bencher.dev/diffsol:latest
@@ -49,4 +38,4 @@ jobs:
             --threshold-upper-boundary 0.99 \
             --thresholds-reset \
             --github-actions '${{ secrets.GITHUB_TOKEN }}' \
-            /ode_solvers_ci
+            "cargo bench --bench ode_solvers_ci"
