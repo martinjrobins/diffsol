@@ -17,74 +17,7 @@ use diffsol::{
 };
 
 mod sundials_benches;
-
-macro_rules! bench_implicit {
-    ($g:ident, $name:ident, $solver:ident, $ls:ident, $problem:ident, $m:ty) => {
-        $g.bench_function(stringify!($name), |b| {
-            b.iter(|| {
-                let (problem, soln) = $problem::<$m>(false);
-                let t_evals = soln
-                    .solution_points
-                    .iter()
-                    .map(|sp| sp.t)
-                    .collect::<Vec<_>>();
-                benchmarks::$solver::<_, $ls<_>>(&problem, &t_evals);
-            })
-        });
-    };
-}
-
-macro_rules! bench_implicit_cg {
-    ($g:ident, $name:ident, $solver:ident, $ls:ident, $problem:ident, $m:ty, $($N:expr),+ $(,)?) => {
-        $(
-            $g.bench_function(concat!(stringify!($name), "_", $N), |b| {
-                b.iter(|| {
-                    let (problem, soln) = $problem::<$m, $N>();
-                    let t_evals = soln
-                        .solution_points
-                        .iter()
-                        .map(|sp| sp.t)
-                        .collect::<Vec<_>>();
-                    benchmarks::$solver::<_, $ls<_>>(&problem, &t_evals);
-                })
-            });
-        )+
-    };
-}
-
-macro_rules! bench_implicit_rt {
-    ($g:ident, $name:ident, $solver:ident, $ls:ident, $problem:ident, $m:ty, $($N:expr),+ $(,)?) => {
-        $(
-            $g.bench_function(concat!(stringify!($name), "_", $N), |b| {
-                b.iter(|| {
-                    let (problem, soln) = $problem::<$m>(false, $N);
-                    let t_evals = soln
-                        .solution_points
-                        .iter()
-                        .map(|sp| sp.t)
-                        .collect::<Vec<_>>();
-                    benchmarks::$solver::<_, $ls<_>>(&problem, &t_evals);
-                })
-            });
-        )+
-    };
-}
-
-macro_rules! bench_explicit {
-    ($g:ident, $name:ident, $solver:ident, $problem:ident, $m:ty) => {
-        $g.bench_function(stringify!($name), |b| {
-            b.iter(|| {
-                let (problem, soln) = $problem::<$m>(false);
-                let t_evals = soln
-                    .solution_points
-                    .iter()
-                    .map(|sp| sp.t)
-                    .collect::<Vec<_>>();
-                benchmarks::$solver::<_>(&problem, &t_evals);
-            })
-        });
-    };
-}
+use common::{bench_explicit, bench_implicit, bench_implicit_cg, bench_implicit_rt};
 
 macro_rules! bench_diffsl {
     ($g:ident, $name:ident, $solver:ident, $ls:ident, $problem:ident, $m:ty) => {
@@ -97,7 +30,7 @@ macro_rules! bench_diffsl {
                     .iter()
                     .map(|sp| sp.t)
                     .collect::<Vec<_>>();
-                benchmarks::$solver::<_, $ls<_>>(&problem, &t_evals);
+                common::$solver::<_, $ls<_>>(&problem, &t_evals);
             })
         });
     };
@@ -115,7 +48,7 @@ macro_rules! bench_diffsl_cg {
                         .iter()
                         .map(|sp| sp.t)
                         .collect::<Vec<_>>();
-                    benchmarks::$solver::<_, $ls<_>>(&problem, &t_evals);
+                    common::$solver::<_, $ls<_>>(&problem, &t_evals);
                 })
             });
         )+
@@ -134,7 +67,7 @@ macro_rules! bench_diffsl_explicit_cg {
                         .iter()
                         .map(|sp| sp.t)
                         .collect::<Vec<_>>();
-                    benchmarks::$solver::<_>(&problem, &t_evals);
+                    common::$solver::<_>(&problem, &t_evals);
                 })
             });
         )+
@@ -474,63 +407,4 @@ fn criterion_benchmark(c: &mut Criterion) {
 criterion_group!(benches, criterion_benchmark);
 criterion_main!(benches);
 
-mod benchmarks {
-    use diffsol::matrix::MatrixRef;
-    use diffsol::vector::VectorRef;
-    use diffsol::LinearSolver;
-    use diffsol::{
-        DefaultDenseMatrix, DefaultSolver, Matrix, OdeEquationsImplicit, OdeSolverMethod,
-        OdeSolverProblem,
-    };
-
-    pub fn bdf<Eqn, LS>(problem: &OdeSolverProblem<Eqn>, t_evals: &[Eqn::T])
-    where
-        Eqn: OdeEquationsImplicit,
-        Eqn::M: Matrix + DefaultSolver,
-        Eqn::V: DefaultDenseMatrix,
-        LS: LinearSolver<Eqn::M>,
-        for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
-        for<'a> &'a Eqn::M: MatrixRef<Eqn::M>,
-    {
-        let mut s = problem.bdf::<LS>().unwrap();
-        let _y = s.solve_dense(t_evals);
-    }
-
-    pub fn esdirk34<Eqn, LS>(problem: &OdeSolverProblem<Eqn>, t_evals: &[Eqn::T])
-    where
-        Eqn: OdeEquationsImplicit,
-        Eqn::M: Matrix + DefaultSolver,
-        Eqn::V: DefaultDenseMatrix,
-        LS: LinearSolver<Eqn::M>,
-        for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
-        for<'a> &'a Eqn::M: MatrixRef<Eqn::M>,
-    {
-        let mut s = problem.esdirk34::<LS>().unwrap();
-        let _y = s.solve_dense(t_evals);
-    }
-
-    pub fn tr_bdf2<Eqn, LS>(problem: &OdeSolverProblem<Eqn>, t_evals: &[Eqn::T])
-    where
-        Eqn: OdeEquationsImplicit,
-        Eqn::M: Matrix + DefaultSolver,
-        Eqn::V: DefaultDenseMatrix,
-        LS: LinearSolver<Eqn::M>,
-        for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
-        for<'a> &'a Eqn::M: MatrixRef<Eqn::M>,
-    {
-        let mut s = problem.tr_bdf2::<LS>().unwrap();
-        let _y = s.solve_dense(t_evals);
-    }
-
-    pub fn tsit45<Eqn>(problem: &OdeSolverProblem<Eqn>, t_evals: &[Eqn::T])
-    where
-        Eqn: OdeEquationsImplicit,
-        Eqn::M: Matrix + DefaultSolver,
-        Eqn::V: DefaultDenseMatrix,
-        for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
-        for<'a> &'a Eqn::M: MatrixRef<Eqn::M>,
-    {
-        let mut s = problem.tsit45().unwrap();
-        let _y = s.solve_dense(t_evals);
-    }
-}
+mod common;

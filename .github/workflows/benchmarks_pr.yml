@@ -1,0 +1,52 @@
+name: Continuous Benchmarking (PR)
+
+on:
+  pull_request:
+    types: [opened, reopened, edited, synchronize]
+
+jobs:
+  benchmark_pr:
+    name: Benchmark PR with Bencher
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      checks: write
+      pull-requests: write
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: diffsol
+
+      - name: Build benchmarks
+        run: cargo bench --no-run --bench ode_solvers_ci
+
+      - name: Build and push Docker image
+        run: |
+          BIN=$(find target/release/deps -name 'ode_solvers_ci-*' -not -name '*.d' -type f -executable | head -1)
+          cp "$BIN" ode_solvers_ci
+          docker build -t registry.bencher.dev/diffsol:latest .
+          echo "${{ secrets.BENCHER_API_KEY }}" | docker login registry.bencher.dev -u _ --password-stdin
+          docker push registry.bencher.dev/diffsol:latest
+
+      - uses: bencherdev/bencher@main
+
+      - name: Track PR benchmarks
+        run: |
+          bencher run \
+            --project diffsol \
+            --key '${{ secrets.BENCHER_API_KEY }}' \
+            --image diffsol:latest \
+            --branch "$GITHUB_HEAD_REF" \
+            --start-point "$GITHUB_BASE_REF" \
+            --start-point-hash '${{ github.event.pull_request.base.sha }}' \
+            --start-point-clone-thresholds \
+            --start-point-reset \
+            --testbed ubuntu-latest \
+            --error-on-alert \
+            --adapter rust_criterion \
+            --github-actions '${{ secrets.GITHUB_TOKEN }}' \
+            /ode_solvers_ci
