@@ -87,5 +87,9 @@ harness = false
 name = "pybamm_dfn"
 harness = false
 
+[[bench]]
+name = "ode_solvers_ci"
+harness = false
+
 [package.metadata.docs.rs]
 features = ["diffsl-llvm15", "diffsl-cranelift", "diffsl-external-dynamic"]
