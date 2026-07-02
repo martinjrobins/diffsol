@@ -1340,10 +1340,14 @@ pub fn exponential_decay_problem_batched_adjoint<M: Matrix + 'static>(
         p_f64.push(k);
         p_f64.push(y0);
     }
-    let problem = OdeBuilder::<M>::new()
+    let builder = OdeBuilder::<M>::new()
         .context(ctx.clone())
         .p(p_f64.clone())
         .integrate_out(integrate_out)
+        .sens_rtol(1e-6)
+        .sens_atol([1e-6, 1e-6])
+        .param_rtol(1e-6)
+        .param_atol([1e-6, 1e-6])
         .rhs_adjoint_implicit(
             exponential_decay::<M>,
             exponential_decay_jacobian::<M>,
@@ -1361,9 +1365,8 @@ pub fn exponential_decay_problem_batched_adjoint<M: Matrix + 'static>(
             exponential_decay_out_adj_mul_batched::<M>,
             exponential_decay_out_sens_adj_batched::<M>,
             2,
-        )
-        .build()
-        .unwrap();
+        );
+    let problem = builder.build().unwrap();
     let t0 = M::T::zero();
     let t1 = M::T::from_f64(9.0).unwrap();
     let mut soln = OdeSolverSolution {
@@ -1703,6 +1706,10 @@ pub fn exponential_decay_problem_batched_adjoint_with_reset<M: Matrix + 'static>
         .context(ctx.clone())
         .p(p_f64.clone())
         .integrate_out(true)
+        .sens_rtol(1e-6)
+        .sens_atol([1e-6, 1e-6])
+        .param_rtol(1e-6)
+        .param_atol([1e-6, 1e-6])
         .rhs_adjoint_implicit(
             exponential_decay::<M>,
             exponential_decay_jacobian::<M>,
