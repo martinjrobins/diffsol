@@ -21,6 +21,10 @@ pub fn logistic_problem_adjoint_no_out<M: MatrixHost + 'static>() -> (
     let y0 = 0.1;
     let problem = OdeBuilder::<M>::new()
         .p([r, k, y0])
+        .sens_rtol(1e-6)
+        .sens_atol([1e-6])
+        .param_rtol(1e-6)
+        .param_atol([1e-6, 1e-6, 1e-6])
         .rhs_adjoint_implicit(
             |x: &M::V, p: &M::V, _t: M::T, y: &mut M::V| {
                 let r = p.get_index(0);

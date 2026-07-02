@@ -15,6 +15,8 @@ pub fn robertson_ode_with_sens<M: MatrixHost + 'static>(
         .p([0.04, 1.0e4, 3.0e7])
         .rtol(1e-4)
         .atol([1.0e-8, 1.0e-6, 1.0e-6])
+        .sens_rtol(1e-6)
+        .sens_atol([1e-6, 1e-6, 1e-6])
         .use_coloring(use_coloring)
         .rhs_sens_implicit(
             //     dy1/dt = -.04*y1 + 1.e4*y2*y3

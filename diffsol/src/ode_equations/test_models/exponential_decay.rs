@@ -376,16 +376,19 @@ pub fn exponential_decay_problem_with_root<M: MatrixHost + 'static>(
     let out_jac_fn = |_x: &M::V, _p: &M::V, _t: M::T, v: &M::V, y: &mut M::V| {
         y.copy_from(v);
     };
-    let problem = OdeBuilder::<M>::new()
+    let mut builder = OdeBuilder::<M>::new()
         .p([k, y0])
         .use_coloring(use_coloring)
         .rhs_implicit(exponential_decay::<M>, exponential_decay_jacobian::<M>)
         .init(exponential_decay_init::<M>, 2)
         .root(exponential_decay_root::<M>, 1)
         .out_implicit(out_fn, out_jac_fn, 2)
-        .integrate_out(integrate_out)
-        .build()
-        .unwrap();
+        .integrate_out(integrate_out);
+    if integrate_out {
+        let val = M::T::from_f64(1e-6).unwrap();
+        builder = builder.out_rtol(1e-6).out_atol([val, val]);
+    }
+    let problem = builder.build().unwrap();
     let p = [M::T::from_f64(k).unwrap(), M::T::from_f64(y0).unwrap()];
     let mut soln = OdeSolverSolution {
         atol: problem.atol.clone(),
@@ -410,7 +413,7 @@ pub fn exponential_decay_problem_adjoint<M: MatrixHost>(
 ) {
     let k = 0.1;
     let y0 = 1.0;
-    let problem = OdeBuilder::<M>::new()
+    let mut builder = OdeBuilder::<M>::new()
         .p([k, y0])
         .integrate_out(integrate_out)
         .rhs_adjoint_implicit(
@@ -430,9 +433,14 @@ pub fn exponential_decay_problem_adjoint<M: MatrixHost>(
             exponential_decay_out_adj_mul::<M>,
             exponential_decay_out_sens_adj::<M>,
             2,
-        )
-        .build()
-        .unwrap();
+        );
+    builder = builder.sens_rtol(1e-6).sens_atol([1e-6, 1e-6]);
+    builder = builder.param_rtol(1e-6).param_atol([1e-6, 1e-6]);
+    if integrate_out {
+        let val = M::T::from_f64(1e-6).unwrap();
+        builder = builder.out_rtol(1e-6).out_atol([val, val]);
+    }
+    let problem = builder.build().unwrap();
     let ctx = problem.eqn.context();
     let mut soln = OdeSolverSolution {
         atol: problem.atol.clone(),
@@ -618,7 +626,7 @@ pub fn exponential_decay_with_single_reset_root_problem_adjoint<M: MatrixHost + 
 ) {
     let k = 0.1;
     let r = 0.25;
-    let problem = OdeBuilder::<M>::new()
+    let mut builder = OdeBuilder::<M>::new()
         .p([k, r])
         .integrate_out(integrate_out)
         .rhs_adjoint_implicit(
@@ -651,9 +659,14 @@ pub fn exponential_decay_with_single_reset_root_problem_adjoint<M: MatrixHost + 
             exponential_decay_reset_y_plus_2r_jac::<M>,
             exponential_decay_reset_y_plus_2r_adj::<M>,
             exponential_decay_reset_y_plus_2r_sens_adj::<M>,
-        )
-        .build()
-        .unwrap();
+        );
+    builder = builder.sens_rtol(1e-6).sens_atol([1e-6, 1e-6]);
+    builder = builder.param_rtol(1e-6).param_atol([1e-6, 1e-6]);
+    if integrate_out {
+        let val = M::T::from_f64(1e-6).unwrap();
+        builder = builder.out_rtol(1e-6).out_atol([val]);
+    }
+    let problem = builder.build().unwrap();
 
     let ctx = problem.eqn.context();
     let t_root = M::T::from_f64(f64::ln(2.0) / k).unwrap();

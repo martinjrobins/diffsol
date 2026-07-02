@@ -354,33 +354,42 @@ pub fn exponential_decay_with_algebraic_adjoint_problem<M: MatrixHost + 'static>
 ) {
     let a = 0.1;
     let nout = 1;
-    let problem = OdeBuilder::<M>::new()
-        .p([a])
-        .integrate_out(integrate_out)
-        .rhs_adjoint_implicit(
-            exponential_decay_with_algebraic::<M>,
-            exponential_decay_with_algebraic_jacobian::<M>,
-            exponential_decay_with_algebraic_adjoint::<M>,
-            exponential_decay_with_algebraic_sens_adjoint::<M>,
-        )
-        .init_adjoint(
-            exponential_decay_with_algebraic_init::<M>,
-            exponential_decay_with_algebraic_init_sens_adjoint::<M>,
-            3,
-        )
-        .mass_adjoint(
-            exponential_decay_with_algebraic_mass::<M>,
-            exponential_decay_with_algebraic_mass_transpose::<M>,
-        )
-        .out_adjoint_implicit(
-            exponential_decay_with_algebraic_out::<M>,
-            exponential_decay_with_algebraic_out_jac_mul::<M>,
-            exponential_decay_with_algebraic_out_jac_adj_mul::<M>,
-            exponential_decay_with_algebraic_out_sens_adj::<M>,
-            nout,
-        )
-        .build()
-        .unwrap();
+    let problem = {
+        let mut builder = OdeBuilder::<M>::new()
+            .p([a])
+            .integrate_out(integrate_out)
+            .sens_rtol(1e-6)
+            .sens_atol([1e-6, 1e-6, 1e-6])
+            .param_rtol(1e-6)
+            .param_atol([1e-6])
+            .rhs_adjoint_implicit(
+                exponential_decay_with_algebraic::<M>,
+                exponential_decay_with_algebraic_jacobian::<M>,
+                exponential_decay_with_algebraic_adjoint::<M>,
+                exponential_decay_with_algebraic_sens_adjoint::<M>,
+            )
+            .init_adjoint(
+                exponential_decay_with_algebraic_init::<M>,
+                exponential_decay_with_algebraic_init_sens_adjoint::<M>,
+                3,
+            )
+            .mass_adjoint(
+                exponential_decay_with_algebraic_mass::<M>,
+                exponential_decay_with_algebraic_mass_transpose::<M>,
+            )
+            .out_adjoint_implicit(
+                exponential_decay_with_algebraic_out::<M>,
+                exponential_decay_with_algebraic_out_jac_mul::<M>,
+                exponential_decay_with_algebraic_out_jac_adj_mul::<M>,
+                exponential_decay_with_algebraic_out_sens_adj::<M>,
+                nout,
+            );
+        if integrate_out {
+            let val = M::T::from_f64(1e-6).unwrap();
+            builder = builder.out_rtol(1e-6).out_atol([val]);
+        }
+        builder.build().unwrap()
+    };
 
     let ctx = problem.eqn.context();
     let a = M::T::from_f64(a).unwrap();
@@ -413,6 +422,8 @@ pub fn exponential_decay_with_algebraic_problem_sens<M: MatrixHost + 'static>() 
     let k = 0.1;
     let problem = OdeBuilder::<M>::new()
         .p([k])
+        .sens_rtol(1e-6)
+        .sens_atol([1e-6, 1e-6, 1e-6])
         .rhs_sens_implicit(
             exponential_decay_with_algebraic::<M>,
             exponential_decay_with_algebraic_jacobian::<M>,
