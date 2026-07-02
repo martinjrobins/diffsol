@@ -2094,14 +2094,14 @@ mod jit_tests {
                 );
                 assert_eq!(integrate_out, 0);
 
-                assert_eq!(diffsol_ode_set_sens_rtol(ode, 1, 1e-3), DIFFSOL_OK);
-                assert_eq!(diffsol_ode_set_sens_atol(ode, 1, 1e-4), DIFFSOL_OK);
+                assert_eq!(diffsol_ode_set_sens_rtol(ode, 1, 1e-6), DIFFSOL_OK);
+                assert_eq!(diffsol_ode_set_sens_atol(ode, 1, 1e-6), DIFFSOL_OK);
                 assert_eq!(diffsol_ode_set_out_rtol(ode, 1, 2e-3), DIFFSOL_OK);
                 assert_eq!(diffsol_ode_set_out_atol(ode, 1, 2e-4), DIFFSOL_OK);
                 assert_eq!(diffsol_ode_set_param_rtol(ode, 1, 3e-3), DIFFSOL_OK);
                 assert_eq!(diffsol_ode_set_param_atol(ode, 1, 3e-4), DIFFSOL_OK);
-                assert_optional_f64(diffsol_ode_get_sens_rtol, ode, Some(1e-3), "jit sens rtol");
-                assert_optional_f64(diffsol_ode_get_sens_atol, ode, Some(1e-4), "jit sens atol");
+                assert_optional_f64(diffsol_ode_get_sens_rtol, ode, Some(1e-6), "jit sens rtol");
+                assert_optional_f64(diffsol_ode_get_sens_atol, ode, Some(1e-6), "jit sens atol");
                 assert_optional_f64(diffsol_ode_get_out_rtol, ode, Some(2e-3), "jit out rtol");
                 assert_optional_f64(diffsol_ode_get_out_atol, ode, Some(2e-4), "jit out atol");
                 assert_optional_f64(
@@ -2243,6 +2243,9 @@ mod jit_tests {
                         ode_solver_to_i32(OdeSolverType::Bdf),
                     );
                     assert!(!analysis_ode.is_null());
+
+                    assert_eq!(diffsol_ode_set_sens_rtol(analysis_ode, 1, 1e-6), DIFFSOL_OK);
+                    assert_eq!(diffsol_ode_set_sens_atol(analysis_ode, 1, 1e-6), DIFFSOL_OK);
 
                     let mut sens_solution_ptr: *mut SolutionWrapper = ptr::null_mut();
                     assert_eq!(

@@ -466,7 +466,13 @@ pub fn exponential_decay_with_algebraic_problem_diffsl<
     let out = if prep_adjoint { "k * z" } else { "u_i" };
     let problem = OdeBuilder::<M>::new()
         .p([k])
+        .sens_rtol(1e-6)
+        .sens_atol([1e-6, 1e-6, 1e-6])
+        .param_rtol(1e-6)
+        .param_atol([1e-6])
         .integrate_out(prep_adjoint)
+        .out_rtol(1e-6)
+        .out_atol([1e-6])
         .build_from_diffsl(
             format!(
                 "

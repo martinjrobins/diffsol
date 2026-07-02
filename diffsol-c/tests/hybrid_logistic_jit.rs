@@ -132,6 +132,8 @@ fn assert_hybrid_forward_sensitivities_match_piecewise_logistic_diffsl_model(
     let ode = make_hybrid_ode(JitBackendType::Llvm, MatrixType::NalgebraDense, ode_solver);
     ode.set_rtol(1e-8).unwrap();
     ode.set_atol(1e-8).unwrap();
+    ode.set_sens_rtol(Some(1e-6)).unwrap();
+    ode.set_sens_atol(Some(1e-6)).unwrap();
 
     let solution = ode
         .solve_fwd_sens(vector_host(&[r]), vector_host(&t_eval))

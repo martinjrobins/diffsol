@@ -761,6 +761,8 @@ mod tests {
             .p([2.0])
             .rtol(1e-6)
             .atol([1e-6])
+            .sens_rtol(1e-6)
+            .sens_atol([1e-6])
             .build_from_diffsl::<CG>(code)
             .unwrap()
     }
