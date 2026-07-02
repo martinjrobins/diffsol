@@ -8,11 +8,13 @@ COPY Cargo.toml ./
 COPY diffsol/Cargo.toml diffsol/
 COPY diffsol-c/Cargo.toml diffsol-c/
 
-RUN mkdir -p diffsol/src diffsol-c/src diffsol/benches examples && \
+RUN mkdir -p diffsol/src diffsol-c/src diffsol/benches && \
     touch diffsol/src/lib.rs && \
     touch diffsol-c/src/lib.rs && \
     echo "fn main() {}" > diffsol/benches/ode_solvers_ci.rs && \
-    touch diffsol/benches/common.rs
+    touch diffsol/benches/common.rs && \
+    mkdir -p examples/dummy && \
+    printf '[package]\nname = "dummy"\nversion = "0.1.0"\nedition = "2021"\n' > examples/dummy/Cargo.toml
 
 RUN cargo fetch
 RUN cargo build --bench ode_solvers_ci || true
