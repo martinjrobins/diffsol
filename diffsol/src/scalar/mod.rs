@@ -58,6 +58,8 @@ pub trait Scalar:
     fn sin(self) -> Self;
     /// Cosine.
     fn cos(self) -> Self;
+    /// Maximum of two values.
+    fn max(self, other: Self) -> Self;
 }
 
 /// A [`Scalar`] that also satisfies nalgebra's numeric field requirements.
@@ -101,6 +103,9 @@ impl Scalar for f64 {
     fn cos(self) -> Self {
         self.cos()
     }
+    fn max(self, other: Self) -> Self {
+        self.max(other)
+    }
 }
 
 impl Scalar for f32 {
@@ -121,6 +126,9 @@ impl Scalar for f32 {
     }
     fn cos(self) -> Self {
         self.cos()
+    }
+    fn max(self, other: Self) -> Self {
+        self.max(other)
     }
 }
 
