@@ -1,4 +1,4 @@
-FROM rust:1.85-bookworm
+FROM rust:1.89-bookworm
 
 WORKDIR /usr/src/diffsol
 
