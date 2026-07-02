@@ -12,7 +12,11 @@ RUN mkdir -p diffsol/src diffsol-c/src diffsol/benches && \
     touch diffsol/src/lib.rs && \
     touch diffsol-c/src/lib.rs && \
     echo "fn main() {}" > diffsol/benches/ode_solvers_ci.rs && \
+    echo "fn main() {}" > diffsol/benches/ode_solvers.rs && \
+    echo "fn main() {}" > diffsol/benches/lin_alg_ops.rs && \
+    echo "#[cfg(feature = \"diffsl-llvm\")] fn main() {}" > diffsol/benches/pybamm_dfn.rs && \
     touch diffsol/benches/common.rs && \
+    touch diffsol/benches/sundials_benches.rs && \
     mkdir -p examples/dummy && \
     printf '[package]\nname = "dummy"\nversion = "0.1.0"\nedition = "2021"\n' > examples/dummy/Cargo.toml && \
     mkdir -p examples/dummy/src && \
