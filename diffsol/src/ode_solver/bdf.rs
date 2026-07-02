@@ -1,6 +1,7 @@
 use log::{debug, info, trace};
 use std::cell::Ref;
 use std::ops::AddAssign;
+use std::{thread, time::Duration};
 
 use crate::{
     error::{DiffsolError, OdeSolverError},
@@ -1286,6 +1287,9 @@ where
             "Taking BDF step at time {} with step size {} and order {}",
             self.state.t, self.state.h, self.state.order
         );
+        // DELIBERATE PERFORMANCE REGRESSION: sleep to simulate a slowdown
+        // for testing continuous benchmarking with bencher
+        thread::sleep(Duration::from_micros(500));
         let mut safety: Eqn::T;
         let mut error_norm: Eqn::T;
         let problem = self.ode_problem;
