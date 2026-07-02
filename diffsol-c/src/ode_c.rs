@@ -1750,6 +1750,9 @@ mod tests {
             );
             assert!(!analysis_ode.is_null());
 
+            assert_eq!(diffsol_ode_set_sens_rtol(analysis_ode, 1, 1e-6), DIFFSOL_OK);
+            assert_eq!(diffsol_ode_set_sens_atol(analysis_ode, 1, 1e-6), DIFFSOL_OK);
+
             let mut sens_solution_ptr: *mut SolutionWrapper = ptr::null_mut();
             assert_eq!(
                 diffsol_ode_solve_fwd_sens(

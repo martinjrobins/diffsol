@@ -839,6 +839,8 @@ mod tests {
         let ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
         ode.set_rtol(1e-8).unwrap();
         ode.set_atol(1e-8).unwrap();
+        ode.set_sens_rtol(Some(1e-6)).unwrap();
+        ode.set_sens_atol(Some(1e-6)).unwrap();
 
         let t_eval = [0.25, 0.5, 1.0];
         let solution = ode
