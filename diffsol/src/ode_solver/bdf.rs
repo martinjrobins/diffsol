@@ -1,7 +1,6 @@
 use log::{debug, info, trace};
 use std::cell::Ref;
 use std::ops::AddAssign;
-use std::time::Duration;
 
 use crate::{
     error::{DiffsolError, OdeSolverError},
