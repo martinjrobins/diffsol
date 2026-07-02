@@ -4,6 +4,8 @@ on:
   pull_request_target:
     types: [closed]
 
+permissions: {}
+
 jobs:
   archive_pr:
     name: Archive PR Branch with Bencher

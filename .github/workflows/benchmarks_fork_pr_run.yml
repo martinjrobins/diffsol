@@ -4,6 +4,8 @@ on:
   pull_request:
     types: [opened, reopened, edited, synchronize]
 
+permissions: {}
+
 jobs:
   benchmark_fork_pr:
     name: Run Fork PR Benchmarks
