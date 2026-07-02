@@ -14,8 +14,8 @@ use common::{bench_explicit, bench_implicit, bench_implicit_cg, bench_implicit_r
 
 fn criterion_benchmark(c: &mut Criterion) {
     *c = std::mem::take(c)
-        .measurement_time(Duration::from_secs(2))
-        .sample_size(10)
+        .measurement_time(Duration::from_secs(1))
+        .sample_size(5)
         .warm_up_time(Duration::from_secs(1));
 
     // -------------------------------------------------------------------------

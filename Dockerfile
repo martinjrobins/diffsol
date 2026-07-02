@@ -23,12 +23,12 @@ RUN mkdir -p diffsol/src diffsol-c/src diffsol/benches && \
     echo "fn main() {}" > examples/dummy/src/main.rs
 
 RUN cargo fetch
-RUN cargo build --bench ode_solvers_ci || true
+RUN cargo bench --no-run --bench ode_solvers_ci || true
 
 # Layer 2: Copy real source and build bench binary
 # This layer rebuilds on every commit, but only changed source is recompiled
 # since deps are cached from Layer 1.
 COPY . .
-RUN cargo build --bench ode_solvers_ci
+RUN cargo bench --no-run --bench ode_solvers_ci
 
 CMD ["cargo", "bench", "--bench", "ode_solvers_ci"]
