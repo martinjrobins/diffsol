@@ -1,0 +1,21 @@
+name: Continuous Benchmarking (PR Closed)
+
+on:
+  pull_request_target:
+    types: [closed]
+
+permissions: {}
+
+jobs:
+  archive_pr:
+    name: Archive PR Branch with Bencher
+    runs-on: ubuntu-latest
+    steps:
+      - uses: bencherdev/bencher@main
+
+      - name: Archive closed PR branch
+        run: |
+          bencher archive \
+            --project diffsol \
+            --key '${{ secrets.BENCHER_API_KEY }}' \
+            --branch "$GITHUB_HEAD_REF"
