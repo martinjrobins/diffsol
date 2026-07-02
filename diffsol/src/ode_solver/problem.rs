@@ -667,8 +667,8 @@ where
             .as_mut()
             .set_consistent_augmented(self, augmented_eqn, &mut newton_solver)?;
         let h = state.h;
-        let atol = augmented_eqn.atol().unwrap();
-        let rtol = augmented_eqn.rtol().unwrap();
+        let atol = augmented_eqn.atol().unwrap_or(&self.atol);
+        let rtol = augmented_eqn.rtol().unwrap_or(self.rtol);
         state
             .as_mut()
             .set_step_size(h, atol, rtol, augmented_eqn, 1);
@@ -966,8 +966,8 @@ where
             .as_mut()
             .set_consistent_augmented(self, augmented_eqn, &mut newton_solver)?;
         let h = state.h;
-        let atol = augmented_eqn.atol().unwrap();
-        let rtol = augmented_eqn.rtol().unwrap();
+        let atol = augmented_eqn.atol().unwrap_or(&self.atol);
+        let rtol = augmented_eqn.rtol().unwrap_or(self.rtol);
         state
             .as_mut()
             .set_step_size(h, atol, rtol, augmented_eqn, tableau.order());
@@ -1128,8 +1128,8 @@ where
         }
 
         let h = state.h;
-        let atol = augmented_eqn.atol().unwrap();
-        let rtol = augmented_eqn.rtol().unwrap();
+        let atol = augmented_eqn.atol().unwrap_or(&self.atol);
+        let rtol = augmented_eqn.rtol().unwrap_or(self.rtol);
         state
             .as_mut()
             .set_step_size(h, atol, rtol, augmented_eqn, tableau.order());

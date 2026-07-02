@@ -803,7 +803,7 @@ mod test {
 
     #[test]
     fn sdirk_test_esdirk34_exponential_decay_adjoint() {
-        let (mut problem, soln) = exponential_decay_problem_adjoint::<M>(true);
+        let (mut problem, soln) = exponential_decay_problem_adjoint::<M>(true, true);
         let final_time = soln.solution_points.last().unwrap().t;
         let dgdu = setup_test_adjoint::<LS, _>(&mut problem, soln);
         let mut s = problem.esdirk34::<LS>().unwrap();
@@ -812,7 +812,7 @@ mod test {
         let adjoint_solver = problem
             .esdirk34_solver_adjoint::<LS, _>(checkpointer, Some(s), None)
             .unwrap();
-        test_adjoint(adjoint_solver, dgdu);
+        test_adjoint(adjoint_solver, dgdu, 40.0);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 418
         number_of_jac_muls: 10
@@ -854,7 +854,7 @@ mod test {
         let adjoint_solver = problem
             .esdirk34_solver_adjoint::<LS, _>(checkpointer, Some(s), None)
             .unwrap();
-        test_adjoint(adjoint_solver, dgdu);
+        test_adjoint(adjoint_solver, dgdu, 40.0);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 379
         number_of_jac_muls: 30

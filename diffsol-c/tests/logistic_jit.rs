@@ -29,7 +29,7 @@ fn make_ode(
     matrix_type: MatrixType,
     ode_solver: OdeSolverType,
 ) -> OdeWrapper {
-    OdeWrapper::new_jit(
+    let ode = OdeWrapper::new_jit(
         logistic_diffsl_code(),
         jit_backend,
         scalar_type,
@@ -37,7 +37,14 @@ fn make_ode(
         LinearSolverType::Default,
         ode_solver,
     )
-    .unwrap()
+    .unwrap();
+    ode.set_sens_rtol(Some(1e-6)).unwrap();
+    ode.set_sens_atol(Some(1e-6)).unwrap();
+    ode.set_param_rtol(Some(1e-6)).unwrap();
+    ode.set_param_atol(Some(1e-6)).unwrap();
+    ode.set_out_rtol(Some(1e-6)).unwrap();
+    ode.set_out_atol(Some(1e-6)).unwrap();
+    ode
 }
 
 fn serialized_linear_solver(matrix_type: MatrixType) -> LinearSolverType {
@@ -343,6 +350,8 @@ fn bdf_dense_solution_matches_logistic_diffsl_model() {
         );
         ode.set_rtol(1e-8).unwrap();
         ode.set_atol(1e-8).unwrap();
+        ode.set_sens_rtol(Some(1e-6)).unwrap();
+        ode.set_sens_atol(Some(1e-6)).unwrap();
 
         let t_eval = [0.25, 0.5, 1.0];
         let solution = ode
@@ -366,6 +375,10 @@ fn bdf_solution_matches_logistic_diffsl_model() {
         );
         ode.set_rtol(1e-8).unwrap();
         ode.set_atol(1e-8).unwrap();
+        ode.set_sens_rtol(Some(1e-6)).unwrap();
+        ode.set_sens_atol(Some(1e-6)).unwrap();
+        ode.set_param_rtol(Some(1e-6)).unwrap();
+        ode.set_param_atol(Some(1e-6)).unwrap();
 
         let final_time = 1.0;
         let solution = ode.solve(vector_host(&[r]), final_time).unwrap();
@@ -643,6 +656,12 @@ fn bdf_split_adjoint_matches_finite_difference_gradient_for_logistic_model() {
     .unwrap();
     ode.set_rtol(1e-8).unwrap();
     ode.set_atol(1e-8).unwrap();
+    ode.set_sens_rtol(Some(1e-6)).unwrap();
+    ode.set_sens_atol(Some(1e-6)).unwrap();
+    ode.set_param_rtol(Some(1e-6)).unwrap();
+    ode.set_param_atol(Some(1e-6)).unwrap();
+    ode.set_out_rtol(Some(1e-6)).unwrap();
+    ode.set_out_atol(Some(1e-6)).unwrap();
 
     let t_eval = [0.0, 0.1, 0.3, 0.7, 1.0];
     let data_params = [1.2, 0.9, 0.2];
@@ -693,6 +712,12 @@ fn bdf_split_adjoint_matches_finite_difference_gradient_for_logistic_model() {
     .unwrap();
     ode_adj.set_rtol(1e-8).unwrap();
     ode_adj.set_atol(1e-8).unwrap();
+    ode_adj.set_sens_rtol(Some(1e-6)).unwrap();
+    ode_adj.set_sens_atol(Some(1e-6)).unwrap();
+    ode_adj.set_param_rtol(Some(1e-6)).unwrap();
+    ode_adj.set_param_atol(Some(1e-6)).unwrap();
+    ode_adj.set_out_rtol(Some(1e-6)).unwrap();
+    ode_adj.set_out_atol(Some(1e-6)).unwrap();
 
     let (solution, checkpoint) = ode_adj
         .solve_adjoint_fwd(vector_host(&fit_params), vector_host(&t_eval))
@@ -745,6 +770,12 @@ fn bdf_continuous_adjoint_matches_finite_difference_gradient_for_logistic_integr
     .unwrap();
     ode.set_rtol(1e-8).unwrap();
     ode.set_atol(1e-8).unwrap();
+    ode.set_sens_rtol(Some(1e-6)).unwrap();
+    ode.set_sens_atol(Some(1e-6)).unwrap();
+    ode.set_param_rtol(Some(1e-6)).unwrap();
+    ode.set_param_atol(Some(1e-6)).unwrap();
+    ode.set_out_rtol(Some(1e-6)).unwrap();
+    ode.set_out_atol(Some(1e-6)).unwrap();
 
     let fit_params = [0.8, 1.3, 0.12];
     let final_time = 1.0;

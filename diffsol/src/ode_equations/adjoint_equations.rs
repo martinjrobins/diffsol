@@ -835,7 +835,7 @@ mod tests {
     fn test_rhs_exponential() {
         // dy/dt = -ay (p = [a])
         // a = 0.1
-        let (problem, _soln) = exponential_decay_problem_adjoint::<Mcpu>(true);
+        let (problem, _soln) = exponential_decay_problem_adjoint::<Mcpu>(true, true);
         let ctx = problem.eqn.context();
         let state = RkState {
             t: 0.0,
@@ -918,7 +918,7 @@ mod tests {
     fn test_rhs_exponential_sparse() {
         // dy/dt = -ay (p = [a])
         // a = 0.1
-        let (problem, _soln) = exponential_decay_problem_adjoint::<FaerSparseMat<f64>>(true);
+        let (problem, _soln) = exponential_decay_problem_adjoint::<FaerSparseMat<f64>>(true, true);
         let ctx = problem.eqn.context();
         let state = RkState {
             t: 0.0,

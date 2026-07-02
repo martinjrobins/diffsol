@@ -114,6 +114,12 @@ fn make_hybrid_ode(
     };
     ode.set_rtol(tol).unwrap();
     ode.set_atol(tol).unwrap();
+    ode.set_sens_rtol(Some(1e-6)).unwrap();
+    ode.set_sens_atol(Some(1e-6)).unwrap();
+    ode.set_param_rtol(Some(1e-6)).unwrap();
+    ode.set_param_atol(Some(1e-6)).unwrap();
+    ode.set_out_rtol(Some(1e-6)).unwrap();
+    ode.set_out_atol(Some(1e-6)).unwrap();
     ode
 }
 
