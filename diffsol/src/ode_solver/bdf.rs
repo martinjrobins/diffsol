@@ -985,7 +985,7 @@ where
                 self.s_deltas[i] -= &self.s_predict;
             }
 
-            if s_op.eqn().out().is_some() && s_op.eqn().include_out_in_error_control() {
+            if s_op.eqn().out().is_some() {
                 self.calculate_sens_output_delta(i);
             }
         }
@@ -1834,17 +1834,17 @@ mod test {
 
     #[test]
     fn bdf_test_nalgebra_exponential_decay_adjoint() {
-        let (mut problem, soln) = exponential_decay_problem_adjoint::<M>(true);
+        let (mut problem, soln) = exponential_decay_problem_adjoint::<M>(true, true);
         let final_time = soln.solution_points.last().unwrap().t;
         let dgdu = setup_test_adjoint::<LS, _>(&mut problem, soln);
-        let (problem, _soln) = exponential_decay_problem_adjoint::<M>(true);
+        let (problem, _soln) = exponential_decay_problem_adjoint::<M>(true, true);
         let mut s = problem.bdf::<LS>().unwrap();
         let (checkpointer, _y, _t, _stop_reason) =
             s.solve_with_checkpointing(final_time, None).unwrap();
         let adjoint_solver = problem
             .bdf_solver_adjoint::<LS, _>(checkpointer, Some(s), Some(dgdu.ncols()))
             .unwrap();
-        test_adjoint(adjoint_solver, dgdu);
+        test_adjoint(adjoint_solver, dgdu, 40.0);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 159
         number_of_jac_muls: 2
@@ -1854,11 +1854,42 @@ mod test {
     }
 
     #[test]
+    fn bdf_test_faer_sparse_exponential_decay_adjoint() {
+        let (mut problem, soln) =
+            exponential_decay_problem_adjoint::<FaerSparseMat<f64>>(true, true);
+        let final_time = soln.solution_points.last().unwrap().t;
+        let dgdu = setup_test_adjoint::<FaerSparseLU<f64>, _>(&mut problem, soln);
+        let (problem, _soln) = exponential_decay_problem_adjoint::<FaerSparseMat<f64>>(true, true);
+        let mut s = problem.bdf::<FaerSparseLU<f64>>().unwrap();
+        let (checkpointer, _y, _t, _stop_reason) =
+            s.solve_with_checkpointing(final_time, None).unwrap();
+        let adjoint_solver = problem
+            .bdf_solver_adjoint::<FaerSparseLU<f64>, _>(checkpointer, Some(s), Some(dgdu.ncols()))
+            .unwrap();
+        test_adjoint(adjoint_solver, dgdu, 40.0);
+    }
+
+    #[test]
+    fn bdf_test_nalgebra_exponential_decay_adjoint_no_error_control() {
+        let (mut problem, soln) = exponential_decay_problem_adjoint::<M>(false, true);
+        let final_time = soln.solution_points.last().unwrap().t;
+        let dgdu = setup_test_adjoint::<LS, _>(&mut problem, soln);
+        let (problem, _soln) = exponential_decay_problem_adjoint::<M>(false, true);
+        let mut s = problem.bdf::<LS>().unwrap();
+        let (checkpointer, _y, _t, _stop_reason) =
+            s.solve_with_checkpointing(final_time, None).unwrap();
+        let adjoint_solver = problem
+            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(s), Some(dgdu.ncols()))
+            .unwrap();
+        test_adjoint(adjoint_solver, dgdu, 400.0);
+    }
+
+    #[test]
     fn bdf_test_nalgebra_exponential_decay_adjoint_sum_squares() {
-        let (mut problem, soln) = exponential_decay_problem_adjoint::<M>(false);
+        let (mut problem, soln) = exponential_decay_problem_adjoint::<M>(true, false);
         let times = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
         let (dgdp, data) = setup_test_adjoint_sum_squares::<LS, _>(&mut problem, times.as_slice());
-        let (problem, _soln) = exponential_decay_problem_adjoint::<M>(false);
+        let (problem, _soln) = exponential_decay_problem_adjoint::<M>(true, false);
         let mut s = problem.bdf::<LS>().unwrap();
         let (checkpointer, soln, _stop_reason) = s
             .solve_dense_with_checkpointing(times.as_slice(), None)
@@ -1911,7 +1942,7 @@ mod test {
         let adjoint_solver = problem
             .bdf_solver_adjoint::<LS, _>(checkpointer, Some(s), Some(dgdu.ncols()))
             .unwrap();
-        test_adjoint(adjoint_solver, dgdu);
+        test_adjoint(adjoint_solver, dgdu, 40.0);
     }
 
     #[cfg(feature = "diffsl-llvm")]
@@ -1929,7 +1960,7 @@ mod test {
         let adjoint_solver = problem
             .bdf_solver_adjoint::<LS, _>(checkpointer, Some(s), Some(dgdu.ncols()))
             .unwrap();
-        test_adjoint(adjoint_solver, dgdu);
+        test_adjoint(adjoint_solver, dgdu, 40.0);
     }
 
     #[test]
@@ -1944,7 +1975,7 @@ mod test {
         let adjoint_solver = problem
             .bdf_solver_adjoint::<LS, _>(checkpointer, Some(s), Some(dgdu.ncols()))
             .unwrap();
-        test_adjoint(adjoint_solver, dgdu);
+        test_adjoint(adjoint_solver, dgdu, 40.0);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 151
         number_of_jac_muls: 15
@@ -1989,7 +2020,7 @@ mod test {
         let adjoint_solver = problem
             .bdf_solver_adjoint::<LS, _>(checkpointer, Some(s), None)
             .unwrap();
-        test_adjoint(adjoint_solver, dgdu);
+        test_adjoint(adjoint_solver, dgdu, 40.0);
     }
 
     #[test]
@@ -2486,7 +2517,7 @@ mod test {
         let adjoint_solver = problem
             .bdf_solver_adjoint::<CudaLU<f64>, _>(checkpointer, Some(s), Some(dgdu.ncols()))
             .unwrap();
-        test_adjoint(adjoint_solver, dgdu);
+        test_adjoint(adjoint_solver, dgdu, 40.0);
     }
 
     #[cfg(feature = "cuda")]
@@ -2526,7 +2557,7 @@ mod test {
         let adjoint_solver = problem
             .bdf_solver_adjoint::<CudaLU<f64>, _>(checkpointer, Some(s), Some(dgdp_check.ncols()))
             .unwrap();
-        test_adjoint(adjoint_solver, dgdp_check);
+        test_adjoint(adjoint_solver, dgdp_check, 40.0);
     }
 
     #[cfg(feature = "cuda")]

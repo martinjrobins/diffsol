@@ -30,6 +30,10 @@ pub fn robertson_ode_diffsl_problem<
         .p([0.04, 1.0e4, 3.0e7])
         .rtol(1e-4)
         .atol([1.0e-8, 1.0e-6, 1.0e-6])
+        .sens_rtol(1e-6)
+        .sens_atol([1e-6, 1e-6, 1e-6])
+        .param_rtol(1e-6)
+        .param_atol([1e-6, 1e-6, 1e-6])
         .build_from_diffsl::<CG>(code)
         .unwrap();
     let mut soln = soln::<M::V>(problem.context().clone());

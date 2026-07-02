@@ -31,6 +31,12 @@ fn make_no_reset_stop_ode(ode_solver: OdeSolverType) -> OdeWrapper {
     .unwrap();
     ode.set_rtol(1e-8).unwrap();
     ode.set_atol(1e-8).unwrap();
+    ode.set_sens_rtol(Some(1e-6)).unwrap();
+    ode.set_sens_atol(Some(1e-6)).unwrap();
+    ode.set_param_rtol(Some(1e-6)).unwrap();
+    ode.set_param_atol(Some(1e-6)).unwrap();
+    ode.set_out_rtol(Some(1e-6)).unwrap();
+    ode.set_out_atol(Some(1e-6)).unwrap();
     ode
 }
 

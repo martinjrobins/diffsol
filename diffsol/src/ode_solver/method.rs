@@ -1102,7 +1102,7 @@ mod test {
 
     #[test]
     fn test_solve_integrate_out() {
-        let (problem, _soln) = exponential_decay_problem_adjoint::<NalgebraMat<f64>>(true);
+        let (problem, _soln) = exponential_decay_problem_adjoint::<NalgebraMat<f64>>(true, true);
         let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
         let k = 0.1;
@@ -1186,7 +1186,7 @@ mod test {
 
     #[test]
     fn test_dense_solve_integrate_out() {
-        let (problem, soln) = exponential_decay_problem_adjoint::<NalgebraMat<f64>>(true);
+        let (problem, soln) = exponential_decay_problem_adjoint::<NalgebraMat<f64>>(true, true);
         let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
         let t_eval = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
@@ -1401,7 +1401,7 @@ mod test {
 
     #[test]
     fn test_solve_adjoint() {
-        let (problem, soln) = exponential_decay_problem_adjoint::<NalgebraMat<f64>>(true);
+        let (problem, soln) = exponential_decay_problem_adjoint::<NalgebraMat<f64>>(true, true);
         let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
         let final_time = soln.solution_points[soln.solution_points.len() - 1].t;
