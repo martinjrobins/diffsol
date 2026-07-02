@@ -2,7 +2,7 @@ name: Continuous Benchmarking (Base)
 
 on:
   push:
-    branches: [main, benchmarks-ci]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
