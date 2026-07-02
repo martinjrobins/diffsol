@@ -29,7 +29,7 @@ jobs:
           BIN=$(find target/release/deps -name 'ode_solvers_ci-*' -not -name '*.d' -type f -executable | head -1)
           cp "$BIN" ode_solvers_ci
           docker build -t registry.bencher.dev/diffsol:latest .
-          echo "${{ secrets.BENCHER_API_KEY }}" | docker login registry.bencher.dev -u _ --password-stdin
+          docker login registry.bencher.dev -u diffsol --password-stdin <<< "${{ secrets.BENCHER_API_KEY }}"
           docker push registry.bencher.dev/diffsol:latest
 
       - uses: bencherdev/bencher@main
