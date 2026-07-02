@@ -14,7 +14,9 @@ RUN mkdir -p diffsol/src diffsol-c/src diffsol/benches && \
     echo "fn main() {}" > diffsol/benches/ode_solvers_ci.rs && \
     touch diffsol/benches/common.rs && \
     mkdir -p examples/dummy && \
-    printf '[package]\nname = "dummy"\nversion = "0.1.0"\nedition = "2021"\n' > examples/dummy/Cargo.toml
+    printf '[package]\nname = "dummy"\nversion = "0.1.0"\nedition = "2021"\n' > examples/dummy/Cargo.toml && \
+    mkdir -p examples/dummy/src && \
+    echo "fn main() {}" > examples/dummy/src/main.rs
 
 RUN cargo fetch
 RUN cargo build --bench ode_solvers_ci || true
