@@ -578,6 +578,7 @@ mod tests {
     pub fn test_adjoint<'a, Eqn, SolverF, SolverB>(
         backwards_solver: SolverB,
         dgdp_check: <Eqn::V as DefaultDenseMatrix>::M,
+        factor: Eqn::T,
     ) where
         SolverF: OdeSolverMethod<'a, Eqn>,
         SolverB: AdjointOdeSolverMethod<'a, Eqn, SolverF>,
@@ -598,12 +599,7 @@ mod tests {
         let gs_adj = state.into_common().sg;
         #[allow(clippy::needless_range_loop)]
         for j in 0..dgdp_check.ncols() {
-            gs_adj[j].assert_eq_norm(
-                &dgdp_check.column(j).into_owned(),
-                &atol,
-                rtol,
-                Eqn::T::from_f64(40.).unwrap(),
-            );
+            gs_adj[j].assert_eq_norm(&dgdp_check.column(j).into_owned(), &atol, rtol, factor);
         }
     }
 

@@ -406,6 +406,7 @@ pub fn exponential_decay_problem_with_root<M: MatrixHost + 'static>(
 
 #[allow(clippy::type_complexity)]
 pub fn exponential_decay_problem_adjoint<M: MatrixHost>(
+    use_error_control: bool,
     integrate_out: bool,
 ) -> (
     OdeSolverProblem<impl OdeEquationsImplicitAdjoint<M = M, V = M::V, T = M::T, C = M::C>>,
@@ -434,8 +435,10 @@ pub fn exponential_decay_problem_adjoint<M: MatrixHost>(
             exponential_decay_out_sens_adj::<M>,
             2,
         );
-    builder = builder.sens_rtol(1e-6).sens_atol([1e-6, 1e-6]);
-    builder = builder.param_rtol(1e-6).param_atol([1e-6, 1e-6]);
+    if use_error_control {
+        builder = builder.sens_rtol(1e-6).sens_atol([1e-6, 1e-6]);
+        builder = builder.param_rtol(1e-6).param_atol([1e-6, 1e-6]);
+    }
     if integrate_out {
         let val = M::T::from_f64(1e-6).unwrap();
         builder = builder.out_rtol(1e-6).out_atol([val, val]);
