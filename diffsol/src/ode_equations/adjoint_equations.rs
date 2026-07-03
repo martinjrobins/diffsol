@@ -571,8 +571,8 @@ where
             eqn.rhs().nstates(),
             eqn.context().clone(),
         ));
-        let atol = problem.sens_atol.as_ref();
-        let rtol = problem.sens_rtol;
+        let atol = problem.sens_atol.as_ref().or(Some(&problem.atol));
+        let rtol = problem.sens_rtol.or(Some(problem.rtol));
         let out_atol = problem.param_atol.as_ref();
         let out_rtol = problem.param_rtol;
         let mass = eqn.mass().map(|_m| AdjointMass::new(eqn));

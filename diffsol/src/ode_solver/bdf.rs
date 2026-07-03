@@ -1280,7 +1280,6 @@ where
         let mut error_norm: Eqn::T;
         let problem = self.ode_problem;
         let integrate_out = problem.integrate_out;
-        let output_in_error_control = problem.output_in_error_control();
         let integrate_sens = self.s_op.is_some();
         let old_num_error_test_failures = self.statistics.number_of_error_test_failures;
 
@@ -1335,7 +1334,7 @@ where
                     self.y_delta -= &self.y_predict;
 
                     // deal with output equations
-                    if integrate_out && output_in_error_control {
+                    if integrate_out {
                         self.calculate_output_delta();
                     }
                 }
@@ -1797,18 +1796,18 @@ mod test {
         let (problem, soln) = exponential_decay_problem_diffsl::<M, diffsl::LlvmModule>(false);
         let mut s = problem.bdf_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
-        insta::assert_yaml_snapshot!(s.get_statistics(), @"
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 14
-        number_of_steps: 52
+        number_of_steps: 56
         number_of_error_test_failures: 1
-        number_of_nonlinear_solver_iterations: 164
+        number_of_nonlinear_solver_iterations: 175
         number_of_nonlinear_solver_fails: 0
         number_of_linear_solver_setups_from_checkpoint: 1
         number_of_linear_solver_setups_from_first_convergence_fail: 0
         number_of_linear_solver_setups_from_second_convergence_fail: 0
         number_of_linear_solver_setups_from_error_test_fail: 1
         number_of_linear_solver_setups_from_step_success: 12
-        ");
+        "###);
     }
 
     #[cfg(feature = "diffsl-llvm")]
@@ -1871,7 +1870,7 @@ mod test {
         let adjoint_solver = problem
             .bdf_solver_adjoint::<LS, _>(checkpointer, Some(s), Some(dgdu.ncols()))
             .unwrap();
-        test_adjoint(adjoint_solver, dgdu, 400.0);
+        test_adjoint(adjoint_solver, dgdu, 40.0);
     }
 
     #[test]
@@ -2088,18 +2087,18 @@ mod test {
         soln.rtol = problem.rtol;
         let mut s = problem.bdf_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
-        insta::assert_yaml_snapshot!(s.get_statistics(), @"
-        number_of_linear_solver_setups: 23
-        number_of_steps: 47
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        number_of_linear_solver_setups: 24
+        number_of_steps: 45
         number_of_error_test_failures: 8
-        number_of_nonlinear_solver_iterations: 119
+        number_of_nonlinear_solver_iterations: 115
         number_of_nonlinear_solver_fails: 0
         number_of_linear_solver_setups_from_checkpoint: 1
         number_of_linear_solver_setups_from_first_convergence_fail: 0
         number_of_linear_solver_setups_from_second_convergence_fail: 0
         number_of_linear_solver_setups_from_error_test_fail: 8
-        number_of_linear_solver_setups_from_step_success: 14
-        ");
+        number_of_linear_solver_setups_from_step_success: 15
+        "###);
     }
 
     #[test]
@@ -2163,6 +2162,7 @@ mod test {
         let (dgdp, data) = setup_test_adjoint_sum_squares::<LS, _>(&mut problem, times.as_slice());
         let (mut problem, _soln) = robertson_ode::robertson_ode_diffsl_problem::<M, LlvmModule>();
         problem.ode_options.max_nonlinear_solver_failures = 1000;
+        problem.ode_options.max_error_test_failures = 200;
         let mut s = problem.bdf::<LS>().unwrap();
         let (checkpointer, soln, _stop_reason) = s
             .solve_dense_with_checkpointing(times.as_slice(), None)
@@ -2496,11 +2496,11 @@ mod test {
         use crate::{CudaLU, CudaMat};
         let nbatch = 2;
         let (mut problem, soln) =
-            exponential_decay_problem_batched_adjoint::<CudaMat<f64>>(nbatch, true);
+            exponential_decay_problem_batched_adjoint::<CudaMat<f64>>(nbatch, true, true);
         let final_time = soln.solution_points.last().unwrap().t;
         let dgdu = setup_test_adjoint::<CudaLU<f64>, _>(&mut problem, soln);
         let (problem, _soln) =
-            exponential_decay_problem_batched_adjoint::<CudaMat<f64>>(nbatch, true);
+            exponential_decay_problem_batched_adjoint::<CudaMat<f64>>(nbatch, true, true);
         let mut s = problem.bdf::<CudaLU<f64>>().unwrap();
         let (checkpointer, _y, _t, _stop_reason) =
             s.solve_with_checkpointing(final_time, None).unwrap();
@@ -2516,12 +2516,12 @@ mod test {
         use crate::{CudaLU, CudaMat};
         let nbatch = 2;
         let (mut problem, soln) =
-            exponential_decay_problem_batched_adjoint::<CudaMat<f64>>(nbatch, false);
+            exponential_decay_problem_batched_adjoint::<CudaMat<f64>>(nbatch, true, false);
         let times = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
         let (dgdp, data) =
             setup_test_adjoint_sum_squares::<CudaLU<f64>, _>(&mut problem, times.as_slice());
         let (problem, _soln) =
-            exponential_decay_problem_batched_adjoint::<CudaMat<f64>>(nbatch, false);
+            exponential_decay_problem_batched_adjoint::<CudaMat<f64>>(nbatch, true, false);
         let mut s = problem.bdf::<CudaLU<f64>>().unwrap();
         let (checkpointer, soln, _stop_reason) = s
             .solve_dense_with_checkpointing(times.as_slice(), None)
@@ -2538,7 +2538,7 @@ mod test {
         use crate::{CudaLU, CudaMat};
         let nbatch = 2;
         let (mut problem, soln) =
-            exponential_decay_problem_batched_adjoint_with_reset::<CudaMat<f64>>(nbatch);
+            exponential_decay_problem_batched_adjoint_with_reset::<CudaMat<f64>>(nbatch, true);
         let final_time = soln.solution_points.last().unwrap().t;
         let dgdp_check = setup_test_adjoint::<CudaLU<f64>, _>(&mut problem, soln);
         let mut s = problem.bdf::<CudaLU<f64>>().unwrap();
