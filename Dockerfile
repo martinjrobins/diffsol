@@ -1,34 +1,46 @@
-FROM rust:1.89-bookworm
+# Stage 1: Build
+FROM rust:1.89-slim-bookworm AS builder
 
 WORKDIR /usr/src/diffsol
 
-# Layer 1: Copy workspace manifests and create minimal source for dep pre-compilation
-# This layer is only rebuilt when Cargo.toml files change.
-COPY Cargo.toml ./
+# Copy workspace Cargo.toml and scope to only diffsol (avoids pulling in
+# diffsol-c and examples/* which aren't needed for benchmarks)
+COPY Cargo.toml .
+RUN sed -i 's/^members = .*/members = ["diffsol"]/' Cargo.toml && \
+    sed -i 's/^default-members = .*/default-members = ["diffsol"]/' Cargo.toml
+
+# Copy diffsol Cargo.toml for dependency resolution
 COPY diffsol/Cargo.toml diffsol/
-COPY diffsol-c/Cargo.toml diffsol-c/
 
-RUN mkdir -p diffsol/src diffsol-c/src diffsol/benches && \
-    touch diffsol/src/lib.rs && \
-    touch diffsol-c/src/lib.rs && \
-    echo "fn main() {}" > diffsol/benches/ode_solvers_ci.rs && \
-    echo "fn main() {}" > diffsol/benches/ode_solvers.rs && \
-    echo "fn main() {}" > diffsol/benches/lin_alg_ops.rs && \
-    echo "#[cfg(feature = \"diffsl-llvm\")] fn main() {}" > diffsol/benches/pybamm_dfn.rs && \
-    touch diffsol/benches/common.rs && \
-    touch diffsol/benches/sundials_benches.rs && \
-    mkdir -p examples/dummy && \
-    printf '[package]\nname = "dummy"\nversion = "0.1.0"\nedition = "2021"\n' > examples/dummy/Cargo.toml && \
-    mkdir -p examples/dummy/src && \
-    echo "fn main() {}" > examples/dummy/src/main.rs
+# Create minimal stubs so cargo can resolve and pre-compile deps
+RUN mkdir -p diffsol/src diffsol/benches \
+    && echo '' > diffsol/src/lib.rs \
+    && echo 'fn main() {}' > diffsol/benches/ode_solvers_ci.rs \
+    && echo 'fn main() {}' > diffsol/benches/ode_solvers.rs \
+    && echo 'fn main() {}' > diffsol/benches/lin_alg_ops.rs \
+    && echo 'fn main() {}' > diffsol/benches/pybamm_dfn.rs
 
-RUN cargo fetch
-RUN cargo bench --no-run --bench ode_solvers_ci || true
+# Pre-compile dependencies (cached layer — only rebuilt when Cargo.toml changes)
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    cargo build --lib --release
 
-# Layer 2: Copy real source and build bench binary
-# This layer rebuilds on every commit, but only changed source is recompiled
-# since deps are cached from Layer 1.
-COPY . .
-RUN cargo bench --no-run --bench ode_solvers_ci
+# Copy real diffsol source and build the benchmark binary
+COPY diffsol/ diffsol/
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    cargo build --bench ode_solvers_ci --release && \
+    for p in target/release/ode_solvers_ci target/release/deps/ode_solvers_ci-*; do \
+      [ -f "$p" ] && [ -x "$p" ] && cp "$p" /usr/local/bin/ode_solvers_ci && break; \
+    done && \
+    chmod +x /usr/local/bin/ode_solvers_ci
 
-CMD ["cargo", "bench", "--bench", "ode_solvers_ci"]
+# Stage 2: Runtime (~74 MB base)
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /usr/local/bin/ode_solvers_ci /usr/local/bin/
+
+ENTRYPOINT ["ode_solvers_ci"]
+CMD ["--bench"]
