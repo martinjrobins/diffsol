@@ -1131,7 +1131,8 @@ where
 
     /// Set the relative tolerance for forward sensitivity or adjoint equations.
     ///
-    /// If not set or set to `None`, sensitivities will not be included in error control.
+    /// In the adjoint backward pass, if not set, the standard [`rtol`](Self::rtol) is used as a
+    /// fallback so that sensitivity equations always contribute to error control.
     pub fn sens_rtol(mut self, sens_rtol: f64) -> Self {
         self.sens_rtol = Some(M::T::from_f64(sens_rtol).unwrap());
         self
@@ -1140,7 +1141,8 @@ where
     /// Set the absolute tolerance for forward sensitivity or adjoint equations.
     ///
     /// Can be a single value (used for all states) or a vector (one per state).
-    /// If not set or set to `None`, sensitivities will not be included in error control.
+    /// In the adjoint backward pass, if not set, the standard [`atol`](Self::atol) is used as a
+    /// fallback so that sensitivity equations always contribute to error control.
     pub fn sens_atol<V>(mut self, sens_atol: V) -> Self
     where
         V: IntoIterator<Item = f64>,
@@ -1154,10 +1156,10 @@ where
         self
     }
 
-    /// Disable error control for sensitivity equations.
+    /// Disable error control for forward sensitivity equations.
     ///
-    /// When disabled, the sensitivity equations will still be computed but will not
-    /// contribute to the error estimates that control the timestep.
+    /// Does not affect adjoint backward passes — those always fall back to the
+    /// standard `rtol`/`atol` when `sens_rtol`/`sens_atol` are not explicitly set.
     pub fn turn_off_sensitivities_error_control(mut self) -> Self {
         self.sens_atol = None;
         self.sens_rtol = None;
@@ -1184,18 +1186,20 @@ where
         self
     }
 
-    /// Set the relative tolerance for integration of output equations
+    /// Set the relative tolerance for output integral error control in the forward solve.
     ///
-    /// If not set, errors in the output equations will not be included in error control.
+    /// Output integrals are always computed regardless of whether this is set.
+    /// Does not affect the adjoint backward pass.
     pub fn out_rtol(mut self, out_rtol: f64) -> Self {
         self.out_rtol = Some(M::T::from_f64(out_rtol).unwrap());
         self
     }
 
-    /// Set the absolute tolerance for integration of output equations.
+    /// Set the absolute tolerance for output integral error control in the forward solve.
     ///
     /// Can be a single value (used for all outputs) or a vector (one per output).
-    /// If not set, errors in the output equations will not be included in error control.
+    /// Output integrals are always computed regardless of whether this is set.
+    /// Does not affect the adjoint backward pass.
     pub fn out_atol<V, T>(mut self, out_atol: V) -> Self
     where
         V: IntoIterator<Item = T>,
@@ -1205,18 +1209,22 @@ where
         self
     }
 
-    /// Set the relative tolerance for adjoint parameter gradient equations.
+    /// Set the relative tolerance for parameter gradient equations during adjoint
+    /// backward passes.
     ///
-    /// If not set, these equations will not be included in error control.
+    /// If not set, parameter gradient errors will not influence timestep selection
+    /// during the backward pass (no fallback to standard tolerances).
     pub fn param_rtol(mut self, param_rtol: f64) -> Self {
         self.param_rtol = Some(M::T::from_f64(param_rtol).unwrap());
         self
     }
 
-    /// Set the absolute tolerance for adjoint parameter gradient equations.
+    /// Set the absolute tolerance for parameter gradient equations during adjoint
+    /// backward passes.
     ///
     /// Can be a single value (used for all parameters) or a vector (one per parameter).
-    /// If not set, these equations will not be included in error control.
+    /// If not set, parameter gradient errors will not influence timestep selection
+    /// during the backward pass (no fallback to standard tolerances).
     pub fn param_atol<V>(mut self, param_atol: V) -> Self
     where
         V: IntoIterator<Item = f64>,
