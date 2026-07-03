@@ -481,10 +481,10 @@ mod test {
             .unwrap();
         test_adjoint(adjoint_solver, dgdu, 40.0);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 421
+        number_of_calls: 431
         number_of_jac_muls: 8
         number_of_matrix_evals: 4
-        number_of_jac_adj_muls: 361
+        number_of_jac_adj_muls: 385
         "###);
     }
 
@@ -503,10 +503,10 @@ mod test {
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 990
+        number_of_calls: 1090
         number_of_jac_muls: 0
         number_of_matrix_evals: 0
-        number_of_jac_adj_muls: 2233
+        number_of_jac_adj_muls: 2473
         "###);
     }
 

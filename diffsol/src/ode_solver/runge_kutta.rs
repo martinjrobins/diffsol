@@ -767,7 +767,6 @@ where
         augmented_eqn: Option<&mut impl AugmentedOdeEquations<Eqn>>,
         linear_solver: impl FnOnce(&mut Eqn::V) -> Result<(), DiffsolError>,
     ) -> Result<Eqn::T, DiffsolError> {
-        let mut ncontributions = 0;
         let mut error_norm = Eqn::T::zero();
         if let Some(error) = self.error.as_mut() {
             self.diff
@@ -777,8 +776,8 @@ where
             // compute error norm
             let atol = &self.problem.atol;
             let rtol = self.problem.rtol;
-            error_norm += error.squared_norm(&self.state.y, atol, rtol);
-            ncontributions += 1;
+            let err = error.squared_norm(&self.state.y, atol, rtol);
+            error_norm = error_norm.max(err);
         }
 
         if let Some(out_error) = self.out_error.as_mut() {
@@ -788,8 +787,7 @@ where
             let atol = self.problem.out_atol.as_ref().unwrap();
             let rtol = self.problem.out_rtol.unwrap();
             let out_error_norm = out_error.squared_norm(&self.state.g, atol, rtol);
-            error_norm += out_error_norm;
-            ncontributions += 1;
+            error_norm = error_norm.max(out_error_norm);
         }
 
         // sensitivity errors
@@ -799,8 +797,8 @@ where
             let rtol = aug_eqn.rtol().unwrap();
             for i in 0..self.sdiff.len() {
                 self.sdiff[i].gemv(Eqn::T::one(), self.tableau.d(), Eqn::T::zero(), sens_error);
-                error_norm += sens_error.squared_norm(&self.state.s[i], atol, rtol);
-                ncontributions += 1;
+                let err = sens_error.squared_norm(&self.state.s[i], atol, rtol);
+                error_norm = error_norm.max(err);
             }
         }
 
@@ -816,12 +814,9 @@ where
                     Eqn::T::zero(),
                     sens_out_error,
                 );
-                error_norm += sens_out_error.squared_norm(&self.state.sg[i], atol, rtol);
-                ncontributions += 1;
+                let err = sens_out_error.squared_norm(&self.state.sg[i], atol, rtol);
+                error_norm = error_norm.max(err);
             }
-        }
-        if ncontributions > 1 {
-            error_norm /= Eqn::T::from_f64(ncontributions as f64).unwrap();
         }
         Ok(error_norm)
     }
