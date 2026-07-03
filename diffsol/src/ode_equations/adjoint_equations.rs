@@ -194,7 +194,7 @@ where
     }
 
     fn sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
-        self.eqn.mass().and_then(|mass| mass.transpose_sparsity())
+        self.eqn.mass().unwrap().transpose_sparsity()
     }
 }
 
