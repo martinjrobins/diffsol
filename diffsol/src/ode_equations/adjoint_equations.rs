@@ -192,6 +192,10 @@ where
     fn matrix_inplace(&self, t: Self::T, y: &mut Self::M) {
         self.eqn.mass().unwrap().transpose_inplace(t, y);
     }
+
+    fn sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        self.eqn.mass().unwrap().transpose_sparsity()
+    }
 }
 
 pub struct AdjointInit<'a, Eqn, Method>

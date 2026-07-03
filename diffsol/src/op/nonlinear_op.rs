@@ -100,9 +100,10 @@ pub trait NonLinearOpSensAdjoint: NonLinearOp {
     /// Compute the negative transpose of the gradient of the operator wrt a parameter vector p and return it.
     /// See [Self::sens_adjoint_inplace] for a non-allocating version.
     fn sens_adjoint(&self, x: &Self::V, t: Self::T) -> Self::M {
-        let n = self.nstates();
+        let n = self.nparams();
+        let m = self.nout();
         let mut y =
-            Self::M::new_from_sparsity(n, n, self.sens_adjoint_sparsity(), self.context().clone());
+            Self::M::new_from_sparsity(n, m, self.sens_adjoint_sparsity(), self.context().clone());
         self.sens_adjoint_inplace(x, t, &mut y);
         y
     }
@@ -117,9 +118,9 @@ pub trait NonLinearOpSensAdjoint: NonLinearOp {
 
     /// Default implementation of the gradient computation (this is the default for [Self::sens_adjoint_inplace]).
     fn _default_sens_adjoint_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
-        let mut v = Self::V::zeros(self.nstates(), self.context().clone());
-        let mut col = Self::V::zeros(self.nout(), self.context().clone());
-        for j in 0..self.nstates() {
+        let mut v = Self::V::zeros(self.nout(), self.context().clone());
+        let mut col = Self::V::zeros(self.nparams(), self.context().clone());
+        for j in 0..self.nout() {
             v.set_index(j, Self::T::one());
             self.sens_transpose_mul_inplace(x, t, &v, &mut col);
             y.set_column(j, &col);

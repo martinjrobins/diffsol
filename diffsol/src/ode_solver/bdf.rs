@@ -1974,6 +1974,25 @@ mod test {
     }
 
     #[test]
+    fn bdf_test_faer_sparse_exponential_decay_algebraic_adjoint() {
+        use crate::FaerSparseLU;
+        use crate::FaerSparseMat;
+        let (mut problem, soln) =
+            exponential_decay_with_algebraic_adjoint_problem::<FaerSparseMat<f64>>(true);
+        let final_time = soln.solution_points.last().unwrap().t;
+        let dgdu = setup_test_adjoint::<FaerSparseLU<f64>, _>(&mut problem, soln);
+        let (problem, _soln) =
+            exponential_decay_with_algebraic_adjoint_problem::<FaerSparseMat<f64>>(true);
+        let mut s = problem.bdf::<FaerSparseLU<f64>>().unwrap();
+        let (checkpointer, _y, _t, _stop_reason) =
+            s.solve_with_checkpointing(final_time, None).unwrap();
+        let adjoint_solver = problem
+            .bdf_solver_adjoint::<FaerSparseLU<f64>, _>(checkpointer, Some(s), Some(dgdu.ncols()))
+            .unwrap();
+        test_adjoint(adjoint_solver, dgdu, 40.0);
+    }
+
+    #[test]
     fn bdf_test_nalgebra_exponential_decay_algebraic_adjoint_sum_squares() {
         let (mut problem, soln) = exponential_decay_with_algebraic_adjoint_problem::<M>(false);
         let times = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();

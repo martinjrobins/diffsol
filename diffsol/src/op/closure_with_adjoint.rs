@@ -108,7 +108,7 @@ where
         let non_zeros = find_sens_adjoint_non_zeros(&op, y0, t0);
         let nparams = p.len();
         self.sens_sparsity = Some(
-            MatrixSparsity::try_from_indices(self.nstates, nparams, non_zeros.clone())
+            MatrixSparsity::try_from_indices(nparams, self.nstates, non_zeros.clone())
                 .expect("invalid sparsity pattern"),
         );
         self.coloring_sens_adjoint = Some(JacobianColoring::new(
