@@ -1139,7 +1139,7 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpAdjoint
             panic!("Adjoint not prepared. Call prep_adjoint before calling adjoint_inplace");
         }
         if let Some(coloring) = &self.0.rhs_adjoint_coloring {
-            coloring.jacobian_inplace(self, x, t, y);
+            coloring.adjoint_inplace(self, x, t, y);
         } else {
             self._default_adjoint_inplace(x, t, y);
         }
@@ -1452,6 +1452,9 @@ mod tests {
 
     generate_tests_llvm_only!(diffsl_reset_sens_and_adjoint_gradients);
     generate_tests_llvm_only!(diffsl_root_sens_gradients);
+    generate_tests_llvm_only!(diffsl_out_adjoint_nonlinear);
+    generate_tests_llvm_only!(diffsl_out_adjoint_full_solve);
+    generate_tests_llvm_only!(diffsl_out_adjoint_dae_algebraic_output);
     /// Tests forward evaluation and Jacobian-vector product for DiffSlReset.
     /// Runs on all backends (Cranelift + LLVM).
     ///
@@ -1877,6 +1880,250 @@ mod tests {
             &ctx.vector_from_vec(vec![-M::T::from_f64(3.0).unwrap()]),
             M::T::from_f64(1e-10).unwrap(),
         );
+    }
+
+    /// Tests adjoint gradient (jac_transpose_mul_inplace) for DiffSlOut with a non-linear
+    /// output function.
+    #[allow(dead_code)]
+    fn diffsl_out_adjoint_nonlinear<
+        CG: CodegenModuleJit + CodegenModuleCompile,
+        M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
+    >()
+    where
+        for<'b> &'b M::V: VectorRef<M::V>,
+        for<'b> &'b M: MatrixRef<M>,
+    {
+        let text = "
+            in_i { a = 1 }
+            u_i {
+                y = 3,
+                z = 2,
+            }
+            F_i {
+                y,
+                z,
+            }
+            out_i {
+                2 * y * y,
+                3 * z,
+            }
+        ";
+
+        let ctx = M::C::default();
+        let p = ctx.vector_from_vec(vec![M::T::one()]);
+        let mut eqn = DiffSl::<M, CG>::compile(text, ctx.clone(), false).unwrap();
+        eqn.set_params(&p);
+
+        let out_op = eqn.out().expect("model must have an output operator");
+
+        // x = (y, z) = (3, 2) after set_params
+        let x = eqn.init().call(M::T::zero());
+        let t = M::T::zero();
+
+        // forward output
+        let out_val = out_op.call(&x, t);
+        let out_expected = ctx.vector_from_vec(vec![
+            M::T::from_f64(18.0).unwrap(),
+            M::T::from_f64(6.0).unwrap(),
+        ]);
+        out_val.assert_eq_st(&out_expected, M::T::from_f64(1e-10).unwrap());
+
+        // jac_transpose_mul: -J^T*v, J=[[12,0],[0,3]], v=[1,1] => -[12,3] = [-12,-3]
+        let v = ctx.vector_from_vec(vec![M::T::one(), M::T::one()]);
+        let mut y = ctx.vector_from_vec(vec![M::T::zero(), M::T::zero()]);
+        out_op.jac_transpose_mul_inplace(&x, t, &v, &mut y);
+        let jac_adj_expected = ctx.vector_from_vec(vec![
+            M::T::from_f64(-12.0).unwrap(),
+            M::T::from_f64(-3.0).unwrap(),
+        ]);
+        y.assert_eq_st(&jac_adj_expected, M::T::from_f64(1e-10).unwrap());
+    }
+
+    /// Tests a full adjoint solve (forward + backward pass) with DiffSL and a
+    /// non-linear output function. Verifies that the adjoint equations correctly
+    /// use the wrapper's `calc_out_rgrad` / `calc_out_srgrad` paths for output
+    /// adjoint operator computations.
+    ///
+    /// Model: dx/dt = -k*x, x(0)=3, out=[2*x*x]
+    /// The integral G = ∫ out dt is analytically 9*(1 - exp(-2k))/k.
+    /// For k=1, tf=1: dG/dk ≈ -5.346.
+    ///
+    /// Requires LLVM — Cranelift does not compile reverse-mode autograd.
+    #[allow(dead_code)]
+    fn diffsl_out_adjoint_full_solve<
+        CG: CodegenModuleJit + CodegenModuleCompile,
+        M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
+    >()
+    where
+        for<'b> &'b M::V: VectorRef<M::V>,
+        for<'b> &'b M: MatrixRef<M>,
+    {
+        use crate::ode_solver::adjoint::AdjointOdeSolverMethod;
+        use crate::ode_solver::state::OdeSolverState;
+        use crate::Op;
+        use num_traits::Signed;
+
+        let text = "
+            in { k = 1 }
+            u { x = 3 }
+            F { -k * x }
+            out { 2 * x * x }
+        ";
+
+        let problem = OdeBuilder::<M>::new()
+            .p([1.0])
+            .rtol(1e-6)
+            .atol([1e-6])
+            .sens_rtol(1e-6)
+            .sens_atol([1e-6])
+            .param_rtol(1e-6)
+            .param_atol([1e-6])
+            .integrate_out(true)
+            .build_from_diffsl::<CG>(text)
+            .unwrap();
+
+        let final_time = M::T::from_f64(1.0).unwrap();
+
+        // forward solve with checkpointing
+        let mut s = problem.bdf::<M::LS>().unwrap();
+        let (checkpointer, _y, _t, _stop_reason) =
+            s.solve_with_checkpointing(final_time, None).unwrap();
+
+        // build and run adjoint backward pass (empty dgdu = integral of output)
+        let adjoint_solver = problem
+            .bdf_solver_adjoint::<M::LS, _>(checkpointer, Some(s), Some(problem.eqn.nout()))
+            .unwrap();
+        let (adj_state, _) = adjoint_solver
+            .solve_adjoint_backwards_pass(&[], &[])
+            .unwrap();
+
+        let common = adj_state.into_common();
+        let sg = common.sg;
+
+        // dG/dk for G = ∫ 2*x² dt with x(t)=3*exp(-k*t), k=1, t_f=1:
+        //   G = 18*(1-exp(-2k))/(2k) = 9*(1-exp(-2k))/k
+        //   dG/dk = 9*(3*exp(-2k) - 1)/k² ≈ -5.346 at k=1
+        let expected = M::T::from_f64(-5.346).unwrap();
+        let grad = sg[0].get_index(0);
+        let tol = M::T::from_f64(1e-1).unwrap();
+        assert!(
+            (grad - expected).abs() < tol,
+            "adjoint gradient {} differs from expected {}",
+            grad,
+            expected
+        );
+    }
+
+    /// Tests that DAE adjoint gradient is non-zero even when the output depends
+    /// only on algebraic state variables.
+    ///
+    /// Model: dx/dt = -k*x, 0 = x - z (z is algebraic, x is differential).
+    /// Both `out { x }` and `out { z }` should give the same gradient
+    /// dG/dk where G = Σ_i g(u(t_i)) at discrete time points.
+    ///
+    /// Bug: when output depends only on algebraic state (out { z }),
+    /// `integrate_delta_g` uses `rhs_jac_ad = ∂f_d/∂y_a` (J_da block from
+    /// Jacobian split) instead of `∂f_a/∂y_d^T` (J_ad^T). When ∂f_d/∂y_a = 0
+    /// (diff RHS does not depend on alg state), the adjoint gradient is zero.
+    #[allow(dead_code)]
+    fn diffsl_out_adjoint_dae_algebraic_output<
+        CG: CodegenModuleJit + CodegenModuleCompile,
+        M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
+    >()
+    where
+        for<'b> &'b M::V: VectorRef<M::V>,
+        for<'b> &'b M: MatrixRef<M>,
+    {
+        use num_traits::Signed;
+
+        let base = "
+            in { k = 1 }
+            u_i { x = 1, z = 1 }
+            dudt_i { dxdt = 0, dzdt = 0 }
+            M_i { dxdt, 0 }
+            F_i { -k * x, x - z }
+        ";
+
+        let grad_diff = adjoint_gradient_at_points::<M, CG>(&format!("{}\nout_i {{ x }}", base));
+        let grad_alg = adjoint_gradient_at_points::<M, CG>(&format!("{}\nout_i {{ z }}", base));
+
+        // Both gradients should be non-zero (since x = z from the constraint)
+        let tol = M::T::from_f64(1e-6).unwrap();
+        assert!(
+            grad_diff.abs() > tol,
+            "diff output gradient should be non-zero"
+        );
+
+        // BUG: algebraic-only output currently returns zero because
+        // integrate_delta_g uses the wrong Jacobian block for DAE coupling
+        assert!(
+            grad_alg.abs() > tol,
+            "alg output gradient {} should be non-zero (BUG: currently zero)",
+            grad_alg,
+        );
+    }
+
+    /// Helper: run a discrete-time adjoint solve (dt=0.1 from 0 to 1, dgdu=1 at each point)
+    /// and return dG/d(parameter[0]).
+    fn adjoint_gradient_at_points<
+        M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
+        CG: CodegenModuleJit + CodegenModuleCompile,
+    >(
+        code: &str,
+    ) -> M::T
+    where
+        for<'b> &'b M::V: VectorRef<M::V>,
+        for<'b> &'b M: MatrixRef<M>,
+    {
+        use crate::ode_solver::adjoint::AdjointOdeSolverMethod;
+        use crate::ode_solver::state::OdeSolverState;
+        use crate::Op;
+
+        let problem = OdeBuilder::<M>::new()
+            .p([1.0])
+            .rtol(1e-5)
+            .atol([1e-5, 1e-5])
+            .sens_rtol(1e-5)
+            .sens_atol([1e-4, 1e-4])
+            .param_rtol(1e-5)
+            .param_atol([1e-4])
+            .integrate_out(false)
+            .build_from_diffsl::<CG>(code)
+            .unwrap();
+
+        let ctx = problem.eqn.context().clone();
+        let nout = problem.eqn.nout();
+
+        // create time points: [0.1, 0.2, ..., 1.0]
+        let dgdu_count = 10;
+        let times: Vec<M::T> = (1..=dgdu_count)
+            .map(|i| M::T::from_f64(i as f64 * 0.1).unwrap())
+            .collect();
+
+        // forward solve with checkpointing
+        let final_time = *times.last().unwrap();
+        let mut s = problem.bdf::<M::LS>().unwrap();
+        let (checkpointer, _y, _t, _stop_reason) =
+            s.solve_with_checkpointing(final_time, None).unwrap();
+
+        // build dgdu: one nout × dgdu_count matrix (all ones)
+        let mut dgdu_mat = <M::V as DefaultDenseMatrix>::M::zeros(nout, dgdu_count, ctx.clone());
+        for i in 0..nout {
+            for j in 0..dgdu_count {
+                dgdu_mat.set_index(i, j, M::T::one());
+            }
+        }
+        let dgdu_refs = [&dgdu_mat];
+
+        // run adjoint backward pass with discrete dgdu
+        let adjoint_solver = problem
+            .bdf_solver_adjoint::<M::LS, _>(checkpointer, Some(s), Some(nout))
+            .unwrap();
+        let (adj_state, _) = adjoint_solver
+            .solve_adjoint_backwards_pass(&times, &dgdu_refs)
+            .unwrap();
+        let common = adj_state.into_common();
+        common.sg[0].get_index(0)
     }
 
     #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
