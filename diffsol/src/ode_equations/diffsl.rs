@@ -2449,7 +2449,7 @@ mod tests {
         let t_vals = [0.0, 0.5, 1.0, 1.5, 2.0];
         let p_val = 0.72;
 
-        for (name, alg_expr) in [
+        for (_name, alg_expr) in [
             ("x/p", "x_i / p"),
             ("c2/p/x", "1.116 / p / x_i"),
             ("1/p/x", "1.0 / p / x_i"),
