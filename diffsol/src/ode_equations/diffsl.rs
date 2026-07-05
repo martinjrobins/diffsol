@@ -2425,4 +2425,111 @@ mod tests {
         assert!(matches!(err, DiffsolError::Other(_)));
         assert!(err.to_string().contains("scalar type mismatch"));
     }
+
+    /// Regression test: forward sens and adjoint sens must agree for DAEs
+    /// where the algebraic constraint depends on the parameter.
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn test_adjoint_fwd_sens_consistency_algebraic() {
+        use crate::FaerSparseMat;
+        use crate::FaerSparseLU;
+        use crate::FaerVec;
+        use crate::ode_solver::adjoint::AdjointOdeSolverMethod;
+        use crate::ode_solver::sensitivities::SensitivitiesOdeSolverMethod;
+        use crate::ode_solver::state::OdeSolverState;
+        use crate::ode_solver::method::OdeSolverMethod;
+        use crate::matrix::DenseMatrix;
+        use crate::matrix::MatrixCommon;
+        use crate::Op;
+
+        type M = FaerSparseMat<f64>;
+        type LS = FaerSparseLU<f64>;
+        type CG = crate::LlvmModule;
+
+        let t_vals = [0.0, 0.5, 1.0, 1.5, 2.0];
+        let p_val = 0.72;
+
+        for (name, alg_expr) in [
+            ("x/p", "x_i / p"),
+            ("c2/p/x", "1.116 / p / x_i"),
+            ("1/p/x", "1.0 / p / x_i"),
+        ] {
+            let code = format!(
+                r#"
+                in {{ p = {p_val} }}
+                c0_i {{ (0:1): 1.0 }}
+                c1_i {{ (0:1): 0.7 }}
+                c2_i {{ (0:1): 1.116 }}
+                u_i {{ x = c0_i, v = c1_i }}
+                dudt_i {{ dxdt = 0, dvdt = 0 }}
+                M_i {{ dxdt_i, 0 }}
+                F_i {{
+                  (-(p * x_i)),
+                  (v_i - ({alg_expr}))
+                }}
+                out_i {{ v_i }}
+            "#
+            );
+
+            // --- Forward sensitivity ---
+            let problem_fs = OdeBuilder::<M>::new()
+                .p([p_val])
+                .rtol(1e-6)
+                .atol([1e-6, 1e-6])
+                .build_from_diffsl::<CG>(&code)
+                .unwrap();
+            let mut fs_solver = problem_fs.bdf_sens::<LS>().unwrap();
+            let (_y, sens, _stop) =
+                fs_solver.solve_dense_sensitivities(&t_vals).unwrap();
+            // Sum sensitivities and store as a 1-element vector for assert_eq_norm
+            let nparams = problem_fs.eqn.nparams();
+            let mut fwd_vec = FaerVec::<f64>::zeros(nparams, problem_fs.eqn.context().clone());
+            for (p, sens_mat) in sens.iter().enumerate() {
+                let mut col_sum = 0.0;
+                let ncols = sens_mat.ncols();
+                for j in 0..ncols {
+                    let col: FaerVec<f64> = sens_mat.column(j).into_owned();
+                    col_sum += col.as_slice().iter().sum::<f64>();
+                }
+                fwd_vec.set_index(p, col_sum);
+            }
+
+            // --- Adjoint (discrete cost, integrate_out=false) ---
+            let problem_a = OdeBuilder::<M>::new()
+                .p([p_val])
+                .rtol(1e-6)
+                .atol([1e-6, 1e-6])
+                .param_rtol(1e-6)
+                .param_atol([1e-6])
+                .integrate_out(false)
+                .build_from_diffsl::<CG>(&code)
+                .unwrap();
+            let nout = problem_a.eqn.nout();
+            let nt = t_vals.len();
+            let ctx = problem_a.eqn.context();
+
+            let mut fwd_solver = problem_a.bdf::<LS>().unwrap();
+            let (checkpointer, _y, _stop_reason) =
+                fwd_solver.solve_dense_with_checkpointing(&t_vals, None).unwrap();
+
+            let adjoint_solver = problem_a
+                .bdf_solver_adjoint::<LS, _>(checkpointer, Some(fwd_solver), Some(nout))
+                .unwrap();
+
+            let dgdu_grid = <FaerVec<f64> as crate::DefaultDenseMatrix>::M::from_vec(
+                nout, nt, vec![1.0; nout * nt], ctx.clone(),
+            );
+            let (state, _) = adjoint_solver
+                .solve_adjoint_backwards_pass(&t_vals, &[&dgdu_grid])
+                .unwrap();
+
+            // Compare using assert_eq_norm (absolute + relative tolerance)
+            // sg[0] holds the parameter gradient vector (length nparams)
+            let atol = FaerVec::<f64>::from_element(nparams, 1e-6, ctx.clone());
+            let rtol = 1e-6;
+            // Factor 2000 accounts for accumulated integration error from using two
+            // independent solver configurations (bdf_sens vs bdf + checkpoint + adjoint).
+            state.as_ref().sg[0].assert_eq_norm(&fwd_vec, &atol, rtol, 2000.0);
+        }
+    }
 }

@@ -430,6 +430,7 @@ where
         // tmp_nparams = out
 
         let out = solver.augmented_eqn().unwrap().eqn().out();
+        let fwd_rhs = solver.augmented_eqn().unwrap().eqn().rhs();
         let sol_mdd_opt = self.mass_dd.as_ref().map(|m| &m.solver);
         let sol_jaa_opt = self.rhs_jac_aa.as_ref().map(|m| &m.solver);
         let state_mut = solver.state_mut();
@@ -475,6 +476,18 @@ where
                     &mut self.tmp_differential2,
                 );
                 self.tmp_differential2.scatter(&p.differential_indices, s_i);
+                // add parameter gradient contribution from algebraic constraint:
+                // sg += -F_{p,a}^T * (A_aa^{-1} * (-g_{y,a}^T * dgdu))
+                // = sens_transpose_mul_inplace(x, t, v) where v = tmp_algebraic at alg indices
+                self.tmp_nstates2.fill(M::T::zero());
+                self.tmp_algebraic.scatter(&p.algebraic_indices, &mut self.tmp_nstates2);
+                fwd_rhs.sens_transpose_mul_inplace(
+                    &self.tmp_nstates,
+                    t,
+                    &self.tmp_nstates2,
+                    &mut self.tmp_nparams,
+                );
+                sg_i.add_assign(&self.tmp_nparams);
             // just has out and mass, no algebraic indices (requires tmp_nstates2)
             } else if let (Some(out), Some(sol_mdd)) = (out.as_ref(), sol_mdd_opt) {
                 // calculate -dgdy^T = -u_y^T * dgdu^T (if u = y, then dgdy = dgdu)
@@ -512,7 +525,7 @@ where
                 self.tmp_differential2.gather(s_i, &p.differential_indices);
                 self.tmp_differential2.add_assign(&self.tmp_differential);
                 sol_jaa.solve_in_place(&mut self.tmp_algebraic)?;
-                let rhs_jac_ad = self.rhs_jac_aa.as_ref().unwrap().block.m();
+                let rhs_jac_ad = self.rhs_jac_ad.as_ref().unwrap().block.m();
                 rhs_jac_ad.gemv(
                     M::T::one(),
                     &self.tmp_algebraic,
