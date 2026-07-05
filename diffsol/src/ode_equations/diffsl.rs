@@ -2431,15 +2431,15 @@ mod tests {
     #[cfg(feature = "diffsl-llvm")]
     #[test]
     fn test_adjoint_fwd_sens_consistency_algebraic() {
-        use crate::FaerSparseMat;
-        use crate::FaerSparseLU;
-        use crate::FaerVec;
-        use crate::ode_solver::adjoint::AdjointOdeSolverMethod;
-        use crate::ode_solver::sensitivities::SensitivitiesOdeSolverMethod;
-        use crate::ode_solver::state::OdeSolverState;
-        use crate::ode_solver::method::OdeSolverMethod;
         use crate::matrix::DenseMatrix;
         use crate::matrix::MatrixCommon;
+        use crate::ode_solver::adjoint::AdjointOdeSolverMethod;
+        use crate::ode_solver::method::OdeSolverMethod;
+        use crate::ode_solver::sensitivities::SensitivitiesOdeSolverMethod;
+        use crate::ode_solver::state::OdeSolverState;
+        use crate::FaerSparseLU;
+        use crate::FaerSparseMat;
+        use crate::FaerVec;
         use crate::Op;
 
         type M = FaerSparseMat<f64>;
@@ -2479,8 +2479,7 @@ mod tests {
                 .build_from_diffsl::<CG>(&code)
                 .unwrap();
             let mut fs_solver = problem_fs.bdf_sens::<LS>().unwrap();
-            let (_y, sens, _stop) =
-                fs_solver.solve_dense_sensitivities(&t_vals).unwrap();
+            let (_y, sens, _stop) = fs_solver.solve_dense_sensitivities(&t_vals).unwrap();
             // Sum sensitivities and store as a 1-element vector for assert_eq_norm
             let nparams = problem_fs.eqn.nparams();
             let mut fwd_vec = FaerVec::<f64>::zeros(nparams, problem_fs.eqn.context().clone());
@@ -2509,15 +2508,19 @@ mod tests {
             let ctx = problem_a.eqn.context();
 
             let mut fwd_solver = problem_a.bdf::<LS>().unwrap();
-            let (checkpointer, _y, _stop_reason) =
-                fwd_solver.solve_dense_with_checkpointing(&t_vals, None).unwrap();
+            let (checkpointer, _y, _stop_reason) = fwd_solver
+                .solve_dense_with_checkpointing(&t_vals, None)
+                .unwrap();
 
             let adjoint_solver = problem_a
                 .bdf_solver_adjoint::<LS, _>(checkpointer, Some(fwd_solver), Some(nout))
                 .unwrap();
 
             let dgdu_grid = <FaerVec<f64> as crate::DefaultDenseMatrix>::M::from_vec(
-                nout, nt, vec![1.0; nout * nt], ctx.clone(),
+                nout,
+                nt,
+                vec![1.0; nout * nt],
+                ctx.clone(),
             );
             let (state, _) = adjoint_solver
                 .solve_adjoint_backwards_pass(&t_vals, &[&dgdu_grid])

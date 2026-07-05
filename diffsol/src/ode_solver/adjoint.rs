@@ -277,6 +277,206 @@ struct PartitionInfo<I> {
     pub differential_indices: I,
 }
 
+/// Holds mutable borrows of the scratch buffers in [`IntegrateDeltaG`],
+/// for passing them into the discrete delta helper functions.
+struct DeltaGBuf<'a, M: Matrix> {
+    tmp_nstates: &'a M::V,
+    tmp_nstates2: &'a mut M::V,
+    tmp_differential: &'a mut M::V,
+    tmp_algebraic: &'a mut M::V,
+    tmp_differential2: &'a mut M::V,
+    tmp_nparams: &'a mut M::V,
+    tmp_nout: &'a mut M::V,
+}
+
+/// Discrete delta: output operator `g(y)`, mass matrix `M = diag(M_dd, 0)`,
+/// and algebraic indices.
+///
+/// Let `G_y = ∂g/∂y`, `G_p = ∂g/∂p`, and let `A = -F_y^T` be the adjoint
+/// Jacobian, partitioned by differential (`d`) and algebraic (`a`) indices:
+///
+/// ```text
+///     A = [A_dd  A_da]
+///         [A_ad  A_aa]
+/// ```
+///
+/// Given the discrete cost gradient `dgdu` at this evaluation time:
+///
+/// ```text
+/// v   = G_y^T · dgdu
+/// v_d, v_a = partition of v
+///
+/// λ_d^+ = λ_d^- + M_dd^{-1} · v_d - A_da · A_aa^{-1} · v_a
+/// sg^+  = sg^-  + G_p^T · dgdu + F_{p,a}^T · A_aa^{-1} · v_a
+/// ```
+#[allow(clippy::too_many_arguments)]
+fn apply_delta_g_out_mass_alg<M: Matrix, OutOp, RhsOp>(
+    buf: &mut DeltaGBuf<'_, M>,
+    s_i: &mut M::V,
+    sg_i: &mut M::V,
+    out: &OutOp,
+    fwd_rhs: &RhsOp,
+    p: &PartitionInfo<<M::V as Vector>::Index>,
+    rhs_jac_ad: &M,
+    sol_mdd: &impl LinearSolver<M>,
+    sol_jaa: &impl LinearSolver<M>,
+    t: M::T,
+) -> Result<(), DiffsolError>
+where
+    OutOp: NonLinearOpAdjoint<V = M::V, T = M::T, M = M>
+        + NonLinearOpSensAdjoint<V = M::V, T = M::T, M = M>,
+    RhsOp: NonLinearOpSensAdjoint<V = M::V, T = M::T, M = M>,
+{
+    // g_p contribution: sg -= -g_p^T * dgdu  =>  sg += g_p^T * dgdu
+    out.sens_transpose_mul_inplace(buf.tmp_nstates, t, buf.tmp_nout, buf.tmp_nparams);
+    sg_i.sub_assign(&*buf.tmp_nparams);
+
+    // -g_y^T * dgdu
+    out.jac_transpose_mul_inplace(buf.tmp_nstates, t, buf.tmp_nout, buf.tmp_nstates2);
+
+    // -M_dd^{-1} * g_y_d^T
+    buf.tmp_differential
+        .gather(buf.tmp_nstates2, &p.differential_indices);
+    buf.tmp_algebraic
+        .gather(buf.tmp_nstates2, &p.algebraic_indices);
+    sol_mdd.solve_in_place(buf.tmp_differential)?;
+
+    // differential update:  -M_dd^{-1}*g_y_d  +  A_da * A_aa^{-1} * (-g_y_a)
+    buf.tmp_differential2.gather(s_i, &p.differential_indices);
+    buf.tmp_differential2.sub_assign(&*buf.tmp_differential);
+
+    sol_jaa.solve_in_place(buf.tmp_algebraic)?;
+    rhs_jac_ad.gemv(
+        M::T::one(),
+        buf.tmp_algebraic,
+        M::T::one(),
+        buf.tmp_differential2,
+    );
+    buf.tmp_differential2.scatter(&p.differential_indices, s_i);
+
+    // parameter contribution from the algebraic constraint:
+    // sg += -F_{p,a}^T * A_aa^{-1} * (-g_{y,a}^T * dgdu)
+    buf.tmp_nstates2.fill(M::T::zero());
+    buf.tmp_algebraic
+        .scatter(&p.algebraic_indices, buf.tmp_nstates2);
+    fwd_rhs.sens_transpose_mul_inplace(buf.tmp_nstates, t, buf.tmp_nstates2, buf.tmp_nparams);
+    sg_i.add_assign(&*buf.tmp_nparams);
+    Ok(())
+}
+
+/// Discrete delta: output operator `g(y)` and mass matrix, no algebraic indices.
+///
+/// ```text
+/// v = G_y^T · dgdu
+///
+/// λ^+ = λ^- + M^{-1} · v
+/// sg^+ = sg^- + G_p^T · dgdu
+/// ```
+fn apply_delta_g_out_mass<M: Matrix, OutOp>(
+    buf: &mut DeltaGBuf<'_, M>,
+    s_i: &mut M::V,
+    sg_i: &mut M::V,
+    out: &OutOp,
+    sol_mdd: &impl LinearSolver<M>,
+    t: M::T,
+) -> Result<(), DiffsolError>
+where
+    OutOp: NonLinearOpAdjoint<V = M::V, T = M::T, M = M>
+        + NonLinearOpSensAdjoint<V = M::V, T = M::T, M = M>,
+{
+    out.sens_transpose_mul_inplace(buf.tmp_nstates, t, buf.tmp_nout, buf.tmp_nparams);
+    sg_i.sub_assign(&*buf.tmp_nparams);
+
+    out.jac_transpose_mul_inplace(buf.tmp_nstates, t, buf.tmp_nout, buf.tmp_nstates2);
+    sol_mdd.solve_in_place(buf.tmp_nstates2)?;
+    s_i.sub_assign(&*buf.tmp_nstates2);
+    Ok(())
+}
+
+/// Discrete delta: output operator `g(y)`, no mass matrix.
+///
+/// ```text
+/// v = G_y^T · dgdu
+///
+/// λ^+ = λ^- + v
+/// sg^+ = sg^- + G_p^T · dgdu
+/// ```
+fn apply_delta_g_out<M: Matrix, OutOp>(
+    buf: &mut DeltaGBuf<'_, M>,
+    s_i: &mut M::V,
+    sg_i: &mut M::V,
+    out: &OutOp,
+    t: M::T,
+) where
+    OutOp: NonLinearOpAdjoint<V = M::V, T = M::T, M = M>
+        + NonLinearOpSensAdjoint<V = M::V, T = M::T, M = M>,
+{
+    out.sens_transpose_mul_inplace(buf.tmp_nstates, t, buf.tmp_nout, buf.tmp_nparams);
+    sg_i.sub_assign(&*buf.tmp_nparams);
+
+    out.jac_transpose_mul_inplace(buf.tmp_nstates, t, buf.tmp_nout, buf.tmp_nstates2);
+    s_i.sub_assign(&*buf.tmp_nstates2);
+}
+
+/// Discrete delta: no output operator, mass matrix and algebraic indices.
+///
+/// Without an output function, `dgdu` is applied directly to the adjoint state.
+/// Let `A = -F_y^T` be the adjoint Jacobian, partitioned `A_dd, A_da, A_ad, A_aa`.
+///
+/// ```text
+/// λ_d^+ = λ_d^- + M_dd^{-1} · dgdu_d + A_da · A_aa^{-1} · dgdu_a
+/// ```
+fn apply_delta_g_no_out_mass_alg<M: Matrix>(
+    buf: &mut DeltaGBuf<'_, M>,
+    s_i: &mut M::V,
+    p: &PartitionInfo<<M::V as Vector>::Index>,
+    rhs_jac_ad: &M,
+    sol_mdd: &impl LinearSolver<M>,
+    sol_jaa: &impl LinearSolver<M>,
+) -> Result<(), DiffsolError> {
+    buf.tmp_differential
+        .gather(buf.tmp_nout, &p.differential_indices);
+    buf.tmp_algebraic.gather(buf.tmp_nout, &p.algebraic_indices);
+
+    sol_mdd.solve_in_place(buf.tmp_differential)?;
+
+    buf.tmp_differential2.gather(s_i, &p.differential_indices);
+    buf.tmp_differential2.add_assign(&*buf.tmp_differential);
+    sol_jaa.solve_in_place(buf.tmp_algebraic)?;
+    rhs_jac_ad.gemv(
+        M::T::one(),
+        buf.tmp_algebraic,
+        M::T::one(),
+        buf.tmp_differential2,
+    );
+    buf.tmp_differential2.scatter(&p.differential_indices, s_i);
+    Ok(())
+}
+
+/// Discrete delta: no output operator, mass matrix, no algebraic indices.
+///
+/// ```text
+/// λ^+ = λ^- + M^{-1} · dgdu
+/// ```
+fn apply_delta_g_no_out_mass<M: Matrix>(
+    buf: &mut DeltaGBuf<'_, M>,
+    s_i: &mut M::V,
+    sol_mdd: &impl LinearSolver<M>,
+) -> Result<(), DiffsolError> {
+    sol_mdd.solve_in_place(buf.tmp_nout)?;
+    s_i.add_assign(&*buf.tmp_nout);
+    Ok(())
+}
+
+/// Discrete delta: no output operator, no mass matrix.
+///
+/// ```text
+/// λ^+ = λ^- + dgdu
+/// ```
+fn apply_delta_g_no_out<M: Matrix>(buf: &DeltaGBuf<'_, M>, s_i: &mut M::V) {
+    s_i.add_assign(&*buf.tmp_nout);
+}
+
 struct IntegrateDeltaG<M: Matrix, LS: LinearSolver<M>> {
     pub rhs_jac_aa: Option<BlockInfoSol<M, LS>>,
     pub rhs_jac_ad: Option<BlockInfo<M>>,
@@ -431,8 +631,6 @@ where
 
         let out = solver.augmented_eqn().unwrap().eqn().out();
         let fwd_rhs = solver.augmented_eqn().unwrap().eqn().rhs();
-        let sol_mdd_opt = self.mass_dd.as_ref().map(|m| &m.solver);
-        let sol_jaa_opt = self.rhs_jac_aa.as_ref().map(|m| &m.solver);
         let state_mut = solver.state_mut();
         for ((s_i, sg_i), dgdu) in state_mut
             .s
@@ -440,148 +638,43 @@ where
             .zip(state_mut.sg.iter_mut())
             .zip(dgdus)
         {
-            // start from dgdu^T, where u is the output of the model
             self.tmp_nout.copy_from_view(&dgdu);
 
-            // has out, mass and algebraic indices (requires tmp_nstates2, tmp_differential2, tmp_differential, tmp_algebraic
+            let mut buf = DeltaGBuf {
+                tmp_nstates: &self.tmp_nstates,
+                tmp_nstates2: &mut self.tmp_nstates2,
+                tmp_differential: &mut self.tmp_differential,
+                tmp_algebraic: &mut self.tmp_algebraic,
+                tmp_differential2: &mut self.tmp_differential2,
+                tmp_nparams: &mut self.tmp_nparams,
+                tmp_nout: &mut self.tmp_nout,
+            };
+            let sol_mdd_opt = self.mass_dd.as_ref().map(|m| &m.solver);
+            let sol_jaa_opt = self.rhs_jac_aa.as_ref().map(|m| &m.solver);
+
             if let (Some(out), Some(sol_mdd), Some(sol_jaa)) =
                 (out.as_ref(), sol_mdd_opt, sol_jaa_opt)
             {
                 let p = self.partition.as_ref().unwrap();
-                // calculate -dgdy^T = -u_y^T * dgdu^T (if u = y, then dgdy = dgdu)
-                out.jac_transpose_mul_inplace(
-                    &self.tmp_nstates,
-                    t,
-                    &self.tmp_nout,
-                    &mut self.tmp_nstates2,
-                );
-
-                // calculate -M_dd^-1 * dgdy_d^T (if M = I, then dgdy = dgdu)
-                self.tmp_differential
-                    .gather(&self.tmp_nstates2, &p.differential_indices);
-                self.tmp_algebraic
-                    .gather(&self.tmp_nstates2, &p.algebraic_indices);
-                sol_mdd.solve_in_place(&mut self.tmp_differential)?;
-
-                // add -f*_y^d (f*_y^a)^{-1} g*_y^a + M_dd^-1 g*_y^d to differential part of s
-                self.tmp_differential2.gather(s_i, &p.differential_indices);
-                self.tmp_differential2.sub_assign(&self.tmp_differential);
-
-                sol_jaa.solve_in_place(&mut self.tmp_algebraic)?;
                 let rhs_jac_ad = self.rhs_jac_ad.as_ref().unwrap().block.m();
-                rhs_jac_ad.gemv(
-                    M::T::one(),
-                    &self.tmp_algebraic,
-                    M::T::one(),
-                    &mut self.tmp_differential2,
-                );
-                self.tmp_differential2.scatter(&p.differential_indices, s_i);
-                // add parameter gradient contribution from algebraic constraint:
-                // sg += -F_{p,a}^T * (A_aa^{-1} * (-g_{y,a}^T * dgdu))
-                // = sens_transpose_mul_inplace(x, t, v) where v = tmp_algebraic at alg indices
-                self.tmp_nstates2.fill(M::T::zero());
-                self.tmp_algebraic.scatter(&p.algebraic_indices, &mut self.tmp_nstates2);
-                fwd_rhs.sens_transpose_mul_inplace(
-                    &self.tmp_nstates,
-                    t,
-                    &self.tmp_nstates2,
-                    &mut self.tmp_nparams,
-                );
-                sg_i.add_assign(&self.tmp_nparams);
-            // just has out and mass, no algebraic indices (requires tmp_nstates2)
+                apply_delta_g_out_mass_alg(
+                    &mut buf, s_i, sg_i, out, &fwd_rhs, p, rhs_jac_ad, sol_mdd, sol_jaa, t,
+                )?;
             } else if let (Some(out), Some(sol_mdd)) = (out.as_ref(), sol_mdd_opt) {
-                // calculate -dgdy^T = -u_y^T * dgdu^T (if u = y, then dgdy = dgdu)
-                out.jac_transpose_mul_inplace(
-                    &self.tmp_nstates,
-                    t,
-                    &self.tmp_nout,
-                    &mut self.tmp_nstates2,
-                );
-                // calculate -M_dd^-1 * dgdy^T (if M = I, then dgdy = dgdu)
-                sol_mdd.solve_in_place(&mut self.tmp_nstates2)?;
-                s_i.sub_assign(&self.tmp_nstates2);
-            // just has out, no mass (requires tmp_nstates2)
+                apply_delta_g_out_mass(&mut buf, s_i, sg_i, out, sol_mdd, t)?;
             } else if let Some(out) = out.as_ref() {
-                // calculate -dgdy^T = -u_y^T * dgdu^T (if u = y, then dgdy = dgdu)
-                out.jac_transpose_mul_inplace(
-                    &self.tmp_nstates,
-                    t,
-                    &self.tmp_nout,
-                    &mut self.tmp_nstates2,
-                );
-                s_i.sub_assign(&self.tmp_nstates2);
-            // no out, has mass and algebraic indices (requires tmp_differential, tmp_algebraic, tmp_differential2)
+                apply_delta_g_out(&mut buf, s_i, sg_i, out, t);
             } else if let (Some(sol_mdd), Some(sol_jaa)) = (sol_mdd_opt, sol_jaa_opt) {
                 let p = self.partition.as_ref().unwrap();
-                self.tmp_differential
-                    .gather(&self.tmp_nout, &p.differential_indices);
-                self.tmp_algebraic
-                    .gather(&self.tmp_nout, &p.algebraic_indices);
-
-                // calculate M_dd^-1 * dgdy^T (if M = I, then dgdy = dgdu)
-                sol_mdd.solve_in_place(&mut self.tmp_differential)?;
-
-                // add -f*_y^d (f*_y^a)^{-1} g*_y^a + M_dd^-1 g*_y^d to differential part of s
-                self.tmp_differential2.gather(s_i, &p.differential_indices);
-                self.tmp_differential2.add_assign(&self.tmp_differential);
-                sol_jaa.solve_in_place(&mut self.tmp_algebraic)?;
                 let rhs_jac_ad = self.rhs_jac_ad.as_ref().unwrap().block.m();
-                rhs_jac_ad.gemv(
-                    M::T::one(),
-                    &self.tmp_algebraic,
-                    M::T::one(),
-                    &mut self.tmp_differential2,
-                );
-                self.tmp_differential2.scatter(&p.differential_indices, s_i);
-            // no out, has mass, no algebraic indices
+                apply_delta_g_no_out_mass_alg(&mut buf, s_i, p, rhs_jac_ad, sol_mdd, sol_jaa)?;
             } else if let Some(sol_mdd) = sol_mdd_opt {
-                // calculate M_dd^-1 * dgdy^T (if M = I, then dgdy = dgdu)
-                sol_mdd.solve_in_place(&mut self.tmp_nout)?;
-                s_i.add_assign(&self.tmp_nout);
-            // no out, no mass
+                apply_delta_g_no_out_mass(&mut buf, s_i, sol_mdd)?;
             } else {
-                // add dgdy^T to s
-                s_i.add_assign(&self.tmp_nout);
-            }
-
-            // add -g_p^T(x, t) to sg if there is an output function (requires tmp_nparams)
-            // g_p = g_u^T * u_y^T * y_p^T
-            // g_p^T =  u_p^T * g_u^T (u is the output of the model, so u_p^T is the sens_tranpose)
-            if let Some(out) = out.as_ref() {
-                out.sens_transpose_mul_inplace(
-                    &self.tmp_nstates,
-                    t,
-                    &self.tmp_nout,
-                    &mut self.tmp_nparams,
-                );
-                sg_i.sub_assign(&self.tmp_nparams);
+                apply_delta_g_no_out(&buf, s_i);
             }
         }
 
-        // we have a consistent s_i and sg_i now, calculate ds/dt
-        // ds_d = Mdd^{-1} f(s,t)
-        // ds_a = 0
-        //let n = state_mut.s.len();
-        //for i in 0..n {
-        //    solver.augmented_eqn_mut().unwrap().set_index(i);
-        //    solver.augmented_eqn().unwrap().rhs().call_inplace(&solver.state().s[i], t, &mut self.tmp_nstates);
-
-        //    // mass and algebraic indices
-        //    if let (Some(sol_mdd), Some(p)) = (sol_mdd_opt, self.partition.as_ref()) {
-        //        self.tmp_differential
-        //            .gather(&self.tmp_nstates, &p.differential_indices);
-        //        sol_mdd.solve_in_place(&mut self.tmp_differential)?;
-        //        solver.state_mut().ds[i].assign_at_indices(&p.algebraic_indices, Eqn::T::zero());
-        //        self.tmp_differential.scatter(&p.differential_indices, &mut solver.state_mut().ds[i]);
-        //    // mass only
-        //    } else if let Some(sol_mdd) = sol_mdd_opt {
-        //        sol_mdd.solve_in_place(&mut self.tmp_nstates)?;
-        //        solver.state_mut().ds[i].copy_from(&self.tmp_nstates);
-        //    // no mass
-        //    } else {
-        //        solver.state_mut().ds[i].copy_from(&self.tmp_nstates);
-        //    }
-        //}
         Ok(())
     }
 }
