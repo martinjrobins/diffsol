@@ -2532,7 +2532,7 @@ mod tests {
             let rtol = 1e-6;
             // Factor 2000 accounts for accumulated integration error from using two
             // independent solver configurations (bdf_sens vs bdf + checkpoint + adjoint).
-            state.as_ref().sg[0].assert_eq_norm(&fwd_vec, &atol, rtol, 2000.0);
+            state.as_ref().sg[0].assert_eq_norm(&fwd_vec, &atol, rtol, 900.0);
         }
     }
 }
