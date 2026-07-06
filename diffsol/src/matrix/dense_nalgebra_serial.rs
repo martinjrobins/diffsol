@@ -230,6 +230,9 @@ impl<T: NalgebraScalar> Matrix for NalgebraMat<T> {
 
     fn gather(&mut self, other: &Self, indices: &<Self::V as Vector>::Index) {
         assert_eq!(indices.len(), self.nrows() * self.ncols());
+        if self.nrows() == 0 || self.ncols() == 0 {
+            return;
+        }
         let mut idx = indices.data.iter().peekable();
         for j in 0..self.ncols() {
             let other_col = other.data.column(*idx.peek().unwrap() / other.nrows());
