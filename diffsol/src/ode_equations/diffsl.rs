@@ -2324,6 +2324,7 @@ mod tests {
     /// Uses forward sensitivity via `bdf_sens` and adjoint via `bdf_solver_adjoint`
     /// with discrete cost (dgdu = ones, integrate_out=false). The total forward
     /// sensitivity sum is compared to sg[0] from the adjoint backward pass.
+    #[allow(dead_code)]
     fn test_adjoint_fwd_sens_consistency<
         CG: CodegenModuleJit + CodegenModuleCompile,
         M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
@@ -2415,6 +2416,7 @@ mod tests {
     }
 
     /// out + mass + algebraic (parameter in algebraic constraint)
+    #[allow(dead_code)]
     fn test_adjoint_fwd_sens_consistency_out_mass_alg<
         CG: CodegenModuleJit + CodegenModuleCompile,
         M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
@@ -2442,6 +2444,7 @@ mod tests {
     }
 
     /// out + mass, no algebraic
+    #[allow(dead_code)]
     fn test_adjoint_fwd_sens_consistency_out_mass<
         CG: CodegenModuleJit + CodegenModuleCompile,
         M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
@@ -2468,6 +2471,7 @@ mod tests {
     }
 
     /// out, no mass
+    #[allow(dead_code)]
     fn test_adjoint_fwd_sens_consistency_out<
         CG: CodegenModuleJit + CodegenModuleCompile,
         M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
@@ -2493,6 +2497,7 @@ mod tests {
     }
 
     /// no out, mass + algebraic
+    #[allow(dead_code)]
     fn test_adjoint_fwd_sens_consistency_no_out_mass_alg<
         CG: CodegenModuleJit + CodegenModuleCompile,
         M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
@@ -2519,6 +2524,7 @@ mod tests {
     }
 
     /// no out, mass, no algebraic
+    #[allow(dead_code)]
     fn test_adjoint_fwd_sens_consistency_no_out_mass<
         CG: CodegenModuleJit + CodegenModuleCompile,
         M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
@@ -2544,6 +2550,7 @@ mod tests {
     }
 
     /// no out, no mass
+    #[allow(dead_code)]
     fn test_adjoint_fwd_sens_consistency_no_out<
         CG: CodegenModuleJit + CodegenModuleCompile,
         M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
@@ -2569,6 +2576,7 @@ mod tests {
 
     /// Algebraic-only output, parameter only in differential equation.
     /// Tests `out { z }` where z is an algebraic state variable.
+    #[allow(dead_code)]
     fn test_adjoint_fwd_sens_consistency_alg_output<
         CG: CodegenModuleJit + CodegenModuleCompile,
         M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
@@ -2592,6 +2600,7 @@ mod tests {
     /// out + mass + algebraic, output on differential state.
     /// Tests the full `v_d - A_da * A_aa^{-1} * v_a` accumulation
     /// where both terms are non-zero.
+    #[allow(dead_code)]
     fn test_adjoint_fwd_sens_consistency_out_mass_alg_diff<
         CG: CodegenModuleJit + CodegenModuleCompile,
         M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
@@ -2620,6 +2629,7 @@ mod tests {
 
     /// out + mass + algebraic, parameter appears in output function.
     /// Tests non-zero `G_p^T · dgdu` contribution.
+    #[allow(dead_code)]
     fn test_adjoint_fwd_sens_consistency_out_mass_alg_param_out<
         CG: CodegenModuleJit + CodegenModuleCompile,
         M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,

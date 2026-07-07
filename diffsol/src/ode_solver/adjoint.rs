@@ -428,6 +428,7 @@ fn apply_delta_g_out<M: Matrix, OutOp>(
 /// λ_d^+ = λ_d^- + M_dd^{-1} · (dgdu_d - A_da · A_aa^{-1} · dgdu_a)
 /// sg^+  = sg^-  + F_{p,a}^T · A_aa^{-1} · dgdu_a
 /// ```
+#[allow(clippy::too_many_arguments)]
 fn apply_delta_g_no_out_mass_alg<M: Matrix, RhsOp>(
     buf: &mut DeltaGBuf<'_, M>,
     s_i: &mut M::V,
