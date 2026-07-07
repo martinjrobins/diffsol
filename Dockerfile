@@ -42,5 +42,4 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=builder /usr/local/bin/ode_solvers_ci /usr/local/bin/
 
-ENTRYPOINT ["ode_solvers_ci"]
-CMD ["--bench"]
+CMD ["ode_solvers_ci", "--bench"]

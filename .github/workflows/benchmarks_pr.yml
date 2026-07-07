@@ -38,4 +38,4 @@ jobs:
             --error-on-alert \
             --adapter rust_criterion \
             --github-actions '${{ secrets.GITHUB_TOKEN }}' \
-            "cargo bench --bench ode_solvers_ci"
+            "ode_solvers_ci --bench"
