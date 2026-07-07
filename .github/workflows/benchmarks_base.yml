@@ -38,4 +38,4 @@ jobs:
             --threshold-upper-boundary 0.99 \
             --thresholds-reset \
             --github-actions '${{ secrets.GITHUB_TOKEN }}' \
-            "cargo bench --bench ode_solvers_ci"
+            "ode_solvers_ci --bench"
