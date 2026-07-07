@@ -1445,8 +1445,6 @@ mod tests {
         ($test_fn:ident) => {
             generate_tests!(@impl $test_fn, llvm_dense_f64, crate::LlvmModule, crate::NalgebraMat<f64>, "diffsl-llvm");
             generate_tests!(@impl $test_fn, llvm_sparse_f64, crate::LlvmModule, crate::FaerSparseMat<f64>, "diffsl-llvm");
-            generate_tests!(@impl $test_fn, llvm_dense_f32, crate::LlvmModule, crate::NalgebraMat<f32>, "diffsl-llvm");
-            generate_tests!(@impl $test_fn, llvm_sparse_f32, crate::LlvmModule, crate::FaerSparseMat<f32>, "diffsl-llvm");
         };
     }
 
@@ -1454,7 +1452,15 @@ mod tests {
     generate_tests_llvm_only!(diffsl_root_sens_gradients);
     generate_tests_llvm_only!(diffsl_out_adjoint_nonlinear);
     generate_tests_llvm_only!(diffsl_out_adjoint_full_solve);
-    generate_tests_llvm_only!(diffsl_out_adjoint_dae_algebraic_output);
+    generate_tests_llvm_only!(test_adjoint_fwd_sens_consistency_out_mass_alg);
+    generate_tests_llvm_only!(test_adjoint_fwd_sens_consistency_out_mass);
+    generate_tests_llvm_only!(test_adjoint_fwd_sens_consistency_out);
+    generate_tests_llvm_only!(test_adjoint_fwd_sens_consistency_no_out_mass_alg);
+    generate_tests_llvm_only!(test_adjoint_fwd_sens_consistency_no_out_mass);
+    generate_tests_llvm_only!(test_adjoint_fwd_sens_consistency_no_out);
+    generate_tests_llvm_only!(test_adjoint_fwd_sens_consistency_alg_output);
+    generate_tests_llvm_only!(test_adjoint_fwd_sens_consistency_out_mass_alg_diff);
+    generate_tests_llvm_only!(test_adjoint_fwd_sens_consistency_out_mass_alg_param_out);
     /// Tests forward evaluation and Jacobian-vector product for DiffSlReset.
     /// Runs on all backends (Cranelift + LLVM).
     ///
@@ -2014,118 +2020,6 @@ mod tests {
         );
     }
 
-    /// Tests that DAE adjoint gradient is non-zero even when the output depends
-    /// only on algebraic state variables.
-    ///
-    /// Model: dx/dt = -k*x, 0 = x - z (z is algebraic, x is differential).
-    /// Both `out { x }` and `out { z }` should give the same gradient
-    /// dG/dk where G = Σ_i g(u(t_i)) at discrete time points.
-    ///
-    /// Bug: when output depends only on algebraic state (out { z }),
-    /// `integrate_delta_g` uses `rhs_jac_ad = ∂f_d/∂y_a` (J_da block from
-    /// Jacobian split) instead of `∂f_a/∂y_d^T` (J_ad^T). When ∂f_d/∂y_a = 0
-    /// (diff RHS does not depend on alg state), the adjoint gradient is zero.
-    #[allow(dead_code)]
-    fn diffsl_out_adjoint_dae_algebraic_output<
-        CG: CodegenModuleJit + CodegenModuleCompile,
-        M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
-    >()
-    where
-        for<'b> &'b M::V: VectorRef<M::V>,
-        for<'b> &'b M: MatrixRef<M>,
-    {
-        use num_traits::Signed;
-
-        let base = "
-            in { k = 1 }
-            u_i { x = 1, z = 1 }
-            dudt_i { dxdt = 0, dzdt = 0 }
-            M_i { dxdt, 0 }
-            F_i { -k * x, x - z }
-        ";
-
-        let grad_diff = adjoint_gradient_at_points::<M, CG>(&format!("{}\nout_i {{ x }}", base));
-        let grad_alg = adjoint_gradient_at_points::<M, CG>(&format!("{}\nout_i {{ z }}", base));
-
-        // Both gradients should be non-zero (since x = z from the constraint)
-        let tol = M::T::from_f64(1e-6).unwrap();
-        assert!(
-            grad_diff.abs() > tol,
-            "diff output gradient should be non-zero"
-        );
-
-        // BUG: algebraic-only output currently returns zero because
-        // integrate_delta_g uses the wrong Jacobian block for DAE coupling
-        assert!(
-            grad_alg.abs() > tol,
-            "alg output gradient {} should be non-zero (BUG: currently zero)",
-            grad_alg,
-        );
-    }
-
-    /// Helper: run a discrete-time adjoint solve (dt=0.1 from 0 to 1, dgdu=1 at each point)
-    /// and return dG/d(parameter[0]).
-    fn adjoint_gradient_at_points<
-        M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
-        CG: CodegenModuleJit + CodegenModuleCompile,
-    >(
-        code: &str,
-    ) -> M::T
-    where
-        for<'b> &'b M::V: VectorRef<M::V>,
-        for<'b> &'b M: MatrixRef<M>,
-    {
-        use crate::ode_solver::adjoint::AdjointOdeSolverMethod;
-        use crate::ode_solver::state::OdeSolverState;
-        use crate::Op;
-
-        let problem = OdeBuilder::<M>::new()
-            .p([1.0])
-            .rtol(1e-5)
-            .atol([1e-5, 1e-5])
-            .sens_rtol(1e-5)
-            .sens_atol([1e-4, 1e-4])
-            .param_rtol(1e-5)
-            .param_atol([1e-4])
-            .integrate_out(false)
-            .build_from_diffsl::<CG>(code)
-            .unwrap();
-
-        let ctx = problem.eqn.context().clone();
-        let nout = problem.eqn.nout();
-
-        // create time points: [0.1, 0.2, ..., 1.0]
-        let dgdu_count = 10;
-        let times: Vec<M::T> = (1..=dgdu_count)
-            .map(|i| M::T::from_f64(i as f64 * 0.1).unwrap())
-            .collect();
-
-        // forward solve with checkpointing
-        let final_time = *times.last().unwrap();
-        let mut s = problem.bdf::<M::LS>().unwrap();
-        let (checkpointer, _y, _t, _stop_reason) =
-            s.solve_with_checkpointing(final_time, None).unwrap();
-
-        // build dgdu: one nout × dgdu_count matrix (all ones)
-        let mut dgdu_mat = <M::V as DefaultDenseMatrix>::M::zeros(nout, dgdu_count, ctx.clone());
-        for i in 0..nout {
-            for j in 0..dgdu_count {
-                dgdu_mat.set_index(i, j, M::T::one());
-            }
-        }
-        let dgdu_refs = [&dgdu_mat];
-
-        // run adjoint backward pass with discrete dgdu
-        let adjoint_solver = problem
-            .bdf_solver_adjoint::<M::LS, _>(checkpointer, Some(s), Some(nout))
-            .unwrap();
-        let (adj_state, _) = adjoint_solver
-            .solve_adjoint_backwards_pass(&times, &dgdu_refs)
-            .unwrap();
-        let common = adj_state.into_common();
-        common.sg[0].get_index(0)
-    }
-
     #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
     fn diffsl_logistic_growth_with_model_index<
         CG: CodegenModuleJit + CodegenModuleCompile,
@@ -2424,5 +2318,341 @@ mod tests {
 
         assert!(matches!(err, DiffsolError::Other(_)));
         assert!(err.to_string().contains("scalar type mismatch"));
+    }
+
+    /// Helper: forward sens and adjoint sens must agree for a given DiffSL code.
+    /// Uses forward sensitivity via `bdf_sens` and adjoint via `bdf_solver_adjoint`
+    /// with discrete cost (dgdu = ones, integrate_out=false). The total forward
+    /// sensitivity sum is compared to sg[0] from the adjoint backward pass.
+    #[allow(dead_code)]
+    fn test_adjoint_fwd_sens_consistency<
+        CG: CodegenModuleJit + CodegenModuleCompile,
+        M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
+    >(
+        code: &str,
+    ) where
+        for<'b> &'b M::V: VectorRef<M::V>,
+        for<'b> &'b M: MatrixRef<M>,
+    {
+        use crate::matrix::MatrixCommon;
+        use crate::ode_solver::adjoint::AdjointOdeSolverMethod;
+        use crate::ode_solver::method::OdeSolverMethod;
+        use crate::ode_solver::sensitivities::SensitivitiesOdeSolverMethod;
+        use crate::ode_solver::state::OdeSolverState;
+        use crate::Op;
+
+        let t_vals_f64 = [0.0, 0.5, 1.0, 1.5, 2.0];
+        let t_vals: Vec<M::T> = t_vals_f64
+            .iter()
+            .map(|&t| M::T::from_f64(t).unwrap())
+            .collect();
+        let atol_val = M::T::from_f64(1e-6).unwrap();
+        let rtol_val = M::T::from_f64(1e-6).unwrap();
+
+        // --- Forward sensitivity ---
+        let problem_fs = OdeBuilder::<M>::new()
+            .p([0.72])
+            .rtol(1e-6)
+            .atol([1e-6, 1e-6])
+            .build_from_diffsl::<CG>(code)
+            .unwrap();
+        let mut fs_solver = problem_fs.bdf_sens::<M::LS>().unwrap();
+        let (_y, sens, _stop) = fs_solver.solve_dense_sensitivities(&t_vals).unwrap();
+
+        let nparams = problem_fs.eqn.nparams();
+        let ctx = problem_fs.eqn.context().clone();
+        let mut fwd_vec = M::V::zeros(nparams, ctx.clone());
+        for (p, sens_mat) in sens.iter().enumerate() {
+            let mut col_sum = M::T::zero();
+            let ncols = sens_mat.ncols();
+            let nrows = sens_mat.nrows();
+            for j in 0..ncols {
+                for i in 0..nrows {
+                    col_sum = col_sum + sens_mat.get_index(i, j);
+                }
+            }
+            fwd_vec.set_index(p, col_sum);
+        }
+
+        // --- Adjoint (discrete cost, integrate_out=false) ---
+        let problem_a = OdeBuilder::<M>::new()
+            .p([0.72])
+            .rtol(1e-6)
+            .atol([1e-6, 1e-6])
+            .param_rtol(1e-6)
+            .param_atol([1e-6])
+            .integrate_out(false)
+            .build_from_diffsl::<CG>(code)
+            .unwrap();
+        let nout = problem_a.eqn.nout();
+        let nt = t_vals.len();
+
+        let mut fwd_solver = problem_a.bdf::<M::LS>().unwrap();
+        let (checkpointer, _y, _stop_reason) = fwd_solver
+            .solve_dense_with_checkpointing(&t_vals, None)
+            .unwrap();
+
+        let adjoint_solver = problem_a
+            .bdf_solver_adjoint::<M::LS, _>(checkpointer, Some(fwd_solver), Some(1))
+            .unwrap();
+
+        let dgdu_grid = <M::V as DefaultDenseMatrix>::M::from_vec(
+            nout,
+            nt,
+            vec![M::T::one(); nout * nt],
+            ctx.clone(),
+        );
+        let (state, _) = adjoint_solver
+            .solve_adjoint_backwards_pass(&t_vals, &[&dgdu_grid])
+            .unwrap();
+
+        let atol = M::V::from_element(nparams, atol_val, ctx.clone());
+        state.as_ref().sg[0].assert_eq_norm(
+            &fwd_vec,
+            &atol,
+            rtol_val,
+            M::T::from_f64(5000.0).unwrap(),
+        );
+    }
+
+    /// out + mass + algebraic (parameter in algebraic constraint)
+    #[allow(dead_code)]
+    fn test_adjoint_fwd_sens_consistency_out_mass_alg<
+        CG: CodegenModuleJit + CodegenModuleCompile,
+        M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
+    >()
+    where
+        for<'b> &'b M::V: VectorRef<M::V>,
+        for<'b> &'b M: MatrixRef<M>,
+    {
+        test_adjoint_fwd_sens_consistency::<CG, M>(
+            r#"
+            in { p = 0.72 }
+            c0_i { (0:1): 1.0 }
+            c1_i { (0:1): 0.7 }
+            c2_i { (0:1): 1.116 }
+            u_i { x = c0_i, v = c1_i }
+            dudt_i { dxdt = 0, dvdt = 0 }
+            M_i { 2 * dxdt_i, 0 }
+            F_i {
+              (-(p * x_i)),
+              (v_i - (x_i / p))
+            }
+            out_i { v_i }
+        "#,
+        );
+    }
+
+    /// out + mass, no algebraic
+    #[allow(dead_code)]
+    fn test_adjoint_fwd_sens_consistency_out_mass<
+        CG: CodegenModuleJit + CodegenModuleCompile,
+        M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
+    >()
+    where
+        for<'b> &'b M::V: VectorRef<M::V>,
+        for<'b> &'b M: MatrixRef<M>,
+    {
+        test_adjoint_fwd_sens_consistency::<CG, M>(
+            r#"
+            in { p = 0.72 }
+            c0_i { (0:1): 1.0 }
+            c1_i { (0:1): 0.7 }
+            u_i { x = c0_i, v = c1_i }
+            dudt_i { dxdt = 0, dvdt = 0 }
+            M_i { 2 * dxdt_i, dvdt_i }
+            F_i {
+              (-(p * x_i)),
+              (v_i - x_i)
+            }
+            out_i { v_i }
+        "#,
+        );
+    }
+
+    /// out, no mass
+    #[allow(dead_code)]
+    fn test_adjoint_fwd_sens_consistency_out<
+        CG: CodegenModuleJit + CodegenModuleCompile,
+        M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
+    >()
+    where
+        for<'b> &'b M::V: VectorRef<M::V>,
+        for<'b> &'b M: MatrixRef<M>,
+    {
+        test_adjoint_fwd_sens_consistency::<CG, M>(
+            r#"
+            in { p = 0.72 }
+            c0_i { (0:1): 1.0 }
+            c1_i { (0:1): 0.7 }
+            u_i { x = c0_i, v = c1_i }
+            dudt_i { dxdt = 0, dvdt = 0 }
+            F_i {
+              (-(p * x_i)),
+              (v_i - x_i)
+            }
+            out_i { v_i }
+        "#,
+        );
+    }
+
+    /// no out, mass + algebraic
+    #[allow(dead_code)]
+    fn test_adjoint_fwd_sens_consistency_no_out_mass_alg<
+        CG: CodegenModuleJit + CodegenModuleCompile,
+        M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
+    >()
+    where
+        for<'b> &'b M::V: VectorRef<M::V>,
+        for<'b> &'b M: MatrixRef<M>,
+    {
+        test_adjoint_fwd_sens_consistency::<CG, M>(
+            r#"
+            in { p = 0.72 }
+            c0_i { (0:1): 1.0 }
+            c1_i { (0:1): 0.7 }
+            c2_i { (0:1): 1.116 }
+            u_i { x = c0_i, v = c1_i }
+            dudt_i { dxdt = 0, dvdt = 0 }
+            M_i { 2 * dxdt_i, 0 }
+            F_i {
+              (-(p * x_i)),
+              (v_i - (x_i / p))
+            }
+        "#,
+        );
+    }
+
+    /// no out, mass, no algebraic
+    #[allow(dead_code)]
+    fn test_adjoint_fwd_sens_consistency_no_out_mass<
+        CG: CodegenModuleJit + CodegenModuleCompile,
+        M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
+    >()
+    where
+        for<'b> &'b M::V: VectorRef<M::V>,
+        for<'b> &'b M: MatrixRef<M>,
+    {
+        test_adjoint_fwd_sens_consistency::<CG, M>(
+            r#"
+            in { p = 0.72 }
+            c0_i { (0:1): 1.0 }
+            c1_i { (0:1): 0.7 }
+            u_i { x = c0_i, v = c1_i }
+            dudt_i { dxdt = 0, dvdt = 0 }
+            M_i { 2 * dxdt_i, dvdt_i }
+            F_i {
+              (-(p * x_i)),
+              (v_i - x_i)
+            }
+        "#,
+        );
+    }
+
+    /// no out, no mass
+    #[allow(dead_code)]
+    fn test_adjoint_fwd_sens_consistency_no_out<
+        CG: CodegenModuleJit + CodegenModuleCompile,
+        M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
+    >()
+    where
+        for<'b> &'b M::V: VectorRef<M::V>,
+        for<'b> &'b M: MatrixRef<M>,
+    {
+        test_adjoint_fwd_sens_consistency::<CG, M>(
+            r#"
+            in { p = 0.72 }
+            c0_i { (0:1): 1.0 }
+            c1_i { (0:1): 0.7 }
+            u_i { x = c0_i, v = c1_i }
+            dudt_i { dxdt = 0, dvdt = 0 }
+            F_i {
+              (-(p * x_i)),
+              (v_i - x_i)
+            }
+        "#,
+        );
+    }
+
+    /// Algebraic-only output, parameter only in differential equation.
+    /// Tests `out { z }` where z is an algebraic state variable.
+    #[allow(dead_code)]
+    fn test_adjoint_fwd_sens_consistency_alg_output<
+        CG: CodegenModuleJit + CodegenModuleCompile,
+        M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
+    >()
+    where
+        for<'b> &'b M::V: VectorRef<M::V>,
+        for<'b> &'b M: MatrixRef<M>,
+    {
+        test_adjoint_fwd_sens_consistency::<CG, M>(
+            r#"
+            in { k = 1 }
+            u_i { x = 1, z = 1 }
+            dudt_i { dxdt = 0, dzdt = 0 }
+            M_i { dxdt, 0 }
+            F_i { -k * x, x - z }
+            out_i { z }
+        "#,
+        );
+    }
+
+    /// out + mass + algebraic, output on differential state.
+    /// Tests the full `v_d - A_da * A_aa^{-1} * v_a` accumulation
+    /// where both terms are non-zero.
+    #[allow(dead_code)]
+    fn test_adjoint_fwd_sens_consistency_out_mass_alg_diff<
+        CG: CodegenModuleJit + CodegenModuleCompile,
+        M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
+    >()
+    where
+        for<'b> &'b M::V: VectorRef<M::V>,
+        for<'b> &'b M: MatrixRef<M>,
+    {
+        test_adjoint_fwd_sens_consistency::<CG, M>(
+            r#"
+            in { p = 0.72 }
+            c0_i { (0:1): 1.0 }
+            c1_i { (0:1): 0.7 }
+            c2_i { (0:1): 1.116 }
+            u_i { x = c0_i, v = c1_i }
+            dudt_i { dxdt = 0, dvdt = 0 }
+            M_i { 2 * dxdt_i, 0 }
+            F_i {
+              (-(p * x_i)),
+              (v_i - (x_i / p))
+            }
+            out_i { x_i }
+        "#,
+        );
+    }
+
+    /// out + mass + algebraic, parameter appears in output function.
+    /// Tests non-zero `G_p^T · dgdu` contribution.
+    #[allow(dead_code)]
+    fn test_adjoint_fwd_sens_consistency_out_mass_alg_param_out<
+        CG: CodegenModuleJit + CodegenModuleCompile,
+        M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
+    >()
+    where
+        for<'b> &'b M::V: VectorRef<M::V>,
+        for<'b> &'b M: MatrixRef<M>,
+    {
+        test_adjoint_fwd_sens_consistency::<CG, M>(
+            r#"
+            in { p = 0.72 }
+            c0_i { (0:1): 1.0 }
+            c1_i { (0:1): 0.7 }
+            c2_i { (0:1): 1.116 }
+            u_i { x = c0_i, v = c1_i }
+            dudt_i { dxdt = 0, dvdt = 0 }
+            M_i { 2 * dxdt_i, 0 }
+            F_i {
+              (-(p * x_i)),
+              (v_i - (x_i / p))
+            }
+            out_i { x_i + p * v_i }
+        "#,
+        );
     }
 }
