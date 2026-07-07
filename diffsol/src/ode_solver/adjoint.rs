@@ -306,7 +306,7 @@ struct DeltaGBuf<'a, M: Matrix> {
 /// v   = G_y^T · dgdu
 /// v_d, v_a = partition of v
 ///
-/// λ_d^+ = λ_d^- + M_dd^{-1} · v_d - A_da · A_aa^{-1} · v_a
+/// λ_d^+ = λ_d^- + M_dd^{-1} · (v_d - A_da · A_aa^{-1} · v_a)
 /// sg^+  = sg^-  + G_p^T · dgdu + F_{p,a}^T · A_aa^{-1} · v_a
 /// ```
 #[allow(clippy::too_many_arguments)]
@@ -334,24 +334,25 @@ where
     // -g_y^T * dgdu
     out.jac_transpose_mul_inplace(buf.tmp_nstates, t, buf.tmp_nout, buf.tmp_nstates2);
 
-    // -M_dd^{-1} * g_y_d^T
+    // gather v_d and v_a from -g_y^T * dgdu
     buf.tmp_differential
         .gather(buf.tmp_nstates2, &p.differential_indices);
     buf.tmp_algebraic
         .gather(buf.tmp_nstates2, &p.algebraic_indices);
-    sol_mdd.solve_in_place(buf.tmp_differential)?;
 
-    // differential update:  -M_dd^{-1}*g_y_d  +  A_da * A_aa^{-1} * (-g_y_a)
-    buf.tmp_differential2.gather(s_i, &p.differential_indices);
-    buf.tmp_differential2.sub_assign(&*buf.tmp_differential);
-
+    // accumulate (v_d - A_da * A_aa^{-1} * v_a) in tmp_differential
     sol_jaa.solve_in_place(buf.tmp_algebraic)?;
     rhs_jac_ad.gemv(
         M::T::one(),
         buf.tmp_algebraic,
-        M::T::one(),
-        buf.tmp_differential2,
+        -M::T::one(),
+        buf.tmp_differential,
     );
+
+    // differential update: λ_d += M_dd^{-1} * (v_d - A_da * A_aa^{-1} * v_a)
+    sol_mdd.solve_in_place(buf.tmp_differential)?;
+    buf.tmp_differential2.gather(s_i, &p.differential_indices);
+    buf.tmp_differential2.add_assign(&*buf.tmp_differential);
     buf.tmp_differential2.scatter(&p.differential_indices, s_i);
 
     // parameter contribution from the algebraic constraint:
@@ -424,32 +425,49 @@ fn apply_delta_g_out<M: Matrix, OutOp>(
 /// Let `A = -F_y^T` be the adjoint Jacobian, partitioned `A_dd, A_da, A_ad, A_aa`.
 ///
 /// ```text
-/// λ_d^+ = λ_d^- + M_dd^{-1} · dgdu_d + A_da · A_aa^{-1} · dgdu_a
+/// λ_d^+ = λ_d^- + M_dd^{-1} · (dgdu_d - A_da · A_aa^{-1} · dgdu_a)
+/// sg^+  = sg^-  + F_{p,a}^T · A_aa^{-1} · dgdu_a
 /// ```
-fn apply_delta_g_no_out_mass_alg<M: Matrix>(
+fn apply_delta_g_no_out_mass_alg<M: Matrix, RhsOp>(
     buf: &mut DeltaGBuf<'_, M>,
     s_i: &mut M::V,
+    sg_i: &mut M::V,
     p: &PartitionInfo<<M::V as Vector>::Index>,
     rhs_jac_ad: &M,
+    fwd_rhs: &RhsOp,
     sol_mdd: &impl LinearSolver<M>,
     sol_jaa: &impl LinearSolver<M>,
-) -> Result<(), DiffsolError> {
+    t: M::T,
+) -> Result<(), DiffsolError>
+where
+    RhsOp: NonLinearOpSensAdjoint<V = M::V, T = M::T, M = M>,
+{
     buf.tmp_differential
         .gather(buf.tmp_nout, &p.differential_indices);
     buf.tmp_algebraic.gather(buf.tmp_nout, &p.algebraic_indices);
 
-    sol_mdd.solve_in_place(buf.tmp_differential)?;
-
-    buf.tmp_differential2.gather(s_i, &p.differential_indices);
-    buf.tmp_differential2.add_assign(&*buf.tmp_differential);
+    // accumulate (dgdu_d - A_da * A_aa^{-1} * dgdu_a) in tmp_differential
     sol_jaa.solve_in_place(buf.tmp_algebraic)?;
     rhs_jac_ad.gemv(
-        M::T::one(),
+        -M::T::one(),
         buf.tmp_algebraic,
         M::T::one(),
-        buf.tmp_differential2,
+        buf.tmp_differential,
     );
+
+    // differential update: λ_d += M_dd^{-1} * (dgdu_d - A_da * A_aa^{-1} * dgdu_a)
+    sol_mdd.solve_in_place(buf.tmp_differential)?;
+    buf.tmp_differential2.gather(s_i, &p.differential_indices);
+    buf.tmp_differential2.add_assign(&*buf.tmp_differential);
     buf.tmp_differential2.scatter(&p.differential_indices, s_i);
+
+    // parameter contribution from the algebraic constraint:
+    // sg += F_{p,a}^T * A_aa^{-1} * dgdu_a = sg - (-F_{p,a}^T * A_aa^{-1} * dgdu_a)
+    buf.tmp_nstates2.fill(M::T::zero());
+    buf.tmp_algebraic
+        .scatter(&p.algebraic_indices, buf.tmp_nstates2);
+    fwd_rhs.sens_transpose_mul_inplace(buf.tmp_nstates, t, buf.tmp_nstates2, buf.tmp_nparams);
+    sg_i.sub_assign(&*buf.tmp_nparams);
     Ok(())
 }
 
@@ -667,7 +685,9 @@ where
             } else if let (Some(sol_mdd), Some(sol_jaa)) = (sol_mdd_opt, sol_jaa_opt) {
                 let p = self.partition.as_ref().unwrap();
                 let rhs_jac_ad = self.rhs_jac_ad.as_ref().unwrap().block.m();
-                apply_delta_g_no_out_mass_alg(&mut buf, s_i, p, rhs_jac_ad, sol_mdd, sol_jaa)?;
+                apply_delta_g_no_out_mass_alg(
+                    &mut buf, s_i, sg_i, p, rhs_jac_ad, &fwd_rhs, sol_mdd, sol_jaa, t,
+                )?;
             } else if let Some(sol_mdd) = sol_mdd_opt {
                 apply_delta_g_no_out_mass(&mut buf, s_i, sol_mdd)?;
             } else {
