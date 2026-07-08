@@ -3,6 +3,8 @@
 //! Diffsol is a library for solving differential equations. It provides a simple interface to
 //! solve ODEs with optional mass matrices, where the user can provide the equations either as
 //! closures or via strings in a domain-specific language.
+
+#![cfg_attr(feature = "autodiff", feature(autodiff))]
 //!
 //! ## Solving ODEs
 //!
@@ -462,6 +464,10 @@ pub use op::{
     closure::Closure, closure_with_adjoint::ClosureWithAdjoint, constant_closure::ConstantClosure,
     constant_closure_with_adjoint::ConstantClosureWithAdjoint, linear_closure::LinearClosure,
     matrix::MatrixOp, unit::UnitCallable, BuilderOp, Op, ParameterisedOp,
+};
+#[cfg(feature = "autodiff")]
+pub use op::{
+    closure_autodiff::ClosureAutodiff, constant_closure_autodiff::ConstantClosureAutodiff,
 };
 use op::{
     closure_no_jac::ClosureNoJac, closure_with_sens::ClosureWithSens,
