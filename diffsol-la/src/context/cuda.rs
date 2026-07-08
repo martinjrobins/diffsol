@@ -9,11 +9,7 @@ use cudarc::{
     nvrtc::Ptx,
 };
 
-use crate::{
-    cuda_error,
-    error::{CudaError, DiffsolError},
-    ScalarCuda,
-};
+use crate::{cuda_error, error::LaError, ScalarCuda};
 
 static DEVICES: LazyLock<Mutex<CudaGlobalContext>> =
     LazyLock::new(|| Mutex::new(CudaGlobalContext::new()));
@@ -49,7 +45,7 @@ pub struct CudaContext {
 
 impl CudaContext {
     /// Compiles the PTX files for the given device.
-    fn compile_ptx(device: &Arc<CudaDevice>) -> Result<Arc<CudaModule>, DiffsolError> {
+    fn compile_ptx(device: &Arc<CudaDevice>) -> Result<Arc<CudaModule>, LaError> {
         let out_dir = env!("OUT_DIR");
         // module in diffsol.ptx
         let ptx_file = format!("{}/diffsol.ptx", out_dir);
@@ -74,7 +70,7 @@ impl CudaContext {
     /// Gets the device for the given ordinal. If the device is not already created, it creates a new one.
     pub fn get_device_and_module(
         ordinal: usize,
-    ) -> Result<(Arc<CudaDevice>, Arc<CudaModule>), DiffsolError> {
+    ) -> Result<(Arc<CudaDevice>, Arc<CudaModule>), LaError> {
         let mut devices = DEVICES.lock().unwrap();
         let (device, module) = match devices.get(ordinal) {
             Some(dev_mod) => dev_mod.clone(),
@@ -91,7 +87,7 @@ impl CudaContext {
     }
 
     /// Creates a new CudaContext with the given ordinal and creates a new non-default stream.
-    pub fn new_with_stream(ordinal: usize) -> Result<Self, DiffsolError> {
+    pub fn new_with_stream(ordinal: usize) -> Result<Self, LaError> {
         let (device, _module) = Self::get_device_and_module(ordinal)?;
         let stream = device
             .new_stream()
@@ -100,7 +96,7 @@ impl CudaContext {
     }
 
     /// Creates a new CudaContext with the given ordinal (uses default stream).
-    pub fn new(ordinal: usize) -> Result<Self, DiffsolError> {
+    pub fn new(ordinal: usize) -> Result<Self, LaError> {
         let (device, _module) = Self::get_device_and_module(ordinal)?;
         let stream = device.default_stream();
         Ok(Self { stream, nbatch: 1 })
@@ -138,7 +134,7 @@ impl crate::Context for CudaContext {
     fn nbatch(&self) -> usize {
         self.nbatch
     }
-    fn clone_with_nbatch(&self, nbatch: usize) -> Result<Self, DiffsolError> {
+    fn clone_with_nbatch(&self, nbatch: usize) -> Result<Self, LaError> {
         assert!(nbatch > 0, "nbatch must be > 0");
         Ok(Self {
             stream: self.stream.clone(),

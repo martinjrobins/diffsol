@@ -5,7 +5,7 @@ use num_traits::{One, Pow, Signed, Zero};
 use crate::error::NonLinearSolverError;
 use crate::Scalar;
 use crate::{
-    error::{DiffsolError, OdeSolverError},
+    error::DiffsolError,
     nonlinear_solver::{convergence::Convergence, NonLinearSolver},
     ode_solver_error, scale, AugmentedOdeEquations, AugmentedOdeEquationsImplicit, ConstantOp,
     Context, InitOp, LinearOp, LinearSolver, Matrix, NewtonNonlinearSolver, NonLinearOp,

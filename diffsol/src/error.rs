@@ -1,4 +1,4 @@
-use faer::sparse::CreationError;
+use diffsol_la::error::LaError;
 use thiserror::Error;
 
 /// Custom error type for Diffsol
@@ -6,42 +6,16 @@ use thiserror::Error;
 /// This error type is used to wrap all possible errors that can occur when using Diffsol
 #[derive(Error, Debug, Clone)]
 pub enum DiffsolError {
-    #[error("Linear solver error: {0}")]
-    LinearSolverError(#[from] LinearSolverError),
+    #[error("Linear algebra error: {0}")]
+    LaError(#[from] LaError),
     #[error("Non-linear solver error: {0}")]
     NonLinearSolverError(#[from] NonLinearSolverError),
     #[error("ODE solver error: {0}")]
     OdeSolverError(#[from] OdeSolverError),
-    #[error("Matrix error: {0}")]
-    MatrixError(#[from] MatrixError),
-    #[cfg(feature = "cuda")]
-    #[error("Cuda error: {0}")]
-    VectorError(#[from] CudaError),
     #[error("DiffSL Parser error: {0}")]
     DiffslParserError(String),
     #[error("DiffSL Compiler error: {0}")]
     DiffslCompilerError(String),
-    #[error("Error: {0}")]
-    Other(String),
-}
-
-/// Possible errors that can occur when solving a linear problem
-#[derive(Error, Debug, Clone)]
-pub enum LinearSolverError {
-    #[error("LU not initialized")]
-    LuNotInitialized,
-    #[error("LU solve failed")]
-    LuSolveFailed,
-    #[error("Linear solver not setup")]
-    LinearSolverNotSetup,
-    #[error("Linear solver matrix not square")]
-    LinearSolverMatrixNotSquare,
-    #[error("Linear solver matrix not compatible with vector")]
-    LinearSolverMatrixVectorNotCompatible,
-    #[error("KLU failed to analyze")]
-    KluFailedToAnalyze,
-    #[error("KLU failed to factorize")]
-    KluFailedToFactorize,
     #[error("Error: {0}")]
     Other(String),
 }
@@ -128,86 +102,29 @@ pub enum OdeSolverError {
     Other(String),
 }
 
-/// Possible errors for matrix operations
-#[derive(Error, Debug, Clone)]
-pub enum MatrixError {
-    #[error("Failed to create matrix from triplets: {0}")]
-    FailedToCreateMatrixFromTriplets(#[from] CreationError),
-    #[error("Cannot union matrices with different shapes")]
-    UnionIncompatibleShapes,
-    #[error("Cannot create a matrix with zero rows or columns")]
-    MatrixShapeError,
-    #[error("Index out of bounds")]
-    IndexOutOfBounds,
-    #[error("Error: {0}")]
-    Other(String),
-}
-
-#[cfg(feature = "cuda")]
-#[derive(Error, Debug, Clone)]
-pub enum CudaError {
-    #[error("Failed to allocate memory on GPU")]
-    CudaMemoryAllocationError,
-    #[error("Failed to initialize CUDA: {0}")]
-    CudaInitializationError(String),
-    #[error("Cuda error: {0}")]
-    Other(String),
-}
-
-#[cfg(feature = "cuda")]
-#[macro_export]
-macro_rules! cuda_error {
-    ($variant:ident) => {
-        DiffsolError::from(CudaError::$variant)
-    };
-    ($variant:ident, $($arg:tt)*) => {
-        DiffsolError::from(CudaError::$variant($($arg)*))
-    };
-}
-
-#[macro_export]
-macro_rules! linear_solver_error {
-    ($variant:ident) => {
-        DiffsolError::from(LinearSolverError::$variant)
-    };
-    ($variant:ident, $($arg:tt)*) => {
-        DiffsolError::from(LinearSolverError::$variant($($arg)*))
-    };
-}
-
 #[macro_export]
 macro_rules! non_linear_solver_error {
     ($variant:ident) => {
-        DiffsolError::from(NonLinearSolverError::$variant)
+        $crate::DiffsolError::from($crate::error::NonLinearSolverError::$variant)
     };
     ($variant:ident, $($arg:tt)*) => {
-        DiffsolError::from(NonLinearSolverError::$variant($($arg)*))
+        $crate::DiffsolError::from($crate::error::NonLinearSolverError::$variant($($arg)*))
     };
 }
 
 #[macro_export]
 macro_rules! ode_solver_error {
     ($variant:ident) => {
-        DiffsolError::from(OdeSolverError::$variant)
+        $crate::DiffsolError::from($crate::error::OdeSolverError::$variant)
     };
     ($variant:ident, $($arg:tt)*) => {
-        DiffsolError::from(OdeSolverError::$variant($($arg)*.to_string()))
-    };
-}
-
-#[macro_export]
-macro_rules! matrix_error {
-    ($variant:ident) => {
-        DiffsolError::from(MatrixError::$variant)
-    };
-    ($variant:ident, $($arg:tt)*) => {
-        DiffsolError::from(MatrixError::$variant($($arg)*))
+        $crate::DiffsolError::from($crate::error::OdeSolverError::$variant($($arg)*.to_string()))
     };
 }
 
 #[macro_export]
 macro_rules! other_error {
     ($msg:expr) => {
-        DiffsolError::Other($msg.to_string())
+        $crate::DiffsolError::Other($msg.to_string())
     };
 }

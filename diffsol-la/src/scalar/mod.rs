@@ -17,7 +17,7 @@ use crate::vector::VectorView;
 ///
 /// # Examples
 /// ```
-/// use diffsol::Scalar;
+/// use diffsol_la::Scalar;
 ///
 /// fn compute<T: Scalar>(x: T, y: T) -> T {
 ///     x * x + y

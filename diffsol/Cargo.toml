@@ -13,11 +13,11 @@ readme = "../README.md"
 
 [features]
 default = ["nalgebra", "faer"]
-faer = []
-nalgebra = []
-cuda = ["dep:cudarc"]
+faer = ["diffsol-la/faer"]
+nalgebra = ["diffsol-la/nalgebra"]
+cuda = ["diffsol-la/cuda"]
 sundials = ["suitesparse_sys", "bindgen", "cc"]
-suitesparse = ["suitesparse_sys"]
+suitesparse = ["suitesparse_sys", "diffsol-la/suitesparse"]
 diffsl = ["dep:diffsl"]
 diffsl-cranelift = ["diffsl/cranelift", "diffsl"]
 diffsl-external-f64 = ["diffsl-external", "diffsl/external_f64", "diffsl"]
@@ -34,35 +34,15 @@ diffsl-llvm20 = ["diffsl/llvm20-1", "diffsl", "diffsl-llvm"]
 diffsl-llvm21 = ["diffsl/llvm21-1", "diffsl", "diffsl-llvm"]
 
 [dependencies]
-nalgebra = { workspace = true }
-nalgebra-sparse = { version = "0.12.0", features = ["io"] }
+diffsol-la = { workspace = true, features = ["nalgebra", "faer"] }
 num-traits = { workspace = true }
 serde = { workspace = true }
 diffsl = { workspace = true, optional = true }
 petgraph = "0.8.3"
 suitesparse_sys = { version = "0.1", optional = true }
 thiserror = "2.0"
-faer-traits = { workspace = true }
-cudarc = { workspace = true, optional = true, default-features = false, features = [
-  "cuda-version-from-build-system",
-  "cusolver",
-  "dynamic-linking",
-  "std",
-  "cublas",
-  "cublaslt",
-  "curand",
-  "driver",
-  "runtime",
-  "nvrtc",
-] }
 log = "0.4"
 serde_json = { workspace = true }
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-faer = { workspace = true, features = ["rayon"] }
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-faer = { workspace = true }
 
 [dev-dependencies]
 insta = { version = "1.48", features = ["yaml"] }

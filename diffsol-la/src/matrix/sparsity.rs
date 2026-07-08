@@ -1,5 +1,5 @@
 use crate::{
-    error::{DiffsolError, MatrixError},
+    error::LaError,
     matrix_error,
     scalar::IndexType,
     vector::{Vector, VectorIndex},
@@ -16,9 +16,9 @@ pub trait MatrixSparsity<M: Matrix>: Sized + Clone {
         nrows: IndexType,
         ncols: IndexType,
         indices: Vec<(IndexType, IndexType)>,
-    ) -> Result<Self, DiffsolError>;
+    ) -> Result<Self, LaError>;
     fn indices(&self) -> Vec<(IndexType, IndexType)>;
-    fn union(self, other: M::SparsityRef<'_>) -> Result<M::Sparsity, DiffsolError>;
+    fn union(self, other: M::SparsityRef<'_>) -> Result<M::Sparsity, LaError>;
     fn new_diagonal(n: IndexType) -> Self;
     fn as_ref(&self) -> M::SparsityRef<'_>;
     fn get_index(
@@ -94,7 +94,7 @@ impl<M> MatrixSparsity<M> for Dense<M>
 where
     for<'a> M: Matrix<Sparsity = Dense<M>, SparsityRef<'a> = DenseRef<'a, M>>,
 {
-    fn union(self, other: M::SparsityRef<'_>) -> Result<M::Sparsity, DiffsolError> {
+    fn union(self, other: M::SparsityRef<'_>) -> Result<M::Sparsity, LaError> {
         if self.nrows() != other.nrows() || self.ncols() != other.ncols() {
             return Err(matrix_error!(UnionIncompatibleShapes));
         }
@@ -121,7 +121,7 @@ where
         nrows: IndexType,
         ncols: IndexType,
         _indices: Vec<(IndexType, IndexType)>,
-    ) -> Result<Self, DiffsolError> {
+    ) -> Result<Self, LaError> {
         if nrows == 0 || ncols == 0 {
             return Err(matrix_error!(MatrixShapeError));
         }

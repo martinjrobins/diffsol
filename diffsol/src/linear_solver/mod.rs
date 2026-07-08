@@ -1,21 +1,82 @@
 use crate::{error::DiffsolError, Matrix, NonLinearOpJacobian};
+use diffsol_la::LinearSolver as LaLinearSolver;
+use num_traits::Zero;
 
-#[cfg(feature = "nalgebra")]
-pub mod nalgebra;
-
-#[cfg(feature = "faer")]
-pub mod faer;
+pub use diffsol_la::{FaerLU, FaerSparseLU, NalgebraLU};
 
 #[cfg(feature = "suitesparse")]
-pub mod suitesparse;
+pub use diffsol_la::KLU;
 
 #[cfg(feature = "cuda")]
-pub mod cuda;
+pub use diffsol_la::CudaLU;
 
-pub use faer::lu::LU as FaerLU;
-pub use nalgebra::lu::LU as NalgebraLU;
+/// Re-export of the [`diffsol_la`] linear-solver backends' module paths, so that
+/// existing `crate::linear_solver::<backend>` paths keep resolving.
+pub use diffsol_la::linear_solver::{faer, nalgebra};
 
-/// A solver for the linear problem `Ax = b`, where `A` is a linear operator that is obtained by taking the linearisation of a nonlinear operator `C`
+#[cfg(feature = "suitesparse")]
+pub use diffsol_la::linear_solver::suitesparse;
+
+#[cfg(feature = "cuda")]
+pub use diffsol_la::linear_solver::cuda;
+
+/// A borrowing adapter that presents a [NonLinearOpJacobian] (evaluated at a
+/// fixed state `x` and time `t`) as a [`diffsol_la::LinearOp`].
+///
+/// This is the bridge that allows the time-aware, operator-based
+/// [LinearSolver] trait in `diffsol` to be implemented on top of the
+/// time-unaware [`diffsol_la::LinearSolver`] backends.
+pub struct LinearisedRef<'a, C: NonLinearOpJacobian> {
+    op: &'a C,
+    x: Option<&'a C::V>,
+    t: C::T,
+}
+
+impl<'a, C: NonLinearOpJacobian> LinearisedRef<'a, C> {
+    /// Create an adapter used only to query the sparsity pattern (no state set).
+    pub fn sparsity_only(op: &'a C) -> Self {
+        Self {
+            op,
+            x: None,
+            t: C::T::zero(),
+        }
+    }
+
+    /// Create an adapter that evaluates the Jacobian at `(x, t)`.
+    pub fn at(op: &'a C, x: &'a C::V, t: C::T) -> Self {
+        Self { op, x: Some(x), t }
+    }
+}
+
+impl<C: NonLinearOpJacobian> diffsol_la::LinearOp for LinearisedRef<'_, C> {
+    type T = C::T;
+    type V = C::V;
+    type M = C::M;
+    type C = C::C;
+
+    fn nrows(&self) -> crate::IndexType {
+        self.op.nout()
+    }
+
+    fn ncols(&self) -> crate::IndexType {
+        self.op.nstates()
+    }
+
+    fn context(&self) -> &Self::C {
+        self.op.context()
+    }
+
+    fn matrix_inplace(&self, y: &mut Self::M) {
+        let x = self.x.expect("LinearisedRef: state x not set");
+        self.op.jacobian_inplace(x, self.t, y);
+    }
+
+    fn sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        self.op.jacobian_sparsity()
+    }
+}
+
+/// A solver for the linear problem `Ax = b`, where `A` is a linear operator that is obtained by taking the linearisation of a nonlinear operator `C`.
 pub trait LinearSolver<M: Matrix>: Default {
     // sets the point at which the linearisation of the operator is evaluated
     // the operator is assumed to have the same sparsity as that given to [Self::set_problem]
@@ -42,6 +103,27 @@ pub trait LinearSolver<M: Matrix>: Default {
     fn solve_in_place(&self, b: &mut M::V) -> Result<(), DiffsolError>;
 }
 
+/// Any [`diffsol_la::LinearSolver`] backend automatically implements the
+/// time-aware, operator-based [LinearSolver] trait via the [LinearisedRef] bridge.
+impl<M: Matrix, LS: LaLinearSolver<M>> LinearSolver<M> for LS {
+    fn set_linearisation<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M, C = M::C>>(
+        &mut self,
+        op: &C,
+        x: &M::V,
+        t: M::T,
+    ) {
+        LaLinearSolver::set_linearisation(self, &LinearisedRef::at(op, x, t));
+    }
+
+    fn set_problem<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M, C = M::C>>(&mut self, op: &C) {
+        LaLinearSolver::set_sparsity(self, &LinearisedRef::sparsity_only(op));
+    }
+
+    fn solve_in_place(&self, b: &mut M::V) -> Result<(), DiffsolError> {
+        LaLinearSolver::solve_in_place(self, b).map_err(Into::into)
+    }
+}
+
 pub struct LinearSolveSolution<V> {
     pub x: V,
     pub b: V,
@@ -56,7 +138,6 @@ impl<V> LinearSolveSolution<V> {
 #[cfg(test)]
 pub mod tests {
     use crate::{
-        linear_solver::{FaerLU, NalgebraLU},
         matrix::dense_nalgebra_serial::NalgebraMat,
         op::{closure::Closure, ParameterisedOp},
         scalar::scale,
@@ -67,6 +148,7 @@ pub mod tests {
     use num_traits::{FromPrimitive, One, Zero};
 
     use super::LinearSolveSolution;
+    use super::{FaerLU, NalgebraLU};
 
     #[allow(clippy::type_complexity)]
     pub fn linear_problem<M: Matrix + 'static>() -> (
@@ -199,6 +281,27 @@ pub mod tests {
         let p = FaerVec::zeros(0, *op.context());
         let op = ParameterisedOp::new(&op, &p);
         let s = FaerLU::default();
+        test_linear_solver(s, op, rtol, &atol, solns);
+    }
+
+    #[test]
+    fn test_sparse_lu_faer() {
+        use crate::FaerSparseMat;
+        let (op, rtol, atol, solns) = linear_problem::<FaerSparseMat<f64>>();
+        let p = FaerVec::zeros(0, *op.context());
+        let op = ParameterisedOp::new(&op, &p);
+        let s = super::FaerSparseLU::default();
+        test_linear_solver(s, op, rtol, &atol, solns);
+    }
+
+    #[cfg(feature = "suitesparse")]
+    #[test]
+    fn test_klu() {
+        use crate::FaerSparseMat;
+        let (op, rtol, atol, solns) = linear_problem::<FaerSparseMat<f64>>();
+        let p = FaerVec::zeros(0, *op.context());
+        let op = ParameterisedOp::new(&op, &p);
+        let s = super::KLU::default();
         test_linear_solver(s, op, rtol, &atol, solns);
     }
 

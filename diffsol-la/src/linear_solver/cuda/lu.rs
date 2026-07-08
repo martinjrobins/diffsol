@@ -1,9 +1,8 @@
 use std::{cell::RefCell, mem::MaybeUninit};
 
 use crate::{
-    error::{DiffsolError, LinearSolverError},
-    linear_solver_error, Context, CudaContext, CudaMat, CudaVec, LinearSolver, Matrix,
-    NonLinearOpJacobian, ScalarCuda,
+    error::LaError, linear_solver_error, Context, CudaContext, CudaMat, CudaVec, LinearOp,
+    LinearSolver, Matrix, ScalarCuda,
 };
 use cudarc::{
     cusolver::sys::{
@@ -58,19 +57,15 @@ impl<T: ScalarCuda> Drop for CudaLU<T> {
 }
 
 impl<T: ScalarCuda> LinearSolver<CudaMat<T>> for CudaLU<T> {
-    fn set_linearisation<
-        C: NonLinearOpJacobian<T = T, V = CudaVec<T>, M = CudaMat<T>, C = CudaContext>,
-    >(
+    fn set_linearisation<C: LinearOp<T = T, V = CudaVec<T>, M = CudaMat<T>, C = CudaContext>>(
         &mut self,
         op: &C,
-        x: &CudaVec<T>,
-        t: T,
     ) {
         let matrix = self.matrix.as_mut().expect("Matrix not set");
         let work = self.work.as_mut().expect("Work space not set");
         let pivots = self.pivots.as_mut().expect("Pivots not set");
         let nfo = self.nfo.as_mut().expect("NFO not set").get_mut();
-        op.jacobian_inplace(x, t, matrix);
+        op.matrix_inplace(matrix);
         let nbatch = op.context().nbatch();
         let nrows = matrix.nrows();
         let ncols = matrix.ncols();
@@ -101,7 +96,7 @@ impl<T: ScalarCuda> LinearSolver<CudaMat<T>> for CudaLU<T> {
         self.linearisation_set = true;
     }
 
-    fn solve_in_place(&self, x: &mut CudaVec<T>) -> Result<(), DiffsolError> {
+    fn solve_in_place(&self, x: &mut CudaVec<T>) -> Result<(), LaError> {
         let matrix = if let Some(ref matrix) = self.matrix {
             if matrix.nrows() != matrix.ncols() {
                 return Err(linear_solver_error!(LinearSolverMatrixNotSquare))?;
@@ -151,17 +146,14 @@ impl<T: ScalarCuda> LinearSolver<CudaMat<T>> for CudaLU<T> {
         Ok(())
     }
 
-    fn set_problem<
-        C: NonLinearOpJacobian<T = T, V = CudaVec<T>, M = CudaMat<T>, C = CudaContext>,
-    >(
+    fn set_sparsity<C: LinearOp<T = T, V = CudaVec<T>, M = CudaMat<T>, C = CudaContext>>(
         &mut self,
         op: &C,
     ) {
-        let ncols = op.nstates();
-        let nrows = op.nout();
+        let ncols = op.ncols();
+        let nrows = op.nrows();
         let nbatch = op.context().nbatch();
-        let matrix =
-            C::M::new_from_sparsity(nrows, ncols, op.jacobian_sparsity(), op.context().clone());
+        let matrix = C::M::new_from_sparsity(nrows, ncols, op.sparsity(), op.context().clone());
 
         self.matrix = Some(matrix);
 

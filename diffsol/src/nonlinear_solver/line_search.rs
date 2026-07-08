@@ -1,7 +1,5 @@
 use crate::{
-    error::{DiffsolError, NonLinearSolverError},
-    non_linear_solver_error,
-    nonlinear_solver::convergence::ConvergenceStatus,
+    error::DiffsolError, non_linear_solver_error, nonlinear_solver::convergence::ConvergenceStatus,
     Convergence, InitialConditionSolverOptions, Scalar, Vector,
 };
 use log::warn;

@@ -3,7 +3,7 @@ use std::ops::{Add, AddAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 use super::default_solver::DefaultSolver;
 use super::utils::*;
 use super::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
-use crate::error::DiffsolError;
+use crate::error::LaError;
 use crate::scalar::{IndexType, Scalar, Scale};
 use crate::VectorIndex;
 use crate::{Dense, DenseRef, FaerContext, FaerScalar, FaerVec, Vector, VectorViewMut};
@@ -331,7 +331,7 @@ impl<T: FaerScalar> Matrix for FaerMat<T> {
         indices: Vec<(IndexType, IndexType)>,
         values: Vec<Self::T>,
         ctx: Self::C,
-    ) -> Result<Self, DiffsolError> {
+    ) -> Result<Self, LaError> {
         assert_eq!(
             values.len(),
             indices.len(),
