@@ -6,7 +6,7 @@ description = "Linear algebra traits and backends (vectors, matrices, linear sol
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-readme = "../README.md"
+readme = "README.md"
 
 [features]
 default = ["nalgebra", "faer"]
