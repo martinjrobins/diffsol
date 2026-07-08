@@ -1,4 +1,4 @@
-use crate::{error::DiffsolError, DefaultDenseMatrix, Matrix, Vector};
+use crate::{error::LaError, DefaultDenseMatrix, Matrix, Vector};
 
 #[cfg(feature = "cuda")]
 pub mod cuda;
@@ -34,7 +34,7 @@ pub trait Context: Clone + Default {
     ///
     /// Returns an error if the backend does not support batching (i.e.
     /// `nbatch > 1` for CPU backends such as faer and nalgebra).
-    fn clone_with_nbatch(&self, nbatch: usize) -> Result<Self, DiffsolError>;
+    fn clone_with_nbatch(&self, nbatch: usize) -> Result<Self, LaError>;
     /// Panics if the two batch counts are incompatible.
     ///
     /// Compatibility rule: two batches are compatible if they are equal, or

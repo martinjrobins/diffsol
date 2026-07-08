@@ -1,6 +1,5 @@
 use crate::{
     error::DiffsolError,
-    error::OdeSolverError,
     ode_solver::method::write_state_out,
     ode_solver::solution::{Solution, SolutionMode},
     ode_solver_error, AugmentedOdeSolverMethod, Context, DefaultDenseMatrix, DefaultSolver,

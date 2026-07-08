@@ -1,9 +1,7 @@
 use crate::{
-    error::{DiffsolError, OdeSolverError},
-    ode_solver_error,
-    scalar::IndexType,
-    scale, AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, OdeEquations, OdeSolverProblem,
-    OdeSolverState, Op, StateRef, StateRefMut, Vector, VectorViewMut,
+    error::DiffsolError, ode_solver_error, scalar::IndexType, scale, AugmentedOdeEquations,
+    DefaultDenseMatrix, DenseMatrix, OdeEquations, OdeSolverProblem, OdeSolverState, Op, StateRef,
+    StateRefMut, Vector, VectorViewMut,
 };
 use num_traits::Zero;
 use std::ops::MulAssign;

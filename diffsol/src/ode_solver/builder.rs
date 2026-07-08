@@ -1,5 +1,5 @@
 use crate::{
-    error::{DiffsolError, OdeSolverError},
+    error::DiffsolError,
     matrix::dense_nalgebra_serial::NalgebraMat,
     ode_solver_error,
     op::{linear_closure_with_adjoint::LinearClosureWithAdjoint, BuilderOp},

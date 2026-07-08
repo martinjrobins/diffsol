@@ -1,7 +1,7 @@
 use std::{cell::Ref, marker::PhantomData};
 
 use crate::{
-    error::{DiffsolError, OdeSolverError},
+    error::DiffsolError,
     ode_equations::OdeEquationsImplicitSens,
     ode_solver::solution::{SolutionMode, INITIAL_NCOLS},
     ode_solver_error,

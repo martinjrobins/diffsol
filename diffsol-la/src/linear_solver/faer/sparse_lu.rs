@@ -1,9 +1,6 @@
 use crate::{
-    error::{DiffsolError, LinearSolverError},
-    linear_solver::LinearSolver,
-    linear_solver_error,
-    scalar::IndexType,
-    FaerContext, FaerScalar, FaerSparseMat, FaerVec, Matrix, NonLinearOpJacobian,
+    error::LaError, linear_solver::LinearSolver, linear_solver_error, scalar::IndexType,
+    FaerContext, FaerScalar, FaerSparseMat, FaerVec, LinearOp, Matrix,
 };
 
 use faer::{
@@ -36,21 +33,21 @@ where
 }
 
 impl<T: FaerScalar> LinearSolver<FaerSparseMat<T>> for FaerSparseLU<T> {
-    fn set_linearisation<C: NonLinearOpJacobian<T = T, V = FaerVec<T>, M = FaerSparseMat<T>>>(
+    fn set_linearisation<
+        C: LinearOp<T = T, V = FaerVec<T>, M = FaerSparseMat<T>, C = FaerContext>,
+    >(
         &mut self,
         op: &C,
-        x: &FaerVec<T>,
-        t: T,
     ) {
         let matrix = self.matrix.as_mut().expect("Matrix not set");
-        op.jacobian_inplace(x, t, matrix);
+        op.matrix_inplace(matrix);
         self.lu = Some(
             Lu::try_new_with_symbolic(self.lu_symbolic.as_ref().unwrap().clone(), matrix.data.rb())
                 .expect("Failed to factorise matrix"),
         );
     }
 
-    fn solve_in_place(&self, x: &mut FaerVec<T>) -> Result<(), DiffsolError> {
+    fn solve_in_place(&self, x: &mut FaerVec<T>) -> Result<(), LaError> {
         let lu = self
             .lu
             .as_ref()
@@ -59,15 +56,13 @@ impl<T: FaerScalar> LinearSolver<FaerSparseMat<T>> for FaerSparseLU<T> {
         Ok(())
     }
 
-    fn set_problem<
-        C: NonLinearOpJacobian<T = T, V = FaerVec<T>, M = FaerSparseMat<T>, C = FaerContext>,
-    >(
+    fn set_sparsity<C: LinearOp<T = T, V = FaerVec<T>, M = FaerSparseMat<T>, C = FaerContext>>(
         &mut self,
         op: &C,
     ) {
-        let ncols = op.nstates();
-        let nrows = op.nout();
-        let matrix = C::M::new_from_sparsity(nrows, ncols, op.jacobian_sparsity(), *op.context());
+        let ncols = op.ncols();
+        let nrows = op.nrows();
+        let matrix = C::M::new_from_sparsity(nrows, ncols, op.sparsity(), *op.context());
         self.lu_symbolic = Some(
             SymbolicLu::try_new(matrix.data.symbolic()).expect("Failed to create symbolic LU"),
         );
@@ -77,20 +72,20 @@ impl<T: FaerScalar> LinearSolver<FaerSparseMat<T>> for FaerSparseLU<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        linear_solver::tests::{linear_problem, test_linear_solver},
-        op::ParameterisedOp,
-        FaerSparseMat, Op, Vector,
-    };
-
     use super::*;
+    use crate::{linear_solver::tests::diagonal_op, Vector};
 
     #[test]
     fn test_sparse_lu() {
-        let (op, rtol, atol, solns) = linear_problem::<FaerSparseMat<f64>>();
-        let p = FaerVec::zeros(0, *op.context());
-        let op = ParameterisedOp::new(&op, &p);
-        let s = FaerSparseLU::default();
-        test_linear_solver(s, op, rtol, &atol, solns);
+        let mut s = FaerSparseLU::<f64>::default();
+        let op = diagonal_op::<FaerSparseMat<f64>>(2.0);
+        s.set_sparsity(&op);
+        s.set_linearisation(&op);
+        let b = FaerVec::from_vec(vec![2.0, 4.0], Default::default());
+        let x = s.solve(&b).unwrap();
+        x.assert_eq_st(
+            &FaerVec::from_vec(vec![1.0, 2.0], Default::default()),
+            1e-10,
+        );
     }
 }

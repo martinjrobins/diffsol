@@ -1,6 +1,6 @@
 use faer::{get_global_parallelism, Par};
 
-use crate::DiffsolError;
+use crate::LaError;
 
 /// Context for the faer backend.
 ///
@@ -26,9 +26,9 @@ impl Default for FaerContext {
 }
 
 impl crate::Context for FaerContext {
-    fn clone_with_nbatch(&self, nbatch: usize) -> Result<Self, DiffsolError> {
+    fn clone_with_nbatch(&self, nbatch: usize) -> Result<Self, LaError> {
         if nbatch != 1 {
-            Err(DiffsolError::Other(
+            Err(LaError::Other(
                 "FaerContext does not support batching (nbatch > 1). Use the CUDA backend instead."
                     .to_string(),
             ))

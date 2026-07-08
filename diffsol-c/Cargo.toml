@@ -6,7 +6,7 @@ description = "A diffsol wrapper featuring runtime scalar/matrix/solver types an
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-readme = "../README.md"
+readme = "README.md"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

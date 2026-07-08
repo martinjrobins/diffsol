@@ -5,7 +5,7 @@ use super::extract_block::CscBlock;
 use super::sparsity::MatrixSparsityRef;
 use super::utils::*;
 use super::{Matrix, MatrixCommon, MatrixSparsity};
-use crate::error::{DiffsolError, MatrixError};
+use crate::error::{LaError, MatrixError};
 use crate::{DefaultSolver, FaerScalar, FaerSparseLU, IndexType, Scalar, Scale};
 use crate::{FaerContext, FaerVec, FaerVecIndex, Vector, VectorIndex};
 
@@ -68,8 +68,8 @@ impl<T: FaerScalar> MatrixSparsity<FaerSparseMat<T>> for SymbolicSparseColMat<In
     fn union(
         self,
         other: SymbolicSparseColMatRef<IndexType>,
-    ) -> Result<SymbolicSparseColMat<IndexType>, DiffsolError> {
-        union_symbolic(self.rb(), other).map_err(|e| DiffsolError::Other(e.to_string()))
+    ) -> Result<SymbolicSparseColMat<IndexType>, LaError> {
+        union_symbolic(self.rb(), other).map_err(|e| LaError::Other(e.to_string()))
     }
 
     fn as_ref(&self) -> SymbolicSparseColMatRef<'_, IndexType> {
@@ -109,14 +109,14 @@ impl<T: FaerScalar> MatrixSparsity<FaerSparseMat<T>> for SymbolicSparseColMat<In
         nrows: IndexType,
         ncols: IndexType,
         indices: Vec<(IndexType, IndexType)>,
-    ) -> Result<Self, DiffsolError> {
+    ) -> Result<Self, LaError> {
         let indices = indices
             .iter()
             .map(|(i, j)| Pair::new(*i, *j))
             .collect::<Vec<_>>();
         match Self::try_new_from_indices(nrows, ncols, indices.as_slice()) {
             Ok((sparsity, _)) => Ok(sparsity),
-            Err(e) => Err(DiffsolError::Other(e.to_string())),
+            Err(e) => Err(LaError::Other(e.to_string())),
         }
     }
 
@@ -317,7 +317,7 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
         indices: Vec<(IndexType, IndexType)>,
         values: Vec<Self::T>,
         ctx: Self::C,
-    ) -> Result<Self, DiffsolError> {
+    ) -> Result<Self, LaError> {
         assert_eq!(
             values.len(),
             indices.len(),
@@ -333,7 +333,7 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
                 data: mat,
                 context: ctx,
             }),
-            Err(e) => Err(DiffsolError::from(
+            Err(e) => Err(LaError::from(
                 MatrixError::FailedToCreateMatrixFromTriplets(e),
             )),
         }

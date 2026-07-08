@@ -1,4 +1,4 @@
-use crate::DiffsolError;
+use crate::LaError;
 
 /// Context for the nalgebra backend.
 ///
@@ -20,9 +20,9 @@ impl Default for NalgebraContext {
 }
 
 impl crate::Context for NalgebraContext {
-    fn clone_with_nbatch(&self, nbatch: usize) -> Result<Self, DiffsolError> {
+    fn clone_with_nbatch(&self, nbatch: usize) -> Result<Self, LaError> {
         if nbatch != 1 {
-            Err(DiffsolError::Other(
+            Err(LaError::Other(
                 "NalgebraContext does not support batching (nbatch > 1). Use the CUDA backend instead."
                     .to_string(),
             ))

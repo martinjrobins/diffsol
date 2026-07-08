@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
 
-use crate::error::DiffsolError;
+use crate::error::LaError;
 use crate::scalar::Scale;
 use crate::vector::VectorHost;
 use crate::{Context, IndexType, Scalar, Vector, VectorIndex};
@@ -332,7 +332,7 @@ pub trait Matrix:
         indices: Vec<(IndexType, IndexType)>,
         values: Vec<Self::T>,
         ctx: Self::C,
-    ) -> Result<Self, DiffsolError>;
+    ) -> Result<Self, LaError>;
 }
 
 /// A host matrix is a matrix type whose vector type is hosted on the CPU.

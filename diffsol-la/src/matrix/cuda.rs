@@ -7,9 +7,7 @@ use std::ffi::{c_int, c_longlong};
 use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
 
 use crate::{
-    error::{DiffsolError, MatrixError},
-    linear_solver::cuda::lu::CudaLU,
-    matrix::default_solver::DefaultSolver,
+    error::LaError, linear_solver::cuda::lu::CudaLU, matrix::default_solver::DefaultSolver,
     matrix_error, Context, CudaContext, CudaVec, CudaVecMut, CudaVecRef, IndexType, MatrixCommon,
     ScalarCuda, Scale, Vector, VectorIndex,
 };
@@ -1242,7 +1240,7 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
         indices: Vec<(IndexType, IndexType)>,
         values: Vec<T>,
         ctx: Self::C,
-    ) -> Result<Self, DiffsolError> {
+    ) -> Result<Self, LaError> {
         let nbatch = ctx.nbatch();
         let nnz = indices.len();
         assert_eq!(

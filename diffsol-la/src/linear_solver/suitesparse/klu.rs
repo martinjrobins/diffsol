@@ -21,11 +21,8 @@ use suitesparse_sys::{
 type KluIndextype = i64;
 
 use crate::{
-    error::{DiffsolError, LinearSolverError},
-    linear_solver::LinearSolver,
-    linear_solver_error,
-    vector::Vector,
-    FaerSparseMat, FaerVec, Matrix, NonLinearOpJacobian,
+    error::LaError, linear_solver::LinearSolver, linear_solver_error, vector::Vector,
+    FaerSparseMat, FaerVec, LinearOp, Matrix,
 };
 
 trait MatrixKLU: Matrix<T = f64> {
@@ -64,10 +61,7 @@ struct KluSymbolic {
 }
 
 impl KluSymbolic {
-    fn try_from_matrix(
-        mat: &impl MatrixKLU,
-        common: *mut klu_common,
-    ) -> Result<Self, DiffsolError> {
+    fn try_from_matrix(mat: &impl MatrixKLU, common: *mut klu_common) -> Result<Self, LaError> {
         let n = mat.nrows() as i64;
         let inner = unsafe {
             klu_analyze(
@@ -103,7 +97,7 @@ impl KluNumeric {
         col_ptrs: *mut KluIndextype,
         row_indices: *mut KluIndextype,
         values: *mut f64,
-    ) -> Result<Self, DiffsolError> {
+    ) -> Result<Self, LaError> {
         let inner = unsafe {
             klu_factor(
                 col_ptrs,
@@ -181,14 +175,9 @@ where
     M: MatrixKLU,
     M::V: VectorKLU,
 {
-    fn set_linearisation<C: NonLinearOpJacobian<T = M::T, V = M::V, M = M>>(
-        &mut self,
-        op: &C,
-        x: &M::V,
-        t: M::T,
-    ) {
+    fn set_linearisation<C: LinearOp<T = M::T, V = M::V, M = M, C = M::C>>(&mut self, op: &C) {
         let matrix = self.matrix.as_mut().expect("Matrix not set");
-        op.jacobian_inplace(x, t, matrix);
+        op.matrix_inplace(matrix);
         let col_ptrs = matrix.column_pointers() as *mut KluIndextype;
         let row_indices = matrix.row_indices() as *mut KluIndextype;
         let values = matrix.values_ptr();
@@ -203,7 +192,7 @@ where
         );
     }
 
-    fn solve_in_place(&self, x: &mut M::V) -> Result<(), DiffsolError> {
+    fn solve_in_place(&self, x: &mut M::V) -> Result<(), LaError> {
         if self.klu_numeric.is_none() {
             return Err(linear_solver_error!(LuNotInitialized));
         }
@@ -225,11 +214,10 @@ where
         Ok(())
     }
 
-    fn set_problem<C: NonLinearOpJacobian<T = M::T, V = M::V, M = M, C = M::C>>(&mut self, op: &C) {
-        let ncols = op.nstates();
-        let nrows = op.nout();
-        let matrix =
-            C::M::new_from_sparsity(nrows, ncols, op.jacobian_sparsity(), op.context().clone());
+    fn set_sparsity<C: LinearOp<T = M::T, V = M::V, M = M, C = M::C>>(&mut self, op: &C) {
+        let ncols = op.ncols();
+        let nrows = op.nrows();
+        let matrix = C::M::new_from_sparsity(nrows, ncols, op.sparsity(), op.context().clone());
         let mut klu_common = self.klu_common.borrow_mut();
         self.klu_symbolic = KluSymbolic::try_from_matrix(&matrix, klu_common.as_mut()).ok();
         self.matrix = Some(matrix);
@@ -238,20 +226,20 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        linear_solver::tests::{linear_problem, test_linear_solver},
-        op::ParameterisedOp,
-        FaerSparseMat, Op,
-    };
-
     use super::*;
+    use crate::{FaerSparseMat, LinearSolver, Vector};
 
     #[test]
-    fn test_klu() {
-        let (op, rtol, atol, solns) = linear_problem::<FaerSparseMat<f64>>();
-        let p = FaerVec::zeros(0, *op.context());
-        let op = ParameterisedOp::new(&op, &p);
-        let s = KLU::default();
-        test_linear_solver(s, op, rtol, &atol, solns);
+    fn test_klu_identity() {
+        let mut s = KLU::<FaerSparseMat<f64>>::default();
+        let op = crate::linear_solver::tests::diagonal_op::<FaerSparseMat<f64>>(2.0);
+        s.set_sparsity(&op);
+        s.set_linearisation(&op);
+        let b = FaerVec::from_vec(vec![2.0, 4.0], Default::default());
+        let x = s.solve(&b).unwrap();
+        x.assert_eq_st(
+            &FaerVec::from_vec(vec![1.0, 2.0], Default::default()),
+            1e-10,
+        );
     }
 }

@@ -1,7 +1,7 @@
 use crate::{
-    error::OdeSolverError, ode_solver_error, DefaultDenseMatrix, DenseMatrix, DiffsolError, Matrix,
-    MatrixCommon, OdeEquations, OdeEquationsImplicitSens, OdeSolverProblem, OdeSolverStopReason,
-    Scalar, StateRef,
+    ode_solver_error, DefaultDenseMatrix, DenseMatrix, DiffsolError, Matrix, MatrixCommon,
+    OdeEquations, OdeEquationsImplicitSens, OdeSolverProblem, OdeSolverStopReason, Scalar,
+    StateRef,
 };
 
 pub(crate) enum SolutionMode<T: Scalar> {

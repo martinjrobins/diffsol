@@ -7,7 +7,7 @@ use crate::{scalar::Scale, IndexType, NalgebraScalar, Scalar, Vector};
 use super::default_solver::DefaultSolver;
 use super::sparsity::{Dense, DenseRef};
 use super::utils::*;
-use crate::error::DiffsolError;
+use crate::error::LaError;
 use crate::{
     DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut, NalgebraContext, NalgebraLU,
     NalgebraVec, NalgebraVecMut, NalgebraVecRef, VectorIndex,
@@ -286,7 +286,7 @@ impl<T: NalgebraScalar> Matrix for NalgebraMat<T> {
         indices: Vec<(IndexType, IndexType)>,
         values: Vec<Self::T>,
         ctx: Self::C,
-    ) -> Result<Self, DiffsolError> {
+    ) -> Result<Self, LaError> {
         assert_eq!(
             values.len(),
             indices.len(),

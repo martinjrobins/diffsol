@@ -230,10 +230,10 @@
 //!
 //! When solving ODEs, you will need to choose a matrix and vector type to use. Diffsol uses the
 //! following types:
-//!   - [NalgebraVec] and [NalgebraMat] (wrappers around [nalgebra::DMatrix] and
-//!     [nalgebra::DVector] from the [nalgebra](https://nalgebra.org) library).
+//!   - [NalgebraVec] and [NalgebraMat] (wrappers around `nalgebra::DMatrix` and
+//!     `nalgebra::DVector` from the [nalgebra](https://nalgebra.org) library).
 //!   - [FaerVec], [FaerMat] and [FaerSparseMat]
-//!     (wrappers around [faer::Mat], [faer::Col] and [faer::sparse::SparseColMat]
+//!     (wrappers around `faer::Mat`, `faer::Col` and `faer::sparse::SparseColMat`
 //!     from the [faer](https://github.com/sarah-ek/faer-rs) library).
 //!
 //! If you wish to use your own matrix and vector types, you will need to implement the following
@@ -259,10 +259,8 @@ pub use diffsl::ObjectModule;
 
 /// Context objects for managing device resources for vectors and matrices (e.g. device streams, threading pools, etc.).
 ///
-/// This module provides context types that encapsulate information about where data is stored and computed
-/// (CPU, GPU, etc.). Different backends like nalgebra and faer may require different context implementations.
-/// The [Context] trait defines the interface that must be implemented.
-pub mod context;
+/// Re-exported from the [`diffsol_la`] crate.
+pub use diffsol_la::context;
 
 /// Jacobian computation and coloring algorithms for efficient Jacobian evaluation.
 ///
@@ -276,26 +274,18 @@ pub mod jacobian;
 
 /// Linear solver implementations and traits.
 ///
-/// This module defines the [LinearSolver] trait for solving linear systems and provides implementations:
-/// - Direct solvers: [NalgebraLU], [FaerLU], [FaerSparseLU]
-/// - Optional sparse solvers: `KLU` (requires `suitesparse` feature)
-/// - GPU solvers: `CudaLU` (requires `cuda` feature)
+/// This module defines the [LinearSolver] trait for solving linear systems (where the matrix
+/// `A` is obtained by linearising a nonlinear operator) and bridges it to the backend solvers
+/// provided by the [`diffsol_la`] crate ([NalgebraLU], [FaerLU], [FaerSparseLU], and optionally
+/// `KLU` and `CudaLU`).
 ///
 /// The linear solver is a critical component used internally by nonlinear solvers to solve Newton systems.
 pub mod linear_solver;
 
 /// Matrix types and operations.
 ///
-/// This module defines the [Matrix] trait and related traits for matrix operations:
-/// - [DenseMatrix] for dense column-major matrices
-/// - [MatrixView] and [MatrixViewMut] for borrowed views
-/// - Sparsity detection and handling
-///
-/// Implementations are provided for:
-/// - Dense matrices: [NalgebraMat], [FaerMat]
-/// - Sparse matrices: [FaerSparseMat]
-/// - GPU matrices: `CudaMat` (requires `cuda` feature)
-pub mod matrix;
+/// Re-exported from the [`diffsol_la`] crate.
+pub use diffsol_la::matrix;
 
 /// Nonlinear solver implementations and traits.
 ///
@@ -350,62 +340,56 @@ pub mod op;
 
 /// Scalar types and traits.
 ///
-/// This module defines the [Scalar] trait that all floating-point types used in DiffSol must implement.
-/// It aggregates requirements from nalgebra, faer, and num_traits to ensure compatibility with linear algebra operations.
-///
-/// Implementations are provided for `f32` and `f64`.
-/// GPU scalar types are available via `ScalarCuda` (requires `cuda` feature).
-pub mod scalar;
+/// Re-exported from the [`diffsol_la`] crate.
+pub use diffsol_la::scalar;
 
 /// Vector types and traits.
 ///
-/// This module defines the [Vector] trait and related traits for vector operations:
-/// - [VectorView] and [VectorViewMut] for borrowed views
-/// - [VectorIndex] for index collections
-/// - [VectorHost] for CPU-resident vectors with direct access
-///
-/// Implementations are provided for:
-/// - [NalgebraVec] using nalgebra vectors
-/// - [FaerVec] using faer vectors
-/// - `CudaVec` for GPU computation (requires `cuda` feature)
-pub mod vector;
+/// Re-exported from the [`diffsol_la`] crate.
+pub use diffsol_la::vector;
 
 /// Error types and handling.
 ///
 /// This module defines the [DiffsolError] enum and specialized error variants
 /// for different failure modes in ODE solving, including parsing, compilation,
-/// and numerical errors.
+/// and numerical errors. Linear-algebra errors are provided by the
+/// [`diffsol_la`] crate via [LaError].
 pub mod error;
 
+pub use diffsol_la::error::LaError;
 pub use error::DiffsolError;
 
 #[cfg(feature = "sundials")]
 pub mod sundials_sys;
 
+pub use diffsol_la::LinearOp as LaLinearOp;
 pub use linear_solver::LinearSolver;
-pub use linear_solver::{faer::sparse_lu::FaerSparseLU, FaerLU, NalgebraLU};
+pub use linear_solver::{FaerLU, FaerSparseLU, NalgebraLU};
 
-pub use context::{faer::FaerContext, nalgebra::NalgebraContext, Context};
+pub use diffsol_la::{Context, FaerContext, NalgebraContext};
 
 #[cfg(feature = "suitesparse")]
-pub use linear_solver::suitesparse::klu::KLU;
+pub use linear_solver::KLU;
 
 #[cfg(feature = "diffsl")]
 pub use ode_equations::diffsl::{DiffSl, DiffSlContext};
 
+pub use diffsol_la::{
+    DefaultSolver, DenseMatrix, FaerMat, FaerSparseMat, Matrix, MatrixCommon, NalgebraMat,
+};
 pub use jacobian::{
     find_adjoint_non_zeros, find_jacobian_non_zeros, find_matrix_non_zeros,
     find_sens_adjoint_non_zeros, find_sens_non_zeros, find_transpose_non_zeros, JacobianColoring,
 };
-use matrix::extract_block::ColMajBlock;
-pub use matrix::{
-    default_solver::DefaultSolver, dense_faer_serial::FaerMat, dense_nalgebra_serial::NalgebraMat,
-    sparse_faer::FaerSparseMat, DenseMatrix, Matrix, MatrixCommon,
-};
 
-use matrix::{
-    sparsity::Dense, sparsity::DenseRef, sparsity::MatrixSparsity, sparsity::MatrixSparsityRef,
-    MatrixHost, MatrixRef, MatrixView, MatrixViewMut,
+pub use diffsol_la::DefaultDenseMatrix;
+pub use diffsol_la::{FaerScalar, IndexType, NalgebraScalar, Scalar, Scale};
+pub use diffsol_la::{
+    FaerVec, FaerVecIndex, FaerVecMut, FaerVecRef, NalgebraVec, NalgebraVecMut, NalgebraVecRef,
+    Vector, VectorCommon, VectorHost, VectorIndex, VectorRef, VectorView, VectorViewMut,
+};
+use diffsol_la::{
+    MatrixHost, MatrixRef, MatrixSparsity, MatrixSparsityRef, MatrixView, MatrixViewMut,
 };
 use nonlinear_solver::{
     convergence::Convergence, convergence::ConvergenceStatus, root::RootFinder,
@@ -467,23 +451,16 @@ use op::{
     closure_no_jac::ClosureNoJac, closure_with_sens::ClosureWithSens,
     constant_closure_with_sens::ConstantClosureWithSens, init::InitOp,
 };
-pub use scalar::{FaerScalar, IndexType, NalgebraScalar, Scalar, Scale};
-pub use vector::DefaultDenseMatrix;
-pub use vector::{
-    faer_serial::{FaerVec, FaerVecIndex, FaerVecMut, FaerVecRef},
-    nalgebra_serial::{NalgebraVec, NalgebraVecMut, NalgebraVecRef},
-    Vector, VectorCommon, VectorHost, VectorIndex, VectorRef, VectorView, VectorViewMut,
-};
 
 #[cfg(feature = "cuda")]
-pub use context::cuda::CudaContext;
+pub use diffsol_la::CudaContext;
 #[cfg(feature = "cuda")]
-pub use linear_solver::cuda::lu::CudaLU;
+pub use diffsol_la::{CudaIndex, CudaVec, CudaVecMut, CudaVecRef};
 #[cfg(feature = "cuda")]
-pub use matrix::cuda::{CudaMat, CudaMatMut, CudaMatRef};
+pub use diffsol_la::{CudaMat, CudaMatMut, CudaMatRef};
 #[cfg(feature = "cuda")]
-pub use scalar::cuda::{CudaType, ScalarCuda};
+pub use diffsol_la::{CudaType, ScalarCuda};
 #[cfg(feature = "cuda")]
-pub use vector::cuda::{CudaIndex, CudaVec, CudaVecMut, CudaVecRef};
+pub use linear_solver::CudaLU;
 
-pub use scalar::scale;
+pub use diffsol_la::scale;
