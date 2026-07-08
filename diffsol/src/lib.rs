@@ -230,10 +230,10 @@
 //!
 //! When solving ODEs, you will need to choose a matrix and vector type to use. Diffsol uses the
 //! following types:
-//!   - [NalgebraVec] and [NalgebraMat] (wrappers around [nalgebra::DMatrix] and
-//!     [nalgebra::DVector] from the [nalgebra](https://nalgebra.org) library).
+//!   - [NalgebraVec] and [NalgebraMat] (wrappers around `nalgebra::DMatrix` and
+//!     `nalgebra::DVector` from the [nalgebra](https://nalgebra.org) library).
 //!   - [FaerVec], [FaerMat] and [FaerSparseMat]
-//!     (wrappers around [faer::Mat], [faer::Col] and [faer::sparse::SparseColMat]
+//!     (wrappers around `faer::Mat`, `faer::Col` and `faer::sparse::SparseColMat`
 //!     from the [faer](https://github.com/sarah-ek/faer-rs) library).
 //!
 //! If you wish to use your own matrix and vector types, you will need to implement the following

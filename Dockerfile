@@ -3,18 +3,21 @@ FROM rust:1.89-slim-bookworm AS builder
 
 WORKDIR /usr/src/diffsol
 
-# Copy workspace Cargo.toml and scope to only diffsol (avoids pulling in
-# diffsol-c and examples/* which aren't needed for benchmarks)
+# Copy workspace Cargo.toml and scope to only diffsol and its diffsol-la
+# dependency (avoids pulling in diffsol-c and examples/* which aren't needed
+# for benchmarks)
 COPY Cargo.toml .
-RUN sed -i 's/^members = .*/members = ["diffsol"]/' Cargo.toml && \
-    sed -i 's/^default-members = .*/default-members = ["diffsol"]/' Cargo.toml
+RUN sed -i 's/^members = .*/members = ["diffsol-la", "diffsol"]/' Cargo.toml && \
+    sed -i 's/^default-members = .*/default-members = ["diffsol-la", "diffsol"]/' Cargo.toml
 
-# Copy diffsol Cargo.toml for dependency resolution
+# Copy crate Cargo.toml files for dependency resolution
 COPY diffsol/Cargo.toml diffsol/
+COPY diffsol-la/Cargo.toml diffsol-la/
 
 # Create minimal stubs so cargo can resolve and pre-compile deps
-RUN mkdir -p diffsol/src diffsol/benches \
+RUN mkdir -p diffsol/src diffsol/benches diffsol-la/src \
     && echo '' > diffsol/src/lib.rs \
+    && echo '' > diffsol-la/src/lib.rs \
     && echo 'fn main() {}' > diffsol/benches/ode_solvers_ci.rs \
     && echo 'fn main() {}' > diffsol/benches/ode_solvers.rs \
     && echo 'fn main() {}' > diffsol/benches/lin_alg_ops.rs \
@@ -24,7 +27,8 @@ RUN mkdir -p diffsol/src diffsol/benches \
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --lib --release
 
-# Copy real diffsol source and build the benchmark binary
+# Copy real source and build the benchmark binary
+COPY diffsol-la/ diffsol-la/
 COPY diffsol/ diffsol/
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --bench ode_solvers_ci --release && \

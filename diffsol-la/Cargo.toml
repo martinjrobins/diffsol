@@ -1,6 +1,6 @@
 [package]
 name = "diffsol-la"
-version = "0.16.0"
+version = "0.1.0"
 edition.workspace = true
 description = "Linear algebra traits and backends (vectors, matrices, linear solvers) for diffsol."
 license.workspace = true
