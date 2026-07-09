@@ -1,7 +1,9 @@
 use crate::{
-    error::DiffsolError, non_linear_solver_error, nonlinear_solver::convergence::ConvergenceStatus,
-    Convergence, InitialConditionSolverOptions, Scalar, Vector,
+    convergence::{Convergence, ConvergenceStatus},
+    error::NlError,
+    non_linear_solver_error,
 };
+use diffsol_la::{Scalar, Vector};
 use log::warn;
 use num_traits::{FromPrimitive, One, Pow};
 
@@ -23,16 +25,16 @@ pub trait LineSearch<V: Vector>: Default {
     ///
     /// # Returns
     /// - `ConvergenceStatus`: status of the convergence after taking the optimal step
-    /// - `DiffsolError`: error if the line search fails
+    /// - `NlError`: error if the line search fails
     fn take_optimal_step(
         &mut self,
         x: &mut V,
         delta: &mut V,
         error_y: &V,
         fun: &impl Fn(&V, &mut V),
-        linear_solver: &impl Fn(&mut V) -> Result<(), DiffsolError>,
+        linear_solver: &impl Fn(&mut V) -> Result<(), NlError>,
         convergence: &mut Convergence<V>,
-    ) -> Result<ConvergenceStatus, DiffsolError>;
+    ) -> Result<ConvergenceStatus, NlError>;
 
     /// Reset the line search state
     fn reset(&mut self);
@@ -49,9 +51,9 @@ impl<V: Vector> LineSearch<V> for NoLineSearch {
         delta: &mut V,
         error_y: &V,
         fun: &impl Fn(&V, &mut V),
-        linear_solver: &impl Fn(&mut V) -> Result<(), DiffsolError>,
+        linear_solver: &impl Fn(&mut V) -> Result<(), NlError>,
         convergence: &mut Convergence<V>,
-    ) -> Result<ConvergenceStatus, DiffsolError> {
+    ) -> Result<ConvergenceStatus, NlError> {
         //delta = f_at_n
         fun(x, delta);
 
@@ -76,7 +78,7 @@ impl<V: Vector> LineSearch<V> for NoLineSearch {
 /// - tau: step size reduction factor (0 < tau < 1), default 0.5
 /// - c: Armijo condition constant (0 < c < 1), default 1e-4
 /// - steptol: minimum step size, default eps^(2/3)
-/// - max_iter: maximum number of line search iterations, default 100
+/// - max_iter: maximum number of line search iterations, default 10
 /// - n_iters: number of line search iterations performed during last call
 ///
 pub struct BacktrackingLineSearch<V: Vector> {
@@ -92,12 +94,11 @@ pub struct BacktrackingLineSearch<V: Vector> {
 
 impl<V: Vector> Default for BacktrackingLineSearch<V> {
     fn default() -> Self {
-        let ic_options = InitialConditionSolverOptions::<V::T>::default();
         Self {
-            tau: ic_options.step_reduction_factor,
-            c: ic_options.armijo_constant,
+            tau: V::T::from_f64(0.5).unwrap(),
+            c: V::T::from_f64(1e-4).unwrap(),
             steptol: V::T::EPSILON.pow(V::T::from_f64(2.0 / 3.0).unwrap()),
-            max_iter: ic_options.max_linesearch_iterations,
+            max_iter: 10,
             n_iters: 0,
             delta0: V::zeros(0, Default::default()),
             x0: V::zeros(0, Default::default()),
@@ -116,9 +117,9 @@ impl<V: Vector> LineSearch<V> for BacktrackingLineSearch<V> {
         delta: &mut V,
         error_y: &V,
         fun: &impl Fn(&V, &mut V),
-        linear_solver: &impl Fn(&mut V) -> Result<(), DiffsolError>,
+        linear_solver: &impl Fn(&mut V) -> Result<(), NlError>,
         convergence: &mut Convergence<V>,
-    ) -> Result<ConvergenceStatus, DiffsolError> {
+    ) -> Result<ConvergenceStatus, NlError> {
         // on the first iteration, we need to init delta and norm
         if convergence.niter() == 0 {
             //delta = f_at_n

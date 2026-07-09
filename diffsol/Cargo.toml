@@ -13,11 +13,11 @@ readme = "../README.md"
 
 [features]
 default = ["nalgebra", "faer"]
-faer = ["diffsol-la/faer"]
-nalgebra = ["diffsol-la/nalgebra"]
-cuda = ["diffsol-la/cuda"]
+faer = ["diffsol-la/faer", "diffsol-nl/faer"]
+nalgebra = ["diffsol-la/nalgebra", "diffsol-nl/nalgebra"]
+cuda = ["diffsol-la/cuda", "diffsol-nl/cuda"]
 sundials = ["suitesparse_sys", "bindgen", "cc"]
-suitesparse = ["suitesparse_sys", "diffsol-la/suitesparse"]
+suitesparse = ["suitesparse_sys", "diffsol-la/suitesparse", "diffsol-nl/suitesparse"]
 diffsl = ["dep:diffsl"]
 diffsl-cranelift = ["diffsl/cranelift", "diffsl"]
 diffsl-external-f64 = ["diffsl-external", "diffsl/external_f64", "diffsl"]
@@ -35,6 +35,7 @@ diffsl-llvm21 = ["diffsl/llvm21-1", "diffsl", "diffsl-llvm"]
 
 [dependencies]
 diffsol-la = { workspace = true, features = ["nalgebra", "faer"] }
+diffsol-nl = { workspace = true, features = ["nalgebra", "faer"] }
 num-traits = { workspace = true }
 serde = { workspace = true }
 diffsl = { workspace = true, optional = true }

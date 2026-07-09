@@ -30,7 +30,7 @@ where
 impl<T: NalgebraScalar> LinearSolver<NalgebraMat<T>> for LU<T> {
     fn solve_in_place(&self, state: &mut NalgebraVec<T>) -> Result<(), LaError> {
         if self.lu.is_none() {
-            return Err(linear_solver_error!(LuNotInitialized))?;
+            return Err(linear_solver_error!(LuNotInitialized));
         }
         let lu = self.lu.as_ref().unwrap();
         match lu.solve_mut(&mut state.data) {

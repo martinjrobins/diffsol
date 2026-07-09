@@ -391,9 +391,7 @@ pub use diffsol_la::{
 use diffsol_la::{
     MatrixHost, MatrixRef, MatrixSparsity, MatrixSparsityRef, MatrixView, MatrixViewMut,
 };
-use nonlinear_solver::{
-    convergence::Convergence, convergence::ConvergenceStatus, root::RootFinder,
-};
+use nonlinear_solver::{convergence::Convergence, root::RootFinder};
 pub use nonlinear_solver::{
     line_search::{BacktrackingLineSearch, LineSearch, NoLineSearch},
     newton::NewtonNonlinearSolver,

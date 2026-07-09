@@ -622,7 +622,8 @@ where
                 .block
                 .m_mut()
                 .gather(&jacobian, &rhs_jac_aa.src_indices);
-            rhs_jac_aa.solver.set_linearisation(
+            crate::LinearSolver::set_linearisation(
+                &mut rhs_jac_aa.solver,
                 &rhs_jac_aa.block,
                 &self.tmp_algebraic,
                 Eqn::T::zero(),
@@ -633,7 +634,8 @@ where
         if let Some(mass_dd) = self.mass_dd.as_mut() {
             let mass = solver.mass().unwrap();
             mass_dd.block.m_mut().gather(&mass, &mass_dd.src_indices);
-            mass_dd.solver.set_linearisation(
+            crate::LinearSolver::set_linearisation(
+                &mut mass_dd.solver,
                 &mass_dd.block,
                 &self.tmp_differential,
                 Eqn::T::zero(),

@@ -1,7 +1,7 @@
 use log::trace;
 use num_traits::{FromPrimitive, One, Pow, ToPrimitive};
 
-use crate::{scalar::IndexType, Scalar, Vector};
+use diffsol_la::{IndexType, Scalar, Vector};
 
 #[derive(Clone)]
 pub struct Convergence<'a, V: Vector> {

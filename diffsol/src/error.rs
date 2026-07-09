@@ -1,5 +1,10 @@
 use diffsol_la::error::LaError;
+use diffsol_nl::error::NlError;
 use thiserror::Error;
+
+/// Re-export of the non-linear solver error type, which now lives in the
+/// [`diffsol_nl`] crate.
+pub use diffsol_nl::error::NonLinearSolverError;
 
 /// Custom error type for Diffsol
 ///
@@ -20,27 +25,14 @@ pub enum DiffsolError {
     Other(String),
 }
 
-/// Possible errors that can occur when solving a non-linear problem
-#[derive(Error, Debug, Clone)]
-pub enum NonLinearSolverError {
-    #[error("Initial condition solver did not converge")]
-    InitialConditionDidNotConverge,
-    #[error("Newton iterations did not converge, maximum iterations reached")]
-    NewtonMaxIterations,
-    #[error("Newton iteration diverged")]
-    NewtonDiverged,
-    #[error("Newton linesearch failed to find a suitable step in max iterations")]
-    LinesearchFailedMaxIterations,
-    #[error("Newton linesearch failed, minimum step size reached")]
-    LinesearchFailedMinStep,
-    #[error("LU solve failed")]
-    LuSolveFailed,
-    #[error("Jacobian not reset before calling solve")]
-    JacobianNotReset,
-    #[error("State has wrong length: expected {expected}, got {found}")]
-    WrongStateLength { expected: usize, found: usize },
-    #[error("Error: {0}")]
-    Other(String),
+impl From<NlError> for DiffsolError {
+    fn from(e: NlError) -> Self {
+        match e {
+            NlError::NonLinearSolverError(e) => DiffsolError::NonLinearSolverError(e),
+            NlError::LaError(e) => DiffsolError::LaError(e),
+            NlError::Other(s) => DiffsolError::Other(s),
+        }
+    }
 }
 
 /// Possible errors that can occur when solving an ODE
