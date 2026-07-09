@@ -37,7 +37,7 @@ impl<T: FaerScalar> LinearSolver<FaerMat<T>> for LU<T> {
 
     fn solve_in_place(&self, x: &mut FaerVec<T>) -> Result<(), LaError> {
         if self.lu.is_none() {
-            return Err(linear_solver_error!(LuNotInitialized))?;
+            return Err(linear_solver_error!(LuNotInitialized));
         }
         let lu = self.lu.as_ref().unwrap();
         lu.solve_in_place(&mut x.data);
