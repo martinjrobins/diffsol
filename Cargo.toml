@@ -1,6 +1,6 @@
 [workspace]
-members = ["diffsol-la", "diffsol", "diffsol-c", "examples/*"]
-default-members = ["diffsol-la", "diffsol", "diffsol-c"]
+members = ["diffsol-la", "diffsol-nl", "diffsol", "diffsol-c", "examples/*"]
+default-members = ["diffsol-la", "diffsol-nl", "diffsol", "diffsol-c"]
 exclude = ["book"]
 resolver = "2"
 
@@ -13,6 +13,7 @@ repository = "https://github.com/martinjrobins/diffsol"
 
 [workspace.dependencies]
 diffsol-la = { path = "diffsol-la", version = "0.1.0", default-features = false }
+diffsol-nl = { path = "diffsol-nl", version = "0.1.0", default-features = false }
 nalgebra = "0.35"
 faer = { version = "0.24", default-features = false, features = [
   "std",
