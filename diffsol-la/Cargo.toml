@@ -6,6 +6,7 @@ description = "Linear algebra traits and backends (vectors, matrices, linear sol
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+keywords = ["linear-algebra", "matrix", "vector", "solver", "math"]
 readme = "README.md"
 
 [features]

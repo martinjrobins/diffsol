@@ -6,6 +6,7 @@ description = "A library for solving ordinary differential equations (ODEs) in R
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+keywords = ["ode", "solver", "math", "simulation", "science"]
 readme = "../README.md"
 
 
@@ -17,7 +18,11 @@ faer = ["diffsol-la/faer", "diffsol-nl/faer"]
 nalgebra = ["diffsol-la/nalgebra", "diffsol-nl/nalgebra"]
 cuda = ["diffsol-la/cuda", "diffsol-nl/cuda"]
 sundials = ["suitesparse_sys", "bindgen", "cc"]
-suitesparse = ["suitesparse_sys", "diffsol-la/suitesparse", "diffsol-nl/suitesparse"]
+suitesparse = [
+  "suitesparse_sys",
+  "diffsol-la/suitesparse",
+  "diffsol-nl/suitesparse",
+]
 diffsl = ["dep:diffsl"]
 diffsl-cranelift = ["diffsl/cranelift", "diffsl"]
 diffsl-external-f64 = ["diffsl-external", "diffsl/external_f64", "diffsl"]
