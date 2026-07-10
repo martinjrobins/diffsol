@@ -13,7 +13,7 @@ diffsl-llvm = []
 
 
 [dependencies]
-diffsol = { path = "../../diffsol" }
+diffsol = { path = "../../crates/diffsol" }
 faer = { version = "0.24", default-features = false, features = ["sparse"] }
 ndarray = "0.15"
 ndarray-npy = "0.8"

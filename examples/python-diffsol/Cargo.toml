@@ -16,7 +16,7 @@ diffsol-llvm17 = ["diffsol/diffsl-llvm17", "diffsol-llvm"]
 diffsol-llvm18 = ["diffsol/diffsl-llvm18", "diffsol-llvm"]
 
 [dependencies]
-diffsol = { path = "../../diffsol", features = ["diffsl-cranelift"] }
+diffsol = { path = "../../crates/diffsol", features = ["diffsl-cranelift"] }
 nalgebra = { workspace = true }
 numpy = "0.25.0"
 pyo3 = "0.25.0"
