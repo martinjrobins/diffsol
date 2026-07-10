@@ -7,32 +7,32 @@ WORKDIR /usr/src/diffsol
 # diffsol-nl dependencies (avoids pulling in diffsol-c and examples/* which
 # aren't needed for benchmarks)
 COPY Cargo.toml .
-RUN sed -i 's/^members = .*/members = ["diffsol-la", "diffsol-nl", "diffsol"]/' Cargo.toml && \
-    sed -i 's/^default-members = .*/default-members = ["diffsol-la", "diffsol-nl", "diffsol"]/' Cargo.toml
+RUN sed -i 's/^members = .*/members = ["crates\/diffsol-la", "crates\/diffsol-nl", "crates\/diffsol"]/' Cargo.toml && \
+    sed -i 's/^default-members = .*/default-members = ["crates\/diffsol-la", "crates\/diffsol-nl", "crates\/diffsol"]/' Cargo.toml
 
 # Copy crate Cargo.toml files for dependency resolution
-COPY diffsol/Cargo.toml diffsol/
-COPY diffsol-la/Cargo.toml diffsol-la/
-COPY diffsol-nl/Cargo.toml diffsol-nl/
+COPY crates/diffsol/Cargo.toml crates/diffsol/
+COPY crates/diffsol-la/Cargo.toml crates/diffsol-la/
+COPY crates/diffsol-nl/Cargo.toml crates/diffsol-nl/
 
 # Create minimal stubs so cargo can resolve and pre-compile deps
-RUN mkdir -p diffsol/src diffsol/benches diffsol-la/src diffsol-nl/src \
-    && echo '' > diffsol/src/lib.rs \
-    && echo '' > diffsol-la/src/lib.rs \
-    && echo '' > diffsol-nl/src/lib.rs \
-    && echo 'fn main() {}' > diffsol/benches/ode_solvers_ci.rs \
-    && echo 'fn main() {}' > diffsol/benches/ode_solvers.rs \
-    && echo 'fn main() {}' > diffsol/benches/lin_alg_ops.rs \
-    && echo 'fn main() {}' > diffsol/benches/pybamm_dfn.rs
+RUN mkdir -p crates/diffsol/src crates/diffsol/benches crates/diffsol-la/src crates/diffsol-nl/src \
+    && echo '' > crates/diffsol/src/lib.rs \
+    && echo '' > crates/diffsol-la/src/lib.rs \
+    && echo '' > crates/diffsol-nl/src/lib.rs \
+    && echo 'fn main() {}' > crates/diffsol/benches/ode_solvers_ci.rs \
+    && echo 'fn main() {}' > crates/diffsol/benches/ode_solvers.rs \
+    && echo 'fn main() {}' > crates/diffsol/benches/lin_alg_ops.rs \
+    && echo 'fn main() {}' > crates/diffsol/benches/pybamm_dfn.rs
 
 # Pre-compile dependencies (cached layer — only rebuilt when Cargo.toml changes)
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --lib --release
 
 # Copy real source and build the benchmark binary
-COPY diffsol-la/ diffsol-la/
-COPY diffsol-nl/ diffsol-nl/
-COPY diffsol/ diffsol/
+COPY crates/diffsol-la/ crates/diffsol-la/
+COPY crates/diffsol-nl/ crates/diffsol-nl/
+COPY crates/diffsol/ crates/diffsol/
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --bench ode_solvers_ci --release && \
     for p in target/release/ode_solvers_ci target/release/deps/ode_solvers_ci-*; do \
