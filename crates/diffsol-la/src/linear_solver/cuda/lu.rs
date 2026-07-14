@@ -99,21 +99,21 @@ impl<T: ScalarCuda> LinearSolver<CudaMat<T>> for CudaLU<T> {
     fn solve_in_place(&self, x: &mut CudaVec<T>) -> Result<(), LaError> {
         let matrix = if let Some(ref matrix) = self.matrix {
             if matrix.nrows() != matrix.ncols() {
-                return Err(linear_solver_error!(LinearSolverMatrixNotSquare))?;
+                Err(linear_solver_error!(LinearSolverMatrixNotSquare))?;
             }
             matrix
         } else {
-            return Err(linear_solver_error!(LinearSolverNotSetup))?;
+            Err(linear_solver_error!(LinearSolverNotSetup))?
         };
         if !self.linearisation_set {
-            return Err(linear_solver_error!(LinearSolverNotSetup))?;
+            Err(linear_solver_error!(LinearSolverNotSetup))?;
         }
         let nbatch = x.context.nbatch();
         let nrows = matrix.nrows();
         let ncols = matrix.ncols();
         let x_nstates = x.data.len() / nbatch;
         if x_nstates != nrows {
-            return Err(linear_solver_error!(LinearSolverMatrixVectorNotCompatible))?;
+            Err(linear_solver_error!(LinearSolverMatrixVectorNotCompatible))?;
         }
         let mut nfo = self.nfo.as_ref().expect("NFO not set").borrow_mut();
         let stream = &x.context.stream;
