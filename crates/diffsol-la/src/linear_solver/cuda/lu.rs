@@ -103,7 +103,7 @@ impl<T: ScalarCuda> LinearSolver<CudaMat<T>> for CudaLU<T> {
             }
             matrix
         } else {
-            Err(linear_solver_error!(LinearSolverNotSetup))?;
+            Err(linear_solver_error!(LinearSolverNotSetup))?
         };
         if !self.linearisation_set {
             Err(linear_solver_error!(LinearSolverNotSetup))?;
