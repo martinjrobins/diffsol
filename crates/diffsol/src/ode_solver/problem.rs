@@ -48,8 +48,8 @@ impl<T: Scalar> Default for InitialConditionSolverOptions<T> {
 /// ## Step-Size Control
 ///
 /// The step-size controller adapts the time step `h` at each step based on the local error
-/// estimate. The default PI (Proportional-Integral) controller (Gustafsson, 1991) uses the
-/// error norm from the current step `err_n` and the previous accepted step `err_{n-1}`:
+/// estimate. A PI (Proportional-Integral) controller (Gustafsson, 1991) uses the error norm
+/// from the current step `err_n` and the previous accepted step `err_{n-1}`:
 ///
 /// ```text
 /// h_{n+1} = h_n * safety * err_n^{-kI - kP} * err_{n-1}^{kP}
@@ -58,6 +58,10 @@ impl<T: Scalar> Default for InitialConditionSolverOptions<T> {
 /// where `kI = pi_control_integral / (order + 1)` and
 /// `kP = pi_control_proportional / (order + 1)`. On the first step or after a rejected step,
 /// the controller falls back to P-only mode (`kP = 0`).
+///
+/// The default gains `kI = 0.5` and `kP = 0.0` produce a standard P controller (dead-beat),
+/// preserving behaviour from previous versions. To enable true PI control, set
+/// `pi_control_proportional` to a non-zero value (e.g. `0.4`), following Gustafsson (1991).
 ///
 /// The computed factor is clamped by `[min_timestep_shrink, max_timestep_growth]`, with a
 /// dead-zone `[max_timestep_shrink, min_timestep_growth]` where the step size is left unchanged.
@@ -118,9 +122,10 @@ pub struct OdeSolverOptions<T: Scalar> {
     pub threshold_to_update_jacobian: T,
     /// Step-size change threshold for RHS Jacobian update (default: 0.2).
     pub threshold_to_update_rhs_jacobian: T,
-    /// PI controller proportional gain `kP` (default: 0.4). Exponent is `kP / (order + 1)`.
+    /// PI controller proportional gain `kP` (default: 0.0). Exponent is `kP / (order + 1)`.
+    /// Set to a non-zero value (e.g. 0.4) to enable true PI control.
     pub pi_control_proportional: T,
-    /// PI controller integral gain `kI` (default: 0.3). Exponent is `kI / (order + 1)`.
+    /// PI controller integral gain `kI` (default: 0.5). Exponent is `kI / (order + 1)`.
     pub pi_control_integral: T,
 }
 
@@ -140,8 +145,8 @@ impl<T: Scalar> Default for OdeSolverOptions<T> {
             update_rhs_jacobian_after_steps: 50,
             threshold_to_update_jacobian: T::from_f64(0.3).unwrap(),
             threshold_to_update_rhs_jacobian: T::from_f64(0.2).unwrap(),
-            pi_control_proportional: T::from_f64(0.4).unwrap(),
-            pi_control_integral: T::from_f64(0.3).unwrap(),
+            pi_control_proportional: T::from_f64(0.0).unwrap(),
+            pi_control_integral: T::from_f64(0.5).unwrap(),
         }
     }
 }
