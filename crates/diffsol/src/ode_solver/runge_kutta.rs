@@ -15,7 +15,7 @@ use crate::{
 };
 use log::info;
 use log::trace;
-use num_traits::{abs, FromPrimitive, One, Pow, ToPrimitive, Zero};
+use num_traits::{abs, FromPrimitive, One, ToPrimitive, Zero};
 
 use super::jacobian_update::SolverState;
 use super::OdeSolverStatistics;

@@ -8,7 +8,7 @@ use crate::{
     StateRef, StateRefMut,
 };
 
-use num_traits::{abs, FromPrimitive, One, Pow, Signed, ToPrimitive, Zero};
+use num_traits::{abs, FromPrimitive, One, Signed, ToPrimitive, Zero};
 
 use crate::ode_solver_error;
 use crate::{
