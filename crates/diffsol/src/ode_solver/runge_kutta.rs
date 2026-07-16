@@ -53,6 +53,8 @@ where
     out_error: Option<Eqn::V>,
     sens_error: Option<Eqn::V>,
     sens_out_error: Option<Eqn::V>,
+
+    prev_error_norm: Option<Eqn::T>,
 }
 
 impl<'a, Eqn, M> Drop for Rk<'a, Eqn, M>
@@ -91,6 +93,7 @@ where
             out_error: self.out_error.clone(),
             sens_error: self.sens_error.clone(),
             sens_out_error: self.sens_out_error.clone(),
+            prev_error_norm: self.prev_error_norm,
         }
     }
 }
@@ -186,6 +189,7 @@ where
             out_error,
             sens_error: None,
             sens_out_error: None,
+            prev_error_norm: None,
         })
     }
 
@@ -469,8 +473,15 @@ where
         max_increase_factor: Eqn::T,
     ) -> Eqn::T {
         let safety = Eqn::T::from_f64(0.9 * safety_factor).unwrap();
-        let mut factor =
-            safety * error_norm.pow(Eqn::T::from_f64(-0.5 / (self.order() as f64 + 1.0)).unwrap());
+        let raw = pi_controller_raw(
+            error_norm,
+            self.prev_error_norm,
+            self.problem().ode_options.pi_control_integral,
+            self.problem().ode_options.pi_control_proportional,
+            self.order(),
+        );
+
+        let mut factor = safety * raw;
         if factor > max_reduce_factor && factor < min_increase_factor {
             factor = Eqn::T::one();
         }
@@ -481,6 +492,14 @@ where
             factor = max_increase_factor;
         }
         factor
+    }
+
+    pub(crate) fn set_prev_error(&mut self, error: Eqn::T) {
+        self.prev_error_norm = Some(error);
+    }
+
+    pub(crate) fn reset_prev_error(&mut self) {
+        self.prev_error_norm = None;
     }
 
     pub(crate) fn start_step_attempt(
@@ -1287,6 +1306,27 @@ where
             }
         }
         Ok(())
+    }
+}
+
+/// PI controller raw factor computation (before safety multiplier and clamping).
+pub(crate) fn pi_controller_raw<T: crate::Scalar>(
+    error_norm: T,
+    prev_error_norm: Option<T>,
+    pi_integral: T,
+    pi_proportional: T,
+    order: usize,
+) -> T {
+    let order_f = order as f64 + 1.0;
+    let ki = pi_integral.to_f64().unwrap() / order_f;
+    let kp = pi_proportional.to_f64().unwrap() / order_f;
+    match &prev_error_norm {
+        Some(prev) => {
+            let e_iexp = error_norm.pow(T::from_f64(-(ki + kp)).unwrap());
+            let e_pexp = prev.pow(T::from_f64(kp).unwrap());
+            e_iexp * e_pexp
+        }
+        None => error_norm.pow(T::from_f64(-ki).unwrap()),
     }
 }
 
