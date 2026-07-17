@@ -96,11 +96,11 @@ impl<T: Scalar> Default for InitialConditionSolverOptions<T> {
 /// in explicit Runge–Kutta methods. *ACM Transactions on Mathematical Software*,
 /// 17(4), 533–554.
 pub struct OdeSolverOptions<T: Scalar> {
-    /// Maximum number of nonlinear solver iterations per stage (default: 10).
+    /// Maximum number of nonlinear solver iterations per solve (default: 10).
     pub max_nonlinear_solver_iterations: usize,
-    /// Maximum number of consecutive step rejections before aborting (default: 40).
+    /// Maximum number of consecutive step rejections per solve before aborting (default: 40).
     pub max_error_test_failures: usize,
-    /// Maximum number of nonlinear solver convergence failures before aborting (default: 50).
+    /// Maximum number of nonlinear solver convergence failures per solve before aborting (default: 50).
     pub max_nonlinear_solver_failures: usize,
     /// Newton convergence test scaling factor (default: 0.2).
     pub nonlinear_solver_tolerance: T,
@@ -118,9 +118,9 @@ pub struct OdeSolverOptions<T: Scalar> {
     pub update_jacobian_after_steps: usize,
     /// Max steps between full RHS Jacobian re-evaluations (default: 50).
     pub update_rhs_jacobian_after_steps: usize,
-    /// Step-size change threshold for Jacobian update (default: 0.3).
+    /// Step-size change |dt_new / dt_old - 1| threshold for Jacobian update (default: 0.3).
     pub threshold_to_update_jacobian: T,
-    /// Step-size change threshold for RHS Jacobian update (default: 0.2).
+    /// Step-size change |dt_new / dt_old - 1| threshold for RHS Jacobian update (default: 0.2).
     pub threshold_to_update_rhs_jacobian: T,
     /// PI controller proportional gain `kP` (default: 0.0). Exponent is `kP / (order + 1)`.
     /// Set to a non-zero value (e.g. 0.4) to enable true PI control.

@@ -895,7 +895,6 @@ mod test {
     fn test_tr_bdf2_nalgebra_robertson_sens() {
         let (mut problem, soln) = robertson_sens::<M>();
         problem.ode_options.max_nonlinear_solver_iterations = 10;
-        problem.ode_options.pi_control_integral = 0.5;
         let mut s = problem.tr_bdf2_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @"

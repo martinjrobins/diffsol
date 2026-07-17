@@ -1317,16 +1317,19 @@ pub(crate) fn pi_controller_raw<T: crate::Scalar>(
     pi_proportional: T,
     order: usize,
 ) -> T {
-    let order_f = order as f64 + 1.0;
-    let ki = pi_integral.to_f64().unwrap() / order_f;
-    let kp = pi_proportional.to_f64().unwrap() / order_f;
+    let order_f = T::from_usize(order + 1).unwrap();
+    let ki = pi_integral / order_f;
+    if pi_proportional == T::zero() {
+        return error_norm.pow(-ki);
+    }
     match &prev_error_norm {
         Some(prev) => {
-            let e_iexp = error_norm.pow(T::from_f64(-(ki + kp)).unwrap());
-            let e_pexp = prev.pow(T::from_f64(kp).unwrap());
+            let kp = pi_proportional / order_f;
+            let e_iexp = error_norm.pow(-(ki + kp));
+            let e_pexp = prev.pow(kp);
             e_iexp * e_pexp
         }
-        None => error_norm.pow(T::from_f64(-ki).unwrap()),
+        None => error_norm.pow(-ki),
     }
 }
 
