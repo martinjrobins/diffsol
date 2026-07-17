@@ -60,7 +60,7 @@ impl<T: Scalar> Default for InitialConditionSolverOptions<T> {
 /// the controller falls back to P-only mode (`kP = 0`).
 ///
 /// The default gains `kI = 0.5` and `kP = 0.0` produce a standard P controller (dead-beat),
-/// preserving behaviour from previous versions. To enable true PI control, set
+/// as this was found to be faster for the existing benchmark suite. To enable true PI control, set
 /// `pi_control_proportional` to a non-zero value (e.g. `0.4`), following Gustafsson (1991).
 ///
 /// The computed factor is clamped by `[min_timestep_shrink, max_timestep_growth]`, with a
