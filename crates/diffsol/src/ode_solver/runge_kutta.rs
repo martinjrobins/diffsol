@@ -1317,20 +1317,30 @@ pub(crate) fn pi_controller_raw<T: crate::Scalar>(
     pi_proportional: T,
     eff_order: usize,
 ) -> T {
+    debug_assert!(eff_order >= 1, "pi_controller_raw: eff_order={} must be >= 1", eff_order);
+    debug_assert!(!error_norm.is_nan(), "pi_controller_raw: error_norm is NaN");
+    debug_assert!(error_norm >= T::zero(), "pi_controller_raw: error_norm is negative: {:?}", error_norm);
+
     let order_f = T::from_usize(eff_order).unwrap();
     let ki = pi_integral / order_f;
-    if pi_proportional == T::zero() {
-        return error_norm.pow(-ki);
-    }
-    match &prev_error_norm {
-        Some(prev) => {
-            let kp = pi_proportional / order_f;
-            let e_iexp = error_norm.pow(-(ki + kp));
-            let e_pexp = prev.pow(kp);
-            e_iexp * e_pexp
+    let factor = if pi_proportional == T::zero() {
+        error_norm.pow(-ki)
+    } else {
+        match &prev_error_norm {
+            Some(prev) => {
+                let kp = pi_proportional / order_f;
+                let e_iexp = error_norm.pow(-(ki + kp));
+                let e_pexp = prev.pow(kp);
+                e_iexp * e_pexp
+            }
+            None => error_norm.pow(-ki),
         }
-        None => error_norm.pow(-ki),
-    }
+    };
+
+    debug_assert!(!factor.is_nan(), "pi_controller_raw: result is NaN. error_norm={:?}, eff_order={}, ki={:?}, kp={:?}, prev={:?}", error_norm, eff_order, ki, pi_proportional / order_f, prev_error_norm);
+    debug_assert!(factor >= T::zero(), "pi_controller_raw: result is negative: {:?}. error_norm={:?}, eff_order={}", factor, error_norm, eff_order);
+
+    factor
 }
 
 #[cfg(test)]

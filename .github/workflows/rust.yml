@@ -238,6 +238,14 @@ jobs:
         echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm17 --features diffsl-cranelift --features suitesparse --features cuda" >> $GITHUB_ENV
         sudo apt-get update
         sudo apt-get install -y libsuitesparse-dev cmake
+    - name: Install nightly for ASAN
+      run: rustup toolchain install nightly --profile minimal && rustup component add rust-src --toolchain nightly
+    - name: Run tests with AddressSanitizer (suitesparse)
+      env:
+        RUSTFLAGS: "-D warnings -A unused-imports -Z sanitizer=address"
+        ASAN_OPTIONS: "detect_leaks=0:halt_on_error=1:print_stats=1"
+        RUST_BACKTRACE: full
+      run: cargo +nightly test --verbose --features diffsl-llvm17 --features diffsl-cranelift --features suitesparse -p diffsol --lib bdf_test_faer_sparse_ku_robertson
     - name: Run tests - all features
       run: cargo test --verbose ${{ env.ADDITIONAL_FEATURES_FLAGS || '' }} --workspace
     - name: Clippy - all features
