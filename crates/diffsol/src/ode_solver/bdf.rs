@@ -1426,7 +1426,7 @@ where
                         self.prev_error_norm,
                         self.ode_problem.ode_options.pi_control_integral,
                         self.ode_problem.ode_options.pi_control_proportional,
-                        order,
+                        order + 1,
                     );
                 self.prev_error_norm = None;
                 if factor < self.config.minimum_timestep_shrink {
@@ -1503,8 +1503,7 @@ where
                     .into_iter()
                     .enumerate()
                     .map(|(i, error_norm)| {
-                        let eff_order = order + i - 1;
-                        pi_controller_raw(error_norm, prev_error, pi_i, pi_p, eff_order)
+                        pi_controller_raw(error_norm, prev_error, pi_i, pi_p, order + i)
                     })
                     .collect::<Vec<_>>()
             };

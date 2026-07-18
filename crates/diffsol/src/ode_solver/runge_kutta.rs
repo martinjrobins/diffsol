@@ -478,7 +478,7 @@ where
             self.prev_error_norm,
             self.problem().ode_options.pi_control_integral,
             self.problem().ode_options.pi_control_proportional,
-            self.order(),
+            self.order() + 1,
         );
 
         let mut factor = safety * raw;
@@ -1315,9 +1315,9 @@ pub(crate) fn pi_controller_raw<T: crate::Scalar>(
     prev_error_norm: Option<T>,
     pi_integral: T,
     pi_proportional: T,
-    order: usize,
+    eff_order: usize,
 ) -> T {
-    let order_f = T::from_usize(order + 1).unwrap();
+    let order_f = T::from_usize(eff_order).unwrap();
     let ki = pi_integral / order_f;
     if pi_proportional == T::zero() {
         return error_norm.pow(-ki);
