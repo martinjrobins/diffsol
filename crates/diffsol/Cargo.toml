@@ -1,13 +1,13 @@
 [package]
 name = "diffsol"
-version = "0.16.0"
+version = "0.16.1"
 edition.workspace = true
 description = "A library for solving ordinary differential equations (ODEs) in Rust."
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
 keywords = ["ode", "solver", "math", "simulation", "science"]
-readme = "../README.md"
+readme = "../../README.md"
 
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

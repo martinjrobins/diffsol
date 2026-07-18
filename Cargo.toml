@@ -1,6 +1,17 @@
 [workspace]
-members = ["crates/diffsol-la", "crates/diffsol-nl", "crates/diffsol", "crates/diffsol-c", "examples/*"]
-default-members = ["crates/diffsol-la", "crates/diffsol-nl", "crates/diffsol", "crates/diffsol-c"]
+members = [
+  "crates/diffsol-la",
+  "crates/diffsol-nl",
+  "crates/diffsol",
+  "crates/diffsol-c",
+  "examples/*",
+]
+default-members = [
+  "crates/diffsol-la",
+  "crates/diffsol-nl",
+  "crates/diffsol",
+  "crates/diffsol-c",
+]
 exclude = ["book"]
 resolver = "2"
 
@@ -23,7 +34,7 @@ faer = { version = "0.24", default-features = false, features = [
 ] }
 faer-traits = "0.24"
 cudarc = { version = "0.19", default-features = false }
-diffsl = { version = "0.12", features = ["rayon"] }
+diffsl = { version = "0.12.4", features = ["rayon"] }
 
 plotly = { version = "0.14" }
 argmin = { version = "0.11.0" }
