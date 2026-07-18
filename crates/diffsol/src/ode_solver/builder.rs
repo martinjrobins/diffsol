@@ -1397,6 +1397,8 @@ where
             max_nonlinear_solver_failures: ode_options.max_nonlinear_solver_failures,
             nonlinear_solver_tolerance: T::from_f64(ode_options.nonlinear_solver_tolerance)
                 .unwrap(),
+            pi_control_proportional: T::from_f64(ode_options.pi_control_proportional).unwrap(),
+            pi_control_integral: T::from_f64(ode_options.pi_control_integral).unwrap(),
         }
     }
 

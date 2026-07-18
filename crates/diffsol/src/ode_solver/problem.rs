@@ -42,37 +42,91 @@ impl<T: Scalar> Default for InitialConditionSolverOptions<T> {
     }
 }
 
-/// Options for the ODE solver. These options control various aspects of the solver's behavior.
-/// Some options may not be applicable to all solver methods (e.g. implicit vs explicit methods).
+/// Options for the ODE solver. These options control various aspects of the solver's behavior,
+/// including adaptive step-size control, nonlinear solver convergence, and Jacobian updates.
+///
+/// ## Step-Size Control
+///
+/// The step-size controller adapts the time step `h` at each step based on the local error
+/// estimate. A PI (Proportional-Integral) controller (Gustafsson, 1991) uses the error norm
+/// from the current step `err_n` and the previous accepted step `err_{n-1}`:
+///
+/// ```text
+/// h_{n+1} = h_n * safety * err_n^{-kI - kP} * err_{n-1}^{kP}
+/// ```
+///
+/// where `kI = pi_control_integral / (order + 1)` and
+/// `kP = pi_control_proportional / (order + 1)`. On the first step or after a rejected step,
+/// the controller falls back to P-only mode (`kP = 0`).
+///
+/// The default gains `kI = 0.5` and `kP = 0.0` produce a standard P controller (dead-beat),
+/// as this was found to be faster for the existing benchmark suite. To enable true PI control, set
+/// `pi_control_proportional` to a non-zero value (e.g. `0.4`), following Gustafsson (1991).
+///
+/// The computed factor is clamped by `[min_timestep_shrink, max_timestep_growth]`, with a
+/// dead-zone `[max_timestep_shrink, min_timestep_growth]` where the step size is left unchanged.
+/// For implicit methods (BDF, SDIRK) the safety factor also incorporates the Newton iteration
+/// count: `(2*maxiter+1) / (2*maxiter+niter)`, penalising steps that require many iterations.
+///
+/// ## Solver Limits
+///
+/// The solver aborts with an error when:
+/// - The step size falls below `min_timestep`.
+/// - The number of consecutive error test failures exceeds `max_error_test_failures`.
+/// - The number of nonlinear solver failures exceeds `max_nonlinear_solver_failures`
+///   (implicit methods only).
+///
+/// ## Nonlinear Solver (Implicit Methods)
+///
+/// Each implicit stage is solved by a Newton iteration. `max_nonlinear_solver_iterations`
+/// limits the number of Newton steps per stage. `nonlinear_solver_tolerance` is a scaling
+/// factor in the convergence test (smaller values produce a tighter tolerance).
+///
+/// ## Jacobian Updates (Implicit Methods)
+///
+/// The Jacobian matrix is updated when:
+/// - `update_jacobian_after_steps` steps have elapsed (linear solver setup only),
+/// - `update_rhs_jacobian_after_steps` steps have elapsed (full RHS Jacobian re-evaluation),
+/// - The relative step-size change `|dt_new/dt_old - 1|` exceeds `threshold_to_update_jacobian`
+///   or `threshold_to_update_rhs_jacobian`.
+///
+/// ## Reference
+///
+/// Gustafsson, K. (1991). Control theoretic techniques for stepsize selection
+/// in explicit Runge–Kutta methods. *ACM Transactions on Mathematical Software*,
+/// 17(4), 533–554.
 pub struct OdeSolverOptions<T: Scalar> {
-    /// maximum number of nonlinear solver iterations per solve (default: 10)
+    /// Maximum number of nonlinear solver iterations per solve (default: 10).
     pub max_nonlinear_solver_iterations: usize,
-    /// maximum number of error test failures before aborting the solve and returning an error (default: 40)
+    /// Maximum number of consecutive step rejections per solve before aborting (default: 40).
     pub max_error_test_failures: usize,
-    /// maximum number of nonlinear solver failures before aborting the solve and returning an error (default: 50)
+    /// Maximum number of nonlinear solver convergence failures per solve before aborting (default: 50).
     pub max_nonlinear_solver_failures: usize,
-    /// nonlinear solver convergence tolerance (default: 0.2)
+    /// Newton convergence test scaling factor (default: 0.2).
     pub nonlinear_solver_tolerance: T,
-    /// minimum allowed timestep size (default: 1e-13)
+    /// Minimum allowed step size (absolute value, default: 1e-13).
     pub min_timestep: T,
-    /// optional maximum timestep growth factor (solver-specific default when `None`)
+    /// Upper bound on step-size growth `h_new/h_old` (default: solver-specific when `None`).
     pub max_timestep_growth: Option<T>,
-    /// optional minimum timestep growth factor (solver-specific default when `None`)
+    /// Lower bound for step-size growth dead-zone (default: solver-specific when `None`).
     pub min_timestep_growth: Option<T>,
-    /// optional maximum timestep shrink factor (solver-specific default when `None`)
+    /// Upper bound for step-size shrink dead-zone (default: solver-specific when `None`).
     pub max_timestep_shrink: Option<T>,
-    /// optional minimum timestep shrink factor (solver-specific default when `None`)
+    /// Absolute lower bound on step-size reduction `h_new/h_old` (default: 0.5 when `None`).
     pub min_timestep_shrink: Option<T>,
-    /// maximum number of steps after which to update the Jacobian (default: 20).
-    /// This only requires an additional linear solver setup, not evaluation of the full Jacobian.
+    /// Max steps between Jacobian updates (linear solver setup only, default: 20).
     pub update_jacobian_after_steps: usize,
-    /// maximum number of steps after which to update the RHS Jacobian (default: 50).
-    /// This evaluates the full Jacobian of the RHS function and requires an additional linear solver setup.
+    /// Max steps between full RHS Jacobian re-evaluations (default: 50).
     pub update_rhs_jacobian_after_steps: usize,
-    /// threshold on the change in timestep size |dt_new / dt_old - 1| to trigger a Jacobian update (default: 0.3)
+    /// Step-size change |dt_new / dt_old - 1| threshold for Jacobian update (default: 0.3).
     pub threshold_to_update_jacobian: T,
-    /// threshold on the change in timestep size |dt_new / dt_old - 1| to trigger a RHS Jacobian update (default: 0.2)
+    /// Step-size change |dt_new / dt_old - 1| threshold for RHS Jacobian update (default: 0.2).
     pub threshold_to_update_rhs_jacobian: T,
+    /// PI controller proportional gain `kP` (default: 0.0). Exponent is `kP / (order + 1)`.
+    /// Set to a non-zero value (e.g. 0.4) to enable true PI control.
+    pub pi_control_proportional: T,
+    /// PI controller integral gain `kI` (default: 0.5). Exponent is `kI / (order + 1)`.
+    pub pi_control_integral: T,
 }
 
 impl<T: Scalar> Default for OdeSolverOptions<T> {
@@ -91,6 +145,8 @@ impl<T: Scalar> Default for OdeSolverOptions<T> {
             update_rhs_jacobian_after_steps: 50,
             threshold_to_update_jacobian: T::from_f64(0.3).unwrap(),
             threshold_to_update_rhs_jacobian: T::from_f64(0.2).unwrap(),
+            pi_control_proportional: T::from_f64(0.0).unwrap(),
+            pi_control_integral: T::from_f64(0.5).unwrap(),
         }
     }
 }

@@ -427,7 +427,7 @@ where
         let mut nattempts = 0;
         let mut updated_jacobian = false;
         let start = if self.rk.skip_first_stage() { 1 } else { 0 };
-        let factor = 'step: loop {
+        let (factor, error_norm) = 'step: loop {
             // start a step attempt
             self.rk
                 .start_step_attempt(h, self.s_op.as_mut().map(|s_op| s_op.eqn_mut()));
@@ -461,6 +461,7 @@ where
                         self.update_op_step_size(h);
                         self.jacobian_updates(h, SolverState::SecondConvergenceFail);
                     }
+                    self.rk.reset_prev_error();
                     self.rk.solve_fail(
                         h,
                         self.config.minimum_timestep,
@@ -507,7 +508,7 @@ where
             );
             if error_norm < Eqn::T::one() {
                 debug!("Step accepted with error norm {}", error_norm,);
-                break factor;
+                break (factor, error_norm);
             }
             h *= factor;
             debug!(
@@ -519,6 +520,7 @@ where
             self.update_op_step_size(h);
             self.jacobian_updates(h, SolverState::ErrorTestFail);
             nattempts += 1;
+            self.rk.reset_prev_error();
             self.rk.error_test_fail(
                 h,
                 nattempts,
@@ -536,6 +538,7 @@ where
         self.update_op_step_size(new_h);
         self.jacobian_updates(new_h, SolverState::StepSuccess);
         self.jacobian_update.step();
+        self.rk.set_prev_error(error_norm);
         self.rk.step_accepted(h, new_h, true)
     }
 
@@ -681,7 +684,7 @@ mod test {
         let (problem, soln) = exponential_decay_problem::<M>(false);
         let mut s = problem.tr_bdf2::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
-        insta::assert_yaml_snapshot!(s.get_statistics(), @"
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 8
         number_of_steps: 46
         number_of_error_test_failures: 0
@@ -692,7 +695,7 @@ mod test {
         number_of_linear_solver_setups_from_second_convergence_fail: 0
         number_of_linear_solver_setups_from_error_test_fail: 0
         number_of_linear_solver_setups_from_step_success: 7
-        ");
+        "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 112
         number_of_jac_muls: 2
@@ -731,7 +734,7 @@ mod test {
         let (problem, soln) = exponential_decay_problem::<M>(false);
         let mut s = problem.esdirk34::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
-        insta::assert_yaml_snapshot!(s.get_statistics(), @"
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 6
         number_of_steps: 18
         number_of_error_test_failures: 0
@@ -742,7 +745,7 @@ mod test {
         number_of_linear_solver_setups_from_second_convergence_fail: 0
         number_of_linear_solver_setups_from_error_test_fail: 0
         number_of_linear_solver_setups_from_step_success: 5
-        ");
+        "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 68
         number_of_jac_muls: 2
@@ -756,7 +759,7 @@ mod test {
         let (problem, soln) = exponential_decay_with_algebraic_problem::<M>(false);
         let mut s = problem.esdirk34::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
-        insta::assert_yaml_snapshot!(s.get_statistics(), @"
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 6
         number_of_steps: 6
         number_of_error_test_failures: 0
@@ -767,7 +770,7 @@ mod test {
         number_of_linear_solver_setups_from_second_convergence_fail: 0
         number_of_linear_solver_setups_from_error_test_fail: 0
         number_of_linear_solver_setups_from_step_success: 5
-        ");
+        "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 28
         number_of_jac_muls: 6

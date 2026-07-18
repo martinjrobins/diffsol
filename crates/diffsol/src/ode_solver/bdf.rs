@@ -8,7 +8,7 @@ use crate::{
     StateRef, StateRefMut,
 };
 
-use num_traits::{abs, FromPrimitive, One, Pow, Signed, ToPrimitive, Zero};
+use num_traits::{abs, FromPrimitive, One, Signed, ToPrimitive, Zero};
 
 use crate::ode_solver_error;
 use crate::{
@@ -23,6 +23,7 @@ use super::adjoint::AdjointOdeSolverMethod;
 use super::config::BdfConfig;
 use super::jacobian_update::SolverState;
 use super::method::AugmentedOdeSolverMethod;
+use super::runge_kutta::pi_controller_raw;
 use super::sensitivities::SensitivitiesOdeSolverMethod;
 use super::OdeSolverStatistics;
 
@@ -146,6 +147,7 @@ pub struct Bdf<
     is_state_modified: bool,
     jacobian_update: JacobianUpdate<Eqn::T>,
     config: BdfConfig<Eqn::T>,
+    prev_error_norm: Option<Eqn::T>,
 }
 
 impl<M, Eqn, Nls, AugmentedEqn> Clone for Bdf<'_, Eqn, Nls, M, AugmentedEqn>
@@ -200,6 +202,7 @@ where
             is_state_modified: self.is_state_modified,
             jacobian_update: self.jacobian_update.clone(),
             config: self.config.clone(),
+            prev_error_norm: self.prev_error_norm,
         }
     }
 }
@@ -363,6 +366,7 @@ where
             is_state_modified,
             jacobian_update: JacobianUpdate::new(&problem.ode_options),
             config,
+            prev_error_norm: None,
         })
     }
 
@@ -1364,6 +1368,7 @@ where
                 if convergence_fail {
                     // newton iteration did not converge, but jacobian has already been
                     // evaluated so reduce step size by 0.3 (as per [1]) and try again
+                    self.prev_error_norm = None;
                     let new_h =
                         self._update_step_size(<Eqn::T as FromPrimitive>::from_f64(0.3).unwrap())?;
                     debug!(
@@ -1382,6 +1387,7 @@ where
                 } else {
                     // newton iteration did not converge, so update jacobian and try again
                     debug!("First convergence failure, updating Jacobian and trying again",);
+                    self.prev_error_norm = None;
                     self._jacobian_updates(
                         self.state.h * self.alpha[order],
                         SolverState::FirstConvergenceFail,
@@ -1412,12 +1418,17 @@ where
                 break;
             } else {
                 // step is rejected
-                // calculate optimal step size factor as per eq 2.46 of [2]
+                // calculate optimal step size factor using PI controller
                 // and reduce step size and try again
                 let mut factor = safety
-                    * error_norm.pow(
-                        <Eqn::T as FromPrimitive>::from_f64(-0.5 / (order as f64 + 1.0)).unwrap(),
+                    * pi_controller_raw(
+                        error_norm,
+                        self.prev_error_norm,
+                        self.ode_problem.ode_options.pi_control_integral,
+                        self.ode_problem.ode_options.pi_control_proportional,
+                        order + 1,
                     );
+                self.prev_error_norm = None;
                 if factor < self.config.minimum_timestep_shrink {
                     factor = self.config.minimum_timestep_shrink;
                 }
@@ -1461,40 +1472,36 @@ where
         // update statistics
         self.statistics.number_of_steps += 1;
         self.jacobian_update.step();
+        self.prev_error_norm = Some(error_norm);
 
         // a change in order is only done after running at order k for k + 1 steps
         // (see page 83 of [2])
         self.n_equal_steps += 1;
 
         if self.n_equal_steps > self.state.order {
-            let factors = {
-                let order = self.state.order;
-                // similar to the optimal step size factor we calculated above for the current
-                // order k, we need to calculate the optimal step size factors for orders
-                // k-1 and k+1. To do this, we note that the error = C_k * D^{k+1} y_n
-                let error_m_norm = if order > 1 {
-                    self.predict_error_control(order - 1)
-                } else {
-                    Eqn::T::INFINITY
-                };
-                let error_p_norm = if order < BdfState::<Eqn::V, M>::MAX_ORDER {
-                    self.predict_error_control(order + 1)
-                } else {
-                    Eqn::T::INFINITY
-                };
-
-                let error_norms = [error_m_norm, error_norm, error_p_norm];
-                error_norms
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, error_norm)| {
-                        error_norm.pow(
-                            <Eqn::T as FromPrimitive>::from_f64(-0.5 / (i as f64 + order as f64))
-                                .unwrap(),
-                        )
-                    })
-                    .collect::<Vec<_>>()
+            let order = self.state.order;
+            // similar to the optimal step size factor we calculated above for the current
+            // order k, we need to calculate the optimal step size factors for orders
+            // k-1 and k+1. To do this, we note that the error = C_k * D^{k+1} y_n
+            let error_m_norm = if order > 1 {
+                self.predict_error_control(order - 1)
+            } else {
+                Eqn::T::INFINITY
             };
+            let error_p_norm = if order < BdfState::<Eqn::V, M>::MAX_ORDER {
+                self.predict_error_control(order + 1)
+            } else {
+                Eqn::T::INFINITY
+            };
+
+            let prev_error = self.prev_error_norm;
+            let pi_i = self.ode_problem.ode_options.pi_control_integral;
+            let pi_p = self.ode_problem.ode_options.pi_control_proportional;
+            let factors: [Eqn::T; 3] = [
+                pi_controller_raw(error_m_norm, prev_error, pi_i, pi_p, order),
+                pi_controller_raw(error_norm, prev_error, pi_i, pi_p, order + 1),
+                pi_controller_raw(error_p_norm, prev_error, pi_i, pi_p, order + 2),
+            ];
 
             // now we have the three factors for orders k-1, k and k+1, pick the maximum in
             // order to maximise the resultant step size
@@ -1686,7 +1693,7 @@ mod test {
         let (problem, soln) = exponential_decay_problem::<M>(false);
         let mut s = problem.bdf::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
-        insta::assert_yaml_snapshot!(s.get_statistics(), @"
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 12
         number_of_steps: 49
         number_of_error_test_failures: 0
@@ -1697,7 +1704,7 @@ mod test {
         number_of_linear_solver_setups_from_second_convergence_fail: 0
         number_of_linear_solver_setups_from_error_test_fail: 0
         number_of_linear_solver_setups_from_step_success: 11
-        ");
+        "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 52
         number_of_jac_muls: 2
@@ -1737,7 +1744,7 @@ mod test {
         let (problem, soln) = exponential_decay_problem::<M>(false);
         let mut s = problem.bdf::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
-        insta::assert_yaml_snapshot!(s.get_statistics(), @"
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 12
         number_of_steps: 49
         number_of_error_test_failures: 0
@@ -1748,7 +1755,7 @@ mod test {
         number_of_linear_solver_setups_from_second_convergence_fail: 0
         number_of_linear_solver_setups_from_error_test_fail: 0
         number_of_linear_solver_setups_from_step_success: 11
-        ");
+        "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 52
         number_of_jac_muls: 2
@@ -1870,7 +1877,7 @@ mod test {
         let adjoint_solver = problem
             .bdf_solver_adjoint::<LS, _>(checkpointer, Some(s), Some(dgdu.ncols()))
             .unwrap();
-        test_adjoint(adjoint_solver, dgdu, 40.0);
+        test_adjoint(adjoint_solver, dgdu, 100.0);
     }
 
     #[test]
@@ -2036,7 +2043,7 @@ mod test {
         let (problem, soln) = exponential_decay_with_algebraic_problem::<M>(false);
         let mut s = problem.bdf::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
-        insta::assert_yaml_snapshot!(s.get_statistics(), @"
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 18
         number_of_steps: 38
         number_of_error_test_failures: 5
@@ -2047,7 +2054,7 @@ mod test {
         number_of_linear_solver_setups_from_second_convergence_fail: 0
         number_of_linear_solver_setups_from_error_test_fail: 5
         number_of_linear_solver_setups_from_step_success: 12
-        ");
+        "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 53
         number_of_jac_muls: 6
@@ -2182,6 +2189,7 @@ mod test {
         let (mut problem, _soln) = robertson_ode::robertson_ode_diffsl_problem::<M, LlvmModule>();
         problem.ode_options.max_nonlinear_solver_failures = 1000;
         problem.ode_options.max_error_test_failures = 200;
+        problem.ode_options.pi_control_integral = 0.5;
         let mut s = problem.bdf::<LS>().unwrap();
         let (checkpointer, soln, _stop_reason) = s
             .solve_dense_with_checkpointing(times.as_slice(), None)

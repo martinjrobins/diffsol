@@ -203,7 +203,7 @@ where
 
         // loop until step is accepted
         let mut nattempts = 0;
-        let factor = loop {
+        let (factor, error_norm) = loop {
             // start a step attempt
             self.rk.start_step_attempt(h, self.augmented_eqn.as_mut());
             for i in 1..self.rk.tableau().s() {
@@ -222,7 +222,7 @@ where
             );
             if error_norm < Eqn::T::one() {
                 debug!("Step accepted with error norm = {:?}", error_norm);
-                break factor;
+                break (factor, error_norm);
             }
             h *= factor;
             nattempts += 1;
@@ -230,6 +230,7 @@ where
                 "Step rejected with error norm = {:?}, reducing h to {:?}",
                 error_norm, h
             );
+            self.rk.reset_prev_error();
             self.rk.error_test_fail(
                 h,
                 nattempts,
@@ -237,6 +238,7 @@ where
                 self.config.minimum_timestep,
             )?;
         };
+        self.rk.set_prev_error(error_norm);
         self.rk.step_accepted(h, h * factor, false)
     }
 
@@ -361,7 +363,7 @@ mod test {
         let (problem, soln) = exponential_decay_problem::<M>(false);
         let mut s = problem.tsit45().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
-        insta::assert_yaml_snapshot!(s.get_statistics(), @"
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 0
         number_of_steps: 9
         number_of_error_test_failures: 0
@@ -372,7 +374,7 @@ mod test {
         number_of_linear_solver_setups_from_second_convergence_fail: 0
         number_of_linear_solver_setups_from_error_test_fail: 0
         number_of_linear_solver_setups_from_step_success: 0
-        ");
+        "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 56
         number_of_jac_muls: 0
@@ -447,7 +449,7 @@ mod test {
         let (problem, soln) = exponential_decay_problem_sens::<M>(false);
         let mut s = problem.tsit45_sens().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
-        insta::assert_yaml_snapshot!(s.get_statistics(), @"
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 0
         number_of_steps: 10
         number_of_error_test_failures: 0
@@ -458,7 +460,7 @@ mod test {
         number_of_linear_solver_setups_from_second_convergence_fail: 0
         number_of_linear_solver_setups_from_error_test_fail: 0
         number_of_linear_solver_setups_from_step_success: 0
-        ");
+        "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 62
         number_of_jac_muls: 122
