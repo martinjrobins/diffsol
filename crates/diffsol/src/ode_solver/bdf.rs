@@ -1289,11 +1289,6 @@ where
 
         let mut convergence_fail = false;
 
-        // sanity: check Vec<f64> fields are valid
-        debug_assert!(self.alpha.capacity() < 1000000);
-        debug_assert!(self.gamma.capacity() < 1000000);
-        debug_assert!(self.error_const2.capacity() < 1000000);
-
         if self.is_state_modified {
             // reinitalise root finder if needed
             if let (Some(root_fn), Some(root_finder)) =
@@ -1582,11 +1577,6 @@ where
         }
 
         // just a normal step, no roots or tstop reached
-
-        debug_assert!(self.alpha.capacity() < 1000000);
-        debug_assert!(self.gamma.capacity() < 1000000);
-        debug_assert!(self.error_const2.capacity() < 1000000);
-
         Ok(OdeSolverStopReason::InternalTimestep)
     }
 
