@@ -7,8 +7,8 @@ WORKDIR /usr/src/diffsol
 # diffsol-nl dependencies (avoids pulling in diffsol-c and examples/* which
 # aren't needed for benchmarks)
 COPY Cargo.toml .
-RUN sed -i 's/^members = .*/members = ["crates\/diffsol-la", "crates\/diffsol-nl", "crates\/diffsol"]/' Cargo.toml && \
-    sed -i 's/^default-members = .*/default-members = ["crates\/diffsol-la", "crates\/diffsol-nl", "crates\/diffsol"]/' Cargo.toml
+RUN sed -i '/^members = \[/,/^\]/c\members = ["crates/diffsol-la", "crates/diffsol-nl", "crates/diffsol"]' Cargo.toml && \
+    sed -i '/^default-members = \[/,/^\]/c\default-members = ["crates/diffsol-la", "crates/diffsol-nl", "crates/diffsol"]' Cargo.toml
 
 # Copy crate Cargo.toml files for dependency resolution
 COPY crates/diffsol/Cargo.toml crates/diffsol/
