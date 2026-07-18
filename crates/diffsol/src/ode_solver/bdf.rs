@@ -1289,6 +1289,11 @@ where
 
         let mut convergence_fail = false;
 
+        // sanity: check Vec<f64> fields are valid
+        assert!(self.alpha.capacity() < 1000000, "alpha capacity corrupted: {}", self.alpha.capacity());
+        assert!(self.gamma.capacity() < 1000000, "gamma capacity corrupted: {}", self.gamma.capacity());
+        assert!(self.error_const2.capacity() < 1000000, "error_const2 capacity corrupted: {}", self.error_const2.capacity());
+
         if self.is_state_modified {
             // reinitalise root finder if needed
             if let (Some(root_fn), Some(root_finder)) =
@@ -1499,14 +1504,19 @@ where
                 let prev_error = self.prev_error_norm;
                 let pi_i = self.ode_problem.ode_options.pi_control_integral;
                 let pi_p = self.ode_problem.ode_options.pi_control_proportional;
-                error_norms
+                let factors: Vec<Eqn::T> = error_norms
                     .into_iter()
                     .enumerate()
                     .map(|(i, error_norm)| {
                         pi_controller_raw(error_norm, prev_error, pi_i, pi_p, order + i)
                     })
-                    .collect::<Vec<_>>()
+                    .collect();
+                assert_eq!(factors.len(), 3);
+                assert!(factors.capacity() < 1000000, "factors capacity corrupted: {}", factors.capacity());
+                factors
             };
+
+            assert!(factors.capacity() < 1000000, "factors capacity corrupted after use: {}", factors.capacity());
 
             // now we have the three factors for orders k-1, k and k+1, pick the maximum in
             // order to maximise the resultant step size
@@ -1582,6 +1592,12 @@ where
         }
 
         // just a normal step, no roots or tstop reached
+
+        // sanity: check Vec<f64> fields are still valid after step
+        assert!(self.alpha.capacity() < 1000000, "alpha capacity corrupted during step: {}", self.alpha.capacity());
+        assert!(self.gamma.capacity() < 1000000, "gamma capacity corrupted during step: {}", self.gamma.capacity());
+        assert!(self.error_const2.capacity() < 1000000, "error_const2 capacity corrupted during step: {}", self.error_const2.capacity());
+
         Ok(OdeSolverStopReason::InternalTimestep)
     }
 
