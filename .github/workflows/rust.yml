@@ -242,6 +242,7 @@ jobs:
       run: rustup toolchain install nightly --profile minimal && rustup component add rust-src --toolchain nightly
     - name: Run tests with AddressSanitizer (suitesparse)
       env:
+        CARGO_TARGET_DIR: target/asan
         RUSTFLAGS: "-D warnings -A unused-imports -Z sanitizer=address"
         ASAN_OPTIONS: "detect_leaks=0:halt_on_error=1:print_stats=1"
         RUST_BACKTRACE: full
