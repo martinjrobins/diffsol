@@ -1319,7 +1319,7 @@ pub(crate) fn pi_controller_raw<T: crate::Scalar>(
 ) -> T {
     let order_f = T::from_usize(eff_order).unwrap();
     let ki = pi_integral / order_f;
-    let factor = if pi_proportional == T::zero() {
+    if pi_proportional == T::zero() {
         error_norm.pow(-ki)
     } else {
         match &prev_error_norm {
@@ -1331,8 +1331,7 @@ pub(crate) fn pi_controller_raw<T: crate::Scalar>(
             }
             None => error_norm.pow(-ki),
         }
-    };
-    factor
+    }
 }
 
 #[cfg(test)]
