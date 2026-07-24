@@ -5,4 +5,4 @@ edition.workspace = true
 publish = false
 
 [dependencies]
-diffsol-c = { path = "../../diffsol-c", features = ["diffsl-cranelift"] }
+diffsol-c = { path = "../../crates/diffsol-c", features = ["diffsl-cranelift"] }

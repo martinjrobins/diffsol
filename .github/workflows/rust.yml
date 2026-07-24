@@ -160,11 +160,11 @@ jobs:
       if: matrix.coverage == true
       run: cargo install cargo-tarpaulin
     - name: Set features variable and install dependencies (macOS)
-      if: matrix.os == 'macos-15-intel' || matrix.os == 'macos-latest'
+      if:  matrix.os == 'macos-latest'
       run: |
         echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm17 --features diffsl-cranelift --features diffsl-external-dynamic" >> $GITHUB_ENV
     - name: Set features variable and install dependencies (Windows)
-      if: matrix.os == 'windows-latest'
+      if: matrix.os == 'windows-latest' || matrix.os == 'macos-15-intel'
       run: |
         echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-cranelift --features diffsl-external-dynamic" >> $GITHUB_ENV
     - name: Run tests - default features

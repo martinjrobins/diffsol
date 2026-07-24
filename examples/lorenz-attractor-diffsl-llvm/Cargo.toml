@@ -12,4 +12,4 @@ diffsl-llvm18 = ["diffsol/diffsl-llvm18", "diffsl-llvm"]
 diffsl-llvm = []
 
 [dependencies]
-diffsol = { path = "../../diffsol"}
+diffsol = { path = "../../crates/diffsol"}

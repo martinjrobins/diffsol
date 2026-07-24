@@ -6,7 +6,7 @@ publish = false
 description = "Example showing trait-based autodiff with diffsol ODE solvers"
 
 [dependencies]
-diffsol = { path = "../../diffsol" }
+diffsol = { path = "../../crates/diffsol" }
 nalgebra = { workspace = true }
 
 [features]

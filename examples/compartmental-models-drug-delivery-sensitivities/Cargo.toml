@@ -15,6 +15,6 @@ diffsl-llvm21 = ["diffsol/diffsl-llvm21", "diffsl-llvm"]
 diffsl-llvm = []
 
 [dependencies]
-diffsol = { path = "../../diffsol" }
+diffsol = { path = "../../crates/diffsol" }
 nalgebra = { workspace = true }
 plotly = { workspace = true }

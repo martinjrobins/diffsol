@@ -13,7 +13,7 @@ name = "neural-ode-weather-prediction"
 required-features = ["onnx"]
 
 [dependencies]
-diffsol = { path = "../../diffsol" }
+diffsol = { path = "../../crates/diffsol" }
 nalgebra = { workspace = true }
 plotly = { workspace = true }
 ort = { workspace = true, optional = true }

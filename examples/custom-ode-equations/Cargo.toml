@@ -5,5 +5,5 @@ edition.workspace = true
 publish = false
 
 [dependencies]
-diffsol = { path = "../../diffsol" }
+diffsol = { path = "../../crates/diffsol" }
 nalgebra = { workspace = true }
