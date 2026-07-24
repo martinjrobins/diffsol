@@ -1,3 +1,4 @@
+// ANCHOR: problem
 use argmin::{
     core::{observers::ObserverMode, CostFunction, Executor, Gradient},
     solver::{linesearch::MoreThuenteLineSearch, quasinewton::LBFGS},
@@ -21,7 +22,9 @@ struct Problem {
     ts_data: Vec<T>,
     problem: RefCell<OdeSolverProblem<Eqn>>,
 }
+// ANCHOR_END: problem
 
+// ANCHOR: cost_function
 impl CostFunction for Problem {
     type Output = T;
     type Param = Vec<T>;
@@ -46,7 +49,9 @@ impl CostFunction for Problem {
         Ok(loss)
     }
 }
+// ANCHOR_END: cost_function
 
+// ANCHOR: gradient
 impl Gradient for Problem {
     type Gradient = Vec<T>;
     type Param = Vec<T>;
@@ -79,7 +84,9 @@ impl Gradient for Problem {
         Ok(dlossdp)
     }
 }
+// ANCHOR_END: gradient
 
+// ANCHOR: main
 pub fn main() {
     let code = "
             in_i { b = 4.0/3.0, d = 1.0 }
@@ -132,3 +139,4 @@ pub fn main() {
     println!("Best parameter vector: {:?}", best);
     println!("True parameter vector: {:?}", vec![b_true, d_true]);
 }
+// ANCHOR_END: main

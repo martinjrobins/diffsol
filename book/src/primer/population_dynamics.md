@@ -62,7 +62,7 @@ We also have initial conditions for the populations at time \\(t = 0\\). We can 
 Let's solve this system of ODEs using the Diffsol crate. We will use the [DiffSL](https://martinjrobins.github.io/diffsl/) domain-specific language to specify the problem. We could have also used [Rust closures](/specify/closure/rust_closures.md), but this allows us to illustrate the modelling process with a minimum of Rust syntax.
 
 ```rust,ignore
-{{#include ../../../examples/population-dynamics/src/main.rs::57}}
+{{#include ../../../examples/population-dynamics/src/main.rs:solve}}
 ```
 
 {{#include images/prey-predator.html}}
@@ -78,7 +78,7 @@ Our initial conditions are now:
 so we can solve this system for different values of \\(y_0\\) and plot the phase plane for each case. We will use similar code as above, but we will introduce our new parameter and loop over different values of \\(y_0\\)
 
 ```rust,ignore
-{{#include ../../../examples/population-dynamics/src/main.rs:59:}}
+{{#include ../../../examples/population-dynamics/src/main.rs:phase_plane}}
 ```
 
 {{#include images/prey-predator2.html}}
