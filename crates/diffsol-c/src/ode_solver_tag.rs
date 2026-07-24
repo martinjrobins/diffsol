@@ -2,9 +2,9 @@ use diffsol::matrix::MatrixRef;
 use diffsol::{
     AdjointEquations, AdjointOdeSolverMethod, Bdf, BdfState, CheckpointingPath, CodegenModule,
     DefaultDenseMatrix, DefaultSolver, DiffSl, DiffsolError, ExplicitRk, LinearSolver, Matrix,
-    NewtonNonlinearSolver, NoLineSearch, OdeEquations, OdeEquationsImplicitAdjoint,
-    OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverProblem, OdeSolverState, RkState, Sdirk,
-    SensEquations, SensitivitiesOdeSolverMethod, VectorRef,
+    OdeEquations, OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeSolverMethod,
+    OdeSolverProblem, OdeSolverState, RkState, Sdirk, SensEquations, SensitivitiesOdeSolverMethod,
+    VectorRef,
 };
 
 use crate::scalar_type::Scalar;
@@ -132,7 +132,7 @@ where
     type State = BdfState<M::V>;
 
     type OdeSolverMethod<'a, LS>
-        = Bdf<'a, DiffSl<M, CG>, NewtonNonlinearSolver<M, LS, NoLineSearch>>
+        = Bdf<'a, DiffSl<M, CG>, LS>
     where
         M: 'a,
         CG: 'a,
@@ -142,7 +142,7 @@ where
         = Bdf<
         'a,
         DiffSl<M, CG>,
-        NewtonNonlinearSolver<M, LS, NoLineSearch>,
+        LS,
         <M::V as DefaultDenseMatrix>::M,
         SensEquations<'a, DiffSl<M, CG>>,
     >
@@ -155,7 +155,7 @@ where
         = Bdf<
         'a,
         DiffSl<M, CG>,
-        NewtonNonlinearSolver<M, LS, NoLineSearch>,
+        LS,
         <M::V as DefaultDenseMatrix>::M,
         AdjointEquations<'a, DiffSl<M, CG>, S>,
     >
