@@ -1,3 +1,4 @@
+// ANCHOR: solve
 use diffsol::{
     CraneliftJitModule, MatrixCommon, NalgebraVec, OdeBuilder, OdeEquations, OdeSolverMethod,
     Vector,
@@ -55,7 +56,9 @@ fn solve() {
     fs::write("book/src/primer/images/prey-predator.html", plot_html)
         .expect("Unable to write file");
 }
+// ANCHOR_END: solve
 
+// ANCHOR: phase_plane
 fn phase_plane() {
     let mut problem = OdeBuilder::<M>::new()
         .p([1.0])
@@ -100,3 +103,4 @@ fn phase_plane() {
     fs::write("book/src/primer/images/prey-predator2.html", plot_html)
         .expect("Unable to write file");
 }
+// ANCHOR_END: phase_plane

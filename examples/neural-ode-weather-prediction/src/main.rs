@@ -31,6 +31,7 @@ const BASE_MODEL_DIR: &str = "examples/neural-ode-weather-prediction/src/model/"
 const BASE_DATA_DIR: &str = "examples/neural-ode-weather-prediction/src/data/";
 const BASE_OUTPUT_DIR: &str = "examples/neural-ode-weather-prediction/";
 
+// ANCHOR: neural_ode
 struct NeuralOde {
     rhs: RefCell<Session>,
     rhs_jac_mul: RefCell<Session>,
@@ -41,6 +42,7 @@ struct NeuralOde {
     input_p: Array1<f32>,
     y0: V,
 }
+// ANCHOR_END: neural_ode
 
 impl NeuralOde {
     fn new_session(filename: &str) -> Result<Session> {
@@ -204,6 +206,7 @@ impl Op for Rhs<'_> {
     }
 }
 
+// ANCHOR: rhs
 impl NonLinearOp for Rhs<'_> {
     fn call_inplace(&self, x: &Self::V, _t: Self::T, y: &mut Self::V) {
         let mut y_input = self.0.input_y.borrow_mut();
@@ -227,6 +230,7 @@ impl NonLinearOp for Rhs<'_> {
             .for_each(|(y, x)| *y = *x as f64);
     }
 }
+// ANCHOR_END: rhs
 
 impl NonLinearOpJacobian for Rhs<'_> {
     fn jac_mul_inplace(&self, x: &Self::V, _t: Self::T, v: &Self::V, y: &mut Self::V) {
@@ -321,6 +325,7 @@ impl NonLinearOpSensAdjoint for Rhs<'_> {
     }
 }
 
+// ANCHOR: adamw
 struct AdamW {
     lr: T,
     betas: (T, T),
@@ -378,7 +383,9 @@ impl AdamW {
             });
     }
 }
+// ANCHOR_END: adamw
 
+// ANCHOR: loss_fn
 fn loss_fn(
     problem: &mut OdeSolverProblem<NeuralOde>,
     p: &V,
@@ -402,6 +409,7 @@ fn loss_fn(
     let (soln, _) = adjoint_solver.solve_adjoint_backwards_pass(ts_data, &[&*g_m])?;
     Ok((loss, soln.into_common().sg.pop().unwrap()))
 }
+// ANCHOR_END: loss_fn
 
 fn predict_fn(
     problem: &mut OdeSolverProblem<NeuralOde>,
@@ -415,6 +423,7 @@ fn predict_fn(
         .map(|(ys, _stop_reason)| ys)
 }
 
+// ANCHOR: train_one_round
 fn train_one_round(
     problem: &mut OdeSolverProblem<NeuralOde>,
     ts_data: &[T],
@@ -435,6 +444,7 @@ fn train_one_round(
         };
     }
 }
+// ANCHOR_END: train_one_round
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // load data
