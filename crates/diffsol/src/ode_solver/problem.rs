@@ -4,10 +4,10 @@ use std::{cell::RefCell, rc::Rc};
 use crate::{
     error::DiffsolError, vector::Vector, AdjointContext, AdjointEquations, AugmentedOdeEquations,
     AugmentedOdeEquationsImplicit, Bdf, BdfState, CheckpointingPath, DefaultDenseMatrix,
-    DefaultSolver, DenseMatrix, ExplicitRk, LinearSolver, MatrixRef, NewtonNonlinearSolver,
-    NoLineSearch, OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit,
-    OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverState,
-    RkState, Scalar, Sdirk, SensEquations, Tableau, VectorRef,
+    DenseMatrix, ExplicitRk, LinearSolver, MatrixRef, NewtonNonlinearSolver, NoLineSearch,
+    OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
+    OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverState, RkState, Scalar, Sdirk,
+    SensEquations, Tableau, VectorRef,
 };
 
 /// Options for the initial condition solver used to find consistent initial conditions
@@ -628,13 +628,11 @@ where
     pub fn bdf_solver<LS: LinearSolver<Eqn::M>>(
         &self,
         state: BdfState<Eqn::V>,
-    ) -> Result<Bdf<'_, Eqn, NewtonNonlinearSolver<Eqn::M, LS, NoLineSearch>>, DiffsolError>
+    ) -> Result<Bdf<'_, Eqn, LS>, DiffsolError>
     where
         Eqn: OdeEquationsImplicit,
-        Eqn::M: DefaultSolver,
     {
-        let newton_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
-        Bdf::new(self, state, newton_solver)
+        Bdf::new(self, state, LS::default())
     }
 
     /// Create a new BDF solver instance for the problem. This will create a consistent initial state,
@@ -648,12 +646,9 @@ where
     /// # Returns
     /// A BDF solver instance configured for this problem with a consistent initial state
     #[allow(clippy::type_complexity)]
-    pub fn bdf<LS: LinearSolver<Eqn::M>>(
-        &self,
-    ) -> Result<Bdf<'_, Eqn, NewtonNonlinearSolver<Eqn::M, LS, NoLineSearch>>, DiffsolError>
+    pub fn bdf<LS: LinearSolver<Eqn::M>>(&self) -> Result<Bdf<'_, Eqn, LS>, DiffsolError>
     where
         Eqn: OdeEquationsImplicit,
-        Eqn::M: DefaultSolver,
     {
         let state = self.bdf_state::<LS>()?;
         self.bdf_solver(state)
@@ -667,22 +662,11 @@ where
         &self,
         state: BdfState<Eqn::V>,
         aug_eqn: Aug,
-    ) -> Result<
-        Bdf<
-            '_,
-            Eqn,
-            NewtonNonlinearSolver<Eqn::M, LS, NoLineSearch>,
-            <Eqn::V as DefaultDenseMatrix>::M,
-            Aug,
-        >,
-        DiffsolError,
-    >
+    ) -> Result<Bdf<'_, Eqn, LS, <Eqn::V as DefaultDenseMatrix>::M, Aug>, DiffsolError>
     where
         Eqn: OdeEquationsImplicit,
-        Eqn::M: DefaultSolver,
     {
-        let newton_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
-        Bdf::new_augmented(state, self, aug_eqn, newton_solver)
+        Bdf::new_augmented(state, self, aug_eqn, LS::default())
     }
 
     /// Create a new BDF solver instance for the backwards solve for the adjoint equations. This requires
@@ -744,18 +728,11 @@ where
         state: BdfState<Eqn::V>,
         mut augmented_eqn: AdjointEquations<'a, Eqn, S>,
     ) -> Result<
-        Bdf<
-            'a,
-            Eqn,
-            NewtonNonlinearSolver<Eqn::M, LS, NoLineSearch>,
-            <Eqn::V as DefaultDenseMatrix>::M,
-            AdjointEquations<'a, Eqn, S>,
-        >,
+        Bdf<'a, Eqn, LS, <Eqn::V as DefaultDenseMatrix>::M, AdjointEquations<'a, Eqn, S>>,
         DiffsolError,
     >
     where
         Eqn: OdeEquationsImplicitAdjoint,
-        Eqn::M: DefaultSolver,
     {
         let mut newton_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
         let mut state = state;
@@ -763,8 +740,7 @@ where
         state
             .as_mut()
             .set_consistent_augmented(self, &mut augmented_eqn, &mut newton_solver)?;
-        let newton_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
-        Bdf::new_augmented(state, self, augmented_eqn, newton_solver)
+        Bdf::new_augmented(state, self, augmented_eqn, LS::default())
     }
 
     /// Create a new BDF solver instance for the backwards solve for the adjoint equations.
@@ -790,18 +766,11 @@ where
         solver: Option<S>,
         nout_override: Option<usize>,
     ) -> Result<
-        Bdf<
-            'a,
-            Eqn,
-            NewtonNonlinearSolver<Eqn::M, LS, NoLineSearch>,
-            <Eqn::V as DefaultDenseMatrix>::M,
-            AdjointEquations<'a, Eqn, S>,
-        >,
+        Bdf<'a, Eqn, LS, <Eqn::V as DefaultDenseMatrix>::M, AdjointEquations<'a, Eqn, S>>,
         DiffsolError,
     >
     where
         Eqn: OdeEquationsImplicitAdjoint,
-        Eqn::M: DefaultSolver,
     {
         let mut augmented_eqn = self.adjoint_equations(checkpointer, solver, nout_override);
         let state = self.bdf_state_adjoint::<LS, _>(&mut augmented_eqn)?;
@@ -826,18 +795,11 @@ where
         &self,
         state: BdfState<Eqn::V>,
     ) -> Result<
-        Bdf<
-            '_,
-            Eqn,
-            NewtonNonlinearSolver<Eqn::M, LS, NoLineSearch>,
-            <Eqn::V as DefaultDenseMatrix>::M,
-            SensEquations<'_, Eqn>,
-        >,
+        Bdf<'_, Eqn, LS, <Eqn::V as DefaultDenseMatrix>::M, SensEquations<'_, Eqn>>,
         DiffsolError,
     >
     where
         Eqn: OdeEquationsImplicitSens,
-        Eqn::M: DefaultSolver,
     {
         let sens_eqn = SensEquations::new(self);
         self.bdf_solver_aug(state, sens_eqn)
@@ -857,18 +819,11 @@ where
     pub fn bdf_sens<LS: LinearSolver<Eqn::M>>(
         &self,
     ) -> Result<
-        Bdf<
-            '_,
-            Eqn,
-            NewtonNonlinearSolver<Eqn::M, LS, NoLineSearch>,
-            <Eqn::V as DefaultDenseMatrix>::M,
-            SensEquations<'_, Eqn>,
-        >,
+        Bdf<'_, Eqn, LS, <Eqn::V as DefaultDenseMatrix>::M, SensEquations<'_, Eqn>>,
         DiffsolError,
     >
     where
         Eqn: OdeEquationsImplicitSens,
-        Eqn::M: DefaultSolver,
     {
         let state = self.bdf_state_sens::<LS>()?;
         self.bdf_solver_sens(state)
