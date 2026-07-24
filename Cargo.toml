@@ -1,18 +1,31 @@
 [workspace]
-members = ["diffsol", "diffsol-c", "examples/*"]
-default-members = ["diffsol", "diffsol-c"]
+members = [
+  "crates/diffsol-la",
+  "crates/diffsol-nl",
+  "crates/diffsol",
+  "crates/diffsol-c",
+  "examples/*",
+]
+default-members = [
+  "crates/diffsol-la",
+  "crates/diffsol-nl",
+  "crates/diffsol",
+  "crates/diffsol-c",
+]
 exclude = ["book"]
 resolver = "2"
 
 [workspace.package]
 edition = "2021"
 license = "MIT"
-readme = "diffsol/README.md"
+readme = "README.md"
 authors = ["Martin Robinson <martinjrobins@gmail.com>"]
 repository = "https://github.com/martinjrobins/diffsol"
 
 [workspace.dependencies]
-nalgebra = "0.34"
+diffsol-la = { path = "crates/diffsol-la", version = "0.1.0", default-features = false }
+diffsol-nl = { path = "crates/diffsol-nl", version = "0.1.0", default-features = false }
+nalgebra = "0.35"
 faer = { version = "0.24", default-features = false, features = [
   "std",
   "sparse-linalg",
@@ -21,7 +34,7 @@ faer = { version = "0.24", default-features = false, features = [
 ] }
 faer-traits = "0.24"
 cudarc = { version = "0.19", default-features = false }
-diffsl = { version = "0.12.0", features = ["rayon"] }
+diffsl = { version = "0.12.4", features = ["rayon"] }
 
 plotly = { version = "0.14" }
 argmin = { version = "0.11.0" }
@@ -33,6 +46,10 @@ paste = "1.0.15"
 num-traits = "0.2.17"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
 
 [profile.profiling]
 inherits = "release"

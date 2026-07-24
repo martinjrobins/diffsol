@@ -1,0 +1,26 @@
+[package]
+name = "diffsol-nl"
+version = "0.1.0"
+edition.workspace = true
+description = "Time-unaware non-linear solver traits and implementations (Newton, line search) for diffsol."
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+keywords = ["nonlinear", "solver", "math", "science"]
+readme = "README.md"
+
+[features]
+default = ["nalgebra", "faer"]
+faer = ["diffsol-la/faer"]
+nalgebra = ["diffsol-la/nalgebra"]
+cuda = ["diffsol-la/cuda"]
+suitesparse = ["diffsol-la/suitesparse"]
+
+[dependencies]
+diffsol-la = { workspace = true }
+num-traits = { workspace = true }
+thiserror = "2.0"
+log = "0.4"
+
+[dev-dependencies]
+paste = { workspace = true }

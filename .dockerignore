@@ -1,0 +1,20 @@
+# Build artifacts (multiple GB)
+target/
+
+# Git history
+.git/
+
+# Documentation build output
+book/
+
+# CI/CD configs (not needed in image)
+.github/
+.gitignore
+
+# IDE/editor configs
+.vscode/
+.idea/
+
+# Markdown/docs (not needed at build time)
+*.md
+LICENSE

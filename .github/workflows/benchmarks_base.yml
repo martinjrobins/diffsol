@@ -1,0 +1,41 @@
+name: Continuous Benchmarking (Base)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  checks: write
+
+jobs:
+  benchmark_base:
+    name: Benchmark Base Branch with Bencher
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and push Docker image
+        run: |
+          docker build -t registry.bencher.dev/diffsol:latest .
+          docker login registry.bencher.dev -u diffsol --password-stdin <<< "${{ secrets.BENCHER_API_KEY }}"
+          docker push registry.bencher.dev/diffsol:latest
+
+      - uses: bencherdev/bencher@main
+
+      - name: Track base branch benchmarks
+        run: |
+          bencher run \
+            --project diffsol \
+            --key '${{ secrets.BENCHER_API_KEY }}' \
+            --image diffsol:latest \
+            --branch main \
+            --testbed ubuntu-latest \
+            --adapter rust_criterion \
+            --threshold-measure latency \
+            --threshold-test t_test \
+            --threshold-max-sample-size 64 \
+            --threshold-upper-boundary 0.99 \
+            --thresholds-reset \
+            --github-actions '${{ secrets.GITHUB_TOKEN }}' \
+            "ode_solvers_ci --bench"

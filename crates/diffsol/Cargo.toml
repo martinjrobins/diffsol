@@ -1,0 +1,82 @@
+[package]
+name = "diffsol"
+version = "0.16.1"
+edition.workspace = true
+description = "A library for solving ordinary differential equations (ODEs) in Rust."
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+keywords = ["ode", "solver", "math", "simulation", "science"]
+readme = "../../README.md"
+
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+default = ["nalgebra", "faer"]
+faer = ["diffsol-la/faer", "diffsol-nl/faer"]
+nalgebra = ["diffsol-la/nalgebra", "diffsol-nl/nalgebra"]
+cuda = ["diffsol-la/cuda", "diffsol-nl/cuda"]
+sundials = ["suitesparse_sys", "bindgen", "cc"]
+suitesparse = [
+  "suitesparse_sys",
+  "diffsol-la/suitesparse",
+  "diffsol-nl/suitesparse",
+]
+diffsl = ["dep:diffsl"]
+diffsl-cranelift = ["diffsl/cranelift", "diffsl"]
+diffsl-external-f64 = ["diffsl-external", "diffsl/external_f64", "diffsl"]
+diffsl-external-f32 = ["diffsl-external", "diffsl/external_f32", "diffsl"]
+diffsl-external = []
+diffsl-external-dynamic = ["diffsl", "diffsl/external_dynamic"]
+diffsl-llvm = []
+diffsl-llvm15 = ["diffsl/llvm15-0", "diffsl", "diffsl-llvm"]
+diffsl-llvm16 = ["diffsl/llvm16-0", "diffsl", "diffsl-llvm"]
+diffsl-llvm17 = ["diffsl/llvm17-0", "diffsl", "diffsl-llvm"]
+diffsl-llvm18 = ["diffsl/llvm18-1", "diffsl", "diffsl-llvm"]
+diffsl-llvm19 = ["diffsl/llvm19-1", "diffsl", "diffsl-llvm"]
+diffsl-llvm20 = ["diffsl/llvm20-1", "diffsl", "diffsl-llvm"]
+diffsl-llvm21 = ["diffsl/llvm21-1", "diffsl", "diffsl-llvm"]
+nightly = []
+
+[dependencies]
+diffsol-la = { workspace = true, features = ["nalgebra", "faer"] }
+diffsol-nl = { workspace = true, features = ["nalgebra", "faer"] }
+num-traits = { workspace = true }
+serde = { workspace = true }
+diffsl = { workspace = true, optional = true }
+petgraph = "0.8.3"
+suitesparse_sys = { version = "0.1", optional = true }
+thiserror = "2.0"
+log = "0.4"
+serde_json = { workspace = true }
+
+[dev-dependencies]
+insta = { version = "1.48", features = ["yaml"] }
+criterion = { version = "0.8" }
+skeptic = "0.13"
+paste = { workspace = true }
+colog = "1.4"
+
+[build-dependencies]
+bindgen = { version = "0.72", optional = true }
+cc = { version = "1.2", optional = true }
+
+[[bench]]
+name = "ode_solvers"
+harness = false
+
+[[bench]]
+name = "lin_alg_ops"
+harness = false
+
+[[bench]]
+name = "pybamm_dfn"
+harness = false
+
+[[bench]]
+name = "ode_solvers_ci"
+harness = false
+
+[package.metadata.docs.rs]
+features = ["diffsl-llvm15", "diffsl-cranelift", "diffsl-external-dynamic"]

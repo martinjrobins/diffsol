@@ -1,0 +1,1719 @@
+use crate::{
+    error::DiffsolError,
+    matrix::dense_nalgebra_serial::NalgebraMat,
+    ode_solver_error,
+    op::{linear_closure_with_adjoint::LinearClosureWithAdjoint, BuilderOp},
+    Closure, ClosureNoJac, ClosureWithAdjoint, ClosureWithSens, ConstantClosure,
+    ConstantClosureWithAdjoint, ConstantClosureWithSens, ConstantOp, InitialConditionSolverOptions,
+    LinearClosure, LinearOp, Matrix, NonLinearOp, OdeEquations, OdeSolverOptions, OdeSolverProblem,
+    Op, ParameterisedOp, Scalar, UnitCallable, Vector,
+};
+
+#[cfg(feature = "diffsl")]
+use diffsl::execution::scalar::Scalar as DiffSlScalar;
+
+use crate::OdeSolverEquations;
+use num_traits::{FromPrimitive, One, Zero};
+
+/// Builder for ODE problems. Use methods to set parameters and then call one of the build methods when done.
+pub struct OdeBuilder<
+    M: Matrix = NalgebraMat<f64>,
+    Rhs = UnitCallable<M>,
+    Init = UnitCallable<M>,
+    Mass = UnitCallable<M>,
+    Root = UnitCallable<M>,
+    Out = UnitCallable<M>,
+    Reset = UnitCallable<M>,
+> {
+    t0: M::T,
+    h0: M::T,
+    rtol: M::T,
+    atol: Vec<M::T>,
+    sens_atol: Option<Vec<M::T>>,
+    sens_rtol: Option<M::T>,
+    out_rtol: Option<M::T>,
+    out_atol: Option<Vec<M::T>>,
+    param_rtol: Option<M::T>,
+    param_atol: Option<Vec<M::T>>,
+    p: Vec<M::T>,
+    use_coloring: bool,
+    integrate_out: bool,
+    rhs: Option<Rhs>,
+    init: Option<Init>,
+    mass: Option<Mass>,
+    root: Option<Root>,
+    out: Option<Out>,
+    reset: Option<Reset>,
+    ic_options: InitialConditionSolverOptions<f64>,
+    ode_options: OdeSolverOptions<f64>,
+    ctx: M::C,
+}
+
+impl Default for OdeBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Builder for ODE problems. Use methods to set parameters and then call one of the build methods when done.
+///
+/// # Example
+///  
+/// ```rust
+/// use diffsol::{OdeBuilder, NalgebraLU, Bdf, OdeSolverState, OdeSolverMethod, NalgebraMat};
+/// type M = NalgebraMat<f64>;
+/// type LS = NalgebraLU<f64>;
+///
+/// let problem = OdeBuilder::<M>::new()
+///   .rtol(1e-6)
+///   .p([0.1])
+///   .rhs_implicit(
+///     // dy/dt = -ay
+///     |x, p, t, y| {
+///       y[0] = -p[0] * x[0];
+///     },
+///     // Jv = -av
+///     |x, p, t, v, y| {
+///       y[0] = -p[0] * v[0];
+///     },
+///   )
+///   .init(
+///     // y(0) = 1
+///    |p, t, y| y[0] = 1.0,
+///    1,
+///   )
+///   .build()
+///   .unwrap();
+///
+/// let mut solver = problem.bdf::<LS>().unwrap();
+/// let t = 0.4;
+/// while solver.state().t <= t {
+///     solver.step().unwrap();
+/// }
+/// let y = solver.interpolate(t);
+/// ```
+///
+impl<M, Rhs, Init, Mass, Root, Out, Reset> OdeBuilder<M, Rhs, Init, Mass, Root, Out, Reset>
+where
+    M: Matrix,
+{
+    /// Create a new builder with default parameters:
+    /// - t0 = 0.0
+    /// - h0 = 1.0
+    /// - rtol = 1e-6
+    /// - atol = [1e-6]
+    /// - p = []
+    /// - use_coloring = false
+    /// - constant_mass = false
+    pub fn new() -> Self {
+        let default_atol = vec![M::T::from_f64(1e-6).unwrap()];
+        let default_rtol = M::T::from_f64(1e-6).unwrap();
+        Self {
+            rhs: None,
+            init: None,
+            mass: None,
+            root: None,
+            out: None,
+            reset: None,
+            t0: M::T::zero(),
+            h0: M::T::one(),
+            rtol: default_rtol,
+            atol: default_atol.clone(),
+            p: vec![],
+            use_coloring: false,
+            integrate_out: false,
+            out_rtol: None,
+            out_atol: None,
+            param_rtol: None,
+            param_atol: None,
+            sens_atol: None,
+            sens_rtol: None,
+            ctx: M::C::default(),
+            ic_options: Default::default(),
+            ode_options: Default::default(),
+        }
+    }
+
+    /// Set the right-hand side of the ODE.
+    ///
+    /// # Arguments
+    ///
+    /// - `rhs`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the right-hand side of the ODE.
+    pub fn rhs<F>(self, rhs: F) -> OdeBuilder<M, ClosureNoJac<M, F>, Init, Mass, Root, Out, Reset>
+    where
+        F: Fn(&M::V, &M::V, M::T, &mut M::V),
+    {
+        let nstates = 0;
+        OdeBuilder::<M, ClosureNoJac<M, F>, Init, Mass, Root, Out, Reset> {
+            rhs: Some(ClosureNoJac::new(
+                rhs,
+                nstates,
+                nstates,
+                nstates,
+                self.ctx.clone(),
+            )),
+            init: self.init,
+            mass: self.mass,
+            root: self.root,
+            out: self.out,
+
+            reset: self.reset,
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+            ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
+        }
+    }
+
+    /// Set the right-hand side of the ODE.
+    ///
+    /// # Arguments
+    ///
+    /// - `rhs`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the right-hand side of the ODE.
+    /// - `rhs_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the right-hand side with the vector v.
+    pub fn rhs_implicit<F, G>(
+        self,
+        rhs: F,
+        rhs_jac: G,
+    ) -> OdeBuilder<M, Closure<M, F, G>, Init, Mass, Root, Out, Reset>
+    where
+        F: Fn(&M::V, &M::V, M::T, &mut M::V),
+        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    {
+        let nstates = 0;
+        OdeBuilder::<M, Closure<M, F, G>, Init, Mass, Root, Out, Reset> {
+            rhs: Some(Closure::new(
+                rhs,
+                rhs_jac,
+                nstates,
+                nstates,
+                nstates,
+                self.ctx.clone(),
+            )),
+            init: self.init,
+            mass: self.mass,
+            root: self.root,
+            out: self.out,
+
+            reset: self.reset,
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+            ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
+        }
+    }
+
+    /// Set the right-hand side of the ODE for forward sensitivity analysis.
+    ///
+    /// # Arguments
+    /// - `rhs`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the right-hand side of the ODE.
+    /// - `rhs_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the right-hand side with the vector v.
+    /// - `rhs_sens`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the partial derivative of the rhs wrt the parameters, with the vector v.
+    #[allow(clippy::type_complexity)]
+    pub fn rhs_sens_implicit<F, G, H>(
+        self,
+        rhs: F,
+        rhs_jac: G,
+        rhs_sens: H,
+    ) -> OdeBuilder<M, ClosureWithSens<M, F, G, H>, Init, Mass, Root, Out, Reset>
+    where
+        F: Fn(&M::V, &M::V, M::T, &mut M::V),
+        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    {
+        let nstates = 0;
+        OdeBuilder::<M, ClosureWithSens<M, F, G, H>, Init, Mass, Root, Out, Reset> {
+            rhs: Some(ClosureWithSens::new(
+                rhs,
+                rhs_jac,
+                rhs_sens,
+                nstates,
+                nstates,
+                nstates,
+                self.ctx.clone(),
+            )),
+            init: self.init,
+            mass: self.mass,
+            root: self.root,
+            out: self.out,
+
+            reset: self.reset,
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+            ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
+        }
+    }
+
+    /// Set the right-hand side of the ODE for adjoint sensitivity analysis.
+    ///
+    /// This method provides all the functions needed for computing adjoint sensitivities,
+    /// including the transpose Jacobian operations.
+    ///
+    /// # Arguments
+    /// - `rhs`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the right-hand side of the ODE.
+    /// - `rhs_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the right-hand side with the vector v.
+    /// - `rhs_adjoint`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the transpose of the Jacobian with the vector v.
+    /// - `rhs_sens_adjoint`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the transpose of the partial derivative of the rhs wrt the parameters, with the vector v.
+    #[allow(clippy::type_complexity)]
+    pub fn rhs_adjoint_implicit<F, G, H, I>(
+        self,
+        rhs: F,
+        rhs_jac: G,
+        rhs_adjoint: H,
+        rhs_sens_adjoint: I,
+    ) -> OdeBuilder<M, ClosureWithAdjoint<M, F, G, H, I>, Init, Mass, Root, Out, Reset>
+    where
+        F: Fn(&M::V, &M::V, M::T, &mut M::V),
+        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        I: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    {
+        let nstates = 0;
+        OdeBuilder::<M, ClosureWithAdjoint<M, F, G, H, I>, Init, Mass, Root, Out, Reset> {
+            rhs: Some(ClosureWithAdjoint::new(
+                rhs,
+                rhs_jac,
+                rhs_adjoint,
+                rhs_sens_adjoint,
+                nstates,
+                nstates,
+                nstates,
+                self.ctx.clone(),
+            )),
+            init: self.init,
+            mass: self.mass,
+            root: self.root,
+            out: self.out,
+
+            reset: self.reset,
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+            ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
+        }
+    }
+
+    /// Set the initial condition of the ODE.
+    ///
+    /// # Arguments
+    /// - `init`: Function of type Fn(p: &V, t: S) -> V that computes the initial state.
+    pub fn init<F>(
+        self,
+        init: F,
+        nstates: usize,
+    ) -> OdeBuilder<M, Rhs, ConstantClosure<M, F>, Mass, Root, Out, Reset>
+    where
+        F: Fn(&M::V, M::T, &mut M::V),
+    {
+        OdeBuilder::<M, Rhs, ConstantClosure<M, F>, Mass, Root, Out, Reset> {
+            rhs: self.rhs,
+            init: Some(ConstantClosure::new(init, nstates, 0, self.ctx.clone())),
+            mass: self.mass,
+            root: self.root,
+            out: self.out,
+
+            reset: self.reset,
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+            ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
+        }
+    }
+
+    /// Set the initial condition of the ODE for forward sensitivity analysis.
+    ///
+    /// # Arguments
+    /// - `init`: Function of type Fn(p: &V, t: S) -> V that computes the initial state.
+    /// - `init_sens`: Function of type Fn(p: &V, t: S, y: &mut V) that computes the multiplication of the partial derivative of the initial state wrt the parameters, with the vector v.
+    pub fn init_sens<F, G>(
+        self,
+        init: F,
+        init_sens: G,
+        nstates: usize,
+    ) -> OdeBuilder<M, Rhs, ConstantClosureWithSens<M, F, G>, Mass, Root, Out, Reset>
+    where
+        F: Fn(&M::V, M::T, &mut M::V),
+        G: Fn(&M::V, M::T, &M::V, &mut M::V),
+    {
+        OdeBuilder::<M, Rhs, ConstantClosureWithSens<M, F, G>, Mass, Root, Out, Reset> {
+            rhs: self.rhs,
+            init: Some(ConstantClosureWithSens::new(
+                init,
+                init_sens,
+                nstates,
+                0,
+                self.ctx.clone(),
+            )),
+            mass: self.mass,
+            root: self.root,
+            out: self.out,
+
+            reset: self.reset,
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+            ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
+        }
+    }
+
+    /// Set the initial condition of the ODE for adjoint sensitivity analysis.
+    ///
+    /// # Arguments
+    /// - `init`: Function of type Fn(p: &V, t: S) -> V that computes the initial state.
+    /// - `init_sens_adjoint`: Function of type Fn(p: &V, t: S, y: &V, y_adj: &mut V) that computes the multiplication of the partial derivative of the initial state wrt the parameters, with the vector v.
+    ///
+    pub fn init_adjoint<F, G>(
+        self,
+        init: F,
+        init_sens_adjoint: G,
+        nstates: usize,
+    ) -> OdeBuilder<M, Rhs, ConstantClosureWithAdjoint<M, F, G>, Mass, Root, Out, Reset>
+    where
+        F: Fn(&M::V, M::T, &mut M::V),
+        G: Fn(&M::V, M::T, &M::V, &mut M::V),
+    {
+        OdeBuilder::<M, Rhs, ConstantClosureWithAdjoint<M, F, G>, Mass, Root, Out, Reset> {
+            rhs: self.rhs,
+            init: Some(ConstantClosureWithAdjoint::new(
+                init,
+                init_sens_adjoint,
+                nstates,
+                0,
+                self.ctx.clone(),
+            )),
+            mass: self.mass,
+            root: self.root,
+            out: self.out,
+
+            reset: self.reset,
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+            ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
+        }
+    }
+
+    /// Set the mass matrix of the ODE.
+    ///
+    /// # Arguments
+    /// - `mass`: Function of type Fn(v: &V, p: &V, t: S, beta: S, y: &mut V) that computes a gemv multiplication of the mass matrix with the vector v (i.e. y = M * v + beta * y).
+    pub fn mass<F>(self, mass: F) -> OdeBuilder<M, Rhs, Init, LinearClosure<M, F>, Root, Out, Reset>
+    where
+        F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
+    {
+        let nstates = 0;
+        OdeBuilder::<M, Rhs, Init, LinearClosure<M, F>, Root, Out, Reset> {
+            rhs: self.rhs,
+            init: self.init,
+            mass: Some(LinearClosure::new(
+                mass,
+                nstates,
+                nstates,
+                nstates,
+                self.ctx.clone(),
+            )),
+            root: self.root,
+            out: self.out,
+
+            reset: self.reset,
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+            ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
+        }
+    }
+
+    /// Set the mass matrix of the ODE for adjoint sensitivity analysis.
+    ///
+    /// # Arguments
+    ///
+    /// - `mass`: Function of type Fn(v: &V, p: &V, t: S, beta: S, y: &mut V) that computes a gemv multiplication of the mass matrix with
+    ///   the vector v (i.e. y = M * v + beta * y).
+    /// - `mass_adjoint`: Function of type Fn(v: &V, p: &V, t: S, beta: S, y: &mut V) that computes a gemv multiplication of the transpose of the mass matrix with
+    ///   the vector v (i.e. y = M^T * v + beta * y).
+    pub fn mass_adjoint<F, G>(
+        self,
+        mass: F,
+        mass_adjoint: G,
+    ) -> OdeBuilder<M, Rhs, Init, LinearClosureWithAdjoint<M, F, G>, Root, Out, Reset>
+    where
+        F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
+        G: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
+    {
+        let nstates = 0;
+        OdeBuilder::<M, Rhs, Init, LinearClosureWithAdjoint<M, F, G>, Root, Out, Reset> {
+            rhs: self.rhs,
+            init: self.init,
+            mass: Some(LinearClosureWithAdjoint::new(
+                mass,
+                mass_adjoint,
+                nstates,
+                nstates,
+                nstates,
+                self.ctx.clone(),
+            )),
+            root: self.root,
+            out: self.out,
+
+            reset: self.reset,
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+            ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
+        }
+    }
+
+    /// Set a root equation for the ODE.
+    ///
+    /// # Arguments
+    /// - `root`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the root function.
+    /// - `nroots`: Number of roots (i.e. number of elements in the `y` arg in `root`), an event is triggered when any of the roots changes sign.
+    pub fn root<F>(
+        self,
+        root: F,
+        nroots: usize,
+    ) -> OdeBuilder<M, Rhs, Init, Mass, ClosureNoJac<M, F>, Out, Reset>
+    where
+        F: Fn(&M::V, &M::V, M::T, &mut M::V),
+    {
+        let nstates = 0;
+        OdeBuilder::<M, Rhs, Init, Mass, ClosureNoJac<M, F>, Out, Reset> {
+            rhs: self.rhs,
+            init: self.init,
+            mass: self.mass,
+            root: Some(ClosureNoJac::new(
+                root,
+                nstates,
+                nroots,
+                nroots,
+                self.ctx.clone(),
+            )),
+            out: self.out,
+
+            reset: self.reset,
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+            ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
+        }
+    }
+
+    /// Set a root equation for the ODE for forward sensitivity analysis.
+    ///
+    /// # Arguments
+    /// - `root`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the root function.
+    /// - `root_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the root function with the vector v.
+    /// - `root_sens`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the partial derivative of the root function wrt the parameters with the vector v.
+    /// - `nroots`: Number of root outputs.
+    #[allow(clippy::type_complexity)]
+    pub fn root_sens_implicit<F, G, H>(
+        self,
+        root: F,
+        root_jac: G,
+        root_sens: H,
+        nroots: usize,
+    ) -> OdeBuilder<M, Rhs, Init, Mass, ClosureWithSens<M, F, G, H>, Out, Reset>
+    where
+        F: Fn(&M::V, &M::V, M::T, &mut M::V),
+        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    {
+        let nstates = 0;
+        OdeBuilder::<M, Rhs, Init, Mass, ClosureWithSens<M, F, G, H>, Out, Reset> {
+            rhs: self.rhs,
+            init: self.init,
+            mass: self.mass,
+            root: Some(ClosureWithSens::new(
+                root,
+                root_jac,
+                root_sens,
+                nstates,
+                nroots,
+                nroots,
+                self.ctx.clone(),
+            )),
+            out: self.out,
+
+            reset: self.reset,
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+            ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
+        }
+    }
+
+    /// Set a root equation for the ODE for adjoint sensitivity analysis.
+    ///
+    /// # Arguments
+    /// - `root`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the root function.
+    /// - `root_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the root function with the vector v.
+    /// - `root_adjoint`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the transpose of the Jacobian of the root function with the vector v.
+    /// - `root_sens_adjoint`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the transpose of the partial derivative of the root function wrt the parameters with the vector v.
+    /// - `nroots`: Number of root outputs.
+    #[allow(clippy::type_complexity)]
+    pub fn root_adjoint_implicit<F, G, H, I>(
+        self,
+        root: F,
+        root_jac: G,
+        root_adjoint: H,
+        root_sens_adjoint: I,
+        nroots: usize,
+    ) -> OdeBuilder<M, Rhs, Init, Mass, ClosureWithAdjoint<M, F, G, H, I>, Out, Reset>
+    where
+        F: Fn(&M::V, &M::V, M::T, &mut M::V),
+        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        I: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    {
+        let nstates = 0;
+        OdeBuilder::<M, Rhs, Init, Mass, ClosureWithAdjoint<M, F, G, H, I>, Out, Reset> {
+            rhs: self.rhs,
+            init: self.init,
+            mass: self.mass,
+            root: Some(ClosureWithAdjoint::new(
+                root,
+                root_jac,
+                root_adjoint,
+                root_sens_adjoint,
+                nstates,
+                nroots,
+                nroots,
+                self.ctx.clone(),
+            )),
+            out: self.out,
+
+            reset: self.reset,
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+            ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
+        }
+    }
+
+    /// Set the reset function of the ODE.
+    ///
+    /// The reset function is called after a root event at index 0 to update the state.
+    /// It computes the new state from the current state. No Jacobian is required.
+    /// The number of outputs equals the number of states and is set automatically.
+    ///
+    /// # Arguments
+    /// - `reset`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the new state.
+    pub fn reset<F>(self, reset: F) -> OdeBuilder<M, Rhs, Init, Mass, Root, Out, ClosureNoJac<M, F>>
+    where
+        F: Fn(&M::V, &M::V, M::T, &mut M::V),
+    {
+        let nstates = 0;
+        OdeBuilder::<M, Rhs, Init, Mass, Root, Out, ClosureNoJac<M, F>> {
+            rhs: self.rhs,
+            init: self.init,
+            mass: self.mass,
+            root: self.root,
+            out: self.out,
+            reset: Some(ClosureNoJac::new(
+                reset,
+                nstates,
+                nstates,
+                nstates,
+                self.ctx.clone(),
+            )),
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+            ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
+        }
+    }
+
+    /// Set the reset function of the ODE, providing an explicit Jacobian.
+    ///
+    /// Like [`reset`](Self::reset) but also accepts a Jacobian function, enabling
+    /// use with implicit solvers that may need the Jacobian of the reset map.
+    /// The number of outputs equals the number of states and is set automatically.
+    ///
+    /// # Arguments
+    /// - `reset`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the new state.
+    /// - `reset_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the reset function with the vector v.
+    pub fn reset_implicit<F, G>(
+        self,
+        reset: F,
+        reset_jac: G,
+    ) -> OdeBuilder<M, Rhs, Init, Mass, Root, Out, Closure<M, F, G>>
+    where
+        F: Fn(&M::V, &M::V, M::T, &mut M::V),
+        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    {
+        let nstates = 0;
+        OdeBuilder::<M, Rhs, Init, Mass, Root, Out, Closure<M, F, G>> {
+            rhs: self.rhs,
+            init: self.init,
+            mass: self.mass,
+            root: self.root,
+            out: self.out,
+            reset: Some(Closure::new(
+                reset,
+                reset_jac,
+                nstates,
+                nstates,
+                nstates,
+                self.ctx.clone(),
+            )),
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+            ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
+        }
+    }
+
+    /// Set the reset function of the ODE for forward sensitivity analysis.
+    ///
+    /// # Arguments
+    /// - `reset`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the new state.
+    /// - `reset_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the reset function with the vector v.
+    /// - `reset_sens`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the partial derivative of the reset function wrt the parameters with the vector v.
+    #[allow(clippy::type_complexity)]
+    pub fn reset_sens_implicit<F, G, H>(
+        self,
+        reset: F,
+        reset_jac: G,
+        reset_sens: H,
+    ) -> OdeBuilder<M, Rhs, Init, Mass, Root, Out, ClosureWithSens<M, F, G, H>>
+    where
+        F: Fn(&M::V, &M::V, M::T, &mut M::V),
+        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    {
+        let nstates = 0;
+        OdeBuilder::<M, Rhs, Init, Mass, Root, Out, ClosureWithSens<M, F, G, H>> {
+            rhs: self.rhs,
+            init: self.init,
+            mass: self.mass,
+            root: self.root,
+            out: self.out,
+            reset: Some(ClosureWithSens::new(
+                reset,
+                reset_jac,
+                reset_sens,
+                nstates,
+                nstates,
+                nstates,
+                self.ctx.clone(),
+            )),
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+            ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
+        }
+    }
+
+    /// Set the reset function of the ODE for adjoint sensitivity analysis.
+    ///
+    /// # Arguments
+    /// - `reset`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the new state.
+    /// - `reset_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the reset function with the vector v.
+    /// - `reset_adjoint`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the transpose of the Jacobian of the reset function with the vector v.
+    /// - `reset_sens_adjoint`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the transpose of the partial derivative of the reset function wrt the parameters with the vector v.
+    #[allow(clippy::type_complexity)]
+    pub fn reset_adjoint_implicit<F, G, H, I>(
+        self,
+        reset: F,
+        reset_jac: G,
+        reset_adjoint: H,
+        reset_sens_adjoint: I,
+    ) -> OdeBuilder<M, Rhs, Init, Mass, Root, Out, ClosureWithAdjoint<M, F, G, H, I>>
+    where
+        F: Fn(&M::V, &M::V, M::T, &mut M::V),
+        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        I: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    {
+        let nstates = 0;
+        OdeBuilder::<M, Rhs, Init, Mass, Root, Out, ClosureWithAdjoint<M, F, G, H, I>> {
+            rhs: self.rhs,
+            init: self.init,
+            mass: self.mass,
+            root: self.root,
+            out: self.out,
+            reset: Some(ClosureWithAdjoint::new(
+                reset,
+                reset_jac,
+                reset_adjoint,
+                reset_sens_adjoint,
+                nstates,
+                nstates,
+                nstates,
+                self.ctx.clone(),
+            )),
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+            ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
+        }
+    }
+
+    /// Set the output function of the ODE.
+    ///
+    /// Output functions compute additional quantities of interest that depend on the state.
+    /// These can be integrated alongside the ODE or used for root finding.
+    ///
+    /// # Arguments
+    /// - `out`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the output.
+    /// - `out_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the output with the vector v.
+    /// - `nout`: Number of output equations (i.e. size of the output vector `y`).
+    pub fn out_implicit<F, G>(
+        self,
+        out: F,
+        out_jac: G,
+        nout: usize,
+    ) -> OdeBuilder<M, Rhs, Init, Mass, Root, Closure<M, F, G>, Reset>
+    where
+        F: Fn(&M::V, &M::V, M::T, &mut M::V),
+        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    {
+        let nstates = 0;
+        OdeBuilder::<M, Rhs, Init, Mass, Root, Closure<M, F, G>, Reset> {
+            rhs: self.rhs,
+            init: self.init,
+            mass: self.mass,
+            root: self.root,
+            out: Some(Closure::new(
+                out,
+                out_jac,
+                nstates,
+                nout,
+                nstates,
+                self.ctx.clone(),
+            )),
+            reset: self.reset,
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+            ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
+        }
+    }
+
+    /// Set the output function of the ODE for forward sensitivity analysis, suitable for implicit solvers.
+    ///
+    /// This extends the output function with sensitivity information needed for
+    /// computing sensitivities of the outputs with respect to parameters.
+    ///
+    /// # Arguments
+    /// - `out`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the output.
+    /// - `out_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the output with the vector v.
+    /// - `out_sens`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the partial derivative of the output wrt the parameters, with the vector v.
+    /// - `nout`: Number of output equations (i.e. size of the output vector `y`).
+    #[allow(clippy::type_complexity)]
+    pub fn out_sens_implicit<F, G, H>(
+        self,
+        out: F,
+        out_jac: G,
+        out_sens: H,
+        nout: usize,
+    ) -> OdeBuilder<M, Rhs, Init, Mass, Root, ClosureWithSens<M, F, G, H>, Reset>
+    where
+        F: Fn(&M::V, &M::V, M::T, &mut M::V),
+        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    {
+        let nstates = 0;
+        OdeBuilder::<M, Rhs, Init, Mass, Root, ClosureWithSens<M, F, G, H>, Reset> {
+            rhs: self.rhs,
+            init: self.init,
+            mass: self.mass,
+            root: self.root,
+            out: Some(ClosureWithSens::new(
+                out,
+                out_jac,
+                out_sens,
+                nstates,
+                nstates,
+                nout,
+                self.ctx.clone(),
+            )),
+            reset: self.reset,
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+            ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
+        }
+    }
+
+    /// Set the output function of the ODE for adjoint sensitivity analysis, suitable for implicit solvers.
+    ///
+    /// This provides all the functions needed for computing adjoint sensitivities of outputs,
+    /// including the transpose Jacobian operations.
+    ///
+    /// # Arguments
+    /// - `out`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the output.
+    /// - `out_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the output with the vector v.
+    /// - `out_adjoint`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the transpose of the Jacobian with the vector v.
+    /// - `out_sens_adjoint`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the transpose of the partial derivative of the output wrt the parameters, with the vector v.
+    /// - `nout`: Number of output equations.
+    #[allow(clippy::type_complexity)]
+    pub fn out_adjoint_implicit<F, G, H, I>(
+        self,
+        out: F,
+        out_jac: G,
+        out_adjoint: H,
+        out_sens_adjoint: I,
+        nout: usize,
+    ) -> OdeBuilder<M, Rhs, Init, Mass, Root, ClosureWithAdjoint<M, F, G, H, I>, Reset>
+    where
+        F: Fn(&M::V, &M::V, M::T, &mut M::V),
+        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        I: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    {
+        let nstates = 0;
+        OdeBuilder::<M, Rhs, Init, Mass, Root, ClosureWithAdjoint<M, F, G, H, I>, Reset> {
+            rhs: self.rhs,
+            init: self.init,
+            mass: self.mass,
+            root: self.root,
+            out: Some(ClosureWithAdjoint::new(
+                out,
+                out_jac,
+                out_adjoint,
+                out_sens_adjoint,
+                nstates,
+                nout,
+                nstates,
+                self.ctx.clone(),
+            )),
+            reset: self.reset,
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+            ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
+        }
+    }
+
+    /// Set the initial time.
+    /// Set the execution context (e.g. for batching or GPU placement).
+    ///
+    /// Use `CudaContext::with_nbatch(n)` to enable batched solving of `n` independent ODE instances.
+    pub fn context(mut self, ctx: M::C) -> Self {
+        self.ctx = ctx;
+        self
+    }
+
+    pub fn t0(mut self, t0: f64) -> Self {
+        self.t0 = M::T::from_f64(t0).unwrap();
+        self
+    }
+
+    /// Set the relative tolerance for forward sensitivity or adjoint equations.
+    ///
+    /// In the adjoint backward pass, if not set, the standard [`rtol`](Self::rtol) is used as a
+    /// fallback so that sensitivity equations always contribute to error control.
+    pub fn sens_rtol(mut self, sens_rtol: f64) -> Self {
+        self.sens_rtol = Some(M::T::from_f64(sens_rtol).unwrap());
+        self
+    }
+
+    /// Set the absolute tolerance for forward sensitivity or adjoint equations.
+    ///
+    /// Can be a single value (used for all states) or a vector (one per state).
+    /// In the adjoint backward pass, if not set, the standard [`atol`](Self::atol) is used as a
+    /// fallback so that sensitivity equations always contribute to error control.
+    pub fn sens_atol<V>(mut self, sens_atol: V) -> Self
+    where
+        V: IntoIterator<Item = f64>,
+    {
+        self.sens_atol = Some(
+            sens_atol
+                .into_iter()
+                .map(|x| M::T::from_f64(x).unwrap())
+                .collect(),
+        );
+        self
+    }
+
+    /// Disable error control for forward sensitivity equations.
+    ///
+    /// Does not affect adjoint backward passes — those always fall back to the
+    /// standard `rtol`/`atol` when `sens_rtol`/`sens_atol` are not explicitly set.
+    pub fn turn_off_sensitivities_error_control(mut self) -> Self {
+        self.sens_atol = None;
+        self.sens_rtol = None;
+        self
+    }
+
+    /// Disable error control for output equations.
+    ///
+    /// When disabled, output equations will still be integrated (if `integrate_out` is true)
+    /// but will not contribute to the error estimates that control the timestep.
+    pub fn turn_off_output_error_control(mut self) -> Self {
+        self.out_atol = None;
+        self.out_rtol = None;
+        self
+    }
+
+    /// Disable error control for adjoint parameter gradient equations.
+    ///
+    /// When disabled, the parameter gradients will still be computed but will not
+    /// contribute to the error estimates that control the timestep during adjoint solves.
+    pub fn turn_off_param_error_control(mut self) -> Self {
+        self.param_atol = None;
+        self.param_rtol = None;
+        self
+    }
+
+    /// Set the relative tolerance for output integral error control in the forward solve.
+    ///
+    /// Output integrals are always computed regardless of whether this is set.
+    /// Does not affect the adjoint backward pass.
+    pub fn out_rtol(mut self, out_rtol: f64) -> Self {
+        self.out_rtol = Some(M::T::from_f64(out_rtol).unwrap());
+        self
+    }
+
+    /// Set the absolute tolerance for output integral error control in the forward solve.
+    ///
+    /// Can be a single value (used for all outputs) or a vector (one per output).
+    /// Output integrals are always computed regardless of whether this is set.
+    /// Does not affect the adjoint backward pass.
+    pub fn out_atol<V, T>(mut self, out_atol: V) -> Self
+    where
+        V: IntoIterator<Item = T>,
+        M::T: From<T>,
+    {
+        self.out_atol = Some(out_atol.into_iter().map(|x| M::T::from(x)).collect());
+        self
+    }
+
+    /// Set the relative tolerance for parameter gradient equations during adjoint
+    /// backward passes.
+    ///
+    /// If not set, parameter gradient errors will not influence timestep selection
+    /// during the backward pass (no fallback to standard tolerances).
+    pub fn param_rtol(mut self, param_rtol: f64) -> Self {
+        self.param_rtol = Some(M::T::from_f64(param_rtol).unwrap());
+        self
+    }
+
+    /// Set the absolute tolerance for parameter gradient equations during adjoint
+    /// backward passes.
+    ///
+    /// Can be a single value (used for all parameters) or a vector (one per parameter).
+    /// If not set, parameter gradient errors will not influence timestep selection
+    /// during the backward pass (no fallback to standard tolerances).
+    pub fn param_atol<V>(mut self, param_atol: V) -> Self
+    where
+        V: IntoIterator<Item = f64>,
+    {
+        self.param_atol = Some(
+            param_atol
+                .into_iter()
+                .map(|x| M::T::from_f64(x).unwrap())
+                .collect(),
+        );
+        self
+    }
+
+    /// Set whether to integrate the output.
+    /// If true, the output will be integrated using the same method as the ODE.
+    pub fn integrate_out(mut self, integrate_out: bool) -> Self {
+        self.integrate_out = integrate_out;
+        self
+    }
+
+    /// Set the initial step size.
+    pub fn h0(mut self, h0: f64) -> Self {
+        self.h0 = M::T::from_f64(h0).unwrap();
+        self
+    }
+
+    /// Set the relative tolerance for the ODE solver. The state variables will be controlled to this relative tolerance.
+    pub fn rtol(mut self, rtol: f64) -> Self {
+        self.rtol = M::T::from_f64(rtol).unwrap();
+        self
+    }
+
+    /// Set the absolute tolerance for the ODE solver. The state variables will be controlled to this absolute tolerance. Can be a single value (used for all states) or a vector (one per state).
+    pub fn atol<V>(mut self, atol: V) -> Self
+    where
+        V: IntoIterator<Item = f64>,
+    {
+        self.atol = atol
+            .into_iter()
+            .map(|x| M::T::from_f64(x).unwrap())
+            .collect();
+        self
+    }
+
+    /// Set the parameters for the ODE system.
+    pub fn p<V>(mut self, p: V) -> Self
+    where
+        V: IntoIterator<Item = f64>,
+    {
+        self.p = p.into_iter().map(|x| M::T::from_f64(x).unwrap()).collect();
+        self
+    }
+
+    /// Set whether to use coloring when computing the Jacobian.
+    /// This is always true if matrix type is sparse, but can be set to true for dense matrices as well.
+    /// This can speed up the computation of the Jacobian for large sparse systems.
+    /// However, it relys on the sparsity of the Jacobian being constant.
+    pub fn use_coloring(mut self, use_coloring: bool) -> Self {
+        self.use_coloring = use_coloring;
+        self
+    }
+
+    fn build_atol(
+        atol: Vec<M::T>,
+        nstates: usize,
+        ty: &str,
+        ctx: M::C,
+    ) -> Result<M::V, DiffsolError> {
+        if atol.len() == 1 {
+            Ok(M::V::from_element(nstates, atol[0], ctx))
+        } else if atol.len() != nstates {
+            Err(ode_solver_error!(
+                BuilderError,
+                format!(
+                    "Invalid number of {} absolute tolerances. Expected 1 or {}, got {}.",
+                    ty,
+                    nstates,
+                    atol.len()
+                )
+            ))
+        } else {
+            Ok(M::V::from_vec(atol, ctx))
+        }
+    }
+
+    #[allow(clippy::type_complexity, clippy::too_many_arguments)]
+    fn build_atols(
+        atol: Vec<M::T>,
+        sens_atol: Option<Vec<M::T>>,
+        out_atol: Option<Vec<M::T>>,
+        param_atol: Option<Vec<M::T>>,
+        nstates: usize,
+        nout: Option<usize>,
+        nparam: usize,
+        ctx: M::C,
+    ) -> Result<(M::V, Option<M::V>, Option<M::V>, Option<M::V>), DiffsolError> {
+        let atol = Self::build_atol(atol, nstates, "states", ctx.clone())?;
+        let out_atol = match out_atol {
+            Some(out_atol) => Some(Self::build_atol(
+                out_atol,
+                nout.unwrap_or(nstates),
+                "output",
+                ctx.clone(),
+            )?),
+            None => None,
+        };
+        let param_atol = match param_atol {
+            Some(param_atol) => Some(Self::build_atol(
+                param_atol,
+                nparam,
+                "parameters",
+                ctx.clone(),
+            )?),
+            None => None,
+        };
+        let sens_atol = match sens_atol {
+            Some(sens_atol) => Some(Self::build_atol(
+                sens_atol,
+                nstates,
+                "sensitivity",
+                ctx.clone(),
+            )?),
+            None => None,
+        };
+        Ok((atol, sens_atol, out_atol, param_atol))
+    }
+
+    fn build_p(p: Vec<M::T>, ctx: M::C) -> M::V {
+        M::V::from_vec(p, ctx)
+    }
+
+    fn build_ic_options<T: Scalar>(
+        ic_options: InitialConditionSolverOptions<f64>,
+    ) -> InitialConditionSolverOptions<T> {
+        InitialConditionSolverOptions {
+            use_linesearch: ic_options.use_linesearch,
+            max_linesearch_iterations: ic_options.max_linesearch_iterations,
+            armijo_constant: T::from_f64(ic_options.armijo_constant).unwrap(),
+            max_newton_iterations: ic_options.max_newton_iterations,
+            step_reduction_factor: T::from_f64(ic_options.step_reduction_factor).unwrap(),
+            max_linear_solver_setups: ic_options.max_linear_solver_setups,
+        }
+    }
+
+    fn build_ode_options<T: Scalar>(ode_options: OdeSolverOptions<f64>) -> OdeSolverOptions<T> {
+        OdeSolverOptions {
+            max_error_test_failures: ode_options.max_error_test_failures,
+            max_nonlinear_solver_iterations: ode_options.max_nonlinear_solver_iterations,
+            min_timestep: T::from_f64(ode_options.min_timestep).unwrap(),
+            max_timestep_growth: ode_options
+                .max_timestep_growth
+                .map(|value| T::from_f64(value).unwrap()),
+            min_timestep_growth: ode_options
+                .min_timestep_growth
+                .map(|value| T::from_f64(value).unwrap()),
+            max_timestep_shrink: ode_options
+                .max_timestep_shrink
+                .map(|value| T::from_f64(value).unwrap()),
+            min_timestep_shrink: ode_options
+                .min_timestep_shrink
+                .map(|value| T::from_f64(value).unwrap()),
+            update_jacobian_after_steps: ode_options.update_jacobian_after_steps,
+            update_rhs_jacobian_after_steps: ode_options.update_rhs_jacobian_after_steps,
+            threshold_to_update_jacobian: T::from_f64(ode_options.threshold_to_update_jacobian)
+                .unwrap(),
+            threshold_to_update_rhs_jacobian: T::from_f64(
+                ode_options.threshold_to_update_rhs_jacobian,
+            )
+            .unwrap(),
+            max_nonlinear_solver_failures: ode_options.max_nonlinear_solver_failures,
+            nonlinear_solver_tolerance: T::from_f64(ode_options.nonlinear_solver_tolerance)
+                .unwrap(),
+            pi_control_proportional: T::from_f64(ode_options.pi_control_proportional).unwrap(),
+            pi_control_integral: T::from_f64(ode_options.pi_control_integral).unwrap(),
+        }
+    }
+
+    /// Build the ODE problem from the configured builder.
+    ///
+    /// This method validates all the settings, constructs the equation system,
+    /// and returns an `OdeSolverProblem` that can be used to create solvers.
+    ///
+    /// # Returns
+    /// An `OdeSolverProblem` ready to be used with various solver methods.
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - Required components (rhs, init) are missing
+    /// - Dimensions are inconsistent
+    /// - Tolerances are invalid
+    #[allow(clippy::type_complexity)]
+    pub fn build(
+        self,
+    ) -> Result<
+        OdeSolverProblem<OdeSolverEquations<M, Rhs, Init, Mass, Root, Out, Reset>>,
+        DiffsolError,
+    >
+    where
+        M: Matrix,
+        Rhs: BuilderOp<V = M::V, T = M::T, M = M, C = M::C>,
+        Init: BuilderOp<V = M::V, T = M::T, M = M, C = M::C>,
+        Mass: BuilderOp<V = M::V, T = M::T, M = M, C = M::C>,
+        Root: BuilderOp<V = M::V, T = M::T, M = M, C = M::C>,
+        Out: BuilderOp<V = M::V, T = M::T, M = M, C = M::C>,
+        Reset: BuilderOp<V = M::V, T = M::T, M = M, C = M::C>,
+        for<'a> ParameterisedOp<'a, Rhs>: NonLinearOp<M = M, V = M::V, T = M::T, C = M::C>,
+        for<'a> ParameterisedOp<'a, Init>: ConstantOp<M = M, V = M::V, T = M::T, C = M::C>,
+        for<'a> ParameterisedOp<'a, Mass>: LinearOp<M = M, V = M::V, T = M::T, C = M::C>,
+        for<'a> ParameterisedOp<'a, Root>: NonLinearOp<M = M, V = M::V, T = M::T, C = M::C>,
+        for<'a> ParameterisedOp<'a, Out>: NonLinearOp<M = M, V = M::V, T = M::T, C = M::C>,
+        for<'a> ParameterisedOp<'a, Reset>: NonLinearOp<M = M, V = M::V, T = M::T, C = M::C>,
+    {
+        let p = Self::build_p(self.p, self.ctx.clone());
+        let nparams = p.len();
+        let mut rhs = self
+            .rhs
+            .ok_or(ode_solver_error!(BuilderError, "Missing right-hand side"))?;
+        let mut init = self
+            .init
+            .ok_or(ode_solver_error!(BuilderError, "Missing initial state"))?;
+        let mut mass = self.mass;
+        let mut root = self.root;
+        let mut out = self.out;
+        let mut reset = self.reset;
+
+        let init_op = ParameterisedOp::new(&init, &p);
+        let y0 = init_op.call(self.t0);
+        let nstates = y0.len();
+
+        rhs.set_nstates(nstates);
+        rhs.set_nout(nstates);
+        rhs.set_nparams(nparams);
+
+        init.set_nout(nstates);
+        init.set_nparams(nparams);
+
+        if let Some(ref mut mass) = mass {
+            mass.set_nstates(nstates);
+            mass.set_nparams(nparams);
+            mass.set_nout(nstates);
+        }
+
+        if let Some(ref mut root) = root {
+            root.set_nstates(nstates);
+            root.set_nparams(nparams);
+        }
+
+        if let Some(ref mut out) = out {
+            out.set_nstates(nstates);
+            out.set_nparams(nparams);
+        }
+
+        if let Some(ref mut reset) = reset {
+            reset.set_nstates(nstates);
+            reset.set_nout(nstates);
+            reset.set_nparams(nparams);
+        }
+
+        if self.use_coloring || M::is_sparse() {
+            rhs.calculate_sparsity(&y0, self.t0, &p);
+            if let Some(ref mut mass) = mass {
+                mass.calculate_sparsity(&y0, self.t0, &p);
+            }
+        }
+        let nout = out.as_ref().map(|out| out.nout());
+        let eqn = OdeSolverEquations::new(rhs, init, mass, root, out, reset, p);
+        let ic_options = Self::build_ic_options::<M::T>(self.ic_options);
+        let ode_options = Self::build_ode_options::<M::T>(self.ode_options);
+
+        let (atol, sens_atol, out_atol, param_atol) = Self::build_atols(
+            self.atol,
+            self.sens_atol,
+            self.out_atol,
+            self.param_atol,
+            nstates,
+            nout,
+            nparams,
+            self.ctx,
+        )?;
+        OdeSolverProblem::new(
+            eqn,
+            self.rtol,
+            atol,
+            self.sens_rtol,
+            sens_atol,
+            self.out_rtol,
+            out_atol,
+            self.param_rtol,
+            param_atol,
+            self.t0,
+            self.h0,
+            self.integrate_out,
+            ic_options,
+            ode_options,
+        )
+    }
+
+    /// Build an ODE problem from a DiffSL model string.
+    ///
+    /// DiffSL is a domain-specific language for specifying differential equations.
+    /// This method compiles the DiffSL code and creates an ODE problem from it.
+    ///
+    /// # Arguments
+    /// - `code`: The DiffSL model code as a string.
+    ///
+    /// # Type Parameters
+    /// - `CG`: The code generation backend (e.g., LLVM or Cranelift).
+    ///
+    /// # Returns
+    /// An `OdeSolverProblem` with equations compiled from DiffSL.
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - The DiffSL code has syntax or semantic errors
+    /// - The number of parameters previously given doesn't match the compiled model
+    #[cfg(feature = "diffsl")]
+    pub fn build_from_diffsl<CG: crate::CodegenModuleJit + crate::CodegenModuleCompile>(
+        mut self,
+        code: &str,
+    ) -> Result<OdeSolverProblem<crate::DiffSl<M, CG>>, DiffsolError>
+    where
+        M: Matrix<V: crate::VectorHost, T: DiffSlScalar>,
+    {
+        #[cfg(feature = "diffsl-cranelift")]
+        let include_sensitivities = M::is_sparse()
+            && std::any::TypeId::of::<CG>() != std::any::TypeId::of::<diffsl::CraneliftJitModule>();
+        #[cfg(not(feature = "diffsl-cranelift"))]
+        let include_sensitivities = M::is_sparse();
+        let eqn = crate::DiffSl::compile(code, self.ctx.clone(), include_sensitivities)?;
+        // if the user hasn't set the parameters, resize them to match the number of parameters in the equations
+        let nparams = eqn.rhs().nparams();
+        if self.p.len() != nparams && self.p.is_empty() {
+            self.p.resize(nparams, M::T::zero());
+        }
+        self.build_from_eqn(eqn)
+    }
+
+    /// Build an ODE problem from a set of equations
+    pub fn build_from_eqn<Eqn>(self, mut eqn: Eqn) -> Result<OdeSolverProblem<Eqn>, DiffsolError>
+    where
+        Eqn: OdeEquations<M = M, V = M::V, T = M::T>,
+    {
+        let nparams = eqn.rhs().nparams();
+        let nstates = eqn.rhs().nstates();
+        let nout = eqn.out().map(|out| out.nout());
+        let (atol, sens_atol, out_atol, param_atol) = Self::build_atols(
+            self.atol,
+            self.sens_atol,
+            self.out_atol,
+            self.param_atol,
+            nstates,
+            nout,
+            nparams,
+            self.ctx.clone(),
+        )?;
+        if self.p.len() != nparams {
+            return Err(ode_solver_error!(
+                BuilderError,
+                format!(
+                    "Number of parameters on builder does not match number of parameters in equations. Expected {}, got {}.",
+                    nparams,
+                    self.p.len()
+                )
+            ));
+        }
+
+        let ic_options = Self::build_ic_options::<M::T>(self.ic_options);
+        let ode_options = Self::build_ode_options::<M::T>(self.ode_options);
+        let p = Self::build_p(self.p, self.ctx);
+        eqn.set_params(&p);
+        OdeSolverProblem::new(
+            eqn,
+            self.rtol,
+            atol,
+            self.sens_rtol,
+            sens_atol,
+            self.out_rtol,
+            out_atol,
+            self.param_rtol,
+            param_atol,
+            self.t0,
+            self.h0,
+            self.integrate_out,
+            ic_options,
+            ode_options,
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
+    use crate::{Context, OdeBuilder, OdeEquations, Op, Vector};
+    #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
+    use diffsl::execution::{
+        module::{CodegenModuleCompile, CodegenModuleJit},
+        scalar::Scalar as DiffSlScalar,
+    };
+    #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
+    use num_traits::Zero;
+
+    #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
+    fn logistic_diffsl_code() -> &'static str {
+        r#"
+            in_i { r = 1 }
+            u_i { y = 0.1 }
+            dudt_i { dydt = 0 }
+            F_i { (r * y) * (1 - y) }
+            out_i { y }
+        "#
+    }
+
+    #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
+    fn build_from_diffsl_resizes_empty_params<CG, M>()
+    where
+        CG: CodegenModuleJit + CodegenModuleCompile,
+        M: crate::Matrix<V: crate::VectorHost, T: DiffSlScalar>,
+    {
+        let problem = OdeBuilder::<M>::new()
+            .build_from_diffsl::<CG>(logistic_diffsl_code())
+            .unwrap();
+        let mut params = problem.context().vector_zeros(problem.eqn.nparams());
+        problem.eqn.get_params(&mut params);
+        assert_eq!(params.len(), 1);
+        assert_eq!(params.get_index(0), M::T::zero());
+    }
+
+    #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
+    fn build_from_diffsl_rejects_parameter_mismatch<CG>()
+    where
+        CG: CodegenModuleJit + CodegenModuleCompile,
+    {
+        let err = match OdeBuilder::<crate::NalgebraMat<f64>>::new()
+            .p([1.0, 2.0])
+            .build_from_diffsl::<CG>(logistic_diffsl_code())
+        {
+            Ok(_) => panic!("expected parameter mismatch"),
+            Err(err) => err,
+        };
+        assert!(err.to_string().contains("Number of parameters on builder"));
+    }
+
+    #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
+    fn build_from_diffsl_sparse_problem_compiles<CG>()
+    where
+        CG: CodegenModuleJit + CodegenModuleCompile,
+    {
+        use crate::NonLinearOpJacobian;
+
+        let problem = OdeBuilder::<crate::FaerSparseMat<f64>>::new()
+            .build_from_diffsl::<CG>(logistic_diffsl_code())
+            .unwrap();
+        assert!(problem.eqn.rhs().jacobian_sparsity().is_some());
+    }
+
+    #[cfg(feature = "diffsl-cranelift")]
+    #[test]
+    fn build_from_diffsl_resizes_empty_params_for_cranelift() {
+        build_from_diffsl_resizes_empty_params::<crate::CraneliftJitModule, crate::NalgebraMat<f64>>(
+        );
+    }
+
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn build_from_diffsl_resizes_empty_params_for_llvm() {
+        build_from_diffsl_resizes_empty_params::<crate::LlvmModule, crate::NalgebraMat<f64>>();
+    }
+
+    #[cfg(feature = "diffsl-cranelift")]
+    #[test]
+    fn build_from_diffsl_rejects_parameter_mismatch_for_cranelift() {
+        build_from_diffsl_rejects_parameter_mismatch::<crate::CraneliftJitModule>();
+    }
+
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn build_from_diffsl_rejects_parameter_mismatch_for_llvm() {
+        build_from_diffsl_rejects_parameter_mismatch::<crate::LlvmModule>();
+    }
+
+    #[cfg(feature = "diffsl-cranelift")]
+    #[test]
+    fn build_from_diffsl_sparse_problem_compiles_for_cranelift() {
+        build_from_diffsl_sparse_problem_compiles::<crate::CraneliftJitModule>();
+    }
+
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn build_from_diffsl_sparse_problem_compiles_for_llvm() {
+        build_from_diffsl_sparse_problem_compiles::<crate::LlvmModule>();
+    }
+}
