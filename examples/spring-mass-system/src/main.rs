@@ -91,7 +91,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use diffsol::VectorView;
+    use diffsol::{DenseMatrix, Vector, VectorView};
 
     #[test]
     fn diffsl_and_rust_closures_agree() {
