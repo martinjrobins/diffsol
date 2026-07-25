@@ -7,7 +7,7 @@ the specification of a system of ordinary differential equations. It features a 
 
 ## DiffSL syntax
 
-For more detail on the syntax of DiffSL see the [DiffSL book](https://martinjrobins.github.io/diffsl/). This section will focus on how to use DiffSL to specify a problem in Diffsol.
+For more detail on the syntax of DiffSL see the [DiffSL book](https://martinjrobins.github.io/diffsl/). This section will focus on how to use DiffSL to specify a problem in diffsol.
 
 ## Creating a DiffSL problem
 

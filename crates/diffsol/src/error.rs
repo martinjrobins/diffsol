@@ -6,9 +6,9 @@ use thiserror::Error;
 /// [`diffsol_nl`] crate.
 pub use diffsol_nl::error::NonLinearSolverError;
 
-/// Custom error type for Diffsol
+/// Custom error type for diffsol
 ///
-/// This error type is used to wrap all possible errors that can occur when using Diffsol
+/// This error type is used to wrap all possible errors that can occur when using diffsol
 #[derive(Error, Debug, Clone)]
 pub enum DiffsolError {
     #[error("Linear algebra error: {0}")]

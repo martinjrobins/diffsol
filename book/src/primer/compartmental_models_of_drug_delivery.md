@@ -42,7 +42,7 @@ This model describes an *intravenous bolus* dosing protocol, with a linear clear
 - \\(CL\\) [mL/h], the clearance/elimination rate from the central compartment
 - \\(Q_{p1}\\) [mL/h], the transition rate between central compartment and peripheral compartment 1
 
-We will solve this system of ODEs using the Diffsol crate. Rather than trying to write down the dose function as a smooth mathematical function, we will treat each bolus dose as a discrete event. We first do this procedurally by stopping the solver at each dose time in Rust, then rewrite the same model declaratively using DiffSL `stop` and `reset` tensors.
+We will solve this system of ODEs using the diffsol crate. Rather than trying to write down the dose function as a smooth mathematical function, we will treat each bolus dose as a discrete event. We first do this procedurally by stopping the solver at each dose time in Rust, then rewrite the same model declaratively using DiffSL `stop` and `reset` tensors.
 
 First lets write down the equations in the standard form of a first order ODE system:
 

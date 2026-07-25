@@ -59,7 +59,7 @@ We also have initial conditions for the populations at time \\(t = 0\\). We can 
 \mathbf{y}(0) = \begin{bmatrix} 1 \\\\ 1 \end{bmatrix}
 \\]
 
-Let's solve this system of ODEs using the Diffsol crate. First we will define a few types to set our matrix type (dense `nalgebra` with f64),
+Let's solve this system of ODEs using the diffsol crate. First we will define a few types to set our matrix type (dense `nalgebra` with f64),
 the linear solver type (`nalgebra` LU, only used for the BDF solver below), and our DiffSL JIT backend (`cranelift`, only used for the DiffSL problem definition).
 
 ```rust,ignore

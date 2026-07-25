@@ -6,7 +6,7 @@ The main limitation is that JIT compilation of the DiffSL DSL is not yet support
 
 ## An example Yew app
 
-To demonstrate using Diffsol in a WebAssembly application, we will create a simple Yew app that simulates a population dynamics model. The app will allow users to move sliders to adjust the parameters of the model and see the results in real-time using a plotly chart.
+To demonstrate using diffsol in a WebAssembly application, we will create a simple Yew app that simulates a population dynamics model. The app will allow users to move sliders to adjust the parameters of the model and see the results in real-time using a plotly chart.
 
 A [demo](https://martinjrobins.github.io/diffsol/examples/population-dynamics-wasm-yew/) built from this example is available online.
 

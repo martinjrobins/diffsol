@@ -47,19 +47,19 @@ When the ball hits the ground, we need to update the velocity of the ball accord
 v' = -e v
 \\]
 
-where \\(e\\) is the coefficient of restitution. We will first implement this using Diffsol's procedural event-handling API, then rewrite the same event declaratively using the DiffSL `stop` and `reset` tensors.
+where \\(e\\) is the coefficient of restitution. We will first implement this using diffsol's procedural event-handling API, then rewrite the same event declaratively using the DiffSL `stop` and `reset` tensors.
 
 ## Procedural approach
 
-To implement the bounce in Rust, we need to detect when the ball hits the ground. We can do this by using Diffsol's event handling feature, which allows us to specify a function that is equal to zero when the event occurs, i.e. when the ball hits the ground. This function \\(g(\mathbf{y}, t)\\) is called an event or root function, and for our bouncing ball problem, it is given by:
+To implement the bounce in Rust, we need to detect when the ball hits the ground. We can do this by using diffsol's event handling feature, which allows us to specify a function that is equal to zero when the event occurs, i.e. when the ball hits the ground. This function \\(g(\mathbf{y}, t)\\) is called an event or root function, and for our bouncing ball problem, it is given by:
 
 \\[
 g(\mathbf{y}, t) = x
 \\]
 
-where \\(x\\) is the position of the ball. When the ball hits the ground, the event function will be zero and Diffsol will stop the integration, and we can update the velocity of the ball accordingly.
+where \\(x\\) is the position of the ball. When the ball hits the ground, the event function will be zero and diffsol will stop the integration, and we can update the velocity of the ball accordingly.
 
-In code, the bouncing ball problem can be solved using Diffsol as follows:
+In code, the bouncing ball problem can be solved using diffsol as follows:
 
 ```rust,ignore
 {{#include ../../../examples/bouncing-ball/src/main.rs}}
