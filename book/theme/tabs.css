@@ -27,3 +27,20 @@
 .mdbook-tab-content table {
     margin: unset;
 }
+
+.performance-results {
+    width: 100%;
+    table-layout: fixed;
+    font-size: 0.85em;
+}
+
+.performance-results th,
+.performance-results td {
+    padding: 0.35em 0.4em;
+    white-space: nowrap;
+}
+
+.performance-results th:first-child,
+.performance-results td:first-child {
+    width: 20%;
+}
