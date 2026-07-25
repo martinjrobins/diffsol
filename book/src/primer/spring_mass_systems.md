@@ -23,10 +23,29 @@ We can convert this to a system of two first order ODEs by introducing a new var
 
 where \\(v = \frac{dx}{dt}\\) is the velocity of the mass.
 
-We can solve this system of ODEs using Diffsol with the following code:
+We can specify the equations with either [DiffSL](https://martinjrobins.github.io/diffsl/) or Rust closures. Both variants use the same solver and plotting code.
+
+{{#tabs}}
+{{#tab name="DiffSL"}}
 
 ```rust,ignore
-{{#include ../../../examples/spring-mass-system/src/main.rs}}
+{{#include ../../../examples/spring-mass-system/src/main.rs:problem_diffsl}}
+```
+
+{{#endtab}}
+{{#tab name="Rust closures"}}
+
+```rust,ignore
+{{#include ../../../examples/spring-mass-system/src/main.rs:problem_rust_closures}}
+```
+
+{{#endtab}}
+{{#endtabs}}
+
+Once we have defined our problem, we can create a solver, solve and then plot the solution.
+
+```rust,ignore
+{{#include ../../../examples/spring-mass-system/src/main.rs:solve}}
 ```
 
 {{#include images/spring-mass-system.html}}
