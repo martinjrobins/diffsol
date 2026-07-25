@@ -156,6 +156,11 @@ jobs:
       if: matrix.book == true
       with:
         mdbook-version: 'latest'
+    - name: Setup mdBook tabs
+      if: matrix.book == true
+      run: |
+        cargo install mdbook-tabs --version 0.2.3
+        echo "${CARGO_HOME}/bin" >> $GITHUB_PATH
     - name: Install tarpaulin
       if: matrix.coverage == true
       run: cargo install cargo-tarpaulin
