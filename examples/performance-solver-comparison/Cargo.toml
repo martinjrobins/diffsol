@@ -1,0 +1,9 @@
+[package]
+name = "performance-solver-comparison"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[dependencies]
+diffsol = { path = "../../crates/diffsol" }
+nalgebra = { workspace = true }

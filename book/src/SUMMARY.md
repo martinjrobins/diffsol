@@ -43,6 +43,8 @@
   - [Interpolation](./solve/interpolation.md)
   - [Stopping](./solve/stopping.md)
   - [Forward Sensitivities](./solve/forward_sens.md)
+- [Performance](./performance/performance.md)
+  - [Stiff vs Non-Stiff](./performance/stiff_vs_non_stiff.md)
 - [Using Diffsol from other languages](./use/use_from_other_languages.md)
   - [Python](./use/python.md)
   - [C and other languages](./use/c.md)
