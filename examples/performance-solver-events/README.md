@@ -1,17 +1,20 @@
-# Switched stiff heat-equation solver comparison
+# Events Reset BDF Order
 
-This example compares BDF, TR-BDF2, and ESDIRK34 on two decoupled heat-equation
-modes with decay rates `pi^2` and `(40 pi)^2`. The stiffness ratio is 1600.
+This example compares BDF and ESDIRK34 on two decoupled exponential-decay modes:
 
-The forcing starts at `1` and alternates sign every `0.05` time units through
-`t = 5`. The state remains continuous, but its derivative jumps at every
-switch. Each solver stops exactly at those switches. The example then updates
-the stored derivative and marks the state modified: BDF consequently restarts
-its multistep history at first order, while the one-step solvers can resume
-without a history rebuild.
+```text
+y1' = -y1
+y2' = -1000 y2
+```
 
-The example permits 200 recoverable nonlinear-solver failures so BDF can
-complete all 100 restarts instead of stopping at the default limit of 50.
+The stiffness ratio is 1000.
+
+At `t = 0, 0.1, ..., 10`, the example adds one unit to each state. Every jump
+restarts BDF's multistep history at first order. ESDIRK34 is a one-step method,
+so it resumes directly at its fixed order.
+
+The example permits 202 recoverable nonlinear-solver failures so BDF can
+complete all restarts instead of stopping at the default limit of 50.
 
 Run the comparison with:
 
@@ -19,6 +22,7 @@ Run the comparison with:
 cargo run -p performance-solver-events --release
 ```
 
-The program reports elapsed time, accepted steps, rejected steps, RHS
-evaluations, and the maximum error at a switch time. The reference is the
-closed-form scalar recurrence for each mode on every constant-forcing segment.
+The program warms each solver once, then reports the median of 11 timings,
+accepted steps, rejected steps, RHS evaluations, and maximum event-time error.
+The exact reference multiplies each state by its exponential decay over an
+interval and then adds the next unit dose.
