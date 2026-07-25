@@ -1,8 +1,8 @@
 # Neural ode weather prediction example
 
-This is an example of using Diffsol to solve a neural ODE for weather prediction, based on the blog post by Sebastian Callh [Neural ODEs for Weather Prediction](https://sebastiancallh.github.io/post/neural-ode-weather-forecast/)
+This is an example of using diffsol to solve a neural ODE for weather prediction, based on the blog post by Sebastian Callh [Neural ODEs for Weather Prediction](https://sebastiancallh.github.io/post/neural-ode-weather-forecast/)
 
-Please see the [Diffsol book](https://martinjrobins.github.io/diffsol/) for more information on this example.
+Please see the [diffsol book](https://martinjrobins.github.io/diffsol/) for more information on this example.
 
 ## Pre-processing the data
 

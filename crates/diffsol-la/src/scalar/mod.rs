@@ -13,7 +13,7 @@ use crate::vector::VectorView;
 /// This trait aggregates the crate-local numeric requirements shared across diffsol.
 ///
 /// # Implementations
-/// DiffSol provides implementations for `f64` and `f32`.
+/// diffsol provides implementations for `f64` and `f32`.
 ///
 /// # Examples
 /// ```
@@ -81,7 +81,7 @@ pub trait FaerScalar: Scalar + faer::traits::ComplexField + faer::traits::RealFi
 
 impl<T> FaerScalar for T where T: Scalar + faer::traits::ComplexField + faer::traits::RealField {}
 
-/// The index type used throughout DiffSol for indexing vectors and matrices.
+/// The index type used throughout diffsol for indexing vectors and matrices.
 pub type IndexType = usize;
 
 impl Scalar for f64 {

@@ -18,7 +18,7 @@ This can be done using the [`OdeBuilder`](https://docs.rs/diffsol/latest/diffsol
 {{#include ../../../../examples/intro-logistic-closures/src/problem_root.rs}}
 ```
 
-here we have added the root finding function \\(r(y, p, t) = y - 0.5\\), and also let Diffsol know that we have one root function by passing `1` as the last argument to the `root` method.
+here we have added the root finding function \\(r(y, p, t) = y - 0.5\\), and also let diffsol know that we have one root function by passing `1` as the last argument to the `root` method.
 If we had specified more than one root function, the solver would stop when any of the root functions are zero.
 
 ## Detecting roots during the solve

@@ -1,6 +1,6 @@
 # Summary
 
-- [Modelling with Diffsol](./primer/modelling_with_diffsol.md)
+- [Modelling with diffsol](./primer/modelling_with_diffsol.md)
   - [Explicit First Order ODEs](./primer/first_order_odes.md)
     - [Example: Population Dynamics](./primer/population_dynamics.md)
   - [Higher Order ODEs](./primer/higher_order_odes.md)
@@ -21,7 +21,7 @@
   - [Backwards Sensitivity Analysis](./primer/backwards_sensitivity_analysis.md)
     - [Example: Fitting a spring-mass model to data](./primer/spring_mass_fitting.md)
     - [Example: Weather prediction using neural ODEs](./primer/weather_neural_ode.md)
-- [Diffsol APIs for specifying problems](./specify/specifying_the_problem.md)
+- [diffsol APIs for specifying problems](./specify/specifying_the_problem.md)
   - [DiffSL](./specify/diffsl/diffsl.md)
   - [Rust closures](./specify/closure/rust_closures.md)
     - [Explicit](./specify/closure/explicit.md)
@@ -45,7 +45,7 @@
   - [Forward Sensitivities](./solve/forward_sens.md)
 - [Performance](./performance/performance.md)
   - [Stiff vs Non-Stiff](./performance/stiff_vs_non_stiff.md)
-- [Using Diffsol from other languages](./use/use_from_other_languages.md)
+- [Using diffsol from other languages](./use/use_from_other_languages.md)
   - [Python](./use/python.md)
   - [C and other languages](./use/c.md)
   - [WebAssembly](./use/webassembly.md)

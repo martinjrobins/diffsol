@@ -1,6 +1,6 @@
-//! # Diffsol-c
+//! # diffsol-c
 //!
-//! Diffsol-c is a companion crate to [Diffsol](https://crates.io/crates/diffsol) that
+//! diffsol-c is a companion crate to [diffsol](https://crates.io/crates/diffsol) that
 //! provides two higher-level APIs on top of the core `diffsol` library:
 //!
 //! 1. A **dynamic dispatch** API that wraps the generic solver in runtime-dispatched types,

@@ -1,7 +1,7 @@
 # C and other languages
 
 The [`diffsol-c`](https://crates.io/crates/diffsol-c) crate provides two
-higher-level APIs for using Diffsol from other languages with a
+higher-level APIs for using diffsol from other languages with a
 C-compatible FFI:
 
 1. A **dynamic dispatch** API — a Rust API that wraps the core `diffsol` solver

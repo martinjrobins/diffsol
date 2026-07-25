@@ -14,7 +14,7 @@
 </a>
 </div>
 
-Diffsol is a library for solving ordinary differential equations (ODEs) or semi-explicit differential algebraic equations (DAEs) in Rust. It can solve equations in the following form:
+diffsol is a library for solving ordinary differential equations (ODEs) or semi-explicit differential algebraic equations (DAEs) in Rust. It can solve equations in the following form:
 
 ```math
 M \frac{dy}{dt} = f(t, y, p)
@@ -33,7 +33,7 @@ You can add diffsol using `cargo add diffsol` or directly in your `Cargo.toml`:
 diffsol = "0.16"
 ```
 
-Diffsol has the following features that can be enabled or disabled:
+diffsol has the following features that can be enabled or disabled:
 
 - `nalgebra`: Use nalgebra for linear algebra containers and solvers (enabled by default).
 - `faer`: Use faer for linear algebra containers and solvers (enabled by default).
@@ -120,9 +120,9 @@ Contributions are very welcome, as are bug reports! Please see the [contributing
 
 ## Wanted - Developers for higher-level language wrappers
 
-Diffsol is designed to be easy to use from higher-level languages like Python or R. I'd prefer not to split my focus away from the core library, so I'm looking for developers who would like to lead the development of these wrappers. If you're interested, please get in touch.
+diffsol is designed to be easy to use from higher-level languages like Python or R. I'd prefer not to split my focus away from the core library, so I'm looking for developers who would like to lead the development of these wrappers. If you're interested, please get in touch.
 
-Diffsol makes heavy use of generic programming, which can make it difficult to use from other languages. To help with this, the diffsol-c crate provides a wrapper around the core library using runtime polymorphism, and a C API that can be called via FFI. Combined with the DiffSL DSL, this allows for efficient use of diffsol from other languages without needing to write rust code. The following wrappers are currently planned:
+diffsol makes heavy use of generic programming, which can make it difficult to use from other languages. To help with this, the diffsol-c crate provides a wrapper around the core library using runtime polymorphism, and a C API that can be called via FFI. Combined with the DiffSL DSL, this allows for efficient use of diffsol from other languages without needing to write rust code. The following wrappers are currently planned:
 
 - [x] Python (e.g. using [PyO3](https://pyo3.rs/v0.24.0/)). <https://github.com/alexallmont/pydiffsol>.
 - [ ] Python ML frameworks (e.g. [JAX](https://docs.jax.dev/en/latest/ffi.html), [PyTorch](https://pytorch.org/tutorials/advanced/cpp_extension.html))
