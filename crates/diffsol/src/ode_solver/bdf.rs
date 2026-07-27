@@ -1293,6 +1293,15 @@ where
             }
             // reinitialise diff matrix
             self.initialise_to_first_order();
+            let c = self.state.h * self.alpha[self.state.order];
+            if let Some(op) = self.op.as_mut() {
+                op.set_c(self.state.h, self.alpha[self.state.order]);
+            }
+            if let Some(s_op) = self.s_op.as_mut() {
+                s_op.set_c(self.state.h, self.alpha[self.state.order]);
+            }
+            self._jacobian_updates(c, SolverState::StepSuccess);
+            self.prev_error_norm = None;
 
             // reinitialise tstop if needed
             if let Some(t_stop) = self.tstop {
@@ -1633,7 +1642,8 @@ mod test {
             test_state_mut_on_problem,
         },
         scale, ConstantOp, Context, DenseMatrix, FaerLU, FaerMat, FaerSparseLU, FaerSparseMat,
-        MatrixCommon, NalgebraLU, OdeEquations, OdeSolverMethod, Op, Vector, VectorView,
+        MatrixCommon, NalgebraLU, OdeBuilder, OdeEquations, OdeSolverMethod, OdeSolverStopReason,
+        Op, Vector, VectorView,
     };
 
     type M = NalgebraMat<f64>;
@@ -1673,6 +1683,41 @@ mod test {
         let (p, soln) = exponential_decay_problem::<M>(false);
         let s = p.bdf_solver::<LS>(p.bdf_state::<LS>().unwrap()).unwrap();
         test_state_mut_on_problem(s, soln);
+    }
+
+    #[test]
+    fn bdf_restarts_cleanly_after_repeated_state_jumps() {
+        let problem = OdeBuilder::<M>::new()
+            .rtol(1e-4)
+            .atol([1e-4])
+            .rhs_implicit(
+                |y, _p, _t, dy| dy[0] = -1000.0 * y[0],
+                |_y, _p, _t, v, jv| jv[0] = -1000.0 * v[0],
+            )
+            .init(|_p, _t, y| y[0] = 0.0, 1)
+            .build()
+            .unwrap();
+        let mut solver = problem.bdf::<LS>().unwrap();
+
+        {
+            let state = solver.state_mut();
+            state.y[0] = 1.0;
+            state.dy[0] = -1000.0;
+        }
+
+        for event_index in 1..=60 {
+            solver.set_stop_time(event_index as f64 * 0.1).unwrap();
+            loop {
+                if matches!(solver.step().unwrap(), OdeSolverStopReason::TstopReached) {
+                    break;
+                }
+            }
+            let state = solver.state_mut();
+            state.y[0] += 1.0;
+            state.dy[0] = -1000.0 * state.y[0];
+        }
+
+        assert_eq!(solver.get_statistics().number_of_nonlinear_solver_fails, 0);
     }
 
     #[test]
@@ -1892,7 +1937,7 @@ mod test {
         number_of_calls: 521
         number_of_jac_muls: 2
         number_of_matrix_evals: 1
-        number_of_jac_adj_muls: 1098
+        number_of_jac_adj_muls: 1094
         "###);
     }
 
@@ -2011,7 +2056,7 @@ mod test {
         number_of_calls: 250
         number_of_jac_muls: 15
         number_of_matrix_evals: 5
-        number_of_jac_adj_muls: 486
+        number_of_jac_adj_muls: 487
         "###);
     }
 
