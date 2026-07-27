@@ -143,4 +143,9 @@ Wall-clock times depend on the machine and build profile, but they should always
 For logistic growth, the explicit solver needs far fewer steps than BDF, likely because the BDF solver is conservative when adapting its step size for a given problem. Each step is roughly the same wall time between the two solvers, while BDF needs to solve a nonlinear problem at each step (requires a factorisation of the Jacobian) due to the non-linear problem being rather simple it often takes less RHS evaluations to solve this problem, leading to an overall lower number of evaluations than Tsit45.
 
 For rapid relaxation, Tsit45 needs significantly more stability-limited steps and RHS evaluations, leading to an order of magnitude difference in the wall-times between the two solvers.
-The take home message is clear, use an explicit solver for smooth non-stiff systems, and prefer BDF when fast and slow timescales make the system stiff.
+
+The take home message of this example is: use an explicit solver for smooth non-stiff systems, and prefer BDF when fast and slow timescales make the system stiff.
+We have used the BDF solver in this example, but there are other implicit solvers in diffsol that are also suitable for stiff systems, including TR-BDF2 and ESDIRK34.
+However, BDF tends to be a consistently high-performing solver, so it is usually beneficial to try this one first and fallback to TR-BDF2 or ESDIRK34 if needed.
+The BDF solver is a multistep solver, so it uses a history of the past `n` steps to take the next one. This normally works well, but its performance can be reduced
+for [problems involving discrete events](events_and_multistep_solvers.html).
