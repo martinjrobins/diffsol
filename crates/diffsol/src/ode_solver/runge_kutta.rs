@@ -53,6 +53,7 @@ where
     out_error: Option<Eqn::V>,
     sens_error: Option<Eqn::V>,
     sens_out_error: Option<Eqn::V>,
+    sens_atol_scaled: Option<Vec<Eqn::V>>,
 
     prev_error_norm: Option<Eqn::T>,
 }
@@ -93,6 +94,7 @@ where
             out_error: self.out_error.clone(),
             sens_error: self.sens_error.clone(),
             sens_out_error: self.sens_out_error.clone(),
+            sens_atol_scaled: self.sens_atol_scaled.clone(),
             prev_error_norm: self.prev_error_norm,
         }
     }
@@ -189,6 +191,7 @@ where
             out_error,
             sens_error: None,
             sens_out_error: None,
+            sens_atol_scaled: None,
             prev_error_norm: None,
         })
     }
@@ -206,6 +209,24 @@ where
         let nstates = augmented_eqn.rhs().nstates();
         let order = ret.tableau.s();
         let ctx = problem.eqn.context();
+        ret.sens_atol_scaled = if integrate_main_eqn {
+            let sens_atol = problem.sens_atol.as_ref();
+            sens_atol.map(|sens_atol| {
+                let nparams = augmented_eqn.nparams();
+                let mut p = Eqn::V::zeros(nparams, ctx.clone());
+                augmented_eqn.get_params(&mut p);
+                let mut scaled = Vec::with_capacity(nparams);
+                for i in 0..nparams {
+                    let scale = Eqn::T::one() / abs(p.get_index(i));
+                    let mut atol = Eqn::V::zeros(nstates, ctx.clone());
+                    atol.axpy(scale, sens_atol, Eqn::T::zero());
+                    scaled.push(atol);
+                }
+                scaled
+            })
+        } else {
+            None
+        };
         ret.sdiff = vec![M::zeros(nstates, order, ctx.clone()); naug];
         if let Some(out) = augmented_eqn.out() {
             ret.sgdiff = vec![M::zeros(out.nout(), order, ctx.clone()); naug];
@@ -816,7 +837,12 @@ where
             let rtol = aug_eqn.rtol().unwrap();
             for i in 0..self.sdiff.len() {
                 self.sdiff[i].gemv(Eqn::T::one(), self.tableau.d(), Eqn::T::zero(), sens_error);
-                let err = sens_error.squared_norm(&self.state.s[i], atol, rtol);
+                let per_atol = self
+                    .sens_atol_scaled
+                    .as_ref()
+                    .and_then(|v| v.get(i))
+                    .unwrap_or(atol);
+                let err = sens_error.squared_norm(&self.state.s[i], per_atol, rtol);
                 error_norm = error_norm.max(err);
             }
         }

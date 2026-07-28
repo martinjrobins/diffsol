@@ -710,20 +710,20 @@ mod test {
         let mut s = problem.tr_bdf2_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 10
-        number_of_steps: 90
+        number_of_linear_solver_setups: 9
+        number_of_steps: 54
         number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 620
+        number_of_nonlinear_solver_iterations: 378
         number_of_nonlinear_solver_fails: 0
         number_of_linear_solver_setups_from_checkpoint: 1
         number_of_linear_solver_setups_from_first_convergence_fail: 0
         number_of_linear_solver_setups_from_second_convergence_fail: 0
         number_of_linear_solver_setups_from_error_test_fail: 0
-        number_of_linear_solver_setups_from_step_success: 9
+        number_of_linear_solver_setups_from_step_success: 8
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 207
-        number_of_jac_muls: 421
+        number_of_calls: 119
+        number_of_jac_muls: 267
         number_of_matrix_evals: 2
         number_of_jac_adj_muls: 0
         "###);
@@ -786,9 +786,9 @@ mod test {
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 6
-        number_of_steps: 33
+        number_of_steps: 27
         number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 347
+        number_of_nonlinear_solver_iterations: 286
         number_of_nonlinear_solver_fails: 0
         number_of_linear_solver_setups_from_checkpoint: 1
         number_of_linear_solver_setups_from_first_convergence_fail: 0
@@ -797,8 +797,8 @@ mod test {
         number_of_linear_solver_setups_from_step_success: 5
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 107
-        number_of_jac_muls: 246
+        number_of_calls: 93
+        number_of_jac_muls: 199
         number_of_matrix_evals: 1
         number_of_jac_adj_muls: 0
         "###);

@@ -451,7 +451,7 @@ mod test {
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 0
-        number_of_steps: 10
+        number_of_steps: 9
         number_of_error_test_failures: 0
         number_of_nonlinear_solver_iterations: 0
         number_of_nonlinear_solver_fails: 0
@@ -462,8 +462,8 @@ mod test {
         number_of_linear_solver_setups_from_step_success: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 62
-        number_of_jac_muls: 122
+        number_of_calls: 56
+        number_of_jac_muls: 110
         number_of_matrix_evals: 0
         number_of_jac_adj_muls: 0
         "###);

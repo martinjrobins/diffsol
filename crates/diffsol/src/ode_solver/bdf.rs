@@ -127,6 +127,7 @@ pub struct Bdf<
     y_predict: Eqn::V,
     t_predict: Eqn::T,
     s_predict: Eqn::V,
+    sens_atol_scaled: Option<Vec<Eqn::V>>,
     s_op: Option<BdfCallable<AugmentedEqn>>,
     s_deltas: Vec<Eqn::V>,
     sg_deltas: Vec<Eqn::V>,
@@ -183,6 +184,7 @@ where
             y_predict: self.y_predict.clone(),
             t_predict: self.t_predict,
             s_predict: self.s_predict.clone(),
+            sens_atol_scaled: self.sens_atol_scaled.clone(),
             s_deltas: self.s_deltas.clone(),
             sg_deltas: self.sg_deltas.clone(),
             diff_tmp: self.diff_tmp.clone(),
@@ -341,6 +343,7 @@ where
             y_predict,
             t_predict: Eqn::T::zero(),
             s_predict: Eqn::V::zeros(0, ctx.clone()),
+            sens_atol_scaled: None,
             s_deltas: Vec::new(),
             sg_deltas: Vec::new(),
             g_delta,
@@ -399,6 +402,26 @@ where
         // allocate internal state for sensitivities
         let naug = augmented_eqn.max_index();
         let nstates = problem.eqn.rhs().nstates();
+        let ctx = problem.eqn.context();
+
+        ret.sens_atol_scaled = if integrate_main_eqn {
+            let sens_atol = problem.sens_atol.as_ref();
+            sens_atol.map(|sens_atol| {
+                let nparams = augmented_eqn.nparams();
+                let mut p = Eqn::V::zeros(nparams, ctx.clone());
+                augmented_eqn.get_params(&mut p);
+                let mut scaled = Vec::with_capacity(nparams);
+                for i in 0..nparams {
+                    let scale = Eqn::T::one() / abs(p.get_index(i));
+                    let mut atol = Eqn::V::zeros(nstates, ctx.clone());
+                    atol.axpy(scale, sens_atol, Eqn::T::zero());
+                    scaled.push(atol);
+                }
+                scaled
+            })
+        } else {
+            None
+        };
 
         ret.s_op = if integrate_main_eqn {
             Some(BdfCallable::new_no_jacobian(augmented_eqn))
@@ -413,7 +436,6 @@ where
             Some(bdf_callable)
         };
 
-        let ctx = problem.eqn.context();
         ret.s_deltas = vec![<Eqn::V as Vector>::zeros(nstates, ctx.clone()); naug];
         ret.s_predict = <Eqn::V as Vector>::zeros(nstates, ctx.clone());
         if let Some(out) = ret.s_op.as_ref().unwrap().eqn().out() {
@@ -846,7 +868,12 @@ where
             let sens_atol = self.s_op.as_ref().unwrap().eqn().atol().unwrap();
             let sens_rtol = self.s_op.as_ref().unwrap().eqn().rtol().unwrap();
             for i in 0..state.sdiff.len() {
-                let err = self.s_deltas[i].squared_norm(&state.s[i], sens_atol, sens_rtol)
+                let atol = self
+                    .sens_atol_scaled
+                    .as_ref()
+                    .and_then(|v| v.get(i))
+                    .unwrap_or(sens_atol);
+                let err = self.s_deltas[i].squared_norm(&state.s[i], atol, sens_rtol)
                     * self.error_const2[order];
                 error_norm = error_norm.max(err);
             }
@@ -904,11 +931,16 @@ where
             let sens_atol = self.s_op.as_ref().unwrap().eqn().atol().unwrap();
             let sens_rtol = self.s_op.as_ref().unwrap().eqn().rtol().unwrap();
             for i in 0..state.sdiff.len() {
-                let err = state.sdiff[i].column(order + 1).squared_norm(
-                    &state.s[i],
-                    sens_atol,
-                    sens_rtol,
-                ) * self.error_const2[order];
+                let atol = self
+                    .sens_atol_scaled
+                    .as_ref()
+                    .and_then(|v| v.get(i))
+                    .unwrap_or(sens_atol);
+                let err =
+                    state.sdiff[i]
+                        .column(order + 1)
+                        .squared_norm(&state.s[i], atol, sens_rtol)
+                        * self.error_const2[order];
                 error_norm = error_norm.max(err);
             }
         }
@@ -1810,9 +1842,9 @@ mod test {
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 14
-        number_of_steps: 56
+        number_of_steps: 48
         number_of_error_test_failures: 1
-        number_of_nonlinear_solver_iterations: 175
+        number_of_nonlinear_solver_iterations: 156
         number_of_nonlinear_solver_fails: 0
         number_of_linear_solver_setups_from_checkpoint: 1
         number_of_linear_solver_setups_from_first_convergence_fail: 0
@@ -1821,9 +1853,9 @@ mod test {
         number_of_linear_solver_setups_from_step_success: 12
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.statistics(), @r###"
-        number_of_calls: 60
-        number_of_jac_muls: 123
-        number_of_matrix_evals: 2
+        number_of_calls: 52
+        number_of_jac_muls: 110
+        number_of_matrix_evals: 1
         number_of_jac_adj_muls: 0
         "###);
     }
@@ -1844,9 +1876,9 @@ mod test {
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 14
-        number_of_steps: 56
+        number_of_steps: 48
         number_of_error_test_failures: 1
-        number_of_nonlinear_solver_iterations: 175
+        number_of_nonlinear_solver_iterations: 156
         number_of_nonlinear_solver_fails: 0
         number_of_linear_solver_setups_from_checkpoint: 1
         number_of_linear_solver_setups_from_first_convergence_fail: 0
@@ -2115,20 +2147,20 @@ mod test {
         let mut s = problem.bdf_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 24
-        number_of_steps: 45
-        number_of_error_test_failures: 8
-        number_of_nonlinear_solver_iterations: 115
+        number_of_linear_solver_setups: 18
+        number_of_steps: 38
+        number_of_error_test_failures: 5
+        number_of_nonlinear_solver_iterations: 94
         number_of_nonlinear_solver_fails: 0
         number_of_linear_solver_setups_from_checkpoint: 1
         number_of_linear_solver_setups_from_first_convergence_fail: 0
         number_of_linear_solver_setups_from_second_convergence_fail: 0
-        number_of_linear_solver_setups_from_error_test_fail: 8
-        number_of_linear_solver_setups_from_step_success: 15
+        number_of_linear_solver_setups_from_error_test_fail: 5
+        number_of_linear_solver_setups_from_step_success: 12
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 66
-        number_of_jac_muls: 64
+        number_of_calls: 53
+        number_of_jac_muls: 56
         number_of_matrix_evals: 3
         number_of_jac_adj_muls: 0
         "###);
@@ -2153,16 +2185,16 @@ mod test {
         let mut s = problem.bdf_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 24
-        number_of_steps: 45
-        number_of_error_test_failures: 8
-        number_of_nonlinear_solver_iterations: 115
+        number_of_linear_solver_setups: 18
+        number_of_steps: 38
+        number_of_error_test_failures: 5
+        number_of_nonlinear_solver_iterations: 94
         number_of_nonlinear_solver_fails: 0
         number_of_linear_solver_setups_from_checkpoint: 1
         number_of_linear_solver_setups_from_first_convergence_fail: 0
         number_of_linear_solver_setups_from_second_convergence_fail: 0
-        number_of_linear_solver_setups_from_error_test_fail: 8
-        number_of_linear_solver_setups_from_step_success: 15
+        number_of_linear_solver_setups_from_error_test_fail: 5
+        number_of_linear_solver_setups_from_step_success: 12
         "###);
     }
 
@@ -2321,21 +2353,21 @@ mod test {
         let mut s = problem.bdf_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 364
-        number_of_steps: 840
-        number_of_error_test_failures: 226
-        number_of_nonlinear_solver_iterations: 5099
-        number_of_nonlinear_solver_fails: 18
+        number_of_linear_solver_setups: 505
+        number_of_steps: 930
+        number_of_error_test_failures: 345
+        number_of_nonlinear_solver_iterations: 5971
+        number_of_nonlinear_solver_fails: 16
         number_of_linear_solver_setups_from_checkpoint: 1
-        number_of_linear_solver_setups_from_first_convergence_fail: 18
-        number_of_linear_solver_setups_from_second_convergence_fail: 0
-        number_of_linear_solver_setups_from_error_test_fail: 226
-        number_of_linear_solver_setups_from_step_success: 119
+        number_of_linear_solver_setups_from_first_convergence_fail: 14
+        number_of_linear_solver_setups_from_second_convergence_fail: 2
+        number_of_linear_solver_setups_from_error_test_fail: 345
+        number_of_linear_solver_setups_from_step_success: 143
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 1357
-        number_of_jac_muls: 3859
-        number_of_matrix_evals: 28
+        number_of_calls: 1525
+        number_of_jac_muls: 4544
+        number_of_matrix_evals: 23
         number_of_jac_adj_muls: 0
         "###);
     }
