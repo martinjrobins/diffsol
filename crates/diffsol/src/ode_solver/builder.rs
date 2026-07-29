@@ -13,7 +13,7 @@ use crate::{
 use diffsl::execution::scalar::Scalar as DiffSlScalar;
 
 use crate::OdeSolverEquations;
-use num_traits::{FromPrimitive, One, Zero};
+use num_traits::{FromPrimitive, One, ToPrimitive, Zero};
 
 /// Builder for ODE problems. Use methods to set parameters and then call one of the build methods when done.
 pub struct OdeBuilder<
@@ -30,6 +30,7 @@ pub struct OdeBuilder<
     rtol: M::T,
     atol: Vec<M::T>,
     sens_atol: Option<Vec<M::T>>,
+    param_scales: Option<Vec<M::T>>,
     sens_rtol: Option<M::T>,
     out_rtol: Option<M::T>,
     out_atol: Option<Vec<M::T>>,
@@ -127,6 +128,7 @@ where
             param_rtol: None,
             param_atol: None,
             sens_atol: None,
+            param_scales: None,
             sens_rtol: None,
             ctx: M::C::default(),
             ic_options: Default::default(),
@@ -163,6 +165,7 @@ where
             rtol: self.rtol,
             atol: self.atol,
             sens_atol: self.sens_atol,
+            param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
@@ -213,6 +216,7 @@ where
             rtol: self.rtol,
             atol: self.atol,
             sens_atol: self.sens_atol,
+            param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
@@ -267,6 +271,7 @@ where
             rtol: self.rtol,
             atol: self.atol,
             sens_atol: self.sens_atol,
+            param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
@@ -328,6 +333,7 @@ where
             rtol: self.rtol,
             atol: self.atol,
             sens_atol: self.sens_atol,
+            param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
@@ -367,6 +373,7 @@ where
             rtol: self.rtol,
             atol: self.atol,
             sens_atol: self.sens_atol,
+            param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
@@ -415,6 +422,7 @@ where
             rtol: self.rtol,
             atol: self.atol,
             sens_atol: self.sens_atol,
+            param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
@@ -464,6 +472,7 @@ where
             rtol: self.rtol,
             atol: self.atol,
             sens_atol: self.sens_atol,
+            param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
@@ -506,6 +515,7 @@ where
             rtol: self.rtol,
             atol: self.atol,
             sens_atol: self.sens_atol,
+            param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
@@ -558,6 +568,7 @@ where
             rtol: self.rtol,
             atol: self.atol,
             sens_atol: self.sens_atol,
+            param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
@@ -605,6 +616,7 @@ where
             rtol: self.rtol,
             atol: self.atol,
             sens_atol: self.sens_atol,
+            param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
@@ -661,6 +673,7 @@ where
             rtol: self.rtol,
             atol: self.atol,
             sens_atol: self.sens_atol,
+            param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
@@ -721,6 +734,7 @@ where
             rtol: self.rtol,
             atol: self.atol,
             sens_atol: self.sens_atol,
+            param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
@@ -766,6 +780,7 @@ where
             rtol: self.rtol,
             atol: self.atol,
             sens_atol: self.sens_atol,
+            param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
@@ -818,6 +833,7 @@ where
             rtol: self.rtol,
             atol: self.atol,
             sens_atol: self.sens_atol,
+            param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
@@ -871,6 +887,7 @@ where
             rtol: self.rtol,
             atol: self.atol,
             sens_atol: self.sens_atol,
+            param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
@@ -928,6 +945,7 @@ where
             rtol: self.rtol,
             atol: self.atol,
             sens_atol: self.sens_atol,
+            param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
@@ -981,6 +999,7 @@ where
             rtol: self.rtol,
             atol: self.atol,
             sens_atol: self.sens_atol,
+            param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
@@ -1039,6 +1058,7 @@ where
             rtol: self.rtol,
             atol: self.atol,
             sens_atol: self.sens_atol,
+            param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
@@ -1101,6 +1121,7 @@ where
             rtol: self.rtol,
             atol: self.atol,
             sens_atol: self.sens_atol,
+            param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
@@ -1129,20 +1150,15 @@ where
         self
     }
 
-    /// Set the relative tolerance for forward sensitivity or adjoint equations.
-    ///
-    /// In the adjoint backward pass, if not set, the standard [`rtol`](Self::rtol) is used as a
-    /// fallback so that sensitivity equations always contribute to error control.
+    /// Set the relative tolerance for forward sensitivity equations.
     pub fn sens_rtol(mut self, sens_rtol: f64) -> Self {
         self.sens_rtol = Some(M::T::from_f64(sens_rtol).unwrap());
         self
     }
 
-    /// Set the absolute tolerance for forward sensitivity or adjoint equations.
+    /// Set the absolute tolerance for forward sensitivity equations.
     ///
     /// Can be a single value (used for all states) or a vector (one per state).
-    /// In the adjoint backward pass, if not set, the standard [`atol`](Self::atol) is used as a
-    /// fallback so that sensitivity equations always contribute to error control.
     pub fn sens_atol<V>(mut self, sens_atol: V) -> Self
     where
         V: IntoIterator<Item = f64>,
@@ -1156,10 +1172,28 @@ where
         self
     }
 
+    /// Set the scales used to normalize forward sensitivity absolute tolerances.
+    ///
+    /// One finite, non-zero scale must be provided for each model parameter. Each
+    /// parameter's sensitivity tolerance is the base [`sens_atol`](Self::sens_atol)
+    /// divided by the absolute value of its scale.
+    pub fn param_scales<V>(mut self, param_scales: V) -> Self
+    where
+        V: IntoIterator<Item = f64>,
+    {
+        self.param_scales = Some(
+            param_scales
+                .into_iter()
+                .map(|x| M::T::from_f64(x).unwrap())
+                .collect(),
+        );
+        self
+    }
+
     /// Disable error control for forward sensitivity equations.
     ///
-    /// Does not affect adjoint backward passes — those always fall back to the
-    /// standard `rtol`/`atol` when `sens_rtol`/`sens_atol` are not explicitly set.
+    /// Does not affect adjoint backward passes, which always use the standard
+    /// [`rtol`](Self::rtol) and [`atol`](Self::atol).
     pub fn turn_off_sensitivities_error_control(mut self) -> Self {
         self.sens_atol = None;
         self.sens_rtol = None;
@@ -1314,13 +1348,14 @@ where
     fn build_atols(
         atol: Vec<M::T>,
         sens_atol: Option<Vec<M::T>>,
+        param_scales: Option<Vec<M::T>>,
         out_atol: Option<Vec<M::T>>,
         param_atol: Option<Vec<M::T>>,
         nstates: usize,
         nout: Option<usize>,
         nparam: usize,
         ctx: M::C,
-    ) -> Result<(M::V, Option<M::V>, Option<M::V>, Option<M::V>), DiffsolError> {
+    ) -> Result<(M::V, Option<Vec<M::V>>, Option<M::V>, Option<M::V>), DiffsolError> {
         let atol = Self::build_atol(atol, nstates, "states", ctx.clone())?;
         let out_atol = match out_atol {
             Some(out_atol) => Some(Self::build_atol(
@@ -1341,12 +1376,38 @@ where
             None => None,
         };
         let sens_atol = match sens_atol {
-            Some(sens_atol) => Some(Self::build_atol(
-                sens_atol,
-                nstates,
-                "sensitivity",
-                ctx.clone(),
-            )?),
+            Some(sens_atol) => {
+                let sens_atol = Self::build_atol(sens_atol, nstates, "sensitivity", ctx.clone())?;
+                let param_scales = param_scales.unwrap_or_else(|| vec![M::T::one(); nparam]);
+                if param_scales.len() != nparam {
+                    return Err(ode_solver_error!(
+                        BuilderError,
+                        format!(
+                            "Invalid number of parameter scales. Expected {}, got {}.",
+                            nparam,
+                            param_scales.len()
+                        )
+                    ));
+                }
+                let mut scaled_atols = Vec::with_capacity(nparam);
+                for scale in param_scales {
+                    let scale_f64 = scale.to_f64().unwrap();
+                    if !scale_f64.is_finite() || scale_f64 == 0.0 {
+                        return Err(ode_solver_error!(
+                            BuilderError,
+                            "Parameter scales must be finite and non-zero."
+                        ));
+                    }
+                    let mut scaled_atol = M::V::zeros(nstates, ctx.clone());
+                    scaled_atol.axpy(
+                        M::T::one() / num_traits::abs(scale),
+                        &sens_atol,
+                        M::T::zero(),
+                    );
+                    scaled_atols.push(scaled_atol);
+                }
+                Some(scaled_atols)
+            }
             None => None,
         };
         Ok((atol, sens_atol, out_atol, param_atol))
@@ -1497,6 +1558,7 @@ where
         let (atol, sens_atol, out_atol, param_atol) = Self::build_atols(
             self.atol,
             self.sens_atol,
+            self.param_scales,
             self.out_atol,
             self.param_atol,
             nstates,
@@ -1573,6 +1635,7 @@ where
         let (atol, sens_atol, out_atol, param_atol) = Self::build_atols(
             self.atol,
             self.sens_atol,
+            self.param_scales,
             self.out_atol,
             self.param_atol,
             nstates,
@@ -1616,8 +1679,10 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::OdeBuilder;
     #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
-    use crate::{Context, OdeBuilder, OdeEquations, Op, Vector};
+    use crate::{Context, OdeEquations, Op};
+    use crate::{NalgebraMat, Vector};
     #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
     use diffsl::execution::{
         module::{CodegenModuleCompile, CodegenModuleJit},
@@ -1709,6 +1774,66 @@ mod tests {
     #[test]
     fn build_from_diffsl_sparse_problem_compiles_for_cranelift() {
         build_from_diffsl_sparse_problem_compiles::<crate::CraneliftJitModule>();
+    }
+
+    #[test]
+    fn build_sensitivity_atols_uses_parameter_scales() {
+        type M = NalgebraMat<f64>;
+        let ctx = Default::default();
+        let (_, sens_atol, _, _) = OdeBuilder::<M>::build_atols(
+            vec![1e-6],
+            Some(vec![8.0]),
+            Some(vec![2.0, -4.0]),
+            None,
+            None,
+            1,
+            None,
+            2,
+            ctx,
+        )
+        .unwrap();
+        let sens_atol = sens_atol.unwrap();
+        assert_eq!(sens_atol[0].get_index(0), 4.0);
+        assert_eq!(sens_atol[1].get_index(0), 2.0);
+    }
+
+    #[test]
+    fn build_sensitivity_atols_defaults_parameter_scales_to_one() {
+        type M = NalgebraMat<f64>;
+        let (_, sens_atol, _, _) = OdeBuilder::<M>::build_atols(
+            vec![1e-6],
+            Some(vec![8.0]),
+            None,
+            None,
+            None,
+            1,
+            None,
+            2,
+            Default::default(),
+        )
+        .unwrap();
+        let sens_atol = sens_atol.unwrap();
+        assert_eq!(sens_atol[0].get_index(0), 8.0);
+        assert_eq!(sens_atol[1].get_index(0), 8.0);
+    }
+
+    #[test]
+    fn build_sensitivity_atols_rejects_invalid_parameter_scales() {
+        type M = NalgebraMat<f64>;
+        for scales in [vec![0.0], vec![f64::INFINITY], vec![1.0, 2.0]] {
+            let result = OdeBuilder::<M>::build_atols(
+                vec![1e-6],
+                Some(vec![8.0]),
+                Some(scales),
+                None,
+                None,
+                1,
+                None,
+                1,
+                Default::default(),
+            );
+            assert!(result.is_err());
+        }
     }
 
     #[cfg(feature = "diffsl-llvm")]

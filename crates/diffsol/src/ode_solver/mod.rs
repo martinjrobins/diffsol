@@ -1952,6 +1952,7 @@ fn sens_param_scale_small_parameter() {
         .atol([1e-7])
         .sens_rtol(1e-7)
         .sens_atol([1e-7])
+        .param_scales([p])
         .rhs_sens_implicit(
             {
                 let p = p;

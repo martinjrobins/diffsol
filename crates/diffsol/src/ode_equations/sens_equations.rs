@@ -212,7 +212,7 @@ where
     eqn: &'a Eqn,
     rhs: SensRhs<'a, Eqn>,
     init: SensInit<'a, Eqn>,
-    atol: Option<&'a Eqn::V>,
+    atol: Option<&'a Vec<Eqn::V>>,
     rtol: Option<Eqn::T>,
 }
 
@@ -335,8 +335,8 @@ impl<Eqn: OdeEquationsImplicitSens> AugmentedOdeEquations<Eqn> for SensEquations
     fn rtol(&self) -> Option<Eqn::T> {
         self.rtol
     }
-    fn atol(&self) -> Option<&Eqn::V> {
-        self.atol
+    fn atol(&self, index: usize) -> Option<&Eqn::V> {
+        self.atol.and_then(|atol| atol.get(index))
     }
     fn out_atol(&self) -> Option<&Eqn::V> {
         None

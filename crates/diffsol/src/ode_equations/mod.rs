@@ -48,7 +48,7 @@ pub trait AugmentedOdeEquations<Eqn: OdeEquations>:
     fn include_in_error_control(&self) -> bool;
     fn include_out_in_error_control(&self) -> bool;
     fn rtol(&self) -> Option<Eqn::T>;
-    fn atol(&self) -> Option<&Eqn::V>;
+    fn atol(&self, index: usize) -> Option<&Eqn::V>;
     fn out_rtol(&self) -> Option<Eqn::T>;
     fn out_atol(&self) -> Option<&Eqn::V>;
     fn integrate_main_eqn(&self) -> bool;
@@ -159,7 +159,7 @@ impl<Eqn: OdeEquations> AugmentedOdeEquations<Eqn> for NoAug<Eqn> {
     fn set_index(&mut self, _index: usize) {
         panic!("This should never be called")
     }
-    fn atol(&self) -> Option<&<Eqn as Op>::V> {
+    fn atol(&self, _index: usize) -> Option<&<Eqn as Op>::V> {
         panic!("This should never be called")
     }
     fn include_out_in_error_control(&self) -> bool {
@@ -880,7 +880,7 @@ mod tests {
             no_aug.set_index(0)
         }))
         .is_err());
-        assert!(catch_unwind(AssertUnwindSafe(|| no_aug.atol())).is_err());
+        assert!(catch_unwind(AssertUnwindSafe(|| no_aug.atol(0))).is_err());
         assert!(catch_unwind(AssertUnwindSafe(|| no_aug.include_out_in_error_control())).is_err());
         assert!(catch_unwind(AssertUnwindSafe(|| no_aug.out_atol())).is_err());
         assert!(catch_unwind(AssertUnwindSafe(|| no_aug.out_rtol())).is_err());
