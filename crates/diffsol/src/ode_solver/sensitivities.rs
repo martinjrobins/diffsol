@@ -50,7 +50,7 @@ where
             .map(|out| out.nout())
             .unwrap_or_else(|| self.problem().eqn.rhs().nout());
         let nstates = self.problem().eqn.rhs().nstates();
-        let nparams = self.problem().eqn.rhs().nparams();
+        let nsens = self.problem().eqn.rhs().n_sens();
         let nout = self.problem().eqn.out().map(|out| out.nout()).unwrap_or(0);
         let nout_params = self
             .problem()
@@ -58,7 +58,7 @@ where
             .out()
             .map(|out| out.nparams())
             .unwrap_or(0);
-        soln.ensure_sens_allocation(&ctx, nrows, nout, nout_params, nstates, nparams)?;
+        soln.ensure_sens_allocation(&ctx, nrows, nout, nout_params, nstates, nsens)?;
 
         let (stop_reason, col) = solve_dense_sensitivities(
             &mut soln.ys,
@@ -140,11 +140,11 @@ where
             self.problem().eqn.rhs().nout()
         };
         let nstates = self.problem().eqn.rhs().nstates();
-        let nparams = self.problem().eqn.rhs().nparams();
+        let nsens = self.problem().eqn.rhs().n_sens();
         let ctx = self.problem().context().clone();
 
         let mut ret = ctx.dense_mat_zeros::<Eqn::V>(nrows, t_eval.len());
-        let mut ret_sens = vec![ctx.dense_mat_zeros::<Eqn::V>(nrows, t_eval.len()); nparams];
+        let mut ret_sens = vec![ctx.dense_mat_zeros::<Eqn::V>(nrows, t_eval.len()); nsens];
         let mut tmp_nout = Eqn::V::zeros(
             self.problem().eqn.out().map(|out| out.nout()).unwrap_or(0),
             ctx.clone(),
@@ -158,7 +158,7 @@ where
             ctx.clone(),
         );
         let mut tmp_nstates = Eqn::V::zeros(nstates, ctx.clone());
-        let mut tmp_nsens = vec![Eqn::V::zeros(nstates, ctx); nparams];
+        let mut tmp_nsens = vec![Eqn::V::zeros(nstates, ctx); nsens];
 
         // check t_eval is increasing and all values are >= the current time
         let t0 = self.state().t;
@@ -378,14 +378,17 @@ where
     if let Some(out) = s.problem().eqn.out() {
         out.call_inplace(tmp_nstates, t, tmp_nout);
         ret.column_mut(col).copy_from(tmp_nout);
+        let rhs = s.problem().eqn.rhs();
         for (j, s_j) in tmp_nsens.iter().enumerate() {
+            // `tmp_nparams` is a parameter-space seed, so seed column j's parameter.
+            let param_index = rhs.sens_param_index(j);
             let mut col_v = ret_sens[j].column_mut(col);
-            tmp_nparams.set_index(j, Eqn::T::one());
+            tmp_nparams.set_index(param_index, Eqn::T::one());
             out.jac_mul_inplace(tmp_nstates, t, s_j, tmp_nout);
             col_v.copy_from(&*tmp_nout);
             out.sens_mul_inplace(tmp_nstates, t, tmp_nparams, tmp_nout);
             col_v.add_assign(&*tmp_nout);
-            tmp_nparams.set_index(j, Eqn::T::zero());
+            tmp_nparams.set_index(param_index, Eqn::T::zero());
         }
     } else {
         ret.column_mut(col).copy_from(tmp_nstates);
@@ -408,17 +411,20 @@ pub(crate) fn write_state_sens_out<Eqn>(
     Eqn::V: DefaultDenseMatrix,
 {
     if let Some(out) = problem.eqn.out() {
+        let rhs = problem.eqn.rhs();
         for (j, state_sens) in state.s.iter().enumerate() {
             if j >= ret_sens.len() {
                 break;
             }
+            // `tmp_nparams` is a parameter-space seed, so seed column j's parameter.
+            let param_index = rhs.sens_param_index(j);
             let mut col_v = ret_sens[j].column_mut(col);
-            tmp_nparams.set_index(j, Eqn::T::one());
+            tmp_nparams.set_index(param_index, Eqn::T::one());
             out.jac_mul_inplace(state.y, state.t, state_sens, tmp_nout);
             col_v.copy_from(&*tmp_nout);
             out.sens_mul_inplace(state.y, state.t, tmp_nparams, tmp_nout);
             col_v.add_assign(&*tmp_nout);
-            tmp_nparams.set_index(j, Eqn::T::zero());
+            tmp_nparams.set_index(param_index, Eqn::T::zero());
         }
     } else {
         for (sens, state_sens) in ret_sens.iter_mut().zip(state.s.iter()) {

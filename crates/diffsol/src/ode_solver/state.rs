@@ -344,7 +344,7 @@ impl<V: Vector> StateRefMut<'_, V> {
         let y_before = self.y.clone();
         let f_minus = self.dy.clone();
         let s_before = self.s.to_vec();
-        let nparams = s_before.len();
+        let n_sens = s_before.len();
         let reset_t = reset_op.time_derive(&y_before, t);
         let root_t = root_op.time_derive(&y_before, t);
 
@@ -371,15 +371,17 @@ impl<V: Vector> StateRefMut<'_, V> {
             }
         }
 
-        let mut basis = V::zeros(nparams, ctx.clone());
+        let mut basis = V::zeros(rhs.nparams(), ctx.clone());
         let mut reset_jac_s = V::zeros(nstates, ctx.clone());
         let mut reset_sens = V::zeros(nstates, ctx.clone());
         let mut root_jac_s = V::zeros(nroots, ctx.clone());
         let mut root_sens = V::zeros(nroots, ctx);
         let nbatch = correction_dir.context().nbatch();
-        let mut s_plus = Vec::with_capacity(nparams);
+        let mut s_plus = Vec::with_capacity(n_sens);
         for (j, s_j_before) in s_before.iter().enumerate() {
-            basis.set_index(j, V::T::one());
+            // `basis` is a parameter-space seed, so seed column j's parameter.
+            let param_index = rhs.sens_param_index(j);
+            basis.set_index(param_index, V::T::one());
 
             reset_op.jac_mul_inplace(&y_before, t, s_j_before, &mut reset_jac_s);
             reset_op.sens_mul_inplace(&y_before, t, &basis, &mut reset_sens);
@@ -401,7 +403,7 @@ impl<V: Vector> StateRefMut<'_, V> {
             s_j_plus.batched_axpy(&tau_p, &correction_dir, V::T::one());
             s_plus.push(s_j_plus);
 
-            basis.set_index(j, V::T::zero());
+            basis.set_index(param_index, V::T::zero());
         }
 
         for (dst, src) in self.s.iter_mut().zip(s_plus.iter()) {
@@ -450,7 +452,7 @@ impl<V: Vector> StateRefMut<'_, V> {
         let y_before = self.y.clone();
         let f_minus = self.dy.clone();
         let s_before = self.s.to_vec();
-        let nparams = s_before.len();
+        let n_sens = s_before.len();
         let reset_t = reset_op.time_derive(&y_before, t);
         let root_t = root_op.time_derive(&y_before, t);
 
@@ -477,15 +479,17 @@ impl<V: Vector> StateRefMut<'_, V> {
             }
         }
 
-        let mut basis = V::zeros(nparams, ctx.clone());
+        let mut basis = V::zeros(rhs.nparams(), ctx.clone());
         let mut reset_jac_s = V::zeros(nstates, ctx.clone());
         let mut reset_sens = V::zeros(nstates, ctx.clone());
         let mut root_jac_s = V::zeros(nroots, ctx.clone());
         let mut root_sens = V::zeros(nroots, ctx);
         let nbatch = correction_dir.context().nbatch();
-        let mut s_plus = Vec::with_capacity(nparams);
+        let mut s_plus = Vec::with_capacity(n_sens);
         for (j, s_j_before) in s_before.iter().enumerate() {
-            basis.set_index(j, V::T::one());
+            // `basis` is a parameter-space seed, so seed column j's parameter.
+            let param_index = rhs.sens_param_index(j);
+            basis.set_index(param_index, V::T::one());
 
             reset_op.jac_mul_inplace(&y_before, t, s_j_before, &mut reset_jac_s);
             reset_op.sens_mul_inplace(&y_before, t, &basis, &mut reset_sens);
@@ -507,7 +511,7 @@ impl<V: Vector> StateRefMut<'_, V> {
             s_j_plus.batched_axpy(&tau_p, &correction_dir, V::T::one());
             s_plus.push(s_j_plus);
 
-            basis.set_index(j, V::T::zero());
+            basis.set_index(param_index, V::T::zero());
         }
 
         for (dst, src) in self.s.iter_mut().zip(s_plus.iter()) {

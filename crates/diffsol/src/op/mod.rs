@@ -50,6 +50,26 @@ pub trait Op {
     /// Return the number of parameters of the operator.
     fn nparams(&self) -> usize;
 
+    /// Return the number of forward sensitivity columns to integrate, in `0..=nparams()`.
+    ///
+    /// Defaults to every parameter. Returning fewer is not numerically neutral: the
+    /// sensitivity solves feed the step-size and Jacobian-update decisions, so the
+    /// trajectory shifts within `rtol`/`atol`. Adjoint gradients are unaffected.
+    fn n_sens(&self) -> usize {
+        self.nparams()
+    }
+
+    /// Return the parameter index that sensitivity column `sens_col` differentiates, in
+    /// `0..nparams()`. Defaults to the identity mapping; override with [`Op::n_sens`] to
+    /// integrate an arbitrary subset of the parameters.
+    ///
+    /// Parameter-space quantities stay indexed by parameter, not by column: the `f_p`
+    /// matrix keeps its full `nstates x nparams()` layout and the solver maps column to
+    /// parameter through this method.
+    fn sens_param_index(&self, sens_col: usize) -> usize {
+        sens_col
+    }
+
     /// Return statistics about the operator (e.g. how many times it was called, how many times the jacobian was computed, etc.)
     fn statistics(&self) -> OpStatistics {
         OpStatistics::default()
@@ -89,6 +109,12 @@ impl<C: Op> Op for ParameterisedOp<'_, C> {
     }
     fn nparams(&self) -> usize {
         self.op.nparams()
+    }
+    fn n_sens(&self) -> usize {
+        self.op.n_sens()
+    }
+    fn sens_param_index(&self, sens_col: usize) -> usize {
+        self.op.sens_param_index(sens_col)
     }
     fn statistics(&self) -> OpStatistics {
         self.op.statistics()
@@ -152,6 +178,12 @@ impl<C: Op> Op for &C {
     fn nparams(&self) -> usize {
         C::nparams(*self)
     }
+    fn n_sens(&self) -> usize {
+        C::n_sens(*self)
+    }
+    fn sens_param_index(&self, sens_col: usize) -> usize {
+        C::sens_param_index(*self, sens_col)
+    }
     fn statistics(&self) -> OpStatistics {
         C::statistics(*self)
     }
@@ -173,6 +205,12 @@ impl<C: Op> Op for &mut C {
     }
     fn nparams(&self) -> usize {
         C::nparams(*self)
+    }
+    fn n_sens(&self) -> usize {
+        C::n_sens(*self)
+    }
+    fn sens_param_index(&self, sens_col: usize) -> usize {
+        C::sens_param_index(*self, sens_col)
     }
     fn statistics(&self) -> OpStatistics {
         C::statistics(*self)
@@ -337,6 +375,12 @@ mod tests {
         fn nparams(&self) -> usize {
             2
         }
+        fn n_sens(&self) -> usize {
+            1
+        }
+        fn sens_param_index(&self, _sens_col: usize) -> usize {
+            1
+        }
         fn statistics(&self) -> OpStatistics {
             self.stats.borrow().clone()
         }
@@ -485,5 +529,23 @@ mod tests {
         assert_eq!(op_mut.nstates(), 2);
         assert_eq!(op_mut.nout(), 2);
         assert_eq!(op_mut.nparams(), 2);
+    }
+
+    #[test]
+    fn forwarding_ops_preserve_n_sens_override() {
+        // Both are defaulted, so a wrapper forwarding `nparams` but not these silently
+        // reports the inner op's parameter count and an identity mapping.
+        let mut op = ForwardingOp::new();
+        assert_eq!(op.n_sens(), 1);
+        assert_eq!(op.sens_param_index(0), 1);
+
+        let p = crate::NalgebraVec::from_vec(vec![1.0, 2.0], NalgebraContext::default());
+        let pop = ParameterisedOp::new(&op, &p);
+        assert_eq!(pop.n_sens(), 1);
+        assert_eq!(pop.sens_param_index(0), 1);
+        assert_eq!(Op::n_sens(&&op), 1);
+        assert_eq!(Op::sens_param_index(&&op, 0), 1);
+        assert_eq!(Op::n_sens(&&mut op), 1);
+        assert_eq!(Op::sens_param_index(&&mut op, 0), 1);
     }
 }
