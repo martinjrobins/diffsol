@@ -173,3 +173,47 @@ mod autodiff_impl {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        context::nalgebra::NalgebraContext, NalgebraMat, NalgebraVec, NonLinearOp,
+        NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSensAdjoint, ParameterisedOp, Vector,
+    };
+
+    use super::ClosureAutodiff;
+
+    type M = NalgebraMat<f64>;
+    type V = NalgebraVec<f64>;
+
+    fn nonlinear(x: &V, p: &V, y: &mut V) {
+        y[0] = p[0] * x[0] * x[0] + 2.0 * x[1];
+        y[1] = 3.0 * x[0] + p[1] * x[1];
+    }
+
+    #[test]
+    fn autodiff_closure_generates_state_and_parameter_gradients() {
+        let ctx = NalgebraContext::default();
+        let op = ClosureAutodiff::<M, _>::new(nonlinear, 2, 2, 2, ctx);
+        let p = V::from_vec(vec![4.0, 5.0], ctx);
+        let pop = ParameterisedOp::new(&op, &p);
+        let x = V::from_vec(vec![2.0, 3.0], ctx);
+
+        let mut value = V::zeros(2, ctx);
+        pop.call_inplace(&x, 0.0, &mut value);
+        value.assert_eq_st(&V::from_vec(vec![22.0, 21.0], ctx), 1e-12);
+
+        let direction = V::from_vec(vec![7.0, 11.0], ctx);
+        let mut jvp = V::zeros(2, ctx);
+        pop.jac_mul_inplace(&x, 0.0, &direction, &mut jvp);
+        jvp.assert_eq_st(&V::from_vec(vec![134.0, 76.0], ctx), 1e-12);
+
+        let mut state_vjp = V::zeros(2, ctx);
+        pop.jac_transpose_mul_inplace(&x, 0.0, &direction, &mut state_vjp);
+        state_vjp.assert_eq_st(&V::from_vec(vec![-145.0, -69.0], ctx), 1e-12);
+
+        let mut parameter_vjp = V::zeros(2, ctx);
+        pop.sens_transpose_mul_inplace(&x, 0.0, &direction, &mut parameter_vjp);
+        parameter_vjp.assert_eq_st(&V::from_vec(vec![-28.0, -33.0], ctx), 1e-12);
+    }
+}

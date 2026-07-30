@@ -102,3 +102,39 @@ mod autodiff_impl {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        context::nalgebra::NalgebraContext, BuilderOp, ConstantOp, ConstantOpSensAdjoint,
+        NalgebraMat, NalgebraVec, ParameterisedOp, Vector,
+    };
+
+    use super::ConstantClosureAutodiff;
+
+    type M = NalgebraMat<f64>;
+    type V = NalgebraVec<f64>;
+
+    fn initial_condition(p: &V, y: &mut V) {
+        y[0] = p[0] * p[0] + 2.0 * p[1];
+        y[1] = 3.0 * p[0] + p[1];
+    }
+
+    #[test]
+    fn autodiff_constant_closure_generates_parameter_gradient() {
+        let ctx = NalgebraContext::default();
+        let mut op = ConstantClosureAutodiff::<M, _>::new(initial_condition, 2, 2, ctx);
+        op.set_nstates(2);
+        let p = V::from_vec(vec![2.0, 5.0], ctx);
+        let pop = ParameterisedOp::new(&op, &p);
+
+        let mut value = V::zeros(2, ctx);
+        pop.call_inplace(0.0, &mut value);
+        value.assert_eq_st(&V::from_vec(vec![14.0, 11.0], ctx), 1e-12);
+
+        let seed = V::from_vec(vec![7.0, 11.0], ctx);
+        let mut parameter_vjp = V::zeros(2, ctx);
+        pop.sens_transpose_mul_inplace(0.0, &seed, &mut parameter_vjp);
+        parameter_vjp.assert_eq_st(&V::from_vec(vec![-61.0, -25.0], ctx), 1e-12);
+    }
+}

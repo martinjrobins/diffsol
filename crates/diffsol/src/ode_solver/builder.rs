@@ -10,7 +10,7 @@ use crate::{
 };
 
 #[cfg(feature = "autodiff")]
-use crate::{ClosureAutodiff, ConstantClosureAutodiff};
+use crate::{ClosureAutodiff, ConstantClosureAutodiff, LinearClosureAutodiff};
 
 #[cfg(feature = "diffsl")]
 use diffsl::execution::scalar::Scalar as DiffSlScalar;
@@ -352,12 +352,6 @@ where
     /// differentiated to generate Jacobian-vector products, vector-Jacobian
     /// products, and parameter sensitivities.
     ///
-    /// Compile in release mode to avoid Enzyme crashes with nalgebra types:
-    /// ```bash
-    /// CARGO_PROFILE_RELEASE_LTO=fat RUSTFLAGS="-Z autodiff=Enable" \
-    ///   cargo +nightly run --release --features autodiff
-    /// ```
-    ///
     /// # Example
     /// ```ignore
     /// type M = diffsol::NalgebraMat<f64>;
@@ -633,6 +627,52 @@ where
         }
     }
 
+    /// Set the mass matrix of the ODE for adjoint sensitivity analysis,
+    /// using automatic differentiation via `std::autodiff`.
+    ///
+    /// The closure has the same signature as [`mass`](Self::mass). The transpose
+    /// mass-matrix product required by the adjoint solve is generated automatically.
+    #[cfg(feature = "autodiff")]
+    pub fn mass_autodiff<F>(
+        self,
+        func: F,
+    ) -> OdeBuilder<M, Rhs, Init, LinearClosureAutodiff<M, F>, Root, Out, Reset>
+    where
+        F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
+    {
+        let nstates = 0;
+        OdeBuilder::<M, Rhs, Init, LinearClosureAutodiff<M, F>, Root, Out, Reset> {
+            rhs: self.rhs,
+            init: self.init,
+            mass: Some(LinearClosureAutodiff::new(
+                func,
+                nstates,
+                nstates,
+                nstates,
+                self.ctx.clone(),
+            )),
+            root: self.root,
+            out: self.out,
+            reset: self.reset,
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+            ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
+        }
+    }
+
     /// Set the mass matrix of the ODE for adjoint sensitivity analysis.
     ///
     /// # Arguments
@@ -712,6 +752,53 @@ where
             )),
             out: self.out,
 
+            reset: self.reset,
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+            ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
+        }
+    }
+
+    /// Set a root equation for the ODE for adjoint sensitivity analysis,
+    /// using automatic differentiation via `std::autodiff`.
+    ///
+    /// The closure is automatically differentiated to generate the Jacobian
+    /// and adjoint operations required for root-event sensitivities.
+    #[cfg(feature = "autodiff")]
+    pub fn root_autodiff<F>(
+        self,
+        func: F,
+        nroots: usize,
+    ) -> OdeBuilder<M, Rhs, Init, Mass, ClosureAutodiff<M, F>, Out, Reset>
+    where
+        F: Fn(&M::V, &M::V, &mut M::V),
+    {
+        let nstates = 0;
+        OdeBuilder::<M, Rhs, Init, Mass, ClosureAutodiff<M, F>, Out, Reset> {
+            rhs: self.rhs,
+            init: self.init,
+            mass: self.mass,
+            root: Some(ClosureAutodiff::new(
+                func,
+                nstates,
+                nroots,
+                nroots,
+                self.ctx.clone(),
+            )),
+            out: self.out,
             reset: self.reset,
             t0: self.t0,
             h0: self.h0,
@@ -893,6 +980,52 @@ where
         }
     }
 
+    /// Set the reset function of the ODE for adjoint sensitivity analysis,
+    /// using automatic differentiation via `std::autodiff`.
+    ///
+    /// The closure is automatically differentiated to generate Jacobian and
+    /// adjoint operations for the reset map.
+    #[cfg(feature = "autodiff")]
+    pub fn reset_autodiff<F>(
+        self,
+        func: F,
+    ) -> OdeBuilder<M, Rhs, Init, Mass, Root, Out, ClosureAutodiff<M, F>>
+    where
+        F: Fn(&M::V, &M::V, &mut M::V),
+    {
+        let nstates = 0;
+        OdeBuilder::<M, Rhs, Init, Mass, Root, Out, ClosureAutodiff<M, F>> {
+            rhs: self.rhs,
+            init: self.init,
+            mass: self.mass,
+            root: self.root,
+            out: self.out,
+            reset: Some(ClosureAutodiff::new(
+                func,
+                nstates,
+                nstates,
+                nstates,
+                self.ctx.clone(),
+            )),
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+            ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
+        }
+    }
+
     /// Set the reset function of the ODE, providing an explicit Jacobian.
     ///
     /// Like [`reset`](Self::reset) but also accepts a Jacobian function, enabling
@@ -1036,6 +1169,53 @@ where
                 nstates,
                 self.ctx.clone(),
             )),
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+            ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
+        }
+    }
+
+    /// Set the output function of the ODE for adjoint sensitivity analysis,
+    /// using automatic differentiation via `std::autodiff`.
+    ///
+    /// The closure is automatically differentiated to generate Jacobian,
+    /// adjoint, and parameter-sensitivity operations for the output.
+    #[cfg(feature = "autodiff")]
+    pub fn out_autodiff<F>(
+        self,
+        func: F,
+        nout: usize,
+    ) -> OdeBuilder<M, Rhs, Init, Mass, Root, ClosureAutodiff<M, F>, Reset>
+    where
+        F: Fn(&M::V, &M::V, &mut M::V),
+    {
+        let nstates = 0;
+        OdeBuilder::<M, Rhs, Init, Mass, Root, ClosureAutodiff<M, F>, Reset> {
+            rhs: self.rhs,
+            init: self.init,
+            mass: self.mass,
+            root: self.root,
+            out: Some(ClosureAutodiff::new(
+                func,
+                nstates,
+                nout,
+                nstates,
+                self.ctx.clone(),
+            )),
+            reset: self.reset,
             t0: self.t0,
             h0: self.h0,
             rtol: self.rtol,
@@ -1730,6 +1910,26 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "autodiff")]
+    #[test]
+    fn autodiff_builder_supports_all_optional_operations() {
+        use crate::{NalgebraMat, NalgebraVec, OdeBuilder, Vector};
+
+        type M = NalgebraMat<f64>;
+        type V = NalgebraVec<f64>;
+
+        OdeBuilder::<M>::new()
+            .p([2.0])
+            .rhs_autodiff(|x: &V, p: &V, y: &mut V| y[0] = p[0] * x[0])
+            .init_autodiff(|_p: &V, y: &mut V| y[0] = 1.0, 1)
+            .mass_autodiff(|x: &V, _p: &V, _t, beta, y: &mut V| y.axpy(1.0, x, beta))
+            .root_autodiff(|x: &V, _p: &V, y: &mut V| y[0] = x[0] - 0.5, 1)
+            .reset_autodiff(|x: &V, _p: &V, y: &mut V| y[0] = 2.0 * x[0])
+            .out_autodiff(|x: &V, _p: &V, y: &mut V| y[0] = x[0] * x[0], 1)
+            .build()
+            .unwrap();
+    }
+
     #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
     use crate::{Context, OdeBuilder, OdeEquations, Op, Vector};
     #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]

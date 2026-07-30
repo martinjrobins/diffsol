@@ -228,6 +228,17 @@ Run tests in the main crate only (excluding examples):
 cargo test -p diffsol
 ```
 
+### Running autodiff Tests
+
+Run autodiff tests with nightly Rust. The wrapper applies `-Zautodiff=Enable`
+only when compiling `diffsol`, avoiding compiler failures in dependencies:
+
+```bash
+CARGO_PROFILE_RELEASE_LTO=fat \
+RUSTC_WRAPPER="$PWD/.github/scripts/autodiff-rustc-wrapper.sh" \
+cargo +nightly test --release -p diffsol --features autodiff
+```
+
 ### Writing Tests
 
 When adding new functionality or fixing bugs, [include tests](https://doc.rust-lang.org/book/ch11-00-testing.html). Diffsol currently only has unit tests and some documentation tests, but please feel free to add integration tests as needed.

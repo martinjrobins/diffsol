@@ -450,6 +450,7 @@ pub use op::{
 #[cfg(feature = "autodiff")]
 pub use op::{
     closure_autodiff::ClosureAutodiff, constant_closure_autodiff::ConstantClosureAutodiff,
+    linear_closure_autodiff::LinearClosureAutodiff,
 };
 use op::{
     closure_no_jac::ClosureNoJac, closure_with_sens::ClosureWithSens,
