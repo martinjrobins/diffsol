@@ -17,5 +17,5 @@ fn main() {
         .unwrap();
     let mut solver = problem.bdf::<LS>().unwrap();
     let t = 0.4;
-    let _soln = solver.solve(t).unwrap();
+    let (_ys, _ts, _stop_reason) = solver.solve(t).unwrap();
 }

@@ -231,7 +231,7 @@ cargo test -p diffsol
 ### Running autodiff Tests
 
 Run autodiff tests with nightly Rust. The wrapper applies `-Zautodiff=Enable`
-only when compiling `diffsol`, avoiding compiler failures in dependencies:
+only to autodiff-enabled workspace crates, avoiding compiler failures in dependencies:
 
 ```bash
 CARGO_PROFILE_RELEASE_LTO=fat \

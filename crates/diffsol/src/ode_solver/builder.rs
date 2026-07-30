@@ -357,7 +357,7 @@ where
     /// type M = diffsol::NalgebraMat<f64>;
     ///
     /// let problem = diffsol::OdeBuilder::<M>::new()
-    ///     .rhs_autodiff(|x: &M::V, p: &M::V, y: &mut M::V| {
+    ///     .rhs_autodiff(|x: &M::V, p: &M::V, t, y: &mut M::V| {
     ///         y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]);
     ///     })
     ///     .p([1.0, 10.0])
@@ -369,7 +369,7 @@ where
         func: F,
     ) -> OdeBuilder<M, ClosureAutodiff<M, F>, Init, Mass, Root, Out, Reset>
     where
-        F: Fn(&M::V, &M::V, &mut M::V),
+        F: Fn(&M::V, &M::V, M::T, &mut M::V),
     {
         let nstates = 0;
         OdeBuilder::<M, ClosureAutodiff<M, F>, Init, Mass, Root, Out, Reset> {
@@ -416,7 +416,7 @@ where
         nstates: usize,
     ) -> OdeBuilder<M, Rhs, ConstantClosureAutodiff<M, F>, Mass, Root, Out, Reset>
     where
-        F: Fn(&M::V, &mut M::V),
+        F: Fn(&M::V, M::T, &mut M::V),
     {
         OdeBuilder::<M, Rhs, ConstantClosureAutodiff<M, F>, Mass, Root, Out, Reset> {
             rhs: self.rhs,
@@ -784,7 +784,7 @@ where
         nroots: usize,
     ) -> OdeBuilder<M, Rhs, Init, Mass, ClosureAutodiff<M, F>, Out, Reset>
     where
-        F: Fn(&M::V, &M::V, &mut M::V),
+        F: Fn(&M::V, &M::V, M::T, &mut M::V),
     {
         let nstates = 0;
         OdeBuilder::<M, Rhs, Init, Mass, ClosureAutodiff<M, F>, Out, Reset> {
@@ -991,7 +991,7 @@ where
         func: F,
     ) -> OdeBuilder<M, Rhs, Init, Mass, Root, Out, ClosureAutodiff<M, F>>
     where
-        F: Fn(&M::V, &M::V, &mut M::V),
+        F: Fn(&M::V, &M::V, M::T, &mut M::V),
     {
         let nstates = 0;
         OdeBuilder::<M, Rhs, Init, Mass, Root, Out, ClosureAutodiff<M, F>> {
@@ -1200,7 +1200,7 @@ where
         nout: usize,
     ) -> OdeBuilder<M, Rhs, Init, Mass, Root, ClosureAutodiff<M, F>, Reset>
     where
-        F: Fn(&M::V, &M::V, &mut M::V),
+        F: Fn(&M::V, &M::V, M::T, &mut M::V),
     {
         let nstates = 0;
         OdeBuilder::<M, Rhs, Init, Mass, Root, ClosureAutodiff<M, F>, Reset> {
@@ -1920,12 +1920,12 @@ mod tests {
 
         OdeBuilder::<M>::new()
             .p([2.0])
-            .rhs_autodiff(|x: &V, p: &V, y: &mut V| y[0] = p[0] * x[0])
-            .init_autodiff(|_p: &V, y: &mut V| y[0] = 1.0, 1)
+            .rhs_autodiff(|x: &V, p: &V, _t, y: &mut V| y[0] = p[0] * x[0])
+            .init_autodiff(|_p: &V, _t, y: &mut V| y[0] = 1.0, 1)
             .mass_autodiff(|x: &V, _p: &V, _t, beta, y: &mut V| y.axpy(1.0, x, beta))
-            .root_autodiff(|x: &V, _p: &V, y: &mut V| y[0] = x[0] - 0.5, 1)
-            .reset_autodiff(|x: &V, _p: &V, y: &mut V| y[0] = 2.0 * x[0])
-            .out_autodiff(|x: &V, _p: &V, y: &mut V| y[0] = x[0] * x[0], 1)
+            .root_autodiff(|x: &V, _p: &V, _t, y: &mut V| y[0] = x[0] - 0.5, 1)
+            .reset_autodiff(|x: &V, _p: &V, _t, y: &mut V| y[0] = 2.0 * x[0])
+            .out_autodiff(|x: &V, _p: &V, _t, y: &mut V| y[0] = x[0] * x[0], 1)
             .build()
             .unwrap();
     }

@@ -3,8 +3,10 @@
 rustc="$1"
 shift
 
-if [ "$2" = "diffsol" ]; then
-    exec "$rustc" "$@" -Zautodiff=Enable
-fi
+case "$2" in
+    diffsol|logistic_autodiff)
+        exec "$rustc" "$@" -Zautodiff=Enable
+        ;;
+esac
 
 exec "$rustc" "$@"

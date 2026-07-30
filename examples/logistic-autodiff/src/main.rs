@@ -15,11 +15,11 @@ fn main() {
 
     let problem = OdeBuilder::<M>::new()
         .p([r_val, k_val, y0_val])
-        .rhs_autodiff(|x: &V, p: &V, y: &mut V| {
+        .rhs_autodiff(|x: &V, p: &V, _t, y: &mut V| {
             y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]);
         })
         .init_autodiff(
-            |p: &V, y: &mut V| {
+            |p: &V, _t, y: &mut V| {
                 y[0] = p[2];
             },
             1,
@@ -66,13 +66,13 @@ fn main() {
 fn solve_forward(r: f64, k: f64, y0: f64, t_final: f64) -> f64 {
     let p = OdeBuilder::<M>::new()
         .p([r, k, y0])
-        .rhs(|x: &V, p: &V, y: &mut V| {
+        .rhs(|x: &V, p: &V, _t, y: &mut V| {
             y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]);
         })
-        .init(|p: &V, y: &mut V| y[0] = p[2], 1)
+        .init(|p: &V, _t, y: &mut V| y[0] = p[2], 1)
         .build()
         .unwrap();
-    let mut solver = p.tsit45::<LS>().unwrap();
+    let mut solver = p.tsit45().unwrap();
     while solver.state().t <= t_final {
         solver.step().unwrap();
     }
