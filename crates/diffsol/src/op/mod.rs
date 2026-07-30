@@ -50,29 +50,18 @@ pub trait Op {
     /// Return the number of parameters of the operator.
     fn nparams(&self) -> usize;
 
-    /// Return the number of forward sensitivity columns to integrate, in `0..=nparams()`.
+    /// Return the number of forward sensitivity columns to integrate, in `0..=nparams()` (defaults to every parameter).
     ///
-    /// Defaults to every parameter. Returning fewer is not numerically neutral: the
-    /// sensitivity solves feed the step-size and Jacobian-update decisions, so the
-    /// trajectory shifts within `rtol`/`atol`. Adjoint gradients are unaffected.
-    ///
-    /// Only the **rhs** op's implementation is read: the solver asks
-    /// `eqn.rhs().nsens()`, so an override on the equations struct's own [`Op`] impl is
-    /// silently ignored.
+    /// Only the rhs op is consulted, as the solver calls `eqn.rhs().nsens()`.
+    /// Integrating fewer columns shifts the trajectory within `rtol`/`atol`, since the sensitivity solves feed step-size and Jacobian-update decisions.
     fn nsens(&self) -> usize {
         self.nparams()
     }
 
-    /// Return the parameter index that sensitivity column `sens_col` differentiates, in
-    /// `0..nparams()`. Defaults to the identity mapping; override alongside [`Op::nsens`]
-    /// to integrate an arbitrary subset of the parameters. Repeated indices are allowed,
-    /// giving duplicate columns.
+    /// Return the parameter index that sensitivity column `sens_col` differentiates, in `0..nparams()` (defaults to the identity mapping).
     ///
-    /// Parameter-space quantities stay indexed by parameter, not by column: the `f_p`
-    /// matrix keeps its full `nstates x nparams()` layout and the solver maps column to
-    /// parameter through this method.
-    ///
-    /// As with [`Op::nsens`], only the rhs op's implementation is read.
+    /// Override alongside [`Op::nsens`] to integrate a subset of the parameters; repeated indices give duplicate columns.
+    /// Parameter-space quantities stay indexed by parameter, so `f_p` keeps its full `nstates x nparams()` layout.
     fn sens_param_index(&self, sens_col: usize) -> usize {
         sens_col
     }
@@ -540,8 +529,7 @@ mod tests {
 
     #[test]
     fn forwarding_ops_preserve_nsens_override() {
-        // Both are defaulted, so a wrapper forwarding `nparams` but not these silently
-        // reports the inner op's parameter count and an identity mapping.
+        // both are defaulted, so a wrapper that forgets to forward them falls back to nparams and the identity mapping
         let mut op = ForwardingOp::new();
         assert_eq!(op.nsens(), 1);
         assert_eq!(op.sens_param_index(0), 1);

@@ -246,15 +246,15 @@ where
 {
     pub(crate) fn new(problem: &'a OdeSolverProblem<Eqn>) -> Self {
         let eqn = &problem.eqn;
-        // `nsens` cannot change after construction, so check the contract once here.
-        let rhs = eqn.rhs();
-        let (nsens, nparams) = (rhs.nsens(), rhs.nparams());
+        // the state sizes itself from `nsens` once, so validate the mapping here rather than per step
+        let eqn_rhs = eqn.rhs();
+        let (nsens, nparams) = (eqn_rhs.nsens(), eqn_rhs.nparams());
         assert!(
             nsens <= nparams,
             "Op::nsens() must be <= Op::nparams(), got {nsens} > {nparams}"
         );
         for sens_col in 0..nsens {
-            let param_index = rhs.sens_param_index(sens_col);
+            let param_index = eqn_rhs.sens_param_index(sens_col);
             assert!(
                 param_index < nparams,
                 "Op::sens_param_index({sens_col}) must be < Op::nparams(), \
@@ -367,7 +367,7 @@ impl<Eqn: OdeEquationsImplicitSens> AugmentedOdeEquations<Eqn> for SensEquations
         self.rhs.update_state(y, dy, t);
     }
     fn set_index(&mut self, index: usize) {
-        // `index` is a sensitivity column; both ops want a parameter index.
+        // `index` is a sensitivity column, but both ops want a parameter index
         let param_index = self.eqn.rhs().sens_param_index(index);
         self.rhs.set_param_index(param_index);
         self.init.set_param_index(param_index);
@@ -522,9 +522,7 @@ mod tests {
         assert_eq!(sens.get_index(2, 2), 0.0);
     }
 
-    /// Rhs wrapper overriding the integrated column set and the column -> parameter
-    /// mapping, delegating everything else, so a test can decouple them from `nparams`.
-    /// One column is integrated per entry of `sens_params`.
+    /// Rhs wrapper that delegates everything but `nsens`/`sens_param_index`, integrating one column per entry of `sens_params`.
     struct SensOverrideRhs<'a, Eqn: OdeEquations> {
         inner: <Eqn as OdeEquationsRef<'a>>::Rhs,
         sens_params: Vec<usize>,
@@ -573,9 +571,7 @@ mod tests {
         }
     }
 
-    /// Equations wrapper that swaps in [`SensOverrideRhs`] for the rhs op. Note that the
-    /// override has to live on the rhs: this struct's own [`Op`] impl is never consulted
-    /// for `nsens`, so it forwards `nparams` unchanged.
+    /// Equations wrapper that swaps in [`SensOverrideRhs`] for the rhs op; its own [`Op`] impl forwards `nparams` unchanged, as `nsens` is only read off the rhs.
     struct SensOverrideEqn<Eqn> {
         inner: Eqn,
         sens_params: Vec<usize>,
@@ -639,8 +635,7 @@ mod tests {
         }
     }
 
-    /// Rebuild `problem` around a [`SensOverrideEqn`] integrating one sensitivity column
-    /// per entry of `sens_params`, keeping every tolerance.
+    /// Rebuild `problem` around a [`SensOverrideEqn`] over `sens_params`, keeping every tolerance.
     fn with_sens_override<Eqn: OdeEquationsImplicitSens>(
         problem: OdeSolverProblem<Eqn>,
         sens_params: Vec<usize>,
@@ -676,8 +671,7 @@ mod tests {
         assert_eq!(sens_eqn.max_index(), 1);
     }
 
-    /// Checked at construction, so it fires in release too rather than as an opaque
-    /// out-of-bounds panic mid-solve.
+    /// Test that `nsens() > nparams()` is rejected at construction, rather than as an opaque out-of-bounds panic mid-solve.
     #[test]
     #[should_panic(expected = "Op::nsens() must be <= Op::nparams(), got 5 > 3")]
     fn sens_equations_new_rejects_nsens_above_nparams() {
@@ -686,7 +680,7 @@ mod tests {
         let _ = SensEquations::new(&wrapped_problem);
     }
 
-    /// Likewise for an out-of-range column -> parameter mapping.
+    /// Test that an out-of-range column -> parameter mapping is likewise rejected at construction.
     #[test]
     #[should_panic(expected = "Op::sens_param_index(0) must be < Op::nparams(), got 7 >= 3")]
     fn sens_equations_new_rejects_out_of_range_sens_param_index() {
@@ -695,8 +689,7 @@ mod tests {
         let _ = SensEquations::new(&wrapped_problem);
     }
 
-    /// Solve for state and sensitivities at `t_eval`, through BDF or Tsit45. Generic over
-    /// the equations so wrapped and unwrapped problems share one call site.
+    /// Solve for state and sensitivities at `t_eval` through BDF or Tsit45, generic over the equations so wrapped and unwrapped problems share a call site.
     fn solve_dense_sens<Eqn>(
         problem: OdeSolverProblem<Eqn>,
         t_eval: &[f64],
@@ -723,9 +716,7 @@ mod tests {
 
     const SENS_T_EVAL: [f64; 3] = [1e-4, 1e-2, 1.0];
 
-    /// Solve `robertson_sens`, optionally wrapped to integrate only `sens_params`. Returns
-    /// the state, the sensitivity columns at [`SENS_T_EVAL`], and the tolerances for
-    /// comparing solves.
+    /// Solve `robertson_sens`, optionally wrapped to integrate only `sens_params`, returning the state, the sensitivity columns, and the tolerances for comparing solves.
     fn solve_robertson_sens(sens_params: Option<Vec<usize>>) -> (Mcpu, Vec<Mcpu>, Vcpu, f64) {
         let (problem, _soln) = robertson_sens::<Mcpu>();
         let (atol, rtol) = (problem.atol.clone(), problem.rtol);
@@ -736,8 +727,7 @@ mod tests {
         (y, sens, atol, rtol)
     }
 
-    /// With `nsens == nparams` and an identity mapping the override plumbing must reproduce
-    /// the unwrapped solve bit-for-bit, so the default path is provably untouched.
+    /// Test that an identity mapping over every parameter reproduces the unwrapped solve bit-for-bit, i.e. the default path is untouched.
     #[test]
     fn solve_dense_sensitivities_bit_identical_when_nsens_equals_nparams() {
         let (y_full, sens_full, _, _) = solve_robertson_sens(None);
@@ -751,9 +741,8 @@ mod tests {
         );
     }
 
-    /// A non-identity mapping must integrate the selected parameter, not the one sharing
-    /// the column index. Robertson's parameters span orders of magnitude (0.04, 1e4, 3e7),
-    /// so a mix-up is unmissable.
+    /// Test that a non-identity mapping integrates the selected parameter, not the one sharing the column index.
+    /// Robertson's parameters span orders of magnitude (0.04, 1e4, 3e7), so a mix-up cannot pass.
     #[test]
     fn solve_dense_sensitivities_respects_sens_param_index_mapping() {
         let (_, sens_full, atol, rtol) = solve_robertson_sens(None);
@@ -770,9 +759,8 @@ mod tests {
         }
     }
 
-    /// A reduced `nsens` must integrate fewer columns while the leading column still
-    /// tracks the full solve. Only to solver tolerance, not bit-exact: fewer columns shifts
-    /// the step sequence, so both solves are valid to the requested accuracy.
+    /// Test that a reduced `nsens` integrates fewer columns while the leading one still tracks the full solve.
+    /// Agreement is to solver tolerance rather than bit-exact, as dropping columns shifts the step sequence.
     #[test]
     fn solve_dense_sensitivities_respects_nsens_override() {
         let (_, sens_full, atol, rtol) = solve_robertson_sens(None);
@@ -786,7 +774,6 @@ mod tests {
         assert_eq!(sens_reduced[0].ncols(), SENS_T_EVAL.len());
         assert_eq!(sens_reduced[0].nrows(), sens_full[0].nrows());
 
-        // Compare under the solver's own weighted norm, as other solve tests do.
         for j in 0..SENS_T_EVAL.len() {
             sens_reduced[0].column(j).into_owned().assert_eq_norm(
                 &sens_full[0].column(j).into_owned(),
@@ -798,9 +785,8 @@ mod tests {
     }
 
     /// `dx/dt = -p[0]·x`, `x(0) = 1`, with a reset `x -> x + p[1]` firing at `x = 0.5`.
-    /// Parameter 1 enters the problem only through the reset, so its post-event
-    /// sensitivity comes entirely from the parameter-space seed in the reset correction:
-    /// s_1(t) = exp(-p[0]·(t - t_root)) for t > t_root = ln(2)/p[0], and 0 before.
+    /// p[1] enters only through the reset, so its sensitivity comes entirely from the parameter-space seed in the reset correction:
+    /// s_1 = 0 up to t_root = ln(2)/p[0], then exp(-p[0]·(t - t_root)) until the root fires again at t_root + ln(1.6)/p[0] ≈ 1.16.
     fn decay_with_param_dependent_reset_problem() -> OdeSolverProblem<
         impl OdeEquationsImplicitSens<M = Mcpu, V = Vcpu, T = f64, C = NalgebraContext>,
     > {
@@ -829,7 +815,7 @@ mod tests {
             .reset_sens_implicit(
                 |x: &Vcpu, p: &Vcpu, _t, y: &mut Vcpu| y[0] = x[0] + p[1],
                 |_x: &Vcpu, _p: &Vcpu, _t, v: &Vcpu, y: &mut Vcpu| y[0] = v[0],
-                // dreset/dp · v = v[1]: reads the parameter-space seed at parameter 1.
+                // dreset/dp · v = v[1], i.e. reads the seed at parameter 1
                 |_x: &Vcpu, _p: &Vcpu, _t, v: &Vcpu, y: &mut Vcpu| y[0] = v[1],
             )
             .build()
@@ -838,8 +824,7 @@ mod tests {
 
     const RESET_SENS_T_EVAL: [f64; 3] = [0.2, 1.0, 1.5];
 
-    /// Solve [`decay_with_param_dependent_reset_problem`], optionally with only
-    /// parameter 1's sensitivity integrated (column 0 -> parameter 1).
+    /// Solve [`decay_with_param_dependent_reset_problem`], optionally with only parameter 1's sensitivity integrated (column 0 -> parameter 1).
     fn solve_decay_reset_sens(use_bdf: bool, mapped: bool) -> (Vec<Mcpu>, Vcpu, f64) {
         let problem = decay_with_param_dependent_reset_problem();
         let (atol, rtol) = (problem.atol.clone(), problem.rtol);
@@ -860,8 +845,7 @@ mod tests {
         let (sens_full, atol, rtol) = solve_decay_reset_sens(use_bdf, false);
         let (sens_mapped, _, _) = solve_decay_reset_sens(use_bdf, true);
 
-        // Guard: parameter 1's sensitivity is nonzero after the event (s_1 = 2/e at
-        // t = 1), so the comparison below cannot pass vacuously.
+        // guard: s_1(1.0) = 2/e is nonzero, so the comparison below cannot pass vacuously
         let expected = 2.0 / std::f64::consts::E;
         assert!(
             (sens_full[1].get_index(0, 1) - expected).abs() < 1e-3,
@@ -880,22 +864,19 @@ mod tests {
         }
     }
 
-    /// The reset correction seeds parameter space per column; it must seed
-    /// `sens_param_index(j)`, not column `j`. Tsit45 routes through
-    /// `apply_reset_with_sens`.
+    /// Test that the reset correction seeds `sens_param_index(j)` and not column `j`, via Tsit45's `apply_reset_with_sens`.
     #[test]
     fn reset_sens_correction_respects_mapping_tsit45() {
         assert_reset_sens_correction_respects_mapping(false);
     }
 
-    /// As above through BDF, which routes through `apply_reset_with_sens_mass`.
+    /// As above, via BDF's `apply_reset_with_sens_mass`.
     #[test]
     fn reset_sens_correction_respects_mapping_bdf() {
         assert_reset_sens_correction_respects_mapping(true);
     }
 
-    /// `nsens() == 0` is the degenerate end of the documented range: nothing to integrate,
-    /// while the main equation (reset and all) still solves.
+    /// Test that `nsens() == 0` integrates no columns while the main equation, resets and all, still solves.
     #[test]
     fn solve_dense_sensitivities_with_no_columns() {
         for use_bdf in [true, false] {
@@ -907,9 +888,8 @@ mod tests {
         }
     }
 
-    /// `dx/dt = -p[0]·x`, `x(0) = 1`, output `g = x + p[1]`, root at `x = 0.5` and no
-    /// reset. Parameter 1 enters only through the output, so `dg/dp[1] = 1` exactly and
-    /// the out-sensitivity seed is the only thing that can produce it.
+    /// `dx/dt = -p[0]·x`, `x(0) = 1`, output `g = x + p[1]`, root at `x = 0.5` and no reset.
+    /// p[1] enters only through the output, so `dg/dp[1] = 1` exactly and only the out-sensitivity seed can produce it.
     fn decay_with_out_problem() -> OdeSolverProblem<
         impl OdeEquationsImplicitSens<M = Mcpu, V = Vcpu, T = f64, C = NalgebraContext>,
     > {
@@ -938,7 +918,7 @@ mod tests {
             .out_sens_implicit(
                 |x: &Vcpu, p: &Vcpu, _t, y: &mut Vcpu| y[0] = x[0] + p[1],
                 |_x: &Vcpu, _p: &Vcpu, _t, v: &Vcpu, y: &mut Vcpu| y[0] = v[0],
-                // dg/dp · v = v[1]: reads the parameter-space seed at parameter 1.
+                // dg/dp · v = v[1], i.e. reads the seed at parameter 1
                 |_x: &Vcpu, _p: &Vcpu, _t, v: &Vcpu, y: &mut Vcpu| y[0] = v[1],
                 1,
             )
@@ -946,13 +926,10 @@ mod tests {
             .unwrap()
     }
 
-    /// The root at `x = 0.5` fires at `t = ln(2)`, between the second and third entry, so
-    /// the final column is written by `write_state_sens_out` rather than by the
-    /// interpolating path.
+    /// The root at `x = 0.5` fires at `t = ln(2)`, between the last two entries, so the final column comes from `write_state_sens_out` rather than the interpolating path.
     const OUT_SENS_T_EVAL: [f64; 3] = [0.2, 0.5, 1.0];
 
-    /// Both out-sensitivity seed sites are parameter-space: they must seed
-    /// `sens_param_index(j)`, not column `j`.
+    /// Test that both out-sensitivity seed sites seed `sens_param_index(j)` and not column `j`.
     #[test]
     fn out_sens_respects_mapping() {
         let (y_full, sens_full) =
@@ -963,8 +940,7 @@ mod tests {
             true,
         );
 
-        // The last column is the root time, so g = 0.5 + p[1]; confirms the solve stopped
-        // on the root and the `write_state_sens_out` path ran.
+        // g = 0.5 + p[1] at the root time confirms the `write_state_sens_out` path ran
         assert_eq!(y_full.ncols(), OUT_SENS_T_EVAL.len());
         assert!(
             (y_full.get_index(0, 2) - 0.8).abs() < 1e-5,
@@ -972,8 +948,7 @@ mod tests {
             y_full.get_index(0, 2)
         );
 
-        // Guard: dg/dp[0] = -t·exp(-t) is nowhere near dg/dp[1] = 1, so seeding the wrong
-        // index cannot pass. A wrong seed gives 0 for the mapped column.
+        // guard: dg/dp[0] = -t·exp(-t) is nowhere near dg/dp[1] = 1, so a wrong seed cannot pass
         assert_eq!(sens_full.len(), 2);
         let expected_p0 = -0.2 * (-0.2f64).exp();
         assert!(

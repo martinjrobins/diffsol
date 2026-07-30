@@ -379,7 +379,7 @@ impl<V: Vector> StateRefMut<'_, V> {
         let nbatch = correction_dir.context().nbatch();
         let mut s_plus = Vec::with_capacity(nsens);
         for (j, s_j_before) in s_before.iter().enumerate() {
-            // `basis` is a parameter-space seed, so seed column j's parameter.
+            // the seed is parameter-space, so index by parameter and not by column
             let param_index = rhs.sens_param_index(j);
             basis.set_index(param_index, V::T::one());
 
@@ -487,7 +487,7 @@ impl<V: Vector> StateRefMut<'_, V> {
         let nbatch = correction_dir.context().nbatch();
         let mut s_plus = Vec::with_capacity(nsens);
         for (j, s_j_before) in s_before.iter().enumerate() {
-            // `basis` is a parameter-space seed, so seed column j's parameter.
+            // the seed is parameter-space, so index by parameter and not by column
             let param_index = rhs.sens_param_index(j);
             basis.set_index(param_index, V::T::one());
 

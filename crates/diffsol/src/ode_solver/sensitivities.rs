@@ -100,10 +100,8 @@ where
     /// plus one final column at the root time if a root fires before `t_eval` is exhausted and no reset operator is configured.
     ///
     /// The sensitivities are returned as a Vec of dense matrices of identical shape as the ODE solution,
-    /// with one element per integrated sensitivity column, i.e. `eqn.rhs().nsens()` of them.
-    /// By default that is one per parameter, in parameter order; if the equations override
-    /// [`Op::nsens`], the ith element is the sensitivity with respect to parameter
-    /// `eqn.rhs().sens_param_index(i)`.
+    /// with one element per integrated sensitivity column, i.e. `eqn.rhs().nsens()` of them (by default one per parameter, in parameter order).
+    /// The ith element is the sensitivity with respect to parameter `eqn.rhs().sens_param_index(i)`.
     /// `stop_reason` indicates whether the solve reached `t_eval[t_eval.len()-1]` or stopped on a root.
     ///
     /// # Post-condition
@@ -383,7 +381,7 @@ where
         ret.column_mut(col).copy_from(tmp_nout);
         let rhs = s.problem().eqn.rhs();
         for (j, s_j) in tmp_nsens.iter().enumerate() {
-            // `tmp_nparams` is a parameter-space seed, so seed column j's parameter.
+            // the seed is parameter-space, so index by parameter and not by column
             let param_index = rhs.sens_param_index(j);
             let mut col_v = ret_sens[j].column_mut(col);
             tmp_nparams.set_index(param_index, Eqn::T::one());
@@ -419,7 +417,7 @@ pub(crate) fn write_state_sens_out<Eqn>(
             if j >= ret_sens.len() {
                 break;
             }
-            // `tmp_nparams` is a parameter-space seed, so seed column j's parameter.
+            // the seed is parameter-space, so index by parameter and not by column
             let param_index = rhs.sens_param_index(j);
             let mut col_v = ret_sens[j].column_mut(col);
             tmp_nparams.set_index(param_index, Eqn::T::one());
