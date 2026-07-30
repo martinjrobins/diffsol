@@ -59,11 +59,57 @@ We also have initial conditions for the populations at time \\(t = 0\\). We can 
 \mathbf{y}(0) = \begin{bmatrix} 1 \\\\ 1 \end{bmatrix}
 \\]
 
-Let's solve this system of ODEs using the Diffsol crate. We will use the [DiffSL](https://martinjrobins.github.io/diffsl/) domain-specific language to specify the problem. We could have also used [Rust closures](/specify/closure/rust_closures.md), but this allows us to illustrate the modelling process with a minimum of Rust syntax.
+Let's solve this system of ODEs using the diffsol crate. First we will define a few types to set our matrix type (dense `nalgebra` with f64),
+the linear solver type (`nalgebra` LU, only used for the BDF solver below), and our DiffSL JIT backend (`cranelift`, only used for the DiffSL problem definition).
 
 ```rust,ignore
-{{#include ../../../examples/population-dynamics/src/main.rs::57}}
+{{#include ../../../examples/population-dynamics/src/main.rs:types}}
 ```
+
+The equations can be specified with either the [DiffSL](https://martinjrobins.github.io/diffsl/) domain-specific language or [Rust closures](/specify/closure/rust_closures.md). For the rust closure examples, we will defined a varient that is suitable for the implicit solvers (need to provide the Jacobian vector product), and one that is only suitable for explicit solvers. All definitions expose \\(y_0\\) as their single input parameter, which sets both initial populations. We'll use this input later on to generate a phase plane plot.
+
+{{#tabs}}
+{{#tab name="DiffSL"}}
+
+```rust,ignore
+{{#include ../../../examples/population-dynamics/src/main.rs:problem_diffsl}}
+```
+
+{{#endtab}}
+{{#tab name="Rust closures"}}
+
+```rust,ignore
+{{#include ../../../examples/population-dynamics/src/main.rs:problem_rust_closures}}
+```
+
+{{#endtab}}
+{{#tab name="Rust closures (explicit)"}}
+
+```rust,ignore
+{{#include ../../../examples/population-dynamics/src/main.rs:problem_rust_closures_explicit}}
+```
+
+{{#endtab}}
+{{#endtabs}}
+
+The DiffSL and implicit Rust-closure definitions can use a BDF solver, whereas the explicit Rust-closure definition must use the TSIT45 solver, which uses an explicit runge-kutta method. Note that the BDF solver also requires a linear solver type (LS).
+
+{{#tabs}}
+{{#tab name="BDF"}}
+
+```rust,ignore
+{{#include ../../../examples/population-dynamics/src/main.rs:solve}}
+```
+
+{{#endtab}}
+{{#tab name="TSIT45"}}
+
+```rust,ignore
+{{#include ../../../examples/population-dynamics/src/main.rs:solve_explicit}}
+```
+
+{{#endtab}}
+{{#endtabs}}
 
 {{#include images/prey-predator.html}}
 
@@ -78,7 +124,7 @@ Our initial conditions are now:
 so we can solve this system for different values of \\(y_0\\) and plot the phase plane for each case. We will use similar code as above, but we will introduce our new parameter and loop over different values of \\(y_0\\)
 
 ```rust,ignore
-{{#include ../../../examples/population-dynamics/src/main.rs:59:}}
+{{#include ../../../examples/population-dynamics/src/main.rs:phase_plane}}
 ```
 
 {{#include images/prey-predator2.html}}

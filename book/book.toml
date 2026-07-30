@@ -2,7 +2,11 @@
 authors = ["martinjrobins"]
 language = "en"
 src = "src"
-title = "Diffsol"
+title = "diffsol"
+
+[preprocessor.tabs]
 
 [output.html]
+additional-css = ["theme/tabs.css"]
+additional-js = ["theme/tabs.js"]
 mathjax-support = true

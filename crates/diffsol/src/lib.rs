@@ -1,6 +1,6 @@
-//! # Diffsol
+//! # diffsol
 //!
-//! Diffsol is a library for solving differential equations. It provides a simple interface to
+//! diffsol is a library for solving differential equations. It provides a simple interface to
 //! solve ODEs with optional mass matrices, where the user can provide the equations either as
 //! closures or via strings in a domain-specific language.
 
@@ -15,7 +15,7 @@
 //! [OdeBuilder::init], [OdeBuilder::mass] etc.) or leave them at their default values. Then, call
 //! the [OdeBuilder::build] function to create a [OdeSolverProblem].
 //!
-//! You will also need to choose a matrix type to use. Diffsol can use the
+//! You will also need to choose a matrix type to use. diffsol can use the
 //! [nalgebra](https://nalgebra.org) type via [NalgebraMat], the
 //! [faer](https://github.com/sarah-ek/faer-rs) type via [FaerMat],
 //! or you can use any other type that implements the [Matrix] trait.
@@ -42,7 +42,7 @@
 //!
 //! ## The solver
 //!
-//! To solve the problem given the initial state, you need to choose a solver. Diffsol provides the
+//! To solve the problem given the initial state, you need to choose a solver. diffsol provides the
 //! following solvers:
 //!    - A Backwards Difference Formulae [Bdf] solver, suitable for stiff problems
 //!      and singular mass matrices.
@@ -82,7 +82,7 @@
 //! to compile the equations to efficient machine code. The LLVM JIT backend also uses the EnzymeAD
 //! library to compute the jacobian and sensitivity/adjoint equations.
 //!
-//! You can use DiffSL with Diffsol using the [DiffSl] struct, which is created using the
+//! You can use DiffSL with diffsol using the [DiffSl] struct, which is created using the
 //! [OdeBuilder::build_from_diffsl] method. You need to enable one of the `diffsl-llvm*` features
 //! corresponding to the version of LLVM you have installed. E.g. to use your LLVM 17 installation,
 //! enable the `diffsl-llvm17` feature. Or you can use the `diffsl-cranelift` feature to use the
@@ -102,8 +102,8 @@
 //! ## Sparsity pattern for Jacobians and Mass matrices
 //!
 //! Via an implementation of [OdeEquationsImplicit], the user provides the action of the jacobian
-//! on a vector `J(x) v`. By default Diffsol uses this to generate a jacobian matrix for the ODE
-//! solver. For sparse jacobians, Diffsol will attempt to detect the sparsity pattern of the
+//! on a vector `J(x) v`. By default diffsol uses this to generate a jacobian matrix for the ODE
+//! solver. For sparse jacobians, diffsol will attempt to detect the sparsity pattern of the
 //! jacobian using this function and use a sparse matrix representation internally. It attempts to
 //! determine the sparsity pattern of the jacobian (i.e. its non-zero values) by passing in `NaNs`
 //! for the input vector `x` and checking which elements of the output vector `J(x) v` are also
@@ -116,7 +116,7 @@
 //!
 //! ## Events / Root finding
 //!
-//! Diffsol provides a simple way to detect user-provided events during the integration of the
+//! diffsol provides a simple way to detect user-provided events during the integration of the
 //! ODEs. You can use this by providing a closure that has a zero-crossing at the event you want to
 //! detect, using the [OdeBuilder::root] method, or by providing a [NonLinearOp] that has a
 //! zero-crossing at the event you want to detect. To use the root finding feature while
@@ -125,7 +125,7 @@
 //!
 //! ## Forward Sensitivity Analysis
 //!
-//! Diffsol provides a way to compute the forward sensitivity of the solution with respect to the
+//! diffsol provides a way to compute the forward sensitivity of the solution with respect to the
 //! parameters. You can provide the requires equations to the builder using
 //! [OdeBuilder::rhs_sens_implicit] and [OdeBuilder::init_sens], or your equations struct must
 //! implement the [OdeEquationsImplicitSens] trait, Note that by default the sensitivity equations
@@ -154,7 +154,7 @@
 //!
 //! ## Quadrature and Output functions
 //!
-//! The [OdeSolverEquations::Out] associated type can be used to define an output function. Diffsol
+//! The [OdeSolverEquations::Out] associated type can be used to define an output function. diffsol
 //! will optionally integrate this function over the solution trajectory by using the
 //! [OdeBuilder::integrate_out] method. By default, the output integration is added to the error
 //! control of the solver, and the tolerances can be adjusted using the [OdeBuilder::out_atol] and
@@ -192,7 +192,7 @@
 //!
 //! ## Resets
 //!
-//! Diffsol supports a reset operator `R(y)` which maps the current state to a new state at the
+//! diffsol supports a reset operator `R(y)` which maps the current state to a new state at the
 //! same point in time. You provide the reset via methods like [OdeBuilder::reset] or
 //! [OdeBuilder::reset_implicit].
 //!
@@ -212,8 +212,8 @@
 //!
 //! ## Nonlinear and linear solvers
 //!
-//! Diffsol provides generic nonlinear and linear solvers that are used internally by the ODE
-//! solver. You can use the solvers provided by Diffsol, or implement your own following the
+//! diffsol provides generic nonlinear and linear solvers that are used internally by the ODE
+//! solver. You can use the solvers provided by diffsol, or implement your own following the
 //! provided traits. The linear solver trait is [LinearSolver], and the nonlinear solver trait is
 //! [NonLinearSolver].
 //!
@@ -230,7 +230,7 @@
 //!
 //! ## Matrix and vector types
 //!
-//! When solving ODEs, you will need to choose a matrix and vector type to use. Diffsol uses the
+//! When solving ODEs, you will need to choose a matrix and vector type to use. diffsol uses the
 //! following types:
 //!   - [NalgebraVec] and [NalgebraMat] (wrappers around `nalgebra::DMatrix` and
 //!     `nalgebra::DVector` from the [nalgebra](https://nalgebra.org) library).
@@ -311,7 +311,7 @@ pub mod nonlinear_solver;
 /// - [DiffSl] for equations specified in the DiffSL domain-specific language
 /// - [SensEquations] and [AdjointEquations] for sensitivity computations
 ///
-/// All the test equations used in Diffsol's test suite are also provided here.
+/// All the test equations used in diffsol's test suite are also provided here.
 pub mod ode_equations;
 
 /// ODE solver implementations and traits.

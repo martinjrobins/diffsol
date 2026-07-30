@@ -4,8 +4,8 @@ use std::ops::AddAssign;
 
 use crate::{
     error::{DiffsolError, OdeSolverError},
-    AugmentedOdeEquationsImplicit, Context, Convergence, DefaultDenseMatrix, DefaultSolver, NoAug,
-    StateRef, StateRefMut,
+    AugmentedOdeEquationsImplicit, Context, Convergence, DefaultDenseMatrix, LinearSolver,
+    NewtonNonlinearSolver, NoAug, NoLineSearch, StateRef, StateRefMut,
 };
 
 use num_traits::{abs, FromPrimitive, One, Signed, ToPrimitive, Zero};
@@ -27,16 +27,15 @@ use super::runge_kutta::pi_controller_raw;
 use super::sensitivities::SensitivitiesOdeSolverMethod;
 use super::OdeSolverStatistics;
 
-impl<'a, M, Eqn, Nls, AugEqn> AugmentedOdeSolverMethod<'a, Eqn, AugEqn>
-    for Bdf<'a, Eqn, Nls, M, AugEqn>
+impl<'a, M, Eqn, LS, AugEqn> AugmentedOdeSolverMethod<'a, Eqn, AugEqn>
+    for Bdf<'a, Eqn, LS, M, AugEqn>
 where
     Eqn: OdeEquationsImplicit,
-    Eqn::M: DefaultSolver,
     AugEqn: AugmentedOdeEquationsImplicit<Eqn>,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
-    Nls: NonLinearSolver<Eqn::M>,
+    LS: LinearSolver<Eqn::M>,
     Eqn::V: DefaultDenseMatrix<T = Eqn::T>,
 {
     fn into_state_and_eqn(mut self) -> (Self::State, Option<AugEqn>) {
@@ -58,29 +57,27 @@ where
     }
 }
 
-impl<'a, M, Eqn, Nls> SensitivitiesOdeSolverMethod<'a, Eqn>
-    for Bdf<'a, Eqn, Nls, M, SensEquations<'a, Eqn>>
+impl<'a, M, Eqn, LS> SensitivitiesOdeSolverMethod<'a, Eqn>
+    for Bdf<'a, Eqn, LS, M, SensEquations<'a, Eqn>>
 where
     Eqn: OdeEquationsImplicitSens + 'a,
-    Eqn::M: DefaultSolver,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
-    Nls: NonLinearSolver<Eqn::M>,
+    LS: LinearSolver<Eqn::M>,
     Eqn::V: DefaultDenseMatrix<T = Eqn::T>,
 {
 }
 
-impl<'a, M, Eqn, Nls, Solver> AdjointOdeSolverMethod<'a, Eqn, Solver>
-    for Bdf<'a, Eqn, Nls, M, crate::AdjointEquations<'a, Eqn, Solver>>
+impl<'a, M, Eqn, LS, Solver> AdjointOdeSolverMethod<'a, Eqn, Solver>
+    for Bdf<'a, Eqn, LS, M, crate::AdjointEquations<'a, Eqn, Solver>>
 where
     Eqn: OdeEquationsImplicitAdjoint + 'a,
-    Eqn::M: DefaultSolver,
     Solver: OdeSolverMethod<'a, Eqn>,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
-    Nls: NonLinearSolver<Eqn::M>,
+    LS: LinearSolver<Eqn::M>,
     Eqn::V: DefaultDenseMatrix<T = Eqn::T>,
 {
 }
@@ -114,13 +111,13 @@ where
 pub struct Bdf<
     'a,
     Eqn: OdeEquationsImplicit,
-    Nls: NonLinearSolver<Eqn::M>,
+    LS: LinearSolver<Eqn::M>,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C> = <<Eqn as Op>::V as DefaultDenseMatrix>::M,
     AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn> = NoAug<Eqn>,
 > where
     Eqn::V: DefaultDenseMatrix,
 {
-    nonlinear_solver: Nls,
+    nonlinear_solver: NewtonNonlinearSolver<Eqn::M, LS, NoLineSearch>,
     convergence: Convergence<'a, Eqn::V>,
     ode_problem: &'a OdeSolverProblem<Eqn>,
     op: Option<BdfCallable<&'a Eqn>>,
@@ -150,17 +147,17 @@ pub struct Bdf<
     prev_error_norm: Option<Eqn::T>,
 }
 
-impl<M, Eqn, Nls, AugmentedEqn> Clone for Bdf<'_, Eqn, Nls, M, AugmentedEqn>
+impl<M, Eqn, LS, AugmentedEqn> Clone for Bdf<'_, Eqn, LS, M, AugmentedEqn>
 where
     Eqn: OdeEquationsImplicit,
-    Nls: NonLinearSolver<Eqn::M>,
+    LS: LinearSolver<Eqn::M>,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
     AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn>,
     Eqn::V: DefaultDenseMatrix,
 {
     fn clone(&self) -> Self {
         let problem = self.ode_problem;
-        let mut nonlinear_solver = Nls::default();
+        let mut nonlinear_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
         let op = if let Some(op) = self.op.as_ref() {
             let op = op.clone_state(&self.ode_problem.eqn);
             nonlinear_solver.set_problem(&op);
@@ -207,10 +204,10 @@ where
     }
 }
 
-impl<'a, M, Eqn, Nls, AugmentedEqn> Drop for Bdf<'a, Eqn, Nls, M, AugmentedEqn>
+impl<'a, M, Eqn, LS, AugmentedEqn> Drop for Bdf<'a, Eqn, LS, M, AugmentedEqn>
 where
     Eqn: OdeEquationsImplicit,
-    Nls: NonLinearSolver<Eqn::M>,
+    LS: LinearSolver<Eqn::M>,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
     AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn>,
     Eqn::V: DefaultDenseMatrix,
@@ -220,26 +217,25 @@ where
     }
 }
 
-impl<'a, M, Eqn, Nls, AugmentedEqn> Bdf<'a, Eqn, Nls, M, AugmentedEqn>
+impl<'a, M, Eqn, LS, AugmentedEqn> Bdf<'a, Eqn, LS, M, AugmentedEqn>
 where
     AugmentedEqn: AugmentedOdeEquations<Eqn> + OdeEquationsImplicit,
     Eqn: OdeEquationsImplicit,
-    Eqn::M: DefaultSolver,
     Eqn::V: DefaultDenseMatrix,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
-    Nls: NonLinearSolver<Eqn::M>,
+    LS: LinearSolver<Eqn::M>,
 {
     pub fn new(
         problem: &'a OdeSolverProblem<Eqn>,
         state: BdfState<Eqn::V, M>,
-        nonlinear_solver: Nls,
+        linear_solver: LS,
     ) -> Result<Self, DiffsolError> {
         Self::_new(
             problem,
             state,
-            nonlinear_solver,
+            linear_solver,
             true,
             BdfConfig::new(&problem.ode_options),
         )
@@ -248,10 +244,11 @@ where
     fn _new(
         problem: &'a OdeSolverProblem<Eqn>,
         mut state: BdfState<Eqn::V, M>,
-        mut nonlinear_solver: Nls,
+        linear_solver: LS,
         integrate_main_eqn: bool,
         config: BdfConfig<Eqn::T>,
     ) -> Result<Self, DiffsolError> {
+        let mut nonlinear_solver = NewtonNonlinearSolver::new(linear_solver, NoLineSearch);
         // kappa values for difference orders, taken from Table 1 of [1]
         let kappa: [Eqn::T; 6] = [
             Eqn::T::zero(),
@@ -374,13 +371,13 @@ where
         state: BdfState<Eqn::V, M>,
         problem: &'a OdeSolverProblem<Eqn>,
         augmented_eqn: AugmentedEqn,
-        nonlinear_solver: Nls,
+        linear_solver: LS,
     ) -> Result<Self, DiffsolError> {
         Self::new_augmented_with_config(
             state,
             problem,
             augmented_eqn,
-            nonlinear_solver,
+            linear_solver,
             BdfConfig::new(&problem.ode_options),
         )
     }
@@ -389,13 +386,13 @@ where
         state: BdfState<Eqn::V, M>,
         problem: &'a OdeSolverProblem<Eqn>,
         augmented_eqn: AugmentedEqn,
-        nonlinear_solver: Nls,
+        linear_solver: LS,
         config: BdfConfig<Eqn::T>,
     ) -> Result<Self, DiffsolError> {
         state.check_sens_consistent_with_problem(problem, &augmented_eqn)?;
 
         let integrate_main_eqn = augmented_eqn.integrate_main_eqn();
-        let mut ret = Self::_new(problem, state, nonlinear_solver, integrate_main_eqn, config)?;
+        let mut ret = Self::_new(problem, state, linear_solver, integrate_main_eqn, config)?;
 
         ret.state.set_augmented_problem(problem, &augmented_eqn)?;
 
@@ -987,14 +984,13 @@ where
     }
 }
 
-impl<'a, M, Eqn, Nls, AugmentedEqn> OdeSolverMethod<'a, Eqn> for Bdf<'a, Eqn, Nls, M, AugmentedEqn>
+impl<'a, M, Eqn, LS, AugmentedEqn> OdeSolverMethod<'a, Eqn> for Bdf<'a, Eqn, LS, M, AugmentedEqn>
 where
     Eqn: OdeEquationsImplicit,
-    Eqn::M: DefaultSolver,
     AugmentedEqn: AugmentedOdeEquations<Eqn> + OdeEquationsImplicit,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
     Eqn::V: DefaultDenseMatrix,
-    Nls: NonLinearSolver<Eqn::M>,
+    LS: LinearSolver<Eqn::M>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
@@ -1015,9 +1011,7 @@ where
 
     fn apply_reset(&mut self) -> Result<(), DiffsolError> {
         let problem = self.problem();
-        self.state
-            .as_mut()
-            .apply_reset_with_mass::<<Eqn::M as DefaultSolver>::LS, _>(problem)
+        self.state.as_mut().apply_reset_with_mass::<LS, _>(problem)
     }
 
     fn apply_reset_with_sens(&mut self, root_idx: usize) -> Result<(), DiffsolError>
@@ -1027,7 +1021,7 @@ where
         let problem = self.problem();
         self.state
             .as_mut()
-            .apply_reset_with_sens_mass::<<Eqn::M as DefaultSolver>::LS, _>(problem, root_idx)
+            .apply_reset_with_sens_mass::<LS, _>(problem, root_idx)
     }
 
     fn jacobian(&self) -> Option<Ref<'_, <Eqn>::M>> {
@@ -1299,6 +1293,15 @@ where
             }
             // reinitialise diff matrix
             self.initialise_to_first_order();
+            let c = self.state.h * self.alpha[self.state.order];
+            if let Some(op) = self.op.as_mut() {
+                op.set_c(self.state.h, self.alpha[self.state.order]);
+            }
+            if let Some(s_op) = self.s_op.as_mut() {
+                s_op.set_c(self.state.h, self.alpha[self.state.order]);
+            }
+            self._jacobian_updates(c, SolverState::StepSuccess);
+            self.prev_error_norm = None;
 
             // reinitialise tstop if needed
             if let Some(t_stop) = self.tstop {
@@ -1639,7 +1642,8 @@ mod test {
             test_state_mut_on_problem,
         },
         scale, ConstantOp, Context, DenseMatrix, FaerLU, FaerMat, FaerSparseLU, FaerSparseMat,
-        MatrixCommon, NalgebraLU, OdeEquations, OdeSolverMethod, Op, Vector, VectorView,
+        MatrixCommon, NalgebraLU, OdeBuilder, OdeEquations, OdeSolverMethod, OdeSolverStopReason,
+        Op, Vector, VectorView,
     };
 
     type M = NalgebraMat<f64>;
@@ -1679,6 +1683,41 @@ mod test {
         let (p, soln) = exponential_decay_problem::<M>(false);
         let s = p.bdf_solver::<LS>(p.bdf_state::<LS>().unwrap()).unwrap();
         test_state_mut_on_problem(s, soln);
+    }
+
+    #[test]
+    fn bdf_restarts_cleanly_after_repeated_state_jumps() {
+        let problem = OdeBuilder::<M>::new()
+            .rtol(1e-4)
+            .atol([1e-4])
+            .rhs_implicit(
+                |y, _p, _t, dy| dy[0] = -1000.0 * y[0],
+                |_y, _p, _t, v, jv| jv[0] = -1000.0 * v[0],
+            )
+            .init(|_p, _t, y| y[0] = 0.0, 1)
+            .build()
+            .unwrap();
+        let mut solver = problem.bdf::<LS>().unwrap();
+
+        {
+            let state = solver.state_mut();
+            state.y[0] = 1.0;
+            state.dy[0] = -1000.0;
+        }
+
+        for event_index in 1..=60 {
+            solver.set_stop_time(event_index as f64 * 0.1).unwrap();
+            loop {
+                if matches!(solver.step().unwrap(), OdeSolverStopReason::TstopReached) {
+                    break;
+                }
+            }
+            let state = solver.state_mut();
+            state.y[0] += 1.0;
+            state.dy[0] = -1000.0 * state.y[0];
+        }
+
+        assert_eq!(solver.get_statistics().number_of_nonlinear_solver_fails, 0);
     }
 
     #[test]
@@ -1898,7 +1937,7 @@ mod test {
         number_of_calls: 521
         number_of_jac_muls: 2
         number_of_matrix_evals: 1
-        number_of_jac_adj_muls: 1098
+        number_of_jac_adj_muls: 1094
         "###);
     }
 
@@ -2017,7 +2056,7 @@ mod test {
         number_of_calls: 250
         number_of_jac_muls: 15
         number_of_matrix_evals: 5
-        number_of_jac_adj_muls: 486
+        number_of_jac_adj_muls: 487
         "###);
     }
 

@@ -25,7 +25,7 @@ Thank you for your interest in contributing to diffsol! This guide will help you
 
 ## Getting Started
 
-### Diffsol repositories
+### diffsol repositories
 
 The diffsol ecosystem consists of several repositories. Before contributing, please ensure you route your issue or pull request to the appropriate repository:
 
@@ -80,7 +80,7 @@ git remote add upstream https://github.com/martinjrobins/diffsol.git
 
 #### Install Optional Dependencies
 
-Diffsol has several optional features that may require additional dependencies:
+diffsol has several optional features that may require additional dependencies:
 
 - **SuiteSparse KLU** (for `suitesparse` feature):
   - On Ubuntu/Debian: `sudo apt-get install libsuitesparse-dev`
@@ -170,7 +170,7 @@ git rebase origin/main
 
 ### Code Style and Formatting
 
-Diffsol uses the standard Rust formatting style enforced by `rustfmt`.
+diffsol uses the standard Rust formatting style enforced by `rustfmt`.
 
 #### Format Your Code
 
@@ -241,7 +241,7 @@ cargo +nightly test --release -p diffsol --features autodiff
 
 ### Writing Tests
 
-When adding new functionality or fixing bugs, [include tests](https://doc.rust-lang.org/book/ch11-00-testing.html). Diffsol currently only has unit tests and some documentation tests, but please feel free to add integration tests as needed.
+When adding new functionality or fixing bugs, [include tests](https://doc.rust-lang.org/book/ch11-00-testing.html). diffsol currently only has unit tests and some documentation tests, but please feel free to add integration tests as needed.
 
 #### Unit Tests
 
