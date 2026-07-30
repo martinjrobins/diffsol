@@ -90,6 +90,9 @@ pub trait BuilderOp: Op {
     fn set_nparams(&mut self, nparams: usize);
     fn set_nout(&mut self, nout: usize);
     fn calculate_sparsity(&mut self, y0: &Self::V, t0: Self::T, p: &Self::V);
+    /// Set the parameters to integrate sensitivities for, backing [`Op::nsens`] and [`Op::sens_param_index`].
+    /// Defaults to a no-op, as only the rhs op is consulted for them.
+    fn set_sens_params(&mut self, _sens_params: Option<Vec<usize>>) {}
 }
 
 impl<C: Op> Op for ParameterisedOp<'_, C> {

@@ -22,6 +22,7 @@ where
     sparsity: Option<M::Sparsity>,
     sens_sparsity: Option<M::Sparsity>,
     statistics: RefCell<OpStatistics>,
+    sens_params: Option<Vec<usize>>,
     ctx: M::C,
 }
 
@@ -53,6 +54,7 @@ where
             sparsity: None,
             sens_coloring: None,
             sens_sparsity: None,
+            sens_params: None,
             ctx,
         }
     }
@@ -107,6 +109,10 @@ where
         self.calculate_jacobian_sparsity(y0, t0, p);
         self.calculate_sens_sparsity(y0, t0, p);
     }
+
+    fn set_sens_params(&mut self, sens_params: Option<Vec<usize>>) {
+        self.sens_params = sens_params;
+    }
 }
 
 impl<M, F, G, H> Op for ClosureWithSens<M, F, G, H>
@@ -125,6 +131,16 @@ where
     }
     fn nparams(&self) -> usize {
         self.nparams
+    }
+    fn nsens(&self) -> usize {
+        self.sens_params
+            .as_ref()
+            .map_or(self.nparams, |sens_params| sens_params.len())
+    }
+    fn sens_param_index(&self, sens_col: usize) -> usize {
+        self.sens_params
+            .as_ref()
+            .map_or(sens_col, |sens_params| sens_params[sens_col])
     }
     fn statistics(&self) -> OpStatistics {
         self.statistics.borrow().clone()

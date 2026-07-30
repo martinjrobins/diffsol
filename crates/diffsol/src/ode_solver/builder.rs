@@ -31,6 +31,7 @@ pub struct OdeBuilder<
     atol: Vec<M::T>,
     sens_atol: Option<Vec<M::T>>,
     sens_rtol: Option<M::T>,
+    sens_params: Option<Vec<usize>>,
     out_rtol: Option<M::T>,
     out_atol: Option<Vec<M::T>>,
     param_rtol: Option<M::T>,
@@ -128,6 +129,7 @@ where
             param_atol: None,
             sens_atol: None,
             sens_rtol: None,
+            sens_params: None,
             ctx: M::C::default(),
             ic_options: Default::default(),
             ode_options: Default::default(),
@@ -164,6 +166,7 @@ where
             atol: self.atol,
             sens_atol: self.sens_atol,
             sens_rtol: self.sens_rtol,
+            sens_params: self.sens_params,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
@@ -214,6 +217,7 @@ where
             atol: self.atol,
             sens_atol: self.sens_atol,
             sens_rtol: self.sens_rtol,
+            sens_params: self.sens_params,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
@@ -268,6 +272,7 @@ where
             atol: self.atol,
             sens_atol: self.sens_atol,
             sens_rtol: self.sens_rtol,
+            sens_params: self.sens_params,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
@@ -329,6 +334,7 @@ where
             atol: self.atol,
             sens_atol: self.sens_atol,
             sens_rtol: self.sens_rtol,
+            sens_params: self.sens_params,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
@@ -368,6 +374,7 @@ where
             atol: self.atol,
             sens_atol: self.sens_atol,
             sens_rtol: self.sens_rtol,
+            sens_params: self.sens_params,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
@@ -416,6 +423,7 @@ where
             atol: self.atol,
             sens_atol: self.sens_atol,
             sens_rtol: self.sens_rtol,
+            sens_params: self.sens_params,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
@@ -465,6 +473,7 @@ where
             atol: self.atol,
             sens_atol: self.sens_atol,
             sens_rtol: self.sens_rtol,
+            sens_params: self.sens_params,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
@@ -507,6 +516,7 @@ where
             atol: self.atol,
             sens_atol: self.sens_atol,
             sens_rtol: self.sens_rtol,
+            sens_params: self.sens_params,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
@@ -559,6 +569,7 @@ where
             atol: self.atol,
             sens_atol: self.sens_atol,
             sens_rtol: self.sens_rtol,
+            sens_params: self.sens_params,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
@@ -606,6 +617,7 @@ where
             atol: self.atol,
             sens_atol: self.sens_atol,
             sens_rtol: self.sens_rtol,
+            sens_params: self.sens_params,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
@@ -662,6 +674,7 @@ where
             atol: self.atol,
             sens_atol: self.sens_atol,
             sens_rtol: self.sens_rtol,
+            sens_params: self.sens_params,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
@@ -722,6 +735,7 @@ where
             atol: self.atol,
             sens_atol: self.sens_atol,
             sens_rtol: self.sens_rtol,
+            sens_params: self.sens_params,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
@@ -767,6 +781,7 @@ where
             atol: self.atol,
             sens_atol: self.sens_atol,
             sens_rtol: self.sens_rtol,
+            sens_params: self.sens_params,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
@@ -819,6 +834,7 @@ where
             atol: self.atol,
             sens_atol: self.sens_atol,
             sens_rtol: self.sens_rtol,
+            sens_params: self.sens_params,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
@@ -872,6 +888,7 @@ where
             atol: self.atol,
             sens_atol: self.sens_atol,
             sens_rtol: self.sens_rtol,
+            sens_params: self.sens_params,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
@@ -929,6 +946,7 @@ where
             atol: self.atol,
             sens_atol: self.sens_atol,
             sens_rtol: self.sens_rtol,
+            sens_params: self.sens_params,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
@@ -982,6 +1000,7 @@ where
             atol: self.atol,
             sens_atol: self.sens_atol,
             sens_rtol: self.sens_rtol,
+            sens_params: self.sens_params,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
@@ -1040,6 +1059,7 @@ where
             atol: self.atol,
             sens_atol: self.sens_atol,
             sens_rtol: self.sens_rtol,
+            sens_params: self.sens_params,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
@@ -1102,6 +1122,7 @@ where
             atol: self.atol,
             sens_atol: self.sens_atol,
             sens_rtol: self.sens_rtol,
+            sens_params: self.sens_params,
             out_rtol: self.out_rtol,
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
@@ -1135,6 +1156,17 @@ where
     /// fallback so that sensitivity equations always contribute to error control.
     pub fn sens_rtol(mut self, sens_rtol: f64) -> Self {
         self.sens_rtol = Some(M::T::from_f64(sens_rtol).unwrap());
+        self
+    }
+
+    /// Set the parameters to integrate forward sensitivities for, as indices into [`p`](Self::p).
+    ///
+    /// If not set, one sensitivity column is integrated per parameter, in parameter order.
+    /// The ith column of the solve output is then the sensitivity with respect to `sens_params[i]`.
+    /// Only reaches an rhs built by [`rhs_sens_implicit`](Self::rhs_sens_implicit), and is ignored otherwise.
+    /// Indices are validated when the sensitivity equations are constructed, not here.
+    pub fn sens_params(mut self, sens_params: impl IntoIterator<Item = usize>) -> Self {
+        self.sens_params = Some(sens_params.into_iter().collect());
         self
     }
 
@@ -1457,6 +1489,7 @@ where
         rhs.set_nstates(nstates);
         rhs.set_nout(nstates);
         rhs.set_nparams(nparams);
+        rhs.set_sens_params(self.sens_params);
 
         init.set_nout(nstates);
         init.set_nparams(nparams);
