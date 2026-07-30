@@ -30,8 +30,14 @@ automatically generate the required gradients for any type of solver in diffsol.
 
 ## Compiling standalone programs
 
-Autodiff requires nightly Rust and fat LTO. You can enable
-autodiff for a single crate with `RUSTFLAGS`:
+Autodiff requires nightly Rust, the Enzyme backend, and fat LTO. Install the
+backend once for the nightly toolchain:
+
+```bash
+rustup +nightly component add enzyme
+```
+
+You can then enable autodiff for a single crate with `RUSTFLAGS`:
 
 ```bash
 CARGO_PROFILE_RELEASE_LTO=fat \
