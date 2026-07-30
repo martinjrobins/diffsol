@@ -1,11 +1,16 @@
 use diffsol::{
-    AdjointOdeSolverMethod, DenseMatrix, Matrix, NalgebraLU, NalgebraMat, NalgebraVec, OdeBuilder,
-    OdeSolverMethod, OdeSolverState, Op, VectorCommon,
+    AdjointOdeSolverMethod, DenseMatrix, Matrix, NalgebraContext, NalgebraLU, NalgebraMat,
+    NalgebraVec, OdeBuilder, OdeSolverMethod, OdeSolverState, Op, VectorCommon,
 };
 
 type M = NalgebraMat<f64>;
 type V = NalgebraVec<f64>;
 type LS = NalgebraLU<f64>;
+type T = f64;
+type C = NalgebraContext;
+
+mod problem_autodiff;
+use problem_autodiff::problem_autodiff;
 
 fn main() {
     let r_val = 1.0;
@@ -13,19 +18,7 @@ fn main() {
     let y0_val = 0.1;
     let t_final = 5.0;
 
-    let problem = OdeBuilder::<M>::new()
-        .p([r_val, k_val, y0_val])
-        .rhs_autodiff(|x: &V, p: &V, _t, y: &mut V| {
-            y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]);
-        })
-        .init_autodiff(
-            |p: &V, _t, y: &mut V| {
-                y[0] = p[2];
-            },
-            1,
-        )
-        .build()
-        .unwrap();
+    let problem = problem_autodiff(r_val, k_val, y0_val);
 
     let mut solver = problem.bdf::<LS>().unwrap();
     let (checkpointing, _soln, _times, _stop_reason) =

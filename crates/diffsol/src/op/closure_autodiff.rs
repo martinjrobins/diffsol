@@ -1,8 +1,8 @@
 use std::{cell::RefCell, marker::PhantomData};
 
 use crate::{
-    Matrix, NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSensAdjoint, Op,
-    Scale, Vector,
+    Matrix, NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens,
+    NonLinearOpSensAdjoint, Op, Scale, Vector,
 };
 use num_traits::{One, Zero};
 use std::ops::MulAssign;
@@ -87,6 +87,7 @@ mod autodiff_impl {
 
     impl<M: Matrix, F: Fn(&M::V, &M::V, M::T, &mut M::V)> ClosureAutodiff<M, F> {
         #[autodiff_forward(call_jvp, Const, Dual, Const, Const, Dual)]
+        #[autodiff_forward(call_sens_jvp, Const, Const, Dual, Const, Dual)]
         #[autodiff_reverse(call_vjp, Const, Duplicated, Const, Const, Duplicated)]
         #[autodiff_reverse(call_sens_vjp, Const, Const, Duplicated, Const, Duplicated)]
         pub fn call_func(&self, x: &M::V, p: &M::V, t: M::T, y: &mut M::V) {
@@ -117,6 +118,15 @@ mod autodiff_impl {
         }
         fn jacobian_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
             None
+        }
+    }
+
+    impl<M: Matrix, F: Fn(&M::V, &M::V, M::T, &mut M::V)> NonLinearOpSens
+        for ParameterisedOp<'_, ClosureAutodiff<M, F>>
+    {
+        fn sens_mul_inplace(&self, x: &M::V, t: M::T, v: &M::V, y: &mut M::V) {
+            let mut tmp_nstates = self.op.tmp_nstates.borrow_mut();
+            self.op.call_sens_jvp(x, self.p, v, t, &mut tmp_nstates, y);
         }
     }
 
@@ -172,7 +182,8 @@ mod autodiff_impl {
 mod tests {
     use crate::{
         context::nalgebra::NalgebraContext, NalgebraMat, NalgebraVec, NonLinearOp,
-        NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSensAdjoint, ParameterisedOp, Vector,
+        NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint,
+        ParameterisedOp, Vector,
     };
 
     use super::ClosureAutodiff;
@@ -201,6 +212,10 @@ mod tests {
         let mut jvp = V::zeros(2, ctx);
         pop.jac_mul_inplace(&x, 0.5, &direction, &mut jvp);
         jvp.assert_eq_st(&V::from_vec(vec![134.0, 76.0], ctx), 1e-12);
+
+        let mut parameter_jvp = V::zeros(2, ctx);
+        pop.sens_mul_inplace(&x, 0.5, &direction, &mut parameter_jvp);
+        parameter_jvp.assert_eq_st(&V::from_vec(vec![28.0, 33.0], ctx), 1e-12);
 
         let mut state_vjp = V::zeros(2, ctx);
         pop.jac_transpose_mul_inplace(&x, 0.5, &direction, &mut state_vjp);

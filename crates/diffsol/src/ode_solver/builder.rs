@@ -353,15 +353,20 @@ where
     /// products, and parameter sensitivities.
     ///
     /// # Example
-    /// ```ignore
-    /// type M = diffsol::NalgebraMat<f64>;
+    /// ```no_run
+    /// use diffsol::{NalgebraMat, NalgebraVec, OdeBuilder};
     ///
-    /// let problem = diffsol::OdeBuilder::<M>::new()
-    ///     .rhs_autodiff(|x: &M::V, p: &M::V, t, y: &mut M::V| {
+    /// type M = NalgebraMat<f64>;
+    /// type V = NalgebraVec<f64>;
+    ///
+    /// let _problem = OdeBuilder::<M>::new()
+    ///     .rhs_autodiff(|x: &V, p: &V, t, y: &mut V| {
     ///         y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]);
     ///     })
     ///     .p([1.0, 10.0])
-    ///     .build();
+    ///     .init_autodiff(|_p: &V, _t, y: &mut V| y[0] = 0.1, 1)
+    ///     .build()
+    ///     .unwrap();
     /// ```
     #[cfg(feature = "autodiff")]
     pub fn rhs_autodiff<F>(

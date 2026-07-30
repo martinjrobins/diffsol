@@ -177,6 +177,7 @@ jobs:
         echo "ADDITIONAL_TEST_FLAGS=--release" >> $GITHUB_ENV
         echo "RUSTC_WRAPPER=${{ github.workspace }}/.github/scripts/autodiff-rustc-wrapper.sh" >> $GITHUB_ENV
         echo "CARGO_PROFILE_RELEASE_LTO=fat" >> $GITHUB_ENV
+        echo "RUSTDOCFLAGS=${RUSTDOCFLAGS} -Zautodiff=Enable" >> $GITHUB_ENV
     - name: Run tests - all features (macOS Intel)
       if: matrix.tests == true && matrix.os == 'macos-15-intel'
       run: cargo test --verbose ${{ env.ADDITIONAL_FEATURES_FLAGS || '' }} ${{ env.ADDITIONAL_TEST_FLAGS || '' }} --workspace --exclude neural-ode-weather-prediction

@@ -10,6 +10,8 @@ mod problem_root;
 use problem_root::problem_root;
 mod problem_fwd_sens;
 use problem_fwd_sens::problem_fwd_sens;
+mod problem_adjoint_sens;
+use problem_adjoint_sens::problem_adjoint_sens;
 mod problem_sparse;
 use problem_sparse::problem_sparse;
 mod solve;
@@ -51,6 +53,7 @@ fn main() {
     solve_fwd_sens(&mut solver);
     let mut solver = problem.bdf_sens::<LS>().unwrap();
     solve_fwd_sens_step(&mut solver);
+    let _problem = problem_adjoint_sens();
     let _problem = problem_root();
     let _problem = problem_mass();
     let _problem = problem_explicit();
