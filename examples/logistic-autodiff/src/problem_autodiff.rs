@@ -1,4 +1,4 @@
-use crate::{C, M, T, V};
+use super::{C, M, T, V};
 use diffsol::{OdeBuilder, OdeEquationsImplicitAdjoint, OdeSolverProblem};
 
 pub fn problem_autodiff(
