@@ -29,6 +29,8 @@
     - [Mass matrix](./specify/closure/mass_matrix.md)
     - [Root finding](./specify/closure/root_finding.md)
     - [Forward Sensitivity](./specify/closure/forward_sensitivity.md)
+    - [Adjoint Sensitivity](./specify/closure/adjoint_sensitivity.md)
+    - [Automatic differentiation](./specify/closure/autodiff.md)
     - [Sparse problems](./specify/closure/sparse_problems.md)
   - [OdeEquations trait](./specify/trait/ode_equations_trait.md)
     - [Non-linear functions](./specify/trait/non_linear_functions.md)

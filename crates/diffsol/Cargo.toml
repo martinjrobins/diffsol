@@ -14,6 +14,7 @@ readme = "../../README.md"
 
 [features]
 default = ["nalgebra", "faer"]
+autodiff = []
 faer = ["diffsol-la/faer", "diffsol-nl/faer"]
 nalgebra = ["diffsol-la/nalgebra", "diffsol-nl/nalgebra"]
 cuda = ["diffsol-la/cuda", "diffsol-nl/cuda"]
