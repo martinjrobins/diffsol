@@ -50,7 +50,7 @@ where
             .map(|out| out.nout())
             .unwrap_or_else(|| self.problem().eqn.rhs().nout());
         let nstates = self.problem().eqn.rhs().nstates();
-        let nsens = self.problem().eqn.rhs().n_sens();
+        let nsens = self.problem().eqn.rhs().nsens();
         let nout = self.problem().eqn.out().map(|out| out.nout()).unwrap_or(0);
         let nout_params = self
             .problem()
@@ -100,7 +100,10 @@ where
     /// plus one final column at the root time if a root fires before `t_eval` is exhausted and no reset operator is configured.
     ///
     /// The sensitivities are returned as a Vec of dense matrices of identical shape as the ODE solution,
-    /// where the ith element of the Vec corresponds to the sensitivities with respect to the ith parameter.
+    /// with one element per integrated sensitivity column, i.e. `eqn.rhs().nsens()` of them.
+    /// By default that is one per parameter, in parameter order; if the equations override
+    /// [`Op::nsens`], the ith element is the sensitivity with respect to parameter
+    /// `eqn.rhs().sens_param_index(i)`.
     /// `stop_reason` indicates whether the solve reached `t_eval[t_eval.len()-1]` or stopped on a root.
     ///
     /// # Post-condition
@@ -140,7 +143,7 @@ where
             self.problem().eqn.rhs().nout()
         };
         let nstates = self.problem().eqn.rhs().nstates();
-        let nsens = self.problem().eqn.rhs().n_sens();
+        let nsens = self.problem().eqn.rhs().nsens();
         let ctx = self.problem().context().clone();
 
         let mut ret = ctx.dense_mat_zeros::<Eqn::V>(nrows, t_eval.len());

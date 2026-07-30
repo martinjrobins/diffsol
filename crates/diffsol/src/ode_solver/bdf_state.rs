@@ -148,7 +148,7 @@ where
     ) -> Result<(), DiffsolError> {
         let naug = augmented_eqn.max_index();
         let nstates = ode_problem.eqn.rhs().nstates();
-        if self.sdiff.len() != naug || self.sdiff[0].nrows() != nstates {
+        if self.sdiff.len() != naug || (naug > 0 && self.sdiff[0].nrows() != nstates) {
             return Err(ode_solver_error!(StateProblemMismatch));
         }
         let (sgdiff_len, sgdiff_size) = if let Some(out) = augmented_eqn.out() {

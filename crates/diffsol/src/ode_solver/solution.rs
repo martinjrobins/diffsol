@@ -278,17 +278,14 @@ impl<V: DefaultDenseMatrix> Solution<V> {
         nout: usize,
         nout_params: usize,
         nstates: usize,
-        nparams: usize,
+        nsens: usize,
     ) -> Result<(), DiffsolError> {
         self.ensure_ode_allocation(ctx, nrows, nout, nstates)?;
 
         if self.y_sens.is_empty() {
             self.y_sens =
-                vec![
-                    <V as DefaultDenseMatrix>::M::zeros(nrows, self.ts.len(), ctx.clone());
-                    nparams
-                ];
-        } else if self.y_sens.len() != nparams
+                vec![<V as DefaultDenseMatrix>::M::zeros(nrows, self.ts.len(), ctx.clone()); nsens];
+        } else if self.y_sens.len() != nsens
             || self
                 .y_sens
                 .iter()
@@ -310,9 +307,8 @@ impl<V: DefaultDenseMatrix> Solution<V> {
         }
 
         if self.tmp_nsens.is_empty() {
-            self.tmp_nsens = vec![V::zeros(nstates, ctx.clone()); nparams];
-        } else if self.tmp_nsens.len() != nparams
-            || self.tmp_nsens.iter().any(|v| v.len() != nstates)
+            self.tmp_nsens = vec![V::zeros(nstates, ctx.clone()); nsens];
+        } else if self.tmp_nsens.len() != nsens || self.tmp_nsens.iter().any(|v| v.len() != nstates)
         {
             return Err(ode_solver_error!(
                 Other,

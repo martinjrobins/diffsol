@@ -246,14 +246,15 @@ where
 {
     pub(crate) fn new(problem: &'a OdeSolverProblem<Eqn>) -> Self {
         let eqn = &problem.eqn;
-        // `n_sens` cannot change after construction, so check the contract once here.
-        let (n_sens, nparams) = (eqn.rhs().n_sens(), eqn.rhs().nparams());
+        // `nsens` cannot change after construction, so check the contract once here.
+        let rhs = eqn.rhs();
+        let (nsens, nparams) = (rhs.nsens(), rhs.nparams());
         assert!(
-            n_sens <= nparams,
-            "Op::n_sens() must be <= Op::nparams(), got {n_sens} > {nparams}"
+            nsens <= nparams,
+            "Op::nsens() must be <= Op::nparams(), got {nsens} > {nparams}"
         );
-        for sens_col in 0..n_sens {
-            let param_index = eqn.rhs().sens_param_index(sens_col);
+        for sens_col in 0..nsens {
+            let param_index = rhs.sens_param_index(sens_col);
             assert!(
                 param_index < nparams,
                 "Op::sens_param_index({sens_col}) must be < Op::nparams(), \
@@ -360,7 +361,7 @@ impl<Eqn: OdeEquationsImplicitSens> AugmentedOdeEquations<Eqn> for SensEquations
     }
 
     fn max_index(&self) -> usize {
-        self.eqn.rhs().n_sens()
+        self.eqn.rhs().nsens()
     }
     fn update_rhs_out_state(&mut self, y: &Eqn::V, dy: &Eqn::V, t: Eqn::T) {
         self.rhs.update_state(y, dy, t);
@@ -385,10 +386,10 @@ mod tests {
             exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem_sens,
             robertson::robertson_sens,
         },
-        AugmentedOdeEquations, DenseMatrix, MatrixCommon, NalgebraVec, NonLinearOp,
-        NonLinearOpJacobian, NonLinearOpSens, OdeEquations, OdeEquationsImplicit,
-        OdeEquationsImplicitSens, OdeEquationsRef, OdeSolverProblem, Op, RkState, SensEquations,
-        Vector, VectorView,
+        AugmentedOdeEquations, DenseMatrix, MatrixCommon, NalgebraContext, NalgebraLU, NalgebraVec,
+        NonLinearOp, NonLinearOpJacobian, NonLinearOpSens, OdeBuilder, OdeEquations,
+        OdeEquationsImplicit, OdeEquationsImplicitSens, OdeEquationsRef, OdeSolverProblem, Op,
+        RkState, SensEquations, SensitivitiesOdeSolverMethod, Vector, VectorView,
     };
     type Mcpu = NalgebraMat<f64>;
     type Vcpu = NalgebraVec<f64>;
@@ -521,15 +522,15 @@ mod tests {
         assert_eq!(sens.get_index(2, 2), 0.0);
     }
 
-    /// Rhs wrapper overriding `n_sens` and the column -> parameter mapping, delegating
-    /// everything else, so a test can decouple them from `nparams`.
-    struct NSensOverrideRhs<'a, Eqn: OdeEquations> {
+    /// Rhs wrapper overriding the integrated column set and the column -> parameter
+    /// mapping, delegating everything else, so a test can decouple them from `nparams`.
+    /// One column is integrated per entry of `sens_params`.
+    struct SensOverrideRhs<'a, Eqn: OdeEquations> {
         inner: <Eqn as OdeEquationsRef<'a>>::Rhs,
-        n_sens: usize,
-        sens_params: Option<Vec<usize>>,
+        sens_params: Vec<usize>,
     }
 
-    impl<Eqn: OdeEquations> Op for NSensOverrideRhs<'_, Eqn> {
+    impl<Eqn: OdeEquations> Op for SensOverrideRhs<'_, Eqn> {
         type T = Eqn::T;
         type V = Eqn::V;
         type M = Eqn::M;
@@ -546,43 +547,41 @@ mod tests {
         fn context(&self) -> &Self::C {
             self.inner.context()
         }
-        fn n_sens(&self) -> usize {
-            self.n_sens
+        fn nsens(&self) -> usize {
+            self.sens_params.len()
         }
         fn sens_param_index(&self, sens_col: usize) -> usize {
-            match &self.sens_params {
-                Some(map) => map[sens_col],
-                None => sens_col,
-            }
+            self.sens_params[sens_col]
         }
     }
 
-    impl<Eqn: OdeEquations> NonLinearOp for NSensOverrideRhs<'_, Eqn> {
+    impl<Eqn: OdeEquations> NonLinearOp for SensOverrideRhs<'_, Eqn> {
         fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
             self.inner.call_inplace(x, t, y)
         }
     }
 
-    impl<Eqn: OdeEquationsImplicit> NonLinearOpJacobian for NSensOverrideRhs<'_, Eqn> {
+    impl<Eqn: OdeEquationsImplicit> NonLinearOpJacobian for SensOverrideRhs<'_, Eqn> {
         fn jac_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
             self.inner.jac_mul_inplace(x, t, v, y)
         }
     }
 
-    impl<Eqn: OdeEquationsImplicitSens> NonLinearOpSens for NSensOverrideRhs<'_, Eqn> {
+    impl<Eqn: OdeEquationsImplicitSens> NonLinearOpSens for SensOverrideRhs<'_, Eqn> {
         fn sens_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
             self.inner.sens_mul_inplace(x, t, v, y)
         }
     }
 
-    /// Equations wrapper that swaps in [`NSensOverrideRhs`] for the rhs op.
-    struct NSensOverrideEqn<Eqn> {
+    /// Equations wrapper that swaps in [`SensOverrideRhs`] for the rhs op. Note that the
+    /// override has to live on the rhs: this struct's own [`Op`] impl is never consulted
+    /// for `nsens`, so it forwards `nparams` unchanged.
+    struct SensOverrideEqn<Eqn> {
         inner: Eqn,
-        n_sens: usize,
-        sens_params: Option<Vec<usize>>,
+        sens_params: Vec<usize>,
     }
 
-    impl<Eqn: OdeEquations> Op for NSensOverrideEqn<Eqn> {
+    impl<Eqn: OdeEquations> Op for SensOverrideEqn<Eqn> {
         type T = Eqn::T;
         type V = Eqn::V;
         type M = Eqn::M;
@@ -601,20 +600,19 @@ mod tests {
         }
     }
 
-    impl<'a, Eqn: OdeEquationsImplicitSens> OdeEquationsRef<'a> for NSensOverrideEqn<Eqn> {
+    impl<'a, Eqn: OdeEquationsImplicitSens> OdeEquationsRef<'a> for SensOverrideEqn<Eqn> {
         type Mass = <Eqn as OdeEquationsRef<'a>>::Mass;
-        type Rhs = NSensOverrideRhs<'a, Eqn>;
+        type Rhs = SensOverrideRhs<'a, Eqn>;
         type Root = <Eqn as OdeEquationsRef<'a>>::Root;
         type Init = <Eqn as OdeEquationsRef<'a>>::Init;
         type Out = <Eqn as OdeEquationsRef<'a>>::Out;
         type Reset = <Eqn as OdeEquationsRef<'a>>::Reset;
     }
 
-    impl<Eqn: OdeEquationsImplicitSens> OdeEquations for NSensOverrideEqn<Eqn> {
+    impl<Eqn: OdeEquationsImplicitSens> OdeEquations for SensOverrideEqn<Eqn> {
         fn rhs(&self) -> <Self as OdeEquationsRef<'_>>::Rhs {
-            NSensOverrideRhs {
+            SensOverrideRhs {
                 inner: self.inner.rhs(),
-                n_sens: self.n_sens,
                 sens_params: self.sens_params.clone(),
             }
         }
@@ -641,24 +639,15 @@ mod tests {
         }
     }
 
-    /// Rebuild `problem` around an [`NSensOverrideEqn`], keeping every tolerance.
-    fn with_n_sens_override<Eqn: OdeEquationsImplicitSens>(
-        problem: OdeSolverProblem<Eqn>,
-        n_sens: usize,
-    ) -> OdeSolverProblem<NSensOverrideEqn<Eqn>> {
-        with_sens_override(problem, n_sens, None)
-    }
-
-    /// As [`with_n_sens_override`], but also installing a column -> parameter mapping.
+    /// Rebuild `problem` around a [`SensOverrideEqn`] integrating one sensitivity column
+    /// per entry of `sens_params`, keeping every tolerance.
     fn with_sens_override<Eqn: OdeEquationsImplicitSens>(
         problem: OdeSolverProblem<Eqn>,
-        n_sens: usize,
-        sens_params: Option<Vec<usize>>,
-    ) -> OdeSolverProblem<NSensOverrideEqn<Eqn>> {
+        sens_params: Vec<usize>,
+    ) -> OdeSolverProblem<SensOverrideEqn<Eqn>> {
         OdeSolverProblem::new(
-            NSensOverrideEqn {
+            SensOverrideEqn {
                 inner: problem.eqn,
-                n_sens,
                 sens_params,
             },
             problem.rtol,
@@ -679,9 +668,9 @@ mod tests {
     }
 
     #[test]
-    fn max_index_respects_n_sens_override() {
+    fn max_index_respects_nsens_override() {
         let (problem, _soln) = robertson_sens::<Mcpu>();
-        let wrapped_problem = with_n_sens_override(problem, 1);
+        let wrapped_problem = with_sens_override(problem, vec![0]);
         let sens_eqn = SensEquations::new(&wrapped_problem);
         assert_eq!(sens_eqn.nparams(), 3);
         assert_eq!(sens_eqn.max_index(), 1);
@@ -690,10 +679,10 @@ mod tests {
     /// Checked at construction, so it fires in release too rather than as an opaque
     /// out-of-bounds panic mid-solve.
     #[test]
-    #[should_panic(expected = "Op::n_sens() must be <= Op::nparams(), got 5 > 3")]
-    fn sens_equations_new_rejects_n_sens_above_nparams() {
+    #[should_panic(expected = "Op::nsens() must be <= Op::nparams(), got 5 > 3")]
+    fn sens_equations_new_rejects_nsens_above_nparams() {
         let (problem, _soln) = robertson_sens::<Mcpu>();
-        let wrapped_problem = with_n_sens_override(problem, 5);
+        let wrapped_problem = with_sens_override(problem, vec![0, 1, 2, 0, 1]);
         let _ = SensEquations::new(&wrapped_problem);
     }
 
@@ -702,54 +691,57 @@ mod tests {
     #[should_panic(expected = "Op::sens_param_index(0) must be < Op::nparams(), got 7 >= 3")]
     fn sens_equations_new_rejects_out_of_range_sens_param_index() {
         let (problem, _soln) = robertson_sens::<Mcpu>();
-        let wrapped_problem = with_sens_override(problem, 1, Some(vec![7]));
+        let wrapped_problem = with_sens_override(problem, vec![7]);
         let _ = SensEquations::new(&wrapped_problem);
+    }
+
+    /// Solve for state and sensitivities at `t_eval`, through BDF or Tsit45. Generic over
+    /// the equations so wrapped and unwrapped problems share one call site.
+    fn solve_dense_sens<Eqn>(
+        problem: OdeSolverProblem<Eqn>,
+        t_eval: &[f64],
+        use_bdf: bool,
+    ) -> (Mcpu, Vec<Mcpu>)
+    where
+        Eqn: OdeEquationsImplicitSens<M = Mcpu, V = Vcpu, T = f64, C = NalgebraContext>,
+    {
+        let (y, sens, _) = if use_bdf {
+            problem
+                .bdf_sens::<NalgebraLU<f64>>()
+                .unwrap()
+                .solve_dense_sensitivities(t_eval)
+                .unwrap()
+        } else {
+            problem
+                .tsit45_sens()
+                .unwrap()
+                .solve_dense_sensitivities(t_eval)
+                .unwrap()
+        };
+        (y, sens)
     }
 
     const SENS_T_EVAL: [f64; 3] = [1e-4, 1e-2, 1.0];
 
-    /// Solve `robertson_sens`, optionally with a reduced `n_sens`. Returns the state, the
-    /// sensitivity columns at [`SENS_T_EVAL`], and the tolerances for comparing solves.
-    fn solve_robertson_sens(n_sens_override: Option<usize>) -> (Mcpu, Vec<Mcpu>, Vcpu, f64) {
-        solve_robertson_sens_mapped(n_sens_override, None)
-    }
-
-    /// As [`solve_robertson_sens`], but able to install a column -> parameter mapping.
-    fn solve_robertson_sens_mapped(
-        n_sens_override: Option<usize>,
-        sens_params: Option<Vec<usize>>,
-    ) -> (Mcpu, Vec<Mcpu>, Vcpu, f64) {
-        use crate::{NalgebraLU, SensitivitiesOdeSolverMethod};
+    /// Solve `robertson_sens`, optionally wrapped to integrate only `sens_params`. Returns
+    /// the state, the sensitivity columns at [`SENS_T_EVAL`], and the tolerances for
+    /// comparing solves.
+    fn solve_robertson_sens(sens_params: Option<Vec<usize>>) -> (Mcpu, Vec<Mcpu>, Vcpu, f64) {
         let (problem, _soln) = robertson_sens::<Mcpu>();
         let (atol, rtol) = (problem.atol.clone(), problem.rtol);
-        let (y, sens) = match n_sens_override {
-            None => {
-                let (y, sens, _) = problem
-                    .bdf_sens::<NalgebraLU<f64>>()
-                    .unwrap()
-                    .solve_dense_sensitivities(&SENS_T_EVAL)
-                    .unwrap();
-                (y, sens)
-            }
-            Some(n_sens) => {
-                let wrapped = with_sens_override(problem, n_sens, sens_params);
-                let (y, sens, _) = wrapped
-                    .bdf_sens::<NalgebraLU<f64>>()
-                    .unwrap()
-                    .solve_dense_sensitivities(&SENS_T_EVAL)
-                    .unwrap();
-                (y, sens)
-            }
+        let (y, sens) = match sens_params {
+            None => solve_dense_sens(problem, &SENS_T_EVAL, true),
+            Some(map) => solve_dense_sens(with_sens_override(problem, map), &SENS_T_EVAL, true),
         };
         (y, sens, atol, rtol)
     }
 
-    /// With `n_sens == nparams` the override plumbing must reproduce the unwrapped solve
-    /// bit-for-bit, so the default path is provably untouched.
+    /// With `nsens == nparams` and an identity mapping the override plumbing must reproduce
+    /// the unwrapped solve bit-for-bit, so the default path is provably untouched.
     #[test]
-    fn solve_dense_sensitivities_bit_identical_when_n_sens_equals_nparams() {
+    fn solve_dense_sensitivities_bit_identical_when_nsens_equals_nparams() {
         let (y_full, sens_full, _, _) = solve_robertson_sens(None);
-        let (y_wrapped, sens_wrapped, _, _) = solve_robertson_sens(Some(3));
+        let (y_wrapped, sens_wrapped, _, _) = solve_robertson_sens(Some(vec![0, 1, 2]));
 
         assert_eq!(sens_full.len(), 3, "robertson_sens has 3 parameters");
         assert_eq!(y_full, y_wrapped, "state trajectory must be bit-identical");
@@ -765,7 +757,7 @@ mod tests {
     #[test]
     fn solve_dense_sensitivities_respects_sens_param_index_mapping() {
         let (_, sens_full, atol, rtol) = solve_robertson_sens(None);
-        let (_, sens_mapped, _, _) = solve_robertson_sens_mapped(Some(1), Some(vec![2]));
+        let (_, sens_mapped, _, _) = solve_robertson_sens(Some(vec![2]));
 
         assert_eq!(sens_mapped.len(), 1, "one column was selected");
         for j in 0..SENS_T_EVAL.len() {
@@ -778,13 +770,13 @@ mod tests {
         }
     }
 
-    /// A reduced `n_sens` must integrate fewer columns while the leading column still
+    /// A reduced `nsens` must integrate fewer columns while the leading column still
     /// tracks the full solve. Only to solver tolerance, not bit-exact: fewer columns shifts
     /// the step sequence, so both solves are valid to the requested accuracy.
     #[test]
-    fn solve_dense_sensitivities_respects_n_sens_override() {
+    fn solve_dense_sensitivities_respects_nsens_override() {
         let (_, sens_full, atol, rtol) = solve_robertson_sens(None);
-        let (_, sens_reduced, _, _) = solve_robertson_sens(Some(1));
+        let (_, sens_reduced, _, _) = solve_robertson_sens(Some(vec![0]));
 
         assert_eq!(
             sens_reduced.len(),
@@ -805,21 +797,13 @@ mod tests {
         }
     }
 
-    #[test]
-    fn max_index_defaults_to_nparams() {
-        let (problem, _soln) = robertson_sens::<Mcpu>();
-        let sens_eqn = SensEquations::new(&problem);
-        assert_eq!(sens_eqn.max_index(), sens_eqn.nparams());
-    }
-
     /// `dx/dt = -p[0]·x`, `x(0) = 1`, with a reset `x -> x + p[1]` firing at `x = 0.5`.
     /// Parameter 1 enters the problem only through the reset, so its post-event
     /// sensitivity comes entirely from the parameter-space seed in the reset correction:
     /// s_1(t) = exp(-p[0]·(t - t_root)) for t > t_root = ln(2)/p[0], and 0 before.
     fn decay_with_param_dependent_reset_problem() -> OdeSolverProblem<
-        impl OdeEquationsImplicitSens<M = Mcpu, V = Vcpu, T = f64, C = crate::NalgebraContext>,
+        impl OdeEquationsImplicitSens<M = Mcpu, V = Vcpu, T = f64, C = NalgebraContext>,
     > {
-        use crate::OdeBuilder;
         OdeBuilder::<Mcpu>::new()
             .p([1.0, 0.3])
             .rtol(1e-6)
@@ -857,44 +841,17 @@ mod tests {
     /// Solve [`decay_with_param_dependent_reset_problem`], optionally with only
     /// parameter 1's sensitivity integrated (column 0 -> parameter 1).
     fn solve_decay_reset_sens(use_bdf: bool, mapped: bool) -> (Vec<Mcpu>, Vcpu, f64) {
-        use crate::{NalgebraLU, SensitivitiesOdeSolverMethod};
         let problem = decay_with_param_dependent_reset_problem();
         let (atol, rtol) = (problem.atol.clone(), problem.rtol);
-        let sens = match (mapped, use_bdf) {
-            (false, false) => {
-                problem
-                    .tsit45_sens()
-                    .unwrap()
-                    .solve_dense_sensitivities(&RESET_SENS_T_EVAL)
-                    .unwrap()
-                    .1
-            }
-            (false, true) => {
-                problem
-                    .bdf_sens::<NalgebraLU<f64>>()
-                    .unwrap()
-                    .solve_dense_sensitivities(&RESET_SENS_T_EVAL)
-                    .unwrap()
-                    .1
-            }
-            (true, use_bdf) => {
-                let wrapped = with_sens_override(problem, 1, Some(vec![1]));
-                if use_bdf {
-                    wrapped
-                        .bdf_sens::<NalgebraLU<f64>>()
-                        .unwrap()
-                        .solve_dense_sensitivities(&RESET_SENS_T_EVAL)
-                        .unwrap()
-                        .1
-                } else {
-                    wrapped
-                        .tsit45_sens()
-                        .unwrap()
-                        .solve_dense_sensitivities(&RESET_SENS_T_EVAL)
-                        .unwrap()
-                        .1
-                }
-            }
+        let sens = if mapped {
+            solve_dense_sens(
+                with_sens_override(problem, vec![1]),
+                &RESET_SENS_T_EVAL,
+                use_bdf,
+            )
+            .1
+        } else {
+            solve_dense_sens(problem, &RESET_SENS_T_EVAL, use_bdf).1
         };
         (sens, atol, rtol)
     }
@@ -935,5 +892,105 @@ mod tests {
     #[test]
     fn reset_sens_correction_respects_mapping_bdf() {
         assert_reset_sens_correction_respects_mapping(true);
+    }
+
+    /// `nsens() == 0` is the degenerate end of the documented range: nothing to integrate,
+    /// while the main equation (reset and all) still solves.
+    #[test]
+    fn solve_dense_sensitivities_with_no_columns() {
+        for use_bdf in [true, false] {
+            let problem = with_sens_override(decay_with_param_dependent_reset_problem(), vec![]);
+            let (y, sens) = solve_dense_sens(problem, &RESET_SENS_T_EVAL, use_bdf);
+            assert!(sens.is_empty());
+            assert_eq!(y.ncols(), RESET_SENS_T_EVAL.len());
+            assert_eq!(y.nrows(), 1);
+        }
+    }
+
+    /// `dx/dt = -p[0]·x`, `x(0) = 1`, output `g = x + p[1]`, root at `x = 0.5` and no
+    /// reset. Parameter 1 enters only through the output, so `dg/dp[1] = 1` exactly and
+    /// the out-sensitivity seed is the only thing that can produce it.
+    fn decay_with_out_problem() -> OdeSolverProblem<
+        impl OdeEquationsImplicitSens<M = Mcpu, V = Vcpu, T = f64, C = NalgebraContext>,
+    > {
+        OdeBuilder::<Mcpu>::new()
+            .p([1.0, 0.3])
+            .rtol(1e-6)
+            .atol([1e-6])
+            .sens_rtol(1e-6)
+            .sens_atol([1e-6])
+            .rhs_sens_implicit(
+                |x: &Vcpu, p: &Vcpu, _t, y: &mut Vcpu| y[0] = -p[0] * x[0],
+                |_x: &Vcpu, p: &Vcpu, _t, v: &Vcpu, y: &mut Vcpu| y[0] = -p[0] * v[0],
+                |x: &Vcpu, _p: &Vcpu, _t, v: &Vcpu, y: &mut Vcpu| y[0] = -x[0] * v[0],
+            )
+            .init_sens(
+                |_p: &Vcpu, _t, y: &mut Vcpu| y[0] = 1.0,
+                |_p: &Vcpu, _t, _v: &Vcpu, y: &mut Vcpu| y[0] = 0.0,
+                1,
+            )
+            .root_sens_implicit(
+                |x: &Vcpu, _p: &Vcpu, _t, y: &mut Vcpu| y[0] = x[0] - 0.5,
+                |_x: &Vcpu, _p: &Vcpu, _t, v: &Vcpu, y: &mut Vcpu| y[0] = v[0],
+                |_x: &Vcpu, _p: &Vcpu, _t, _v: &Vcpu, y: &mut Vcpu| y[0] = 0.0,
+                1,
+            )
+            .out_sens_implicit(
+                |x: &Vcpu, p: &Vcpu, _t, y: &mut Vcpu| y[0] = x[0] + p[1],
+                |_x: &Vcpu, _p: &Vcpu, _t, v: &Vcpu, y: &mut Vcpu| y[0] = v[0],
+                // dg/dp · v = v[1]: reads the parameter-space seed at parameter 1.
+                |_x: &Vcpu, _p: &Vcpu, _t, v: &Vcpu, y: &mut Vcpu| y[0] = v[1],
+                1,
+            )
+            .build()
+            .unwrap()
+    }
+
+    /// The root at `x = 0.5` fires at `t = ln(2)`, between the second and third entry, so
+    /// the final column is written by `write_state_sens_out` rather than by the
+    /// interpolating path.
+    const OUT_SENS_T_EVAL: [f64; 3] = [0.2, 0.5, 1.0];
+
+    /// Both out-sensitivity seed sites are parameter-space: they must seed
+    /// `sens_param_index(j)`, not column `j`.
+    #[test]
+    fn out_sens_respects_mapping() {
+        let (y_full, sens_full) =
+            solve_dense_sens(decay_with_out_problem(), &OUT_SENS_T_EVAL, true);
+        let (_, sens_mapped) = solve_dense_sens(
+            with_sens_override(decay_with_out_problem(), vec![1]),
+            &OUT_SENS_T_EVAL,
+            true,
+        );
+
+        // The last column is the root time, so g = 0.5 + p[1]; confirms the solve stopped
+        // on the root and the `write_state_sens_out` path ran.
+        assert_eq!(y_full.ncols(), OUT_SENS_T_EVAL.len());
+        assert!(
+            (y_full.get_index(0, 2) - 0.8).abs() < 1e-5,
+            "expected the final column at the root, got g = {}",
+            y_full.get_index(0, 2)
+        );
+
+        // Guard: dg/dp[0] = -t·exp(-t) is nowhere near dg/dp[1] = 1, so seeding the wrong
+        // index cannot pass. A wrong seed gives 0 for the mapped column.
+        assert_eq!(sens_full.len(), 2);
+        let expected_p0 = -0.2 * (-0.2f64).exp();
+        assert!(
+            (sens_full[0].get_index(0, 0) - expected_p0).abs() < 1e-4,
+            "full solve dg/dp[0](0.2) should be ~{expected_p0}, got {}",
+            sens_full[0].get_index(0, 0)
+        );
+
+        assert_eq!(sens_mapped.len(), 1, "one column was selected");
+        for j in 0..OUT_SENS_T_EVAL.len() {
+            for sens in [&sens_full[1], &sens_mapped[0]] {
+                assert!(
+                    (sens.get_index(0, j) - 1.0).abs() < 1e-4,
+                    "dg/dp[1] should be 1 at every column, got {} at column {j}",
+                    sens.get_index(0, j)
+                );
+            }
+        }
     }
 }
