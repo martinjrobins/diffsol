@@ -7,19 +7,19 @@ Rust closures. This avoids manually writing `rhs_jac`, `rhs_adjoint`,
 
 As in the previous closure examples, consider the logistic equation
 
-\[\frac{dy}{dt} = r y (1 - y/K),\]
+$$\frac{dy}{dt} = r y (1 - y/K),$$
 
 with the parameterized initial state
 
-\[y(0) = y_0.\]
+$$y(0) = y_0.$$
 
-The parameter vector is \(p = [r, K, y_0]\), so the right-hand side is
+The parameter vector is \\(p = [r, K, y_0]\\), so the right-hand side is
 
-\[f(y, p, t) = p_0 y (1 - y/p_1),\]
+$$f(y, p, t) = p_0 y (1 - y/p_1),$$
 
 and the initial-condition function is
 
-\[y_0(p, t) = p_2.\]
+$$y_0(p, t) = p_2.$$
 
 Using the `autodiff` feature, we can simply supply these equations, and `std::autodiff` will
 automatically generate the required gradients for any type of solver in diffsol.
@@ -45,14 +45,14 @@ RUSTFLAGS="-Zautodiff=Enable" \
 cargo +nightly run --release
 ```
 
-For more details on installing and using `std::autodiff` in general please consult the
+For more details on installing and using `std::autodiff` please consult the
 [internal](https://rustc-dev-guide.rust-lang.org/autodiff/internals.html) and
 [user docs](https://doc.rust-lang.org/std/autodiff/index.html)
 
 ## Compiling workspaces
 
 `RUSTFLAGS` applies to every crate that Cargo compiles, including dependencies.
-When compiling the `diffsol` tests, we found that some of our dev dependencies
+When compiling the `diffsol` tests, we found that some of our dependencies
 can fail to compile with `-Zautodiff=Enable`. If you run into a similar problem, a rustc wrapper can
 append the flag only for crates that use autodiff. This repository's wrapper is
 an example:

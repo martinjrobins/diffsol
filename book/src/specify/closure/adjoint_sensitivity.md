@@ -8,22 +8,22 @@ For an implicit solver, you need to specify:
 
 For the logistic equation
 
-\[\frac{dy}{dt} = r y (1 - y/K),\]
+$$\frac{dy}{dt} = r y (1 - y/K),$$
 
 the state Jacobian-vector product is
 
-\[Jv = r v (1 - 2y/K),\]
+$$Jv = r v (1 - 2y/K),$$
 
-and the adjoint closure must return \(-J^T v\):
+and the adjoint closure must return \\(-J^T v\\):
 
-\[-J^T v = -r v (1 - 2y/K).\]
+$$-J^T v = -r v (1 - 2y/K).$$
 
-The parameter-adjoint closure similarly returns \(-J_p^T v\):
+The parameter-adjoint closure similarly returns \\(-J_p^T v\\):
 
-\[-J_p^T v = \begin{bmatrix}
--v y (1-y/K) \\
+$$-J_p^T v = \begin{bmatrix}
+-v y (1-y/K) \\\\
 -v r y^2/K^2
-\end{bmatrix}.\]
+\end{bmatrix}.$$
 
 Use `rhs_adjoint_implicit` for these four right-hand-side operations and
 `init_adjoint` for the initial state and its negative parameter transpose. The
