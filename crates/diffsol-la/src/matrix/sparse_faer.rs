@@ -423,7 +423,7 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{FaerSparseMat, Matrix, MatrixSparsity};
+    use crate::{FaerSparseMat, Matrix, MatrixSparsity, MatrixSparsityRef};
     use faer::sparse::SymbolicSparseColMat;
 
     #[test]
@@ -444,6 +444,13 @@ mod tests {
         expected.sort_unstable();
 
         assert_eq!(round_tripped, expected);
+
+        let sparsity_ref =
+            <SymbolicSparseColMat<usize> as MatrixSparsity<FaerSparseMat<f64>>>::as_ref(&sparsity);
+        let mut ref_round_tripped = MatrixSparsityRef::<FaerSparseMat<f64>>::indices(&sparsity_ref);
+        ref_round_tripped.sort_unstable();
+
+        assert_eq!(ref_round_tripped, expected);
     }
 
     #[test]
