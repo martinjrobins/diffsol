@@ -1,4 +1,4 @@
-use diffsol::{NalgebraContext, NalgebraVec};
+use diffsol::{NalgebraContext, NalgebraVec, OdeBuilder};
 use diffsol::{NalgebraLU, NalgebraMat};
 mod problem_implicit;
 use problem_implicit::problem_implicit;
