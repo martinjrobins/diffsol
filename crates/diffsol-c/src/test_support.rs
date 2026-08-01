@@ -103,14 +103,10 @@ pub(crate) fn external_dynamic_fixture_path() -> PathBuf {
                 );
             }
 
-            let profile_dir = if cfg!(debug_assertions) {
-                "debug"
-            } else {
-                "release"
-            };
             let library_path = fixture_dir
                 .join("target")
-                .join(profile_dir)
+                // The nested fixture build does not pass --release.
+                .join("debug")
                 .join(external_dynamic_fixture_filename());
             assert!(
                 library_path.is_file(),

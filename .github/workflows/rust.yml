@@ -114,6 +114,9 @@ jobs:
         key: diffsol-${{ runner.os }}-${{ matrix.toolchain}}-coverage${{ matrix.coverage }}-book${{ matrix.book }}-llvm17
     - name: Set up Rust
       run: rustup default ${{ matrix.toolchain }} && rustup update ${{ matrix.toolchain }} --no-self-update && rustup component add clippy
+    - name: Install Enzyme backend
+      if: matrix.toolchain == 'nightly'
+      run: rustup +nightly component add enzyme
     - name: Rust version
       run: rustc -Vv
     - name: Free Disk Space (Ubuntu)
@@ -175,12 +178,20 @@ jobs:
     - name: Run tests - default features
       if: matrix.tests == true
       run: cargo test --verbose
+    - name: Enable autodiff (nightly)
+      if: matrix.tests == true && matrix.toolchain == 'nightly'
+      run: |
+        echo "ADDITIONAL_FEATURES_FLAGS=${ADDITIONAL_FEATURES_FLAGS} --features autodiff" >> $GITHUB_ENV
+        echo "ADDITIONAL_TEST_FLAGS=--release" >> $GITHUB_ENV
+        echo "RUSTC_WRAPPER=${{ github.workspace }}/.github/scripts/autodiff-rustc-wrapper.sh" >> $GITHUB_ENV
+        echo "CARGO_PROFILE_RELEASE_LTO=fat" >> $GITHUB_ENV
+        echo "RUSTDOCFLAGS=${RUSTDOCFLAGS} -Zautodiff=Enable" >> $GITHUB_ENV
     - name: Run tests - all features (macOS Intel)
       if: matrix.tests == true && matrix.os == 'macos-15-intel'
-      run: cargo test --verbose ${{ env.ADDITIONAL_FEATURES_FLAGS || '' }} --workspace --exclude neural-ode-weather-prediction
+      run: cargo test --verbose ${{ env.ADDITIONAL_FEATURES_FLAGS || '' }} ${{ env.ADDITIONAL_TEST_FLAGS || '' }} --workspace --exclude neural-ode-weather-prediction
     - name: Run tests - all features
       if: matrix.tests == true && matrix.os != 'macos-15-intel'
-      run: cargo test --verbose ${{ env.ADDITIONAL_FEATURES_FLAGS || '' }} --workspace
+      run: cargo test --verbose ${{ env.ADDITIONAL_FEATURES_FLAGS || '' }} ${{ env.ADDITIONAL_TEST_FLAGS || '' }} --workspace
     - name: Clippy - all features
       if: matrix.clippy == true
       run: cargo clippy --verbose ${{ env.ADDITIONAL_FEATURES_FLAGS || ''}} --workspace
