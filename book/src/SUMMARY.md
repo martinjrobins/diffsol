@@ -22,6 +22,8 @@
     - [Example: Fitting a spring-mass model to data](./primer/spring_mass_fitting.md)
     - [Example: Weather prediction using neural ODEs](./primer/weather_neural_ode.md)
 - [diffsol APIs for specifying problems](./specify/specifying_the_problem.md)
+  - [The builder](./specify/builder.md)
+  - [Tolerances](./specify/tolerances.md)
   - [DiffSL](./specify/diffsl/diffsl.md)
   - [Rust closures](./specify/closure/rust_closures.md)
     - [Explicit](./specify/closure/explicit.md)
