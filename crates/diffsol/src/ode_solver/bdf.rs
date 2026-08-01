@@ -844,7 +844,13 @@ where
         if sens_in_error_control {
             let sens_rtol = self.s_op.as_ref().unwrap().eqn().rtol().unwrap();
             for i in 0..state.sdiff.len() {
-                let sens_atol = self.s_op.as_ref().unwrap().eqn().atol(i).unwrap();
+                let sens_atol = self
+                    .s_op
+                    .as_ref()
+                    .unwrap()
+                    .eqn()
+                    .atol(i)
+                    .expect("aug eqn should always have state.sdiff.len() atols");
                 let err = self.s_deltas[i].squared_norm(&state.s[i], sens_atol, sens_rtol)
                     * self.error_const2[order];
                 error_norm = error_norm.max(err);
