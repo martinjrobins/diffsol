@@ -812,10 +812,10 @@ where
         // sensitivity errors
         if let Some(sens_error) = self.sens_error.as_mut() {
             let aug_eqn = augmented_eqn.as_ref().unwrap();
-            let atol = aug_eqn.atol().unwrap();
             let rtol = aug_eqn.rtol().unwrap();
             for i in 0..self.sdiff.len() {
                 self.sdiff[i].gemv(Eqn::T::one(), self.tableau.d(), Eqn::T::zero(), sens_error);
+                let atol = aug_eqn.atol(i).unwrap();
                 let err = sens_error.squared_norm(&self.state.s[i], atol, rtol);
                 error_norm = error_norm.max(err);
             }

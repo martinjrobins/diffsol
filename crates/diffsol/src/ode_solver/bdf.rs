@@ -399,7 +399,7 @@ where
         // allocate internal state for sensitivities
         let naug = augmented_eqn.max_index();
         let nstates = problem.eqn.rhs().nstates();
-
+        let ctx = problem.eqn.context();
         ret.s_op = if integrate_main_eqn {
             Some(BdfCallable::new_no_jacobian(augmented_eqn))
         } else {
@@ -413,7 +413,6 @@ where
             Some(bdf_callable)
         };
 
-        let ctx = problem.eqn.context();
         ret.s_deltas = vec![<Eqn::V as Vector>::zeros(nstates, ctx.clone()); naug];
         ret.s_predict = <Eqn::V as Vector>::zeros(nstates, ctx.clone());
         if let Some(out) = ret.s_op.as_ref().unwrap().eqn().out() {
@@ -843,9 +842,15 @@ where
             }
         }
         if sens_in_error_control {
-            let sens_atol = self.s_op.as_ref().unwrap().eqn().atol().unwrap();
             let sens_rtol = self.s_op.as_ref().unwrap().eqn().rtol().unwrap();
             for i in 0..state.sdiff.len() {
+                let sens_atol = self
+                    .s_op
+                    .as_ref()
+                    .unwrap()
+                    .eqn()
+                    .atol(i)
+                    .expect("aug eqn should always have state.sdiff.len() atols");
                 let err = self.s_deltas[i].squared_norm(&state.s[i], sens_atol, sens_rtol)
                     * self.error_const2[order];
                 error_norm = error_norm.max(err);
@@ -901,9 +906,9 @@ where
             }
         }
         if sens_in_error_control {
-            let sens_atol = self.s_op.as_ref().unwrap().eqn().atol().unwrap();
             let sens_rtol = self.s_op.as_ref().unwrap().eqn().rtol().unwrap();
             for i in 0..state.sdiff.len() {
+                let sens_atol = self.s_op.as_ref().unwrap().eqn().atol(i).unwrap();
                 let err = state.sdiff[i].column(order + 1).squared_norm(
                     &state.s[i],
                     sens_atol,

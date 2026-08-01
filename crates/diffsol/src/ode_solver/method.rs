@@ -1227,7 +1227,7 @@ mod test {
                 let sens_i = sens[j].column(i).into_owned();
                 sens_i.assert_eq_norm(
                     &soln_pt.state,
-                    problem.sens_atol.as_ref().unwrap(),
+                    &problem.sens_atol.as_ref().unwrap()[j],
                     problem.sens_rtol.unwrap(),
                     15.0,
                 );
@@ -1252,7 +1252,7 @@ mod test {
                 let sens_i = sens[j].column(i).into_owned();
                 sens_i.assert_eq_norm(
                     &soln_pt.state,
-                    problem.sens_atol.as_ref().unwrap(),
+                    &problem.sens_atol.as_ref().unwrap()[j],
                     problem.sens_rtol.unwrap(),
                     15.0,
                 );
@@ -1288,7 +1288,7 @@ mod test {
                 let sens_i = dense_soln.y_sens[j].column(i).into_owned();
                 sens_i.assert_eq_norm(
                     &soln_pt.state,
-                    problem.sens_atol.as_ref().unwrap(),
+                    &problem.sens_atol.as_ref().unwrap()[j],
                     problem.sens_rtol.unwrap(),
                     15.0,
                 );
@@ -1331,13 +1331,13 @@ mod test {
         let s_y0 = NalgebraVec::from_vec(vec![decay; 2], *problem.context());
         dense_soln.y_sens[0].column(0).into_owned().assert_eq_norm(
             &s_k,
-            problem.sens_atol.as_ref().unwrap(),
+            &problem.sens_atol.as_ref().unwrap()[0],
             problem.sens_rtol.unwrap(),
             15.0,
         );
         dense_soln.y_sens[1].column(0).into_owned().assert_eq_norm(
             &s_y0,
-            problem.sens_atol.as_ref().unwrap(),
+            &problem.sens_atol.as_ref().unwrap()[1],
             problem.sens_rtol.unwrap(),
             15.0,
         );

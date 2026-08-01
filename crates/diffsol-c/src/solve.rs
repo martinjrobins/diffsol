@@ -650,11 +650,15 @@ where
 
     fn set_sens_atol(&mut self, sens_atol: Option<f64>) {
         self.problem.sens_atol = sens_atol.map(|value| {
-            M::V::from_element(
-                self.problem.eqn.nstates(),
-                M::T::from_f64(value).unwrap(),
-                M::C::default(),
-            )
+            (0..self.problem.eqn.nparams())
+                .map(|_| {
+                    M::V::from_element(
+                        self.problem.eqn.nstates(),
+                        M::T::from_f64(value).unwrap(),
+                        M::C::default(),
+                    )
+                })
+                .collect()
         });
     }
 
@@ -662,6 +666,7 @@ where
         self.problem
             .sens_atol
             .as_ref()
+            .and_then(|values| values.first())
             .and_then(|value| (value.len() > 0).then(|| value.get_index(0).to_f64().unwrap()))
     }
 

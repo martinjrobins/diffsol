@@ -130,7 +130,8 @@
 //! [OdeBuilder::rhs_sens_implicit] and [OdeBuilder::init_sens], or your equations struct must
 //! implement the [OdeEquationsImplicitSens] trait, Note that by default the sensitivity equations
 //! are included in the error control for the solvers, you can change this by setting tolerances
-//! using the [OdeBuilder::sens_atol] and [OdeBuilder::sens_rtol] methods.
+//! using the [OdeBuilder::sens_atol] and [OdeBuilder::sens_rtol] methods. Use
+//! [OdeBuilder::param_scales] to set an absolute tolerance scale for each parameter.
 //!
 //! The easiest way to obtain the sensitivity solution is to use the
 //! [SensitivitiesOdeSolverMethod::solve_dense_sensitivities] method, which will solve the forward
