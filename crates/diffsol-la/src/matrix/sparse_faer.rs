@@ -91,8 +91,8 @@ impl<T: FaerScalar> MatrixSparsity<FaerSparseMat<T>> for SymbolicSparseColMat<In
     fn indices(&self) -> Vec<(IndexType, IndexType)> {
         let mut indices = Vec::with_capacity(self.compute_nnz());
         for col_i in 0..self.ncols() {
-            for row_j in self.col_range(col_i) {
-                indices.push((row_j, col_i));
+            for pos in self.col_range(col_i) {
+                indices.push((self.row_idx()[pos], col_i));
             }
         }
         indices
@@ -241,8 +241,8 @@ impl<'a, T: FaerScalar> MatrixSparsityRef<'a, FaerSparseMat<T>>
     fn indices(&self) -> Vec<(IndexType, IndexType)> {
         let mut indices = Vec::with_capacity(self.compute_nnz());
         for col_i in 0..self.ncols() {
-            for row_j in self.col_range(col_i) {
-                indices.push((row_j, col_i));
+            for pos in self.col_range(col_i) {
+                indices.push((self.row_idx()[pos], col_i));
             }
         }
         indices
@@ -423,7 +423,36 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{FaerSparseMat, Matrix};
+    use crate::{FaerSparseMat, Matrix, MatrixSparsity, MatrixSparsityRef};
+    use faer::sparse::SymbolicSparseColMat;
+
+    #[test]
+    fn sparsity_indices_round_trip() {
+        let indices = vec![(0, 0), (3, 0), (1, 2), (2, 2)];
+        let sparsity =
+            <SymbolicSparseColMat<usize> as MatrixSparsity<FaerSparseMat<f64>>>::try_from_indices(
+                4,
+                3,
+                indices.clone(),
+            )
+            .unwrap();
+
+        let mut round_tripped =
+            <SymbolicSparseColMat<usize> as MatrixSparsity<FaerSparseMat<f64>>>::indices(&sparsity);
+        round_tripped.sort_unstable();
+        let mut expected = indices;
+        expected.sort_unstable();
+
+        assert_eq!(round_tripped, expected);
+
+        let sparsity_ref =
+            <SymbolicSparseColMat<usize> as MatrixSparsity<FaerSparseMat<f64>>>::as_ref(&sparsity);
+        let mut ref_round_tripped = MatrixSparsityRef::<FaerSparseMat<f64>>::indices(&sparsity_ref);
+        ref_round_tripped.sort_unstable();
+
+        assert_eq!(ref_round_tripped, expected);
+    }
+
     #[test]
     fn test_triplet_iter() {
         let indices = vec![(0, 0), (1, 0), (2, 2), (3, 2)];
