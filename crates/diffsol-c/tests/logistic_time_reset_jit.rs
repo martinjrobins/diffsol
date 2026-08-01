@@ -4,10 +4,9 @@ mod common;
 
 #[cfg(feature = "diffsl-llvm")]
 use common::matrix_host;
-use common::{
-    assert_close, available_jit_backends, logistic_integral, logistic_integral_dr, logistic_state,
-    logistic_state_dr, vector_host, ASSERT_TOL,
-};
+use common::{assert_close, available_jit_backends, logistic_state, vector_host, ASSERT_TOL};
+#[cfg(feature = "diffsl-llvm")]
+use common::{logistic_integral, logistic_integral_dr, logistic_state_dr};
 use diffsol_c::host_array::FromHostArray;
 use diffsol_c::{
     JitBackendType, LinearSolverType, MatrixType, OdeSolverType, OdeWrapper, ScalarType,

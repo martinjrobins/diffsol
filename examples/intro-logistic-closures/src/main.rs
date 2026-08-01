@@ -1,4 +1,4 @@
-use diffsol::{NalgebraContext, NalgebraVec, OdeBuilder};
+use diffsol::{NalgebraContext, NalgebraVec, OdeBuilder, Vector};
 use diffsol::{NalgebraLU, NalgebraMat};
 mod problem_implicit;
 use problem_implicit::problem_implicit;
@@ -50,7 +50,7 @@ fn main() {
     //
     // ANCHOR: builder_intro
     type M = NalgebraMat<f64>;
-    let problem = OdeBuilder::<M>::new()
+    let _problem = OdeBuilder::<M>::new()
         .p(vec![1.0, 10.0])
         .rhs(|x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]))
         .init(|_p, _t, y| y.fill(0.1), 1)
