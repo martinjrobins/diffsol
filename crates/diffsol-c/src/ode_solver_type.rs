@@ -739,7 +739,7 @@ mod tests {
         OdeSolverProblem,
     };
     #[cfg(feature = "diffsl-llvm")]
-    use diffsol::{DefaultDenseMatrix, MatrixCommon, Vector};
+    use diffsol::{DefaultDenseMatrix, Matrix, MatrixCommon, Op, Vector};
 
     #[cfg(feature = "diffsl-llvm")]
     use crate::linear_solver_type::LinearSolverType;
