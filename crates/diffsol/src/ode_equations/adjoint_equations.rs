@@ -575,8 +575,8 @@ where
             eqn.rhs().nstates(),
             eqn.context().clone(),
         ));
-        let atol = problem.sens_atol.as_ref().or(Some(&problem.atol));
-        let rtol = problem.sens_rtol.or(Some(problem.rtol));
+        let atol = Some(&problem.atol);
+        let rtol = Some(problem.rtol);
         let out_atol = problem.param_atol.as_ref();
         let out_rtol = problem.param_rtol;
         let mass = eqn.mass().map(|_m| AdjointMass::new(eqn));
@@ -789,7 +789,7 @@ where
         self.out().is_some() && self.out_atol.is_some() && self.out_rtol.is_some()
     }
 
-    fn atol(&self) -> Option<&Eqn::V> {
+    fn atol(&self, _index: usize) -> Option<&Eqn::V> {
         self.atol
     }
     fn out_atol(&self) -> Option<&Eqn::V> {

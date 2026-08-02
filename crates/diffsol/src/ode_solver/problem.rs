@@ -174,10 +174,10 @@ where
     pub h0: Eqn::T,
     /// Whether to integrate the output equations alongside the state equations.
     pub integrate_out: bool,
-    /// Relative tolerance for the forward sensitivity equations or the adjoint equations, if sensitivities are being computed. If `None`, sensitivities are not included in error control.
+    /// Relative tolerance for the forward sensitivity equations. If `None`, sensitivities are not included in error control.
     pub sens_rtol: Option<Eqn::T>,
-    /// Absolute tolerance for the forward sensitivity equations or the adjoint equations, if sensitivities are being computed. If `None`, sensitivities are not included in error control.
-    pub sens_atol: Option<Eqn::V>,
+    /// Absolute tolerances for the forward sensitivity equations, one vector per parameter. If `None`, sensitivities are not included in error control.
+    pub sens_atol: Option<Vec<Eqn::V>>,
     /// Relative tolerance for output equations, if outputs are being integrated and used in error control.
     pub out_rtol: Option<Eqn::T>,
     /// Absolute tolerance for output equations, if outputs are being integrated and used in error control.
@@ -520,7 +520,7 @@ where
         rtol: Eqn::T,
         atol: Eqn::V,
         sens_rtol: Option<Eqn::T>,
-        sens_atol: Option<Eqn::V>,
+        sens_atol: Option<Vec<Eqn::V>>,
         out_rtol: Option<Eqn::T>,
         out_atol: Option<Eqn::V>,
         param_rtol: Option<Eqn::T>,
@@ -707,8 +707,8 @@ where
             .as_mut()
             .set_consistent_augmented(self, augmented_eqn, &mut newton_solver)?;
         let h = state.h;
-        let atol = augmented_eqn.atol().unwrap_or(&self.atol);
-        let rtol = augmented_eqn.rtol().unwrap_or(self.rtol);
+        let atol = &self.atol;
+        let rtol = self.rtol;
         state
             .as_mut()
             .set_step_size(h, atol, rtol, augmented_eqn, 1);
@@ -977,8 +977,8 @@ where
             .as_mut()
             .set_consistent_augmented(self, augmented_eqn, &mut newton_solver)?;
         let h = state.h;
-        let atol = augmented_eqn.atol().unwrap_or(&self.atol);
-        let rtol = augmented_eqn.rtol().unwrap_or(self.rtol);
+        let atol = &self.atol;
+        let rtol = self.rtol;
         state
             .as_mut()
             .set_step_size(h, atol, rtol, augmented_eqn, tableau.order());
@@ -1139,8 +1139,8 @@ where
         }
 
         let h = state.h;
-        let atol = augmented_eqn.atol().unwrap_or(&self.atol);
-        let rtol = augmented_eqn.rtol().unwrap_or(self.rtol);
+        let atol = &self.atol;
+        let rtol = self.rtol;
         state
             .as_mut()
             .set_step_size(h, atol, rtol, augmented_eqn, tableau.order());

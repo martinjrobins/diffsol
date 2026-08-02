@@ -1937,3 +1937,52 @@ mod tests {
         }
     }
 }
+
+#[test]
+fn sens_param_scale_small_parameter() {
+    use crate::{
+        matrix::dense_nalgebra_serial::NalgebraMat,
+        ode_solver::sensitivities::SensitivitiesOdeSolverMethod, NalgebraLU, OdeBuilder,
+    };
+
+    let p = 3.3e-14_f64;
+    let problem = OdeBuilder::<NalgebraMat<f64>>::new()
+        .p([p])
+        .rtol(1e-7)
+        .atol([1e-7])
+        .sens_rtol(1e-7)
+        .sens_atol([1e-7])
+        .param_scales([p])
+        .rhs_sens_implicit(
+            {
+                let p = p;
+                move |x, params, t, y| {
+                    y[0] = 1e3 * ((params[0] / p) * (1e3 * t).sin() - x[0]);
+                }
+            },
+            move |_x, _params, _t, v, y| {
+                y[0] = -1e3 * v[0];
+            },
+            {
+                let p = p;
+                move |_x, _params, t, v, y| {
+                    y[0] = (1e3 / p) * (1e3 * t).sin() * v[0];
+                }
+            },
+        )
+        .init_sens(|_p, _t, y| y[0] = 0.0, |_p, _t, _v, y| y[0] = 0.0, 1)
+        .build()
+        .unwrap();
+
+    let mut bdf = problem.bdf_sens::<NalgebraLU<f64>>().unwrap();
+    let r = bdf.solve_dense_sensitivities(&[0.0, 1e-3]);
+    assert!(r.is_ok(), "bdf failed: {:?}", r.err());
+
+    let mut esdirk34 = problem.esdirk34_sens::<NalgebraLU<f64>>().unwrap();
+    let r = esdirk34.solve_dense_sensitivities(&[0.0, 1e-3]);
+    assert!(r.is_ok(), "esdirk34 failed: {:?}", r.err());
+
+    let mut tsit45 = problem.tsit45_sens().unwrap();
+    let r = tsit45.solve_dense_sensitivities(&[0.0, 1e-3]);
+    assert!(r.is_ok(), "tsit45 failed: {:?}", r.err());
+}
