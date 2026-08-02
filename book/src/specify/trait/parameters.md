@@ -48,8 +48,8 @@ There are a few cases where you *do* need to report your parameter to diffsol, t
 - You want to calculate the gradient of a loss function with respect to that parameter using an adjoint sensitivity solver.
 
 This decision can be made on a per-parameter basis. You can select which parameters of your model
-you want to tell diffsol about, and which parameters you don't, on a case-by-case basis. Just make sure you are
-consistent on the number of parameters that you are reporting to diffsol, and in which order, when you implement
+you want to tell diffsol about, and which parameters you don't. Just make sure you are
+consistent on the number and ordering of the parameters that you are reporting to diffsol, when you implement
 `get/set_params` and the `*Sens` traits.
 
 ## Varying parameters
