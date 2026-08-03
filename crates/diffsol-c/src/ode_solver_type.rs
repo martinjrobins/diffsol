@@ -735,9 +735,11 @@ impl OdeSolverType {
 #[cfg(all(test, any(feature = "diffsl-cranelift", feature = "diffsl-llvm")))]
 mod tests {
     use diffsol::{
-        CodegenModuleCompile, CodegenModuleJit, DefaultDenseMatrix, DefaultSolver, DenseMatrix,
-        Matrix, MatrixCommon, OdeBuilder, OdeSolverProblem, Op, Vector,
+        CodegenModuleCompile, CodegenModuleJit, DefaultSolver, DenseMatrix, OdeBuilder,
+        OdeSolverProblem,
     };
+    #[cfg(feature = "diffsl-llvm")]
+    use diffsol::{DefaultDenseMatrix, Matrix, MatrixCommon, Op, Vector};
 
     #[cfg(feature = "diffsl-llvm")]
     use crate::linear_solver_type::LinearSolverType;

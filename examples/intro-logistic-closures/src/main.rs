@@ -1,4 +1,4 @@
-use diffsol::{NalgebraContext, NalgebraVec};
+use diffsol::{NalgebraContext, NalgebraVec, OdeBuilder, Vector};
 use diffsol::{NalgebraLU, NalgebraMat};
 mod problem_implicit;
 use problem_implicit::problem_implicit;
@@ -48,6 +48,16 @@ fn main() {
     //
     // SPECIFYING THE PROBLEM
     //
+    // ANCHOR: builder_intro
+    type M = NalgebraMat<f64>;
+    let _problem = OdeBuilder::<M>::new()
+        .p(vec![1.0, 10.0])
+        .rhs(|x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]))
+        .init(|_p, _t, y| y.fill(0.1), 1)
+        .build()
+        .unwrap();
+    // ANCHOR_END: builder_intro
+
     let problem = problem_fwd_sens();
     let mut solver = problem.bdf_sens::<LS>().unwrap();
     solve_fwd_sens(&mut solver);

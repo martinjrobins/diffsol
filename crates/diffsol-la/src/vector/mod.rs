@@ -147,7 +147,7 @@ pub trait VectorView<'a>:
     type Owned;
     /// Get the value at the specified index (panics if nbatch > 1).
     fn get_index(&self, index: IndexType) -> Self::T;
-    /// Compute the squared weighted norm: sum_i ((self_i) / (|y_i| * rtol + atol_i))^2
+    /// Compute the squared weighted norm: sum_i^n ((self_i) / (|y_i| * rtol + atol_i))^2 / n
     ///
     /// This is commonly used for error control in ODE solvers.
     fn squared_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: Self::T) -> Self::T;

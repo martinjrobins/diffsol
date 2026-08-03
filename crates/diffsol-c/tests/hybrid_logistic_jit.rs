@@ -2,9 +2,11 @@
 
 mod common;
 
+#[cfg(feature = "diffsl-llvm")]
+use common::hybrid_logistic_state_dr;
 use common::{
     all_ode_solvers, assert_close, available_jit_backends, hybrid_logistic_period,
-    hybrid_logistic_state, hybrid_logistic_state_dr, vector_host, ASSERT_TOL,
+    hybrid_logistic_state, vector_host, ASSERT_TOL,
 };
 use diffsol_c::host_array::FromHostArray;
 use diffsol_c::{
