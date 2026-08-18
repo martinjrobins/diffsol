@@ -30,3 +30,4 @@ env/
 test_par
 AGENTS.md
 *report.md
+.codegraph/

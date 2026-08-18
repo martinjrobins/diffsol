@@ -1,0 +1,28 @@
+[workspace]
+changelog_update = false   # disable changelog updates for examples
+git_release_enable = false # disable GitHub/Gitea releases for examples
+publish = false            # disable `cargo publish` for examples
+
+[[package]]
+name = "diffsol"
+changelog_update = true
+git_release_enable = true
+publish = true
+
+[[package]]
+name = "diffsol-c"
+changelog_update = true
+git_release_enable = true
+publish = true
+
+[[package]]
+name = "diffsol-la"
+changelog_update = true
+git_release_enable = true
+publish = true
+
+[[package]]
+name = "diffsol-nl"
+changelog_update = true
+git_release_enable = true
+publish = true
