@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.3](https://github.com/martinjrobins/diffsol/compare/diffsol-v0.16.2...diffsol-v0.16.3) - 2026-08-20
+
+### Fixed
+
+- use black_blox to prevent benchmark over-optimisation ([#359](https://github.com/martinjrobins/diffsol/pull/359))
+
 ## [0.16.2](https://github.com/martinjrobins/diffsol/compare/diffsol-v0.16.1...diffsol-v0.16.2) - 2026-08-18
 
 ### Added
