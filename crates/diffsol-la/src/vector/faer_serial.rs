@@ -96,6 +96,7 @@ macro_rules! impl_div_scalar {
         impl<'a, T: FaerScalar> Div<Scale<T>> for $lhs {
             type Output = $out;
             #[inline]
+            #[allow(clippy::suspicious_arithmetic_impl)]
             fn div(self, rhs: Scale<T>) -> Self::Output {
                 let inv_rhs: T = T::one() / rhs.value();
                 let scale = faer::Scale(inv_rhs);
@@ -529,7 +530,24 @@ impl<'a, T: FaerScalar> VectorView<'a> for FaerVecRef<'a, T> {
         }
     }
     fn squared_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: Self::T) -> Self::T {
-        self.clone().into_owned().squared_norm(y, atol, rtol)
+        self.context
+            .assert_compatible_nbatch(y.context.nbatch(), "squared_norm");
+        self.context
+            .assert_compatible_nbatch(atol.context.nbatch(), "squared_norm");
+        self.data
+            .iter()
+            .enumerate()
+            .map(|(b, x)| {
+                x.iter()
+                    .zip(y.data[b % y.data.len()].iter())
+                    .zip(atol.data[b % atol.data.len()].iter())
+                    .fold(T::zero(), |acc, ((x, y), atol)| {
+                        let term = *x / (y.abs() * rtol + *atol);
+                        acc + term * term
+                    })
+                    / T::from_f64(x.nrows() as f64).unwrap()
+            })
+            .fold(T::zero(), |a, b| a.max(b))
     }
 }
 

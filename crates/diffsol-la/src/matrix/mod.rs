@@ -424,6 +424,7 @@ pub trait DenseMatrix:
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 pub(crate) mod tests {
     use super::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
     use crate::scalar::Scale;

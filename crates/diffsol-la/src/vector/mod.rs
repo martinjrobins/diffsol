@@ -400,6 +400,422 @@ pub trait DefaultDenseMatrix: Vector {
 }
 
 #[cfg(test)]
+macro_rules! generate_vector_tests_nonbatched {
+    ($suffix:ident, $V:ty) => {
+        paste::paste! {
+            #[test]
+            fn [<test_root_finding_ $suffix>]() {
+                $crate::vector::tests::test_root_finding::<$V>();
+            }
+            #[test]
+            fn [<test_from_slice_ $suffix>]() {
+                $crate::vector::tests::test_from_slice::<$V>();
+            }
+            #[test]
+            fn [<test_mul_scalar_ $suffix>]() {
+                $crate::vector::tests::test_mul_scalar::<$V>();
+            }
+            #[test]
+            fn [<test_div_scalar_ $suffix>]() {
+                $crate::vector::tests::test_div_scalar::<$V>();
+            }
+            #[test]
+            fn [<test_axpy_ $suffix>]() {
+                $crate::vector::tests::test_axpy::<$V>();
+            }
+            #[test]
+            fn [<test_copy_from_indices_ $suffix>]() {
+                $crate::vector::tests::test_copy_from_indices::<$V>();
+            }
+            #[test]
+            fn [<test_gather_ $suffix>]() {
+                $crate::vector::tests::test_gather::<$V>();
+            }
+            #[test]
+            fn [<test_scatter_ $suffix>]() {
+                $crate::vector::tests::test_scatter::<$V>();
+            }
+            #[test]
+            fn [<test_copy_from_via_view_mut_ $suffix>]() {
+                $crate::vector::tests::test_copy_from_via_view_mut::<$V>();
+            }
+            #[test]
+            fn [<test_set_index_ $suffix>]() {
+                $crate::vector::tests::test_set_index::<$V>();
+            }
+            #[test]
+            fn [<test_get_index_ $suffix>]() {
+                $crate::vector::tests::test_get_index::<$V>();
+            }
+            #[test]
+            fn [<test_norm_ $suffix>]() {
+                $crate::vector::tests::test_norm::<$V>();
+            }
+            #[test]
+            fn [<test_norm_l1_ $suffix>]() {
+                $crate::vector::tests::test_norm_l1::<$V>();
+            }
+            #[test]
+            fn [<test_squared_norm_ $suffix>]() {
+                $crate::vector::tests::test_squared_norm::<$V>();
+            }
+            #[test]
+            fn [<test_fill_ $suffix>]() {
+                $crate::vector::tests::test_fill::<$V>();
+            }
+            #[test]
+            fn [<test_from_element_ $suffix>]() {
+                $crate::vector::tests::test_from_element::<$V>();
+            }
+            #[test]
+            fn [<test_copy_from_ $suffix>]() {
+                $crate::vector::tests::test_copy_from::<$V>();
+            }
+            #[test]
+            fn [<test_from_vec_ $suffix>]() {
+                $crate::vector::tests::test_from_vec::<$V>();
+            }
+            #[test]
+            fn [<test_component_mul_assign_ $suffix>]() {
+                $crate::vector::tests::test_component_mul_assign::<$V>();
+            }
+            #[test]
+            fn [<test_component_div_assign_ $suffix>]() {
+                $crate::vector::tests::test_component_div_assign::<$V>();
+            }
+            #[test]
+            fn [<test_assign_at_indices_ $suffix>]() {
+                $crate::vector::tests::test_assign_at_indices::<$V>();
+            }
+            #[test]
+            fn [<test_add_ $suffix>]() {
+                $crate::vector::tests::test_add::<$V>();
+            }
+            #[test]
+            fn [<test_sub_ $suffix>]() {
+                $crate::vector::tests::test_sub::<$V>();
+            }
+            #[test]
+            fn [<test_add_assign_ $suffix>]() {
+                $crate::vector::tests::test_add_assign::<$V>();
+            }
+            #[test]
+            fn [<test_sub_assign_ $suffix>]() {
+                $crate::vector::tests::test_sub_assign::<$V>();
+            }
+            #[test]
+            fn [<test_axpy_v_ $suffix>]() {
+                $crate::vector::tests::test_axpy_v::<$V>();
+            }
+            #[test]
+            fn [<test_mul_assign_scalar_ $suffix>]() {
+                $crate::vector::tests::test_mul_assign_scalar::<$V>();
+            }
+            #[test]
+            fn [<test_copy_from_view_ $suffix>]() {
+                $crate::vector::tests::test_copy_from_view::<$V>();
+            }
+            #[test]
+            fn [<test_view_squared_norm_ $suffix>]() {
+                $crate::vector::tests::test_view_squared_norm::<$V>();
+            }
+            #[test]
+            fn [<test_view_into_owned_ $suffix>]() {
+                $crate::vector::tests::test_view_into_owned::<$V>();
+            }
+            #[test]
+            fn [<test_view_get_index_ $suffix>]() {
+                $crate::vector::tests::test_view_get_index::<$V>();
+            }
+            #[test]
+            fn [<test_view_mut_axpy_ $suffix>]() {
+                $crate::vector::tests::test_view_mut_axpy::<$V>();
+            }
+            #[test]
+            fn [<test_view_mut_set_index_ $suffix>]() {
+                $crate::vector::tests::test_view_mut_set_index::<$V>();
+            }
+            #[test]
+            fn [<test_view_mut_mul_assign_scalar_ $suffix>]() {
+                $crate::vector::tests::test_view_mut_mul_assign_scalar::<$V>();
+            }
+            #[test]
+            fn [<test_view_mut_copy_from_view_ $suffix>]() {
+                $crate::vector::tests::test_view_mut_copy_from_view::<$V>();
+            }
+        }
+    };
+}
+
+#[cfg(test)]
+#[cfg_attr(not(feature = "cuda"), allow(unused_macros))]
+macro_rules! generate_vector_tests_batched {
+    ($suffix:ident, $V:ty, $ctx2:expr, $ctx3:expr) => {
+        paste::paste! {
+            #[test]
+            fn [<test_batched_len_and_total_len_ $suffix>]() {
+                $crate::vector::tests::test_batched_len_and_total_len::<$V>($ctx3);
+            }
+            #[test]
+            fn [<test_batched_from_vec_ $suffix>]() {
+                $crate::vector::tests::test_batched_from_vec::<$V>($ctx2);
+            }
+            #[test]
+            #[should_panic(expected = "divisible by nbatch")]
+            fn [<test_batched_from_vec_bad_length_ $suffix>]() {
+                $crate::vector::tests::test_batched_from_vec_bad_length::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_from_element_ $suffix>]() {
+                $crate::vector::tests::test_batched_from_element::<$V>($ctx3);
+            }
+            #[test]
+            fn [<test_batched_axpy_ $suffix>]() {
+                $crate::vector::tests::test_batched_axpy::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_add_ $suffix>]() {
+                $crate::vector::tests::test_batched_add::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_norm_max_across_batches_ $suffix>]() {
+                $crate::vector::tests::test_batched_norm_max_across_batches::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_norm_l1_ $suffix>]() {
+                $crate::vector::tests::test_batched_norm_l1::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_squared_norm_ $suffix>]() {
+                $crate::vector::tests::test_batched_squared_norm::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_set_index_ $suffix>]() {
+                $crate::vector::tests::test_batched_set_index::<$V>($ctx3);
+            }
+            #[test]
+            #[should_panic(expected = "not supported for batched")]
+            fn [<test_batched_get_index_panics_ $suffix>]() {
+                $crate::vector::tests::test_batched_get_index_panics::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_fill_ $suffix>]() {
+                $crate::vector::tests::test_batched_fill::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_component_mul_ $suffix>]() {
+                $crate::vector::tests::test_batched_component_mul::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_assign_at_indices_ $suffix>]() {
+                $crate::vector::tests::test_batched_assign_at_indices::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_root_finding_consistent_ $suffix>]() {
+                $crate::vector::tests::test_batched_root_finding_consistent::<$V>($ctx2);
+            }
+            #[test]
+            #[should_panic(expected = "differ across batches")]
+            fn [<test_batched_root_finding_inconsistent_ $suffix>]() {
+                $crate::vector::tests::test_batched_root_finding_inconsistent::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_axpy_broadcast_ $suffix>]() {
+                $crate::vector::tests::test_batched_axpy_broadcast::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_copy_from_broadcast_ $suffix>]() {
+                $crate::vector::tests::test_batched_copy_from_broadcast::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_component_div_ $suffix>]() {
+                $crate::vector::tests::test_batched_component_div::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_component_mul_broadcast_ $suffix>]() {
+                $crate::vector::tests::test_batched_component_mul_broadcast::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_component_div_broadcast_ $suffix>]() {
+                $crate::vector::tests::test_batched_component_div_broadcast::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_add_assign_broadcast_ $suffix>]() {
+                $crate::vector::tests::test_batched_add_assign_broadcast::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_sub_assign_broadcast_ $suffix>]() {
+                $crate::vector::tests::test_batched_sub_assign_broadcast::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_sub_ $suffix>]() {
+                $crate::vector::tests::test_batched_sub::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_sub_assign_ $suffix>]() {
+                $crate::vector::tests::test_batched_sub_assign::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_from_slice_ $suffix>]() {
+                $crate::vector::tests::test_batched_from_slice::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_mul_scalar_ $suffix>]() {
+                $crate::vector::tests::test_batched_mul_scalar::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_div_scalar_ $suffix>]() {
+                $crate::vector::tests::test_batched_div_scalar::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_copy_from_indices_ $suffix>]() {
+                $crate::vector::tests::test_batched_copy_from_indices::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_gather_ $suffix>]() {
+                $crate::vector::tests::test_batched_gather::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_scatter_ $suffix>]() {
+                $crate::vector::tests::test_batched_scatter::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_get_batch_ $suffix>]() {
+                $crate::vector::tests::test_batched_get_batch::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_get_batch_mut_ $suffix>]() {
+                $crate::vector::tests::test_batched_get_batch_mut::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_axpy_v_ $suffix>]() {
+                $crate::vector::tests::test_batched_axpy_v::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_mul_assign_scalar_ $suffix>]() {
+                $crate::vector::tests::test_batched_mul_assign_scalar::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_copy_from_view_ $suffix>]() {
+                $crate::vector::tests::test_batched_copy_from_view::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_axpy_new_ $suffix>]() {
+                $crate::vector::tests::test_batched_axpy_new::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_axpy_new_broadcast_ $suffix>]() {
+                $crate::vector::tests::test_batched_axpy_new_broadcast::<$V>($ctx2);
+            }
+            #[test]
+            #[should_panic(expected = "alpha.len() must equal")]
+            fn [<test_batched_axpy_new_bad_length_ $suffix>]() {
+                $crate::vector::tests::test_batched_axpy_new_bad_length::<$V>($ctx2);
+            }
+            #[test]
+            #[should_panic(expected = "incompatible nbatch")]
+            fn [<test_batched_axpy_incompatible_ $suffix>]() {
+                $crate::vector::tests::test_batched_axpy_incompatible::<$V>($ctx2, $ctx3);
+            }
+            #[test]
+            #[should_panic(expected = "incompatible nbatch")]
+            fn [<test_batched_copy_from_incompatible_ $suffix>]() {
+                $crate::vector::tests::test_batched_copy_from_incompatible::<$V>($ctx2, $ctx3);
+            }
+            #[test]
+            #[should_panic(expected = "incompatible nbatch")]
+            fn [<test_batched_add_assign_incompatible_ $suffix>]() {
+                $crate::vector::tests::test_batched_add_assign_incompatible::<$V>($ctx2, $ctx3);
+            }
+            #[test]
+            #[should_panic(expected = "incompatible nbatch")]
+            fn [<test_batched_component_mul_incompatible_ $suffix>]() {
+                $crate::vector::tests::test_batched_component_mul_incompatible::<$V>($ctx2, $ctx3);
+            }
+
+            // --- Strided view tests (batched, using $ctx2) ---
+            #[test]
+            fn [<test_strided_view_set_index_ $suffix>]() {
+                $crate::vector::tests::test_strided_view_set_index::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
+            }
+            #[test]
+            fn [<test_strided_view_mut_copy_from_ $suffix>]() {
+                $crate::vector::tests::test_strided_view_mut_copy_from::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
+            }
+            #[test]
+            fn [<test_strided_view_mut_axpy_ $suffix>]() {
+                $crate::vector::tests::test_strided_view_mut_axpy::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
+            }
+            #[test]
+            fn [<test_strided_view_mut_mul_assign_scalar_ $suffix>]() {
+                $crate::vector::tests::test_strided_view_mut_mul_assign_scalar::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
+            }
+            #[test]
+            fn [<test_strided_view_mut_add_assign_ $suffix>]() {
+                $crate::vector::tests::test_strided_view_mut_add_assign::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
+            }
+            #[test]
+            fn [<test_strided_view_mut_sub_assign_ $suffix>]() {
+                $crate::vector::tests::test_strided_view_mut_sub_assign::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
+            }
+            #[test]
+            fn [<test_strided_view_add_assign_broadcast_ $suffix>]() {
+                $crate::vector::tests::test_strided_view_add_assign_broadcast::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
+            }
+            #[test]
+            fn [<test_strided_view_add_owned_ $suffix>]() {
+                $crate::vector::tests::test_strided_view_add_owned::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
+            }
+            #[test]
+            fn [<test_strided_view_squared_norm_ $suffix>]() {
+                $crate::vector::tests::test_strided_view_squared_norm::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
+            }
+            #[test]
+            fn [<test_strided_view_into_owned_ $suffix>]() {
+                $crate::vector::tests::test_strided_view_into_owned::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
+            }
+            #[test]
+            fn [<test_strided_view_component_mul_ $suffix>]() {
+                $crate::vector::tests::test_strided_view_component_mul::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
+            }
+            #[test]
+            fn [<test_strided_view_component_div_ $suffix>]() {
+                $crate::vector::tests::test_strided_view_component_div::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
+            }
+            #[test]
+            fn [<test_strided_view_mul_scalar_ $suffix>]() {
+                $crate::vector::tests::test_strided_view_mul_scalar::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
+            }
+            #[test]
+            fn [<test_strided_view_fill_ $suffix>]() {
+                $crate::vector::tests::test_strided_view_fill::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
+            }
+            #[test]
+            fn [<test_strided_view_assign_at_indices_ $suffix>]() {
+                $crate::vector::tests::test_strided_view_assign_at_indices::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
+            }
+            #[test]
+            fn [<test_strided_view_copy_from_indices_ $suffix>]() {
+                $crate::vector::tests::test_strided_view_copy_from_indices::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
+            }
+            #[test]
+            fn [<test_strided_view_gather_ $suffix>]() {
+                $crate::vector::tests::test_strided_view_gather::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
+            }
+            #[test]
+            fn [<test_strided_view_scatter_ $suffix>]() {
+                $crate::vector::tests::test_strided_view_scatter::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
+            }
+        }
+    };
+}
+#[cfg(test)]
+#[cfg_attr(not(feature = "cuda"), allow(unused_imports))]
+pub(crate) use generate_vector_tests_batched;
+#[cfg(test)]
+pub(crate) use generate_vector_tests_nonbatched;
+
+#[cfg(test)]
 pub(crate) mod tests {
     use std::panic::{catch_unwind, AssertUnwindSafe};
 
@@ -1537,419 +1953,3 @@ pub(crate) mod tests {
         assert_eq!(b1.get_index(0), f::<M::V>(110.0));
     }
 }
-
-#[cfg(test)]
-macro_rules! generate_vector_tests_nonbatched {
-    ($suffix:ident, $V:ty) => {
-        paste::paste! {
-            #[test]
-            fn [<test_root_finding_ $suffix>]() {
-                $crate::vector::tests::test_root_finding::<$V>();
-            }
-            #[test]
-            fn [<test_from_slice_ $suffix>]() {
-                $crate::vector::tests::test_from_slice::<$V>();
-            }
-            #[test]
-            fn [<test_mul_scalar_ $suffix>]() {
-                $crate::vector::tests::test_mul_scalar::<$V>();
-            }
-            #[test]
-            fn [<test_div_scalar_ $suffix>]() {
-                $crate::vector::tests::test_div_scalar::<$V>();
-            }
-            #[test]
-            fn [<test_axpy_ $suffix>]() {
-                $crate::vector::tests::test_axpy::<$V>();
-            }
-            #[test]
-            fn [<test_copy_from_indices_ $suffix>]() {
-                $crate::vector::tests::test_copy_from_indices::<$V>();
-            }
-            #[test]
-            fn [<test_gather_ $suffix>]() {
-                $crate::vector::tests::test_gather::<$V>();
-            }
-            #[test]
-            fn [<test_scatter_ $suffix>]() {
-                $crate::vector::tests::test_scatter::<$V>();
-            }
-            #[test]
-            fn [<test_copy_from_via_view_mut_ $suffix>]() {
-                $crate::vector::tests::test_copy_from_via_view_mut::<$V>();
-            }
-            #[test]
-            fn [<test_set_index_ $suffix>]() {
-                $crate::vector::tests::test_set_index::<$V>();
-            }
-            #[test]
-            fn [<test_get_index_ $suffix>]() {
-                $crate::vector::tests::test_get_index::<$V>();
-            }
-            #[test]
-            fn [<test_norm_ $suffix>]() {
-                $crate::vector::tests::test_norm::<$V>();
-            }
-            #[test]
-            fn [<test_norm_l1_ $suffix>]() {
-                $crate::vector::tests::test_norm_l1::<$V>();
-            }
-            #[test]
-            fn [<test_squared_norm_ $suffix>]() {
-                $crate::vector::tests::test_squared_norm::<$V>();
-            }
-            #[test]
-            fn [<test_fill_ $suffix>]() {
-                $crate::vector::tests::test_fill::<$V>();
-            }
-            #[test]
-            fn [<test_from_element_ $suffix>]() {
-                $crate::vector::tests::test_from_element::<$V>();
-            }
-            #[test]
-            fn [<test_copy_from_ $suffix>]() {
-                $crate::vector::tests::test_copy_from::<$V>();
-            }
-            #[test]
-            fn [<test_from_vec_ $suffix>]() {
-                $crate::vector::tests::test_from_vec::<$V>();
-            }
-            #[test]
-            fn [<test_component_mul_assign_ $suffix>]() {
-                $crate::vector::tests::test_component_mul_assign::<$V>();
-            }
-            #[test]
-            fn [<test_component_div_assign_ $suffix>]() {
-                $crate::vector::tests::test_component_div_assign::<$V>();
-            }
-            #[test]
-            fn [<test_assign_at_indices_ $suffix>]() {
-                $crate::vector::tests::test_assign_at_indices::<$V>();
-            }
-            #[test]
-            fn [<test_add_ $suffix>]() {
-                $crate::vector::tests::test_add::<$V>();
-            }
-            #[test]
-            fn [<test_sub_ $suffix>]() {
-                $crate::vector::tests::test_sub::<$V>();
-            }
-            #[test]
-            fn [<test_add_assign_ $suffix>]() {
-                $crate::vector::tests::test_add_assign::<$V>();
-            }
-            #[test]
-            fn [<test_sub_assign_ $suffix>]() {
-                $crate::vector::tests::test_sub_assign::<$V>();
-            }
-            #[test]
-            fn [<test_axpy_v_ $suffix>]() {
-                $crate::vector::tests::test_axpy_v::<$V>();
-            }
-            #[test]
-            fn [<test_mul_assign_scalar_ $suffix>]() {
-                $crate::vector::tests::test_mul_assign_scalar::<$V>();
-            }
-            #[test]
-            fn [<test_copy_from_view_ $suffix>]() {
-                $crate::vector::tests::test_copy_from_view::<$V>();
-            }
-            #[test]
-            fn [<test_view_squared_norm_ $suffix>]() {
-                $crate::vector::tests::test_view_squared_norm::<$V>();
-            }
-            #[test]
-            fn [<test_view_into_owned_ $suffix>]() {
-                $crate::vector::tests::test_view_into_owned::<$V>();
-            }
-            #[test]
-            fn [<test_view_get_index_ $suffix>]() {
-                $crate::vector::tests::test_view_get_index::<$V>();
-            }
-            #[test]
-            fn [<test_view_mut_axpy_ $suffix>]() {
-                $crate::vector::tests::test_view_mut_axpy::<$V>();
-            }
-            #[test]
-            fn [<test_view_mut_set_index_ $suffix>]() {
-                $crate::vector::tests::test_view_mut_set_index::<$V>();
-            }
-            #[test]
-            fn [<test_view_mut_mul_assign_scalar_ $suffix>]() {
-                $crate::vector::tests::test_view_mut_mul_assign_scalar::<$V>();
-            }
-            #[test]
-            fn [<test_view_mut_copy_from_view_ $suffix>]() {
-                $crate::vector::tests::test_view_mut_copy_from_view::<$V>();
-            }
-        }
-    };
-}
-
-#[cfg(test)]
-#[cfg_attr(not(feature = "cuda"), allow(unused_macros))]
-macro_rules! generate_vector_tests_batched {
-    ($suffix:ident, $V:ty, $ctx2:expr, $ctx3:expr) => {
-        paste::paste! {
-            #[test]
-            fn [<test_batched_len_and_total_len_ $suffix>]() {
-                $crate::vector::tests::test_batched_len_and_total_len::<$V>($ctx3);
-            }
-            #[test]
-            fn [<test_batched_from_vec_ $suffix>]() {
-                $crate::vector::tests::test_batched_from_vec::<$V>($ctx2);
-            }
-            #[test]
-            #[should_panic(expected = "divisible by nbatch")]
-            fn [<test_batched_from_vec_bad_length_ $suffix>]() {
-                $crate::vector::tests::test_batched_from_vec_bad_length::<$V>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_from_element_ $suffix>]() {
-                $crate::vector::tests::test_batched_from_element::<$V>($ctx3);
-            }
-            #[test]
-            fn [<test_batched_axpy_ $suffix>]() {
-                $crate::vector::tests::test_batched_axpy::<$V>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_add_ $suffix>]() {
-                $crate::vector::tests::test_batched_add::<$V>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_norm_max_across_batches_ $suffix>]() {
-                $crate::vector::tests::test_batched_norm_max_across_batches::<$V>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_norm_l1_ $suffix>]() {
-                $crate::vector::tests::test_batched_norm_l1::<$V>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_squared_norm_ $suffix>]() {
-                $crate::vector::tests::test_batched_squared_norm::<$V>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_set_index_ $suffix>]() {
-                $crate::vector::tests::test_batched_set_index::<$V>($ctx3);
-            }
-            #[test]
-            #[should_panic(expected = "not supported for batched")]
-            fn [<test_batched_get_index_panics_ $suffix>]() {
-                $crate::vector::tests::test_batched_get_index_panics::<$V>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_fill_ $suffix>]() {
-                $crate::vector::tests::test_batched_fill::<$V>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_component_mul_ $suffix>]() {
-                $crate::vector::tests::test_batched_component_mul::<$V>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_assign_at_indices_ $suffix>]() {
-                $crate::vector::tests::test_batched_assign_at_indices::<$V>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_root_finding_consistent_ $suffix>]() {
-                $crate::vector::tests::test_batched_root_finding_consistent::<$V>($ctx2);
-            }
-            #[test]
-            #[should_panic(expected = "differ across batches")]
-            fn [<test_batched_root_finding_inconsistent_ $suffix>]() {
-                $crate::vector::tests::test_batched_root_finding_inconsistent::<$V>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_axpy_broadcast_ $suffix>]() {
-                $crate::vector::tests::test_batched_axpy_broadcast::<$V>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_copy_from_broadcast_ $suffix>]() {
-                $crate::vector::tests::test_batched_copy_from_broadcast::<$V>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_component_div_ $suffix>]() {
-                $crate::vector::tests::test_batched_component_div::<$V>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_component_mul_broadcast_ $suffix>]() {
-                $crate::vector::tests::test_batched_component_mul_broadcast::<$V>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_component_div_broadcast_ $suffix>]() {
-                $crate::vector::tests::test_batched_component_div_broadcast::<$V>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_add_assign_broadcast_ $suffix>]() {
-                $crate::vector::tests::test_batched_add_assign_broadcast::<$V>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_sub_assign_broadcast_ $suffix>]() {
-                $crate::vector::tests::test_batched_sub_assign_broadcast::<$V>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_sub_ $suffix>]() {
-                $crate::vector::tests::test_batched_sub::<$V>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_sub_assign_ $suffix>]() {
-                $crate::vector::tests::test_batched_sub_assign::<$V>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_from_slice_ $suffix>]() {
-                $crate::vector::tests::test_batched_from_slice::<$V>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_mul_scalar_ $suffix>]() {
-                $crate::vector::tests::test_batched_mul_scalar::<$V>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_div_scalar_ $suffix>]() {
-                $crate::vector::tests::test_batched_div_scalar::<$V>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_copy_from_indices_ $suffix>]() {
-                $crate::vector::tests::test_batched_copy_from_indices::<$V>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_gather_ $suffix>]() {
-                $crate::vector::tests::test_batched_gather::<$V>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_scatter_ $suffix>]() {
-                $crate::vector::tests::test_batched_scatter::<$V>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_get_batch_ $suffix>]() {
-                $crate::vector::tests::test_batched_get_batch::<$V>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_get_batch_mut_ $suffix>]() {
-                $crate::vector::tests::test_batched_get_batch_mut::<$V>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_axpy_v_ $suffix>]() {
-                $crate::vector::tests::test_batched_axpy_v::<$V>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_mul_assign_scalar_ $suffix>]() {
-                $crate::vector::tests::test_batched_mul_assign_scalar::<$V>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_copy_from_view_ $suffix>]() {
-                $crate::vector::tests::test_batched_copy_from_view::<$V>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_axpy_new_ $suffix>]() {
-                $crate::vector::tests::test_batched_axpy_new::<$V>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_axpy_new_broadcast_ $suffix>]() {
-                $crate::vector::tests::test_batched_axpy_new_broadcast::<$V>($ctx2);
-            }
-            #[test]
-            #[should_panic(expected = "alpha.len() must equal")]
-            fn [<test_batched_axpy_new_bad_length_ $suffix>]() {
-                $crate::vector::tests::test_batched_axpy_new_bad_length::<$V>($ctx2);
-            }
-            #[test]
-            #[should_panic(expected = "incompatible nbatch")]
-            fn [<test_batched_axpy_incompatible_ $suffix>]() {
-                $crate::vector::tests::test_batched_axpy_incompatible::<$V>($ctx2, $ctx3);
-            }
-            #[test]
-            #[should_panic(expected = "incompatible nbatch")]
-            fn [<test_batched_copy_from_incompatible_ $suffix>]() {
-                $crate::vector::tests::test_batched_copy_from_incompatible::<$V>($ctx2, $ctx3);
-            }
-            #[test]
-            #[should_panic(expected = "incompatible nbatch")]
-            fn [<test_batched_add_assign_incompatible_ $suffix>]() {
-                $crate::vector::tests::test_batched_add_assign_incompatible::<$V>($ctx2, $ctx3);
-            }
-            #[test]
-            #[should_panic(expected = "incompatible nbatch")]
-            fn [<test_batched_component_mul_incompatible_ $suffix>]() {
-                $crate::vector::tests::test_batched_component_mul_incompatible::<$V>($ctx2, $ctx3);
-            }
-
-            // --- Strided view tests (batched, using $ctx2) ---
-            #[test]
-            fn [<test_strided_view_set_index_ $suffix>]() {
-                $crate::vector::tests::test_strided_view_set_index::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
-            }
-            #[test]
-            fn [<test_strided_view_mut_copy_from_ $suffix>]() {
-                $crate::vector::tests::test_strided_view_mut_copy_from::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
-            }
-            #[test]
-            fn [<test_strided_view_mut_axpy_ $suffix>]() {
-                $crate::vector::tests::test_strided_view_mut_axpy::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
-            }
-            #[test]
-            fn [<test_strided_view_mut_mul_assign_scalar_ $suffix>]() {
-                $crate::vector::tests::test_strided_view_mut_mul_assign_scalar::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
-            }
-            #[test]
-            fn [<test_strided_view_mut_add_assign_ $suffix>]() {
-                $crate::vector::tests::test_strided_view_mut_add_assign::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
-            }
-            #[test]
-            fn [<test_strided_view_mut_sub_assign_ $suffix>]() {
-                $crate::vector::tests::test_strided_view_mut_sub_assign::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
-            }
-            #[test]
-            fn [<test_strided_view_add_assign_broadcast_ $suffix>]() {
-                $crate::vector::tests::test_strided_view_add_assign_broadcast::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
-            }
-            #[test]
-            fn [<test_strided_view_add_owned_ $suffix>]() {
-                $crate::vector::tests::test_strided_view_add_owned::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
-            }
-            #[test]
-            fn [<test_strided_view_squared_norm_ $suffix>]() {
-                $crate::vector::tests::test_strided_view_squared_norm::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
-            }
-            #[test]
-            fn [<test_strided_view_into_owned_ $suffix>]() {
-                $crate::vector::tests::test_strided_view_into_owned::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
-            }
-            #[test]
-            fn [<test_strided_view_component_mul_ $suffix>]() {
-                $crate::vector::tests::test_strided_view_component_mul::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
-            }
-            #[test]
-            fn [<test_strided_view_component_div_ $suffix>]() {
-                $crate::vector::tests::test_strided_view_component_div::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
-            }
-            #[test]
-            fn [<test_strided_view_mul_scalar_ $suffix>]() {
-                $crate::vector::tests::test_strided_view_mul_scalar::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
-            }
-            #[test]
-            fn [<test_strided_view_fill_ $suffix>]() {
-                $crate::vector::tests::test_strided_view_fill::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
-            }
-            #[test]
-            fn [<test_strided_view_assign_at_indices_ $suffix>]() {
-                $crate::vector::tests::test_strided_view_assign_at_indices::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
-            }
-            #[test]
-            fn [<test_strided_view_copy_from_indices_ $suffix>]() {
-                $crate::vector::tests::test_strided_view_copy_from_indices::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
-            }
-            #[test]
-            fn [<test_strided_view_gather_ $suffix>]() {
-                $crate::vector::tests::test_strided_view_gather::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
-            }
-            #[test]
-            fn [<test_strided_view_scatter_ $suffix>]() {
-                $crate::vector::tests::test_strided_view_scatter::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
-            }
-        }
-    };
-}
-#[cfg(test)]
-#[cfg_attr(not(feature = "cuda"), allow(unused_imports))]
-pub(crate) use generate_vector_tests_batched;
-#[cfg(test)]
-pub(crate) use generate_vector_tests_nonbatched;

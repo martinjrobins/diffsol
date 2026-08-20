@@ -86,6 +86,7 @@ macro_rules! impl_div_scalar {
         impl<'a, T: NalgebraScalar> Div<Scale<T>> for $lhs {
             type Output = $out;
             #[inline]
+            #[allow(clippy::suspicious_arithmetic_impl)]
             fn div(self, rhs: Scale<T>) -> Self::Output {
                 let inv_rhs: T = T::one() / rhs.value();
                 Self::Output {
@@ -342,7 +343,24 @@ impl<'a, T: NalgebraScalar> VectorView<'a> for NalgebraVecRef<'a, T> {
         }
     }
     fn squared_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: Self::T) -> Self::T {
-        self.clone().into_owned().squared_norm(y, atol, rtol)
+        self.context
+            .assert_compatible_nbatch(y.context.nbatch(), "squared_norm");
+        self.context
+            .assert_compatible_nbatch(atol.context.nbatch(), "squared_norm");
+        self.data
+            .iter()
+            .enumerate()
+            .map(|(b, x)| {
+                x.iter()
+                    .zip(y.data[b % y.data.len()].iter())
+                    .zip(atol.data[b % atol.data.len()].iter())
+                    .fold(T::zero(), |acc, ((x, y), atol)| {
+                        let term = *x / (y.abs() * rtol + *atol);
+                        acc + term * term
+                    })
+                    / T::from_f64(x.len() as f64).unwrap()
+            })
+            .fold(T::zero(), |a, b| a.max(b))
     }
 }
 
@@ -504,7 +522,7 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
     }
     fn from_vec(vec: Vec<T>, ctx: Self::C) -> Self {
         assert!(
-            vec.len() % ctx.nbatch() == 0,
+            vec.len().is_multiple_of(ctx.nbatch()),
             "vector length must be divisible by nbatch"
         );
         let n = vec.len() / ctx.nbatch();
@@ -517,7 +535,7 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
     }
     fn from_slice(slice: &[T], ctx: Self::C) -> Self {
         assert!(
-            slice.len() % ctx.nbatch() == 0,
+            slice.len().is_multiple_of(ctx.nbatch()),
             "vector length must be divisible by nbatch"
         );
         let n = slice.len() / ctx.nbatch();

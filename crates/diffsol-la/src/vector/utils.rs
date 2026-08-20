@@ -52,10 +52,6 @@ macro_rules! impl_sub_assign {
             fn sub_assign(&mut self, rhs: $rhs) {
                 self.context
                     .assert_compatible_nbatch(rhs.context.nbatch(), "sub_assign");
-                if self.context.nbatch() == 1 {
-                    self.data[0] -= &rhs.data[0];
-                    return;
-                }
                 for (batch, data) in self.data.iter_mut().enumerate() {
                     *data -= &rhs.data[batch % rhs.data.len()];
                 }
@@ -67,10 +63,6 @@ macro_rules! impl_sub_assign {
             fn sub_assign(&mut self, rhs: $rhs) {
                 self.context
                     .assert_compatible_nbatch(rhs.context.nbatch(), "sub_assign");
-                if self.context.nbatch() == 1 {
-                    self.data[0] -= &rhs.data[0];
-                    return;
-                }
                 for (batch, data) in self.data.iter_mut().enumerate() {
                     *data -= &rhs.data[batch % rhs.data.len()];
                 }
@@ -86,10 +78,6 @@ macro_rules! impl_add_assign {
             fn add_assign(&mut self, rhs: $rhs) {
                 self.context
                     .assert_compatible_nbatch(rhs.context.nbatch(), "add_assign");
-                if self.context.nbatch() == 1 {
-                    self.data[0] += &rhs.data[0];
-                    return;
-                }
                 for (batch, data) in self.data.iter_mut().enumerate() {
                     *data += &rhs.data[batch % rhs.data.len()];
                 }
@@ -101,10 +89,6 @@ macro_rules! impl_add_assign {
             fn add_assign(&mut self, rhs: $rhs) {
                 self.context
                     .assert_compatible_nbatch(rhs.context.nbatch(), "add_assign");
-                if self.context.nbatch() == 1 {
-                    self.data[0] += &rhs.data[0];
-                    return;
-                }
                 for (batch, data) in self.data.iter_mut().enumerate() {
                     *data += &rhs.data[batch % rhs.data.len()];
                 }
@@ -121,12 +105,6 @@ macro_rules! impl_sub_lhs {
             fn sub(self, rhs: $rhs) -> Self::Output {
                 self.context
                     .assert_compatible_nbatch(rhs.context.nbatch(), "sub");
-                if self.context.nbatch() == 1 {
-                    return Self::Output {
-                        data: vec![&self.data[0] - &rhs.data[0]],
-                        context: self.context,
-                    };
-                }
                 Self::Output {
                     data: (0..self.data.len())
                         .map(|batch| &self.data[batch] - &rhs.data[batch % rhs.data.len()])
@@ -142,12 +120,6 @@ macro_rules! impl_sub_lhs {
             fn sub(self, rhs: $rhs) -> Self::Output {
                 self.context
                     .assert_compatible_nbatch(rhs.context.nbatch(), "sub");
-                if self.context.nbatch() == 1 {
-                    return Self::Output {
-                        data: vec![&self.data[0] - &rhs.data[0]],
-                        context: self.context,
-                    };
-                }
                 Self::Output {
                     data: (0..self.data.len())
                         .map(|batch| &self.data[batch] - &rhs.data[batch % rhs.data.len()])
@@ -167,12 +139,6 @@ macro_rules! impl_sub_rhs {
             fn sub(self, rhs: $rhs) -> Self::Output {
                 rhs.context
                     .assert_compatible_nbatch(self.context.nbatch(), "sub");
-                if rhs.context.nbatch() == 1 {
-                    return Self::Output {
-                        data: vec![&self.data[0] - &rhs.data[0]],
-                        context: rhs.context,
-                    };
-                }
                 Self::Output {
                     data: (0..rhs.data.len())
                         .map(|batch| &self.data[batch % self.data.len()] - &rhs.data[batch])
@@ -188,12 +154,6 @@ macro_rules! impl_sub_rhs {
             fn sub(self, rhs: $rhs) -> Self::Output {
                 rhs.context
                     .assert_compatible_nbatch(self.context.nbatch(), "sub");
-                if rhs.context.nbatch() == 1 {
-                    return Self::Output {
-                        data: vec![&self.data[0] - &rhs.data[0]],
-                        context: rhs.context,
-                    };
-                }
                 Self::Output {
                     data: (0..rhs.data.len())
                         .map(|batch| &self.data[batch % self.data.len()] - &rhs.data[batch])
@@ -213,12 +173,6 @@ macro_rules! impl_sub_both_ref {
             fn sub(self, rhs: $rhs) -> Self::Output {
                 self.context
                     .assert_compatible_nbatch(rhs.context.nbatch(), "sub");
-                if self.context.nbatch() == 1 {
-                    return Self::Output {
-                        data: vec![&self.data[0] - &rhs.data[0]],
-                        context: self.context.clone(),
-                    };
-                }
                 Self::Output {
                     data: (0..self.data.len())
                         .map(|batch| &self.data[batch] - &rhs.data[batch % rhs.data.len()])
@@ -234,12 +188,6 @@ macro_rules! impl_sub_both_ref {
             fn sub(self, rhs: $rhs) -> Self::Output {
                 self.context
                     .assert_compatible_nbatch(rhs.context.nbatch(), "sub");
-                if self.context.nbatch() == 1 {
-                    return Self::Output {
-                        data: vec![&self.data[0] - &rhs.data[0]],
-                        context: self.context.clone(),
-                    };
-                }
                 Self::Output {
                     data: (0..self.data.len())
                         .map(|batch| &self.data[batch] - &rhs.data[batch % rhs.data.len()])
@@ -259,12 +207,6 @@ macro_rules! impl_add_lhs {
             fn add(self, rhs: $rhs) -> Self::Output {
                 self.context
                     .assert_compatible_nbatch(rhs.context.nbatch(), "add");
-                if self.context.nbatch() == 1 {
-                    return Self::Output {
-                        data: vec![&self.data[0] + &rhs.data[0]],
-                        context: self.context,
-                    };
-                }
                 Self::Output {
                     data: (0..self.data.len())
                         .map(|batch| &self.data[batch] + &rhs.data[batch % rhs.data.len()])
@@ -280,12 +222,6 @@ macro_rules! impl_add_lhs {
             fn add(self, rhs: $rhs) -> Self::Output {
                 self.context
                     .assert_compatible_nbatch(rhs.context.nbatch(), "add");
-                if self.context.nbatch() == 1 {
-                    return Self::Output {
-                        data: vec![&self.data[0] + &rhs.data[0]],
-                        context: self.context,
-                    };
-                }
                 Self::Output {
                     data: (0..self.data.len())
                         .map(|batch| &self.data[batch] + &rhs.data[batch % rhs.data.len()])
@@ -305,12 +241,6 @@ macro_rules! impl_add_rhs {
             fn add(self, rhs: $rhs) -> Self::Output {
                 rhs.context
                     .assert_compatible_nbatch(self.context.nbatch(), "add");
-                if rhs.context.nbatch() == 1 {
-                    return Self::Output {
-                        data: vec![&self.data[0] + &rhs.data[0]],
-                        context: rhs.context,
-                    };
-                }
                 Self::Output {
                     data: (0..rhs.data.len())
                         .map(|batch| &self.data[batch % self.data.len()] + &rhs.data[batch])
@@ -326,12 +256,6 @@ macro_rules! impl_add_rhs {
             fn add(self, rhs: $rhs) -> Self::Output {
                 rhs.context
                     .assert_compatible_nbatch(self.context.nbatch(), "add");
-                if rhs.context.nbatch() == 1 {
-                    return Self::Output {
-                        data: vec![&self.data[0] + &rhs.data[0]],
-                        context: rhs.context,
-                    };
-                }
                 Self::Output {
                     data: (0..rhs.data.len())
                         .map(|batch| &self.data[batch % self.data.len()] + &rhs.data[batch])
@@ -351,12 +275,6 @@ macro_rules! impl_add_both_ref {
             fn add(self, rhs: $rhs) -> Self::Output {
                 self.context
                     .assert_compatible_nbatch(rhs.context.nbatch(), "add");
-                if self.context.nbatch() == 1 {
-                    return Self::Output {
-                        data: vec![&self.data[0] + &rhs.data[0]],
-                        context: self.context.clone(),
-                    };
-                }
                 Self::Output {
                     data: (0..self.data.len())
                         .map(|batch| &self.data[batch] + &rhs.data[batch % rhs.data.len()])
@@ -372,12 +290,6 @@ macro_rules! impl_add_both_ref {
             fn add(self, rhs: $rhs) -> Self::Output {
                 self.context
                     .assert_compatible_nbatch(rhs.context.nbatch(), "add");
-                if self.context.nbatch() == 1 {
-                    return Self::Output {
-                        data: vec![&self.data[0] + &rhs.data[0]],
-                        context: self.context.clone(),
-                    };
-                }
                 Self::Output {
                     data: (0..self.data.len())
                         .map(|batch| &self.data[batch] + &rhs.data[batch % rhs.data.len()])

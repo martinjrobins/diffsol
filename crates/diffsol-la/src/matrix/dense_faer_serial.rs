@@ -6,7 +6,7 @@ use super::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
 use crate::error::LaError;
 use crate::scalar::{IndexType, Scalar, Scale};
 use crate::VectorIndex;
-use crate::{Context, Dense, DenseRef, FaerContext, FaerScalar, FaerVec, Vector, VectorViewMut};
+use crate::{Context, Dense, DenseRef, FaerContext, FaerScalar, FaerVec, Vector};
 use crate::{FaerLU, FaerVecMut, FaerVecRef};
 
 use faer::{get_global_parallelism, unzip, zip, Accum};
@@ -314,9 +314,16 @@ impl<T: FaerScalar> DenseMatrix for FaerMat<T> {
             panic!("Column index cannot be the same");
         }
         for data in &mut self.data {
-            let source = data.get(0..data.nrows(), j).to_owned();
-            zip!(data.get_mut(0..data.nrows(), i), source.as_ref())
-                .for_each(|unzip!(dst, src)| *dst += alpha * *src);
+            let nrows = data.nrows();
+            if i < j {
+                let (left, right) = data.as_mut().split_at_col_mut(j);
+                zip!(left.get_mut(0..nrows, i), right.get(0..nrows, 0))
+                    .for_each(|unzip!(dst, src)| *dst += alpha * *src);
+            } else {
+                let (left, right) = data.as_mut().split_at_col_mut(i);
+                zip!(right.get_mut(0..nrows, 0), left.get(0..nrows, j))
+                    .for_each(|unzip!(dst, src)| *dst += alpha * *src);
+            }
         }
     }
 }
@@ -346,9 +353,10 @@ impl<T: FaerScalar> Matrix for FaerMat<T> {
         let nrows = self.nrows();
         for (batch, matrix) in self.data.iter_mut().enumerate() {
             let other = &other.data[batch % other.data.len()];
-            for (dst, src) in indices.data.iter().enumerate() {
-                matrix[(dst % nrows, dst / nrows)] =
-                    other[(*src % other.nrows(), *src / other.nrows())];
+            for (j, src_indices) in indices.data.chunks(nrows).enumerate() {
+                for (dst, src) in matrix.col_as_slice_mut(j).iter_mut().zip(src_indices) {
+                    *dst = other[(*src % other.nrows(), *src / other.nrows())];
+                }
             }
         }
     }
@@ -369,12 +377,16 @@ impl<T: FaerScalar> Matrix for FaerMat<T> {
     }
 
     fn add_column_to_vector(&self, j: IndexType, v: &mut Self::V) {
-        if self.context.nbatch() == 1 {
-            zip!(v.data[0].as_mut(), self.data[0].get(0..self.nrows(), j))
-                .for_each(|unzip!(v, column)| *v += *column);
-            return;
+        v.context
+            .assert_compatible_nbatch(self.context.nbatch(), "add_column_to_vector");
+        let nrows = self.nrows();
+        for (batch, v) in v.data.iter_mut().enumerate() {
+            zip!(
+                v.as_mut(),
+                self.data[batch % self.data.len()].get(0..nrows, j)
+            )
+            .for_each(|unzip!(v, column)| *v += *column);
         }
-        v.add_assign(&self.column(j));
     }
 
     fn triplet_iter(
@@ -419,18 +431,6 @@ impl<T: FaerScalar> Matrix for FaerMat<T> {
             .assert_compatible_nbatch(self.context.nbatch(), "gemv");
         y.context
             .assert_compatible_nbatch(x.context.nbatch(), "gemv");
-        if y.context.nbatch() == 1 {
-            y.data[0] *= faer::Scale(beta);
-            matmul(
-                y.data[0].as_mut(),
-                Accum::Add,
-                self.data[0].as_ref(),
-                x.data[0].as_ref(),
-                alpha,
-                get_global_parallelism(),
-            );
-            return;
-        }
         for (batch, data) in y.data.iter_mut().enumerate() {
             *data *= faer::Scale(beta);
             matmul(
@@ -489,14 +489,14 @@ impl<T: FaerScalar> Matrix for FaerMat<T> {
         )
     }
     fn set_column(&mut self, j: IndexType, v: &Self::V) {
-        if self.context.nbatch() == 1 {
-            let nrows = self.nrows();
-            self.data[0]
+        self.context
+            .assert_compatible_nbatch(v.context.nbatch(), "set_column");
+        let nrows = self.nrows();
+        for (batch, matrix) in self.data.iter_mut().enumerate() {
+            matrix
                 .get_mut(0..nrows, j)
-                .copy_from(v.data[0].as_ref());
-            return;
+                .copy_from(v.data[batch % v.data.len()].as_ref());
         }
-        self.column_mut(j).copy_from(v);
     }
 
     fn scale_add_and_assign(&mut self, x: &Self, beta: Self::T, y: &Self) {

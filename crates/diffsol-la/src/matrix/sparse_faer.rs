@@ -456,16 +456,7 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
         let nnz = sparsity.row_idx().len();
         Self {
             data: (0..ctx.nbatch())
-                .map(|batch| {
-                    SparseColMat::new(
-                        if batch == 0 {
-                            sparsity.clone()
-                        } else {
-                            sparsity.clone()
-                        },
-                        vec![T::zero(); nnz],
-                    )
-                })
+                .map(|_| SparseColMat::new(sparsity.clone(), vec![T::zero(); nnz]))
                 .collect(),
             context: ctx,
         }
@@ -529,7 +520,7 @@ mod tests {
         use crate::{FaerVec, FaerVecIndex, Vector, VectorIndex};
 
         // CSC data-array order: column-major, ascending row within each column.
-        let triplets_full = vec![
+        let triplets_full = [
             (0, 0, 1.0),
             (2, 0, 2.0),
             (1, 1, 3.0),

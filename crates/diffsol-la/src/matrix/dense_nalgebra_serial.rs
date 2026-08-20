@@ -318,11 +318,15 @@ impl<T: NalgebraScalar> Matrix for NalgebraMat<T> {
     }
 
     fn add_column_to_vector(&self, j: IndexType, v: &mut Self::V) {
-        if self.context.nbatch() == 1 {
-            v.data[0].axpy(T::one(), &self.data[0].column(j), T::one());
-            return;
+        v.context
+            .assert_compatible_nbatch(self.context.nbatch(), "add_column_to_vector");
+        for (batch, v) in v.data.iter_mut().enumerate() {
+            v.axpy(
+                T::one(),
+                &self.data[batch % self.data.len()].column(j),
+                T::one(),
+            );
         }
-        v.add_assign(&self.column(j));
     }
 
     fn triplet_iter(
@@ -383,10 +387,6 @@ impl<T: NalgebraScalar> Matrix for NalgebraMat<T> {
             .assert_compatible_nbatch(self.context.nbatch(), "gemv");
         y.context
             .assert_compatible_nbatch(x.context.nbatch(), "gemv");
-        if y.context.nbatch() == 1 {
-            y.data[0].gemv(alpha, &self.data[0], &x.data[0], beta);
-            return;
-        }
         for (batch, y) in y.data.iter_mut().enumerate() {
             y.gemv(
                 alpha,
@@ -406,12 +406,10 @@ impl<T: NalgebraScalar> Matrix for NalgebraMat<T> {
     fn set_column(&mut self, j: IndexType, v: &Self::V) {
         self.context
             .assert_compatible_nbatch(v.context.nbatch(), "set_column");
-        if self.context.nbatch() == 1 {
-            self.data[0].column_mut(j).copy_from(&v.data[0]);
-            return;
-        }
+        let nrows = self.nrows();
         for (batch, data) in self.data.iter_mut().enumerate() {
-            data.column_mut(j).copy_from(&v.data[batch % v.data.len()]);
+            data.as_mut_slice()[j * nrows..(j + 1) * nrows]
+                .copy_from_slice(v.data[batch % v.data.len()].as_slice());
         }
     }
     fn scale_add_and_assign(&mut self, x: &Self, beta: Self::T, y: &Self) {
@@ -535,8 +533,24 @@ impl<T: NalgebraScalar> DenseMatrix for NalgebraMat<T> {
             panic!("Column index cannot be the same");
         }
         for data in &mut self.data {
-            let source = data.column(j).into_owned();
-            data.column_mut(i).axpy(alpha, &source, T::one());
+            let nrows = data.nrows();
+            if i < j {
+                let (left, right) = data.as_mut_slice().split_at_mut(j * nrows);
+                for (dst, src) in left[i * nrows..(i + 1) * nrows]
+                    .iter_mut()
+                    .zip(&right[..nrows])
+                {
+                    *dst += alpha * *src;
+                }
+            } else {
+                let (left, right) = data.as_mut_slice().split_at_mut(i * nrows);
+                for (dst, src) in right[..nrows]
+                    .iter_mut()
+                    .zip(&left[j * nrows..(j + 1) * nrows])
+                {
+                    *dst += alpha * *src;
+                }
+            }
         }
     }
 }
