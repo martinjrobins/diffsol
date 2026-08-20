@@ -318,14 +318,14 @@ mod tests {
         let (problem, _soln) = head2d_problem::<NalgebraMat<f64>, 10>();
         let u0 = problem.eqn.init().call(0.0);
         let jac = problem.eqn.rhs().jacobian(&u0, 0.0);
-        insta::assert_yaml_snapshot!(jac.inner()[0].to_string());
+        insta::assert_yaml_snapshot!(jac.inner().to_string());
     }
 
     #[test]
     fn test_mass() {
         let (problem, _soln) = head2d_problem::<NalgebraMat<f64>, 10>();
         let mass = problem.eqn.mass().unwrap().matrix(0.0);
-        insta::assert_yaml_snapshot!(mass.inner()[0].to_string());
+        insta::assert_yaml_snapshot!(mass.inner().to_string());
     }
 
     #[cfg(feature = "diffsl-cranelift")]

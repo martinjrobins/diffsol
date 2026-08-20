@@ -1,13 +1,11 @@
 use std::ops::{Add, AddAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 
-use nalgebra::{DMatrix, DMatrixView, DMatrixViewMut};
-
-use crate::{scalar::Scale, Context, IndexType, NalgebraScalar, Scalar, Vector};
+use nalgebra::{Const, DMatrix, Dyn, MatrixView as NaMatrixView, MatrixViewMut as NaMatrixViewMut};
 
 use super::default_solver::DefaultSolver;
 use super::sparsity::{Dense, DenseRef};
-use super::utils::*;
 use crate::error::LaError;
+use crate::{scalar::Scale, Context, NalgebraScalar, Vector};
 use crate::{
     DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut, NalgebraContext, NalgebraLU,
     NalgebraVec, NalgebraVecMut, NalgebraVecRef, VectorIndex,
@@ -15,239 +13,290 @@ use crate::{
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct NalgebraMat<T: NalgebraScalar> {
-    pub(crate) data: Vec<DMatrix<T>>,
+    pub(crate) data: DMatrix<T>,
     pub(crate) context: NalgebraContext,
 }
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct NalgebraMatRef<'a, T: NalgebraScalar> {
-    pub(crate) data: Vec<DMatrixView<'a, T>>,
+    pub(crate) data: NaMatrixView<'a, T, Dyn, Dyn, Const<1>, Dyn>,
     pub(crate) context: NalgebraContext,
+    pub(crate) start: usize,
+    pub(crate) end: usize,
 }
-
 #[derive(Debug, PartialEq)]
 pub struct NalgebraMatMut<'a, T: NalgebraScalar> {
-    pub(crate) data: Vec<DMatrixViewMut<'a, T>>,
+    pub(crate) data: NaMatrixViewMut<'a, T, Dyn, Dyn, Const<1>, Dyn>,
     pub(crate) context: NalgebraContext,
+    pub(crate) start: usize,
+    pub(crate) end: usize,
 }
 
+macro_rules! mat_methods {
+    () => {
+        fn logical_ncols(&self) -> usize {
+            self.data.ncols() / self.context.nbatch()
+        }
+        fn ncols_local(&self) -> usize {
+            self.end - self.start
+        }
+        fn col(&self, b: usize, j: usize) -> usize {
+            (b % self.context.nbatch()) * self.logical_ncols() + self.start + j
+        }
+    };
+}
+impl<T: NalgebraScalar> NalgebraMat<T> {
+    fn logical_ncols(&self) -> usize {
+        self.data.ncols() / self.context.nbatch()
+    }
+    fn col(&self, b: usize, j: usize) -> usize {
+        (b % self.context.nbatch()) * self.logical_ncols() + j
+    }
+}
+impl<T: NalgebraScalar> NalgebraMatRef<'_, T> {
+    mat_methods!();
+}
+impl<T: NalgebraScalar> NalgebraMatMut<'_, T> {
+    mat_methods!();
+}
 impl<T: NalgebraScalar> DefaultSolver for NalgebraMat<T> {
     type LS = NalgebraLU<T>;
 }
 
-impl_matrix_common_ref!(
-    NalgebraMatMut<'a, T>,
-    NalgebraVec<T>,
-    NalgebraContext,
-    Vec<DMatrixViewMut<'a, T>>,
-    NalgebraScalar
-);
-impl_matrix_common_ref!(
+impl<T: NalgebraScalar> MatrixCommon for NalgebraMat<T> {
+    type T = T;
+    type V = NalgebraVec<T>;
+    type C = NalgebraContext;
+    type Inner = DMatrix<T>;
+    fn nrows(&self) -> usize {
+        self.data.nrows()
+    }
+    fn ncols(&self) -> usize {
+        self.logical_ncols()
+    }
+    fn inner(&self) -> &Self::Inner {
+        &self.data
+    }
+}
+macro_rules! common_ref {
+    ($t:ty,$inner:ty) => {
+        impl<'a, T: NalgebraScalar> MatrixCommon for $t {
+            type T = T;
+            type V = NalgebraVec<T>;
+            type C = NalgebraContext;
+            type Inner = $inner;
+            fn nrows(&self) -> usize {
+                self.data.nrows()
+            }
+            fn ncols(&self) -> usize {
+                self.ncols_local()
+            }
+            fn inner(&self) -> &Self::Inner {
+                &self.data
+            }
+        }
+    };
+}
+common_ref!(
     NalgebraMatRef<'a, T>,
-    NalgebraVec<T>,
-    NalgebraContext,
-    Vec<DMatrixView<'a, T>>,
-    NalgebraScalar
+    NaMatrixView<'a, T, Dyn, Dyn, Const<1>, Dyn>
 );
-impl_matrix_common!(
-    NalgebraMat<T>,
-    NalgebraVec<T>,
-    NalgebraContext,
-    Vec<DMatrix<T>>,
-    NalgebraScalar
+common_ref!(
+    NalgebraMatMut<'a, T>,
+    NaMatrixViewMut<'a, T, Dyn, Dyn, Const<1>, Dyn>
 );
 
-macro_rules! impl_mul_scalar {
-    ($mat_type:ty, $out:ty) => {
-        impl<'a, T: NalgebraScalar> Mul<Scale<T>> for $mat_type {
-            type Output = $out;
+macro_rules! binary {
+    ($tr:ident, $fn:ident, $l:ty, $r:ty, $op:tt) => {
+        impl<T: NalgebraScalar> $tr<$r> for $l {
+            type Output = NalgebraMat<T>;
 
-            fn mul(self, rhs: Scale<T>) -> Self::Output {
-                let scale = rhs.value();
-                Self::Output {
-                    data: self.data.iter().map(|data| data * scale).collect(),
-                    context: self.context,
+            fn $fn(self, rhs: $r) -> Self::Output {
+                self.context
+                    .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($fn));
+                let nb = self.context.nbatch().max(rhs.context.nbatch());
+                let nc = self.ncols();
+                let mut data = DMatrix::zeros(self.nrows(), nc * nb);
+                for b in 0..nb {
+                    let mut columns = data.columns_mut(b * nc, nc);
+                    columns.copy_from(&self.data.columns(self.col(b, 0), nc));
+                    columns $op &rhs.data.columns(rhs.col(b, 0), nc);
+                }
+                NalgebraMat {
+                    data,
+                    context: if self.context.nbatch() == nb {
+                        self.context
+                    } else {
+                        rhs.context
+                    },
                 }
             }
         }
     };
 }
-
-macro_rules! impl_mul_assign_scalar {
-    ($mat_type:ty) => {
-        impl<T: NalgebraScalar> MulAssign<Scale<T>> for $mat_type {
-            fn mul_assign(&mut self, rhs: Scale<T>) {
-                let scale = rhs.value();
-                for data in &mut self.data {
-                    *data *= scale;
+binary!(Add, add, NalgebraMat<T>, &NalgebraMat<T>, +=);
+binary!(Add, add, NalgebraMat<T>, &NalgebraMatRef<'_, T>, +=);
+binary!(Add, add, NalgebraMatRef<'_, T>, &NalgebraMat<T>, +=);
+binary!(Sub, sub, NalgebraMat<T>, &NalgebraMat<T>, -=);
+binary!(Sub, sub, NalgebraMat<T>, &NalgebraMatRef<'_, T>, -=);
+binary!(Sub, sub, NalgebraMatRef<'_, T>, &NalgebraMat<T>, -=);
+macro_rules! assign {
+    ($tr:ident, $fn:ident, $l:ty, $r:ty, $op:tt) => {
+        impl<T: NalgebraScalar> $tr<$r> for $l {
+            fn $fn(&mut self, rhs: $r) {
+                self.context
+                    .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($fn));
+                for b in 0..self.context.nbatch() {
+                    let nc = self.ncols();
+                    let mut columns = self.data.columns_mut(self.col(b, 0), nc);
+                    columns $op &rhs.data.columns(rhs.col(b, 0), nc);
                 }
             }
         }
     };
 }
-
-impl_mul_scalar!(NalgebraMatRef<'_, T>, NalgebraMat<T>);
-impl_mul_scalar!(NalgebraMat<T>, NalgebraMat<T>);
-impl_mul_scalar!(&NalgebraMat<T>, NalgebraMat<T>);
-
-impl_mul_assign_scalar!(NalgebraMatMut<'_, T>);
-
-impl_add!(
-    NalgebraMat<T>,
-    &NalgebraMat<T>,
-    NalgebraMat<T>,
-    NalgebraScalar
-);
-impl_add!(
-    NalgebraMat<T>,
-    &NalgebraMatRef<'_, T>,
-    NalgebraMat<T>,
-    NalgebraScalar
-);
-impl_add!(
-    NalgebraMatRef<'_, T>,
-    &NalgebraMat<T>,
-    NalgebraMat<T>,
-    NalgebraScalar
-);
-
-impl_sub!(
-    NalgebraMat<T>,
-    &NalgebraMat<T>,
-    NalgebraMat<T>,
-    NalgebraScalar
-);
-impl_sub!(
-    NalgebraMat<T>,
-    &NalgebraMatRef<'_, T>,
-    NalgebraMat<T>,
-    NalgebraScalar
-);
-impl_sub!(
-    NalgebraMatRef<'_, T>,
-    &NalgebraMat<T>,
-    NalgebraMat<T>,
-    NalgebraScalar
-);
-
-impl_add_assign!(NalgebraMat<T>, &NalgebraMat<T>, NalgebraScalar);
-impl_add_assign!(NalgebraMat<T>, &NalgebraMatRef<'_, T>, NalgebraScalar);
-impl_add_assign!(
+assign!(AddAssign, add_assign, NalgebraMat<T>, &NalgebraMat<T>, +=);
+assign!(AddAssign, add_assign, NalgebraMat<T>, &NalgebraMatRef<'_, T>, +=);
+assign!(
+    AddAssign,
+    add_assign,
     NalgebraMatMut<'_, T>,
     &NalgebraMatRef<'_, T>,
-    NalgebraScalar
+    +=
 );
-impl_add_assign!(
+assign!(
+    AddAssign,
+    add_assign,
     NalgebraMatMut<'_, T>,
     &NalgebraMatMut<'_, T>,
-    NalgebraScalar
+    +=
 );
-
-impl_sub_assign!(NalgebraMat<T>, &NalgebraMat<T>, NalgebraScalar);
-impl_sub_assign!(NalgebraMat<T>, &NalgebraMatRef<'_, T>, NalgebraScalar);
-impl_sub_assign!(
+assign!(SubAssign, sub_assign, NalgebraMat<T>, &NalgebraMat<T>, -=);
+assign!(SubAssign, sub_assign, NalgebraMat<T>, &NalgebraMatRef<'_, T>, -=);
+assign!(
+    SubAssign,
+    sub_assign,
     NalgebraMatMut<'_, T>,
     &NalgebraMatRef<'_, T>,
-    NalgebraScalar
+    -=
 );
-impl_sub_assign!(
+assign!(
+    SubAssign,
+    sub_assign,
     NalgebraMatMut<'_, T>,
     &NalgebraMatMut<'_, T>,
-    NalgebraScalar
+    -=
 );
-
-impl_index!(NalgebraMat<T>, NalgebraScalar);
-impl_index!(NalgebraMatRef<'_, T>, NalgebraScalar);
-impl_index_mut!(NalgebraMat<T>, NalgebraScalar);
+macro_rules! scale {
+    ($t:ty) => {
+        impl<T: NalgebraScalar> Mul<Scale<T>> for $t {
+            type Output = NalgebraMat<T>;
+            fn mul(self, r: Scale<T>) -> Self::Output {
+                let mut out = NalgebraMat::zeros(self.nrows(), self.ncols(), self.context);
+                for b in 0..out.context.nbatch() {
+                    let nc = out.ncols();
+                    out.data
+                        .columns_mut(out.col(b, 0), nc)
+                        .copy_from(&self.data.columns(self.col(b, 0), nc));
+                    out.data.columns_mut(out.col(b, 0), nc).scale_mut(r.value());
+                }
+                out
+            }
+        }
+    };
+}
+scale!(NalgebraMat<T>);
+scale!(&NalgebraMat<T>);
+scale!(NalgebraMatRef<'_, T>);
+impl<T: NalgebraScalar> MulAssign<Scale<T>> for NalgebraMatMut<'_, T> {
+    fn mul_assign(&mut self, r: Scale<T>) {
+        for b in 0..self.context.nbatch() {
+            let nc = self.ncols();
+            self.data
+                .columns_mut(self.col(b, 0), nc)
+                .scale_mut(r.value());
+        }
+    }
+}
+macro_rules! ind {
+    ($t:ty) => {
+        impl<T: NalgebraScalar> Index<(usize, usize)> for $t {
+            type Output = T;
+            fn index(&self, x: (usize, usize)) -> &T {
+                &self.data[(x.0, self.col(0, x.1))]
+            }
+        }
+    };
+}
+ind!(NalgebraMat<T>);
+ind!(NalgebraMatRef<'_, T>);
+impl<T: NalgebraScalar> IndexMut<(usize, usize)> for NalgebraMat<T> {
+    fn index_mut(&mut self, x: (usize, usize)) -> &mut T {
+        let c = self.col(0, x.1);
+        &mut self.data[(x.0, c)]
+    }
+}
 
 impl<'a, T: NalgebraScalar> MatrixView<'a> for NalgebraMatRef<'a, T> {
     type Owned = NalgebraMat<T>;
-
     fn into_owned(self) -> Self::Owned {
-        Self::Owned {
-            data: self
-                .data
-                .into_iter()
-                .map(|data| data.into_owned())
-                .collect(),
-            context: self.context,
+        let mut out = NalgebraMat::zeros(self.nrows(), self.ncols(), self.context);
+        for b in 0..self.context.nbatch() {
+            let nc = self.ncols();
+            out.data
+                .columns_mut(out.col(b, 0), nc)
+                .copy_from(&self.data.columns(self.col(b, 0), nc));
         }
+        out
     }
-
-    fn gemv_v(
-        &self,
-        alpha: Self::T,
-        x: &<Self::V as crate::vector::Vector>::View<'_>,
-        beta: Self::T,
-        y: &mut Self::V,
-    ) {
+    fn gemv_v(&self, a: T, x: &NalgebraVecRef<'_, T>, beta: T, y: &mut NalgebraVec<T>) {
         y.context
             .assert_compatible_nbatch(self.context.nbatch(), "gemv_v");
         y.context
             .assert_compatible_nbatch(x.context.nbatch(), "gemv_v");
-        for (b, y) in y.data.iter_mut().enumerate() {
-            y.gemv(
-                alpha,
-                &self.data[b % self.data.len()],
-                &x.data[b % x.data.len()],
+        for b in 0..y.context.nbatch() {
+            y.data.column_mut(b).gemv(
+                a,
+                &self.data.columns(self.col(b, 0), self.ncols()),
+                &x.data.column(b % x.data.ncols()),
                 beta,
             );
         }
     }
-
-    fn gemv_o(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
-        y.context
-            .assert_compatible_nbatch(self.context.nbatch(), "gemv_o");
-        y.context
-            .assert_compatible_nbatch(x.context.nbatch(), "gemv_o");
-        for (b, y) in y.data.iter_mut().enumerate() {
-            y.gemv(
-                alpha,
-                &self.data[b % self.data.len()],
-                &x.data[b % x.data.len()],
-                beta,
-            );
-        }
+    fn gemv_o(&self, a: T, x: &NalgebraVec<T>, beta: T, y: &mut NalgebraVec<T>) {
+        self.gemv_v(a, &x.as_view(), beta, y)
     }
 }
-
 impl<'a, T: NalgebraScalar> MatrixViewMut<'a> for NalgebraMatMut<'a, T> {
     type Owned = NalgebraMat<T>;
     type View = NalgebraMatRef<'a, T>;
     fn into_owned(self) -> Self::Owned {
-        Self::Owned {
-            data: self
-                .data
-                .into_iter()
-                .map(|data| data.into_owned())
-                .collect(),
+        NalgebraMatRef {
+            data: self.data.as_view(),
             context: self.context,
+            start: self.start,
+            end: self.end,
         }
+        .into_owned()
     }
-    fn gemm_oo(&mut self, alpha: Self::T, a: &Self::Owned, b: &Self::Owned, beta: Self::T) {
-        self.context
-            .assert_compatible_nbatch(a.context.nbatch(), "gemm_oo");
-        self.context
-            .assert_compatible_nbatch(b.context.nbatch(), "gemm_oo");
-        for (batch, data) in self.data.iter_mut().enumerate() {
-            data.gemm(
-                alpha,
-                &a.data[batch % a.data.len()],
-                &b.data[batch % b.data.len()],
-                beta,
-            );
-        }
+    fn gemm_oo(&mut self, a: T, x: &Self::Owned, y: &Self::Owned, beta: T) {
+        self.gemm(a, &x.columns(0, x.ncols()), &y.columns(0, y.ncols()), beta)
     }
-    fn gemm_vo(&mut self, alpha: Self::T, a: &Self::View, b: &Self::Owned, beta: Self::T) {
+    fn gemm_vo(&mut self, a: T, x: &Self::View, y: &Self::Owned, beta: T) {
+        self.gemm(a, x, &y.columns(0, y.ncols()), beta)
+    }
+}
+impl<T: NalgebraScalar> NalgebraMatMut<'_, T> {
+    fn gemm(&mut self, a: T, x: &NalgebraMatRef<'_, T>, y: &NalgebraMatRef<'_, T>, beta: T) {
         self.context
-            .assert_compatible_nbatch(a.context.nbatch(), "gemm_vo");
+            .assert_compatible_nbatch(x.context.nbatch(), "gemm");
         self.context
-            .assert_compatible_nbatch(b.context.nbatch(), "gemm_vo");
-        for (batch, data) in self.data.iter_mut().enumerate() {
-            data.gemm(
-                alpha,
-                &a.data[batch % a.data.len()],
-                &b.data[batch % b.data.len()],
+            .assert_compatible_nbatch(y.context.nbatch(), "gemm");
+        for b in 0..self.context.nbatch() {
+            let nc = self.ncols();
+            self.data.columns_mut(self.col(b, 0), nc).gemm(
+                a,
+                &x.data.columns(x.col(b, 0), x.ncols()),
+                &y.data.columns(y.col(b, 0), y.ncols()),
                 beta,
             );
         }
@@ -257,299 +306,255 @@ impl<'a, T: NalgebraScalar> MatrixViewMut<'a> for NalgebraMatMut<'a, T> {
 impl<T: NalgebraScalar> Matrix for NalgebraMat<T> {
     type Sparsity = Dense<Self>;
     type SparsityRef<'a> = DenseRef<'a, Self>;
-
     fn sparsity(&self) -> Option<Self::SparsityRef<'_>> {
         None
     }
-
     fn context(&self) -> &Self::C {
         &self.context
     }
     fn inner_mut(&mut self) -> &mut Self::Inner {
         &mut self.data
     }
-
     fn set_data_with_indices(
         &mut self,
-        dst_indices: &<Self::V as Vector>::Index,
-        src_indices: &<Self::V as Vector>::Index,
-        data: &Self::V,
+        dst: &crate::vector::nalgebra_serial::NalgebraIndex,
+        src: &crate::vector::nalgebra_serial::NalgebraIndex,
+        data: &NalgebraVec<T>,
     ) {
-        for (dst_i, src_i) in dst_indices.data.iter().zip(src_indices.data.iter()) {
-            let i = dst_i % self.nrows();
-            let j = dst_i / self.nrows();
-            for (batch, matrix) in self.data.iter_mut().enumerate() {
-                matrix[(i, j)] = data.data[batch % data.data.len()][*src_i];
+        for (d, s) in dst.data.iter().zip(src.data.iter()) {
+            let i = d % self.nrows();
+            let j = d / self.nrows();
+            for b in 0..self.context.nbatch() {
+                let c = self.col(b, j);
+                self.data[(i, c)] = data.data[(*s, b % data.data.ncols())]
             }
         }
     }
-
-    fn gather(&mut self, other: &Self, indices: &<Self::V as Vector>::Index) {
-        assert_eq!(indices.len(), self.nrows() * self.ncols());
-        if self.nrows() == 0 || self.ncols() == 0 {
-            return;
-        }
-        self.context
-            .assert_compatible_nbatch(other.context.nbatch(), "gather");
-        for (batch, matrix) in self.data.iter_mut().enumerate() {
-            let other = &other.data[batch % other.data.len()];
-            for (dst, src) in indices.data.iter().enumerate() {
-                matrix[dst] = other[*src];
+    fn gather(&mut self, o: &Self, idx: &crate::vector::nalgebra_serial::NalgebraIndex) {
+        for b in 0..self.context.nbatch() {
+            for (d, s) in idx.data.iter().enumerate() {
+                let i = d % self.nrows();
+                let j = d / self.nrows();
+                let oi = s % o.nrows();
+                let oj = s / o.nrows();
+                let c = self.col(b, j);
+                self.data[(i, c)] = o.data[(oi, o.col(b, oj))]
             }
         }
     }
-
     fn partition_indices_by_zero_diagonal(
         &self,
-    ) -> (<Self::V as Vector>::Index, <Self::V as Vector>::Index) {
-        let mut zero_diagonal_indices = Vec::new();
-        let mut non_zero_diagonal_indices = Vec::new();
+    ) -> (
+        crate::vector::nalgebra_serial::NalgebraIndex,
+        crate::vector::nalgebra_serial::NalgebraIndex,
+    ) {
+        let (mut z, mut nz) = (Vec::new(), Vec::new());
         for i in 0..self.nrows() {
-            if self.data[0][(i, i)].is_zero() {
-                zero_diagonal_indices.push(i);
+            if self.data[(i, self.col(0, i))].is_zero() {
+                z.push(i)
             } else {
-                non_zero_diagonal_indices.push(i);
+                nz.push(i)
             }
         }
         (
-            <Self::V as Vector>::Index::from_vec(zero_diagonal_indices, self.context),
-            <Self::V as Vector>::Index::from_vec(non_zero_diagonal_indices, self.context),
+            crate::vector::nalgebra_serial::NalgebraIndex::from_vec(z, self.context),
+            crate::vector::nalgebra_serial::NalgebraIndex::from_vec(nz, self.context),
         )
     }
-
-    fn add_column_to_vector(&self, j: IndexType, v: &mut Self::V) {
-        v.context
-            .assert_compatible_nbatch(self.context.nbatch(), "add_column_to_vector");
-        for (batch, v) in v.data.iter_mut().enumerate() {
-            v.axpy(
-                T::one(),
-                &self.data[batch % self.data.len()].column(j),
-                T::one(),
-            );
+    fn add_column_to_vector(&self, j: usize, v: &mut NalgebraVec<T>) {
+        for b in 0..v.context.nbatch() {
+            v.data
+                .column_mut(b)
+                .axpy(T::one(), &self.data.column(self.col(b, j)), T::one());
         }
     }
-
     fn triplet_iter(
         &self,
     ) -> (
-        impl Iterator<Item = (IndexType, IndexType)> + '_,
-        impl Iterator<Item = Self::T> + '_,
+        impl Iterator<Item = (usize, usize)> + '_,
+        impl Iterator<Item = T> + '_,
     ) {
-        let n = self.ncols();
-        let m = self.nrows();
-        let indices: Vec<_> = (0..n)
-            .flat_map(move |j| (0..m).map(move |i| (i, j)))
+        let pos: Vec<_> = (0..self.ncols())
+            .flat_map(|j| (0..self.nrows()).map(move |i| (i, j)))
             .collect();
-        let values: Vec<_> = self
-            .data
-            .iter()
-            .flat_map(|data| indices.iter().map(|&(i, j)| data[(i, j)]))
-            .collect();
-        (indices.into_iter(), values.into_iter())
-    }
-
-    fn try_from_triplets(
-        nrows: IndexType,
-        ncols: IndexType,
-        indices: Vec<(IndexType, IndexType)>,
-        values: Vec<Self::T>,
-        ctx: Self::C,
-    ) -> Result<Self, LaError> {
-        assert_eq!(values.len(), indices.len() * ctx.nbatch());
-        let data = values
-            .chunks(indices.len())
-            .map(|values| {
-                let mut m = DMatrix::zeros(nrows, ncols);
-                for ((i, j), v) in indices.iter().zip(values) {
-                    m[(*i, *j)] = *v;
-                }
-                m
+        let val: Vec<_> = (0..self.context.nbatch())
+            .flat_map(|b| {
+                pos.iter()
+                    .map(move |&(i, j)| self.data[(i, self.col(b, j))])
             })
             .collect();
-        Ok(Self { data, context: ctx })
+        (pos.into_iter(), val.into_iter())
     }
-    fn zeros(nrows: IndexType, ncols: IndexType, ctx: Self::C) -> Self {
-        let data = (0..ctx.nbatch())
-            .map(|_| DMatrix::zeros(nrows, ncols))
-            .collect();
-        Self { data, context: ctx }
-    }
-    fn from_diagonal(v: &Self::V) -> Self {
-        let data = v.data.iter().map(DMatrix::from_diagonal).collect();
-        Self {
-            data,
-            context: *v.context(),
-        }
-    }
-
-    fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
-        y.context
-            .assert_compatible_nbatch(self.context.nbatch(), "gemv");
-        y.context
-            .assert_compatible_nbatch(x.context.nbatch(), "gemv");
-        for (batch, y) in y.data.iter_mut().enumerate() {
-            y.gemv(
-                alpha,
-                &self.data[batch % self.data.len()],
-                &x.data[batch % x.data.len()],
-                beta,
-            );
-        }
-    }
-    fn copy_from(&mut self, other: &Self) {
-        self.context
-            .assert_compatible_nbatch(other.context.nbatch(), "copy_from");
-        for (batch, data) in self.data.iter_mut().enumerate() {
-            data.copy_from(&other.data[batch % other.data.len()]);
-        }
-    }
-    fn set_column(&mut self, j: IndexType, v: &Self::V) {
-        self.context
-            .assert_compatible_nbatch(v.context.nbatch(), "set_column");
-        let nrows = self.nrows();
-        for (batch, data) in self.data.iter_mut().enumerate() {
-            data.as_mut_slice()[j * nrows..(j + 1) * nrows]
-                .copy_from_slice(v.data[batch % v.data.len()].as_slice());
-        }
-    }
-    fn scale_add_and_assign(&mut self, x: &Self, beta: Self::T, y: &Self) {
-        self.context
-            .assert_compatible_nbatch(x.context.nbatch(), "scale_add_and_assign");
-        self.context
-            .assert_compatible_nbatch(y.context.nbatch(), "scale_add_and_assign");
-        for (batch, data) in self.data.iter_mut().enumerate() {
-            data.copy_from(&y.data[batch % y.data.len()]);
-            *data *= beta;
-            *data += &x.data[batch % x.data.len()];
-        }
-    }
-    fn new_from_sparsity(
-        nrows: IndexType,
-        ncols: IndexType,
-        _sparsity: Option<Self::Sparsity>,
+    fn try_from_triplets(
+        nr: usize,
+        nc: usize,
+        idx: Vec<(usize, usize)>,
+        v: Vec<T>,
         ctx: Self::C,
-    ) -> Self {
-        Self::zeros(nrows, ncols, ctx)
+    ) -> Result<Self, LaError> {
+        assert_eq!(v.len(), idx.len() * ctx.nbatch());
+        let mut out = Self::zeros(nr, nc, ctx);
+        for b in 0..ctx.nbatch() {
+            for (k, &(i, j)) in idx.iter().enumerate() {
+                let c = out.col(b, j);
+                out.data[(i, c)] = v[b * idx.len() + k]
+            }
+        }
+        Ok(out)
+    }
+    fn zeros(nr: usize, nc: usize, ctx: Self::C) -> Self {
+        Self {
+            data: DMatrix::zeros(nr, nc * ctx.nbatch()),
+            context: ctx,
+        }
+    }
+    fn from_diagonal(v: &NalgebraVec<T>) -> Self {
+        let mut out = Self::zeros(v.len(), v.len(), v.context);
+        for b in 0..v.context.nbatch() {
+            out.data
+                .columns_mut(out.col(b, 0), out.ncols())
+                .set_diagonal(&v.data.column(b));
+        }
+        out
+    }
+    fn gemv(&self, a: T, x: &NalgebraVec<T>, beta: T, y: &mut NalgebraVec<T>) {
+        self.columns(0, self.ncols()).gemv_o(a, x, beta, y)
+    }
+    fn copy_from(&mut self, o: &Self) {
+        for b in 0..self.context.nbatch() {
+            let nc = self.ncols();
+            self.data
+                .columns_mut(self.col(b, 0), nc)
+                .copy_from(&o.data.columns(o.col(b, 0), nc));
+        }
+    }
+    fn set_column(&mut self, j: usize, v: &NalgebraVec<T>) {
+        for b in 0..self.context.nbatch() {
+            self.data
+                .column_mut(self.col(b, j))
+                .copy_from(&v.data.column(b % v.data.ncols()));
+        }
+    }
+    fn scale_add_and_assign(&mut self, x: &Self, b: T, y: &Self) {
+        self.data.copy_from(&x.data);
+        self.data += y.data.clone() * b;
+    }
+    fn new_from_sparsity(nr: usize, nc: usize, _: Option<Self::Sparsity>, ctx: Self::C) -> Self {
+        Self::zeros(nr, nc, ctx)
     }
 }
-
 impl<T: NalgebraScalar> DenseMatrix for NalgebraMat<T> {
     type View<'a> = NalgebraMatRef<'a, T>;
     type ViewMut<'a> = NalgebraMatMut<'a, T>;
-
-    fn gemm(&mut self, alpha: Self::T, a: &Self, b: &Self, beta: Self::T) {
-        self.context
-            .assert_compatible_nbatch(a.context.nbatch(), "gemm");
-        self.context
-            .assert_compatible_nbatch(b.context.nbatch(), "gemm");
-        for (batch, data) in self.data.iter_mut().enumerate() {
-            data.gemm(
-                alpha,
-                &a.data[batch % a.data.len()],
-                &b.data[batch % b.data.len()],
-                beta,
-            );
-        }
+    fn gemm(&mut self, a: T, x: &Self, y: &Self, b: T) {
+        self.columns_mut(0, self.ncols()).gemm_oo(a, x, y, b)
     }
-
-    fn resize_cols(&mut self, ncols: IndexType) {
-        if ncols == self.ncols() {
+    fn resize_cols(&mut self, nc: usize) {
+        let old = self.ncols();
+        if old == nc {
             return;
         }
-        for data in &mut self.data {
-            data.resize_horizontally_mut(ncols, Self::T::zero());
+        let mut d = DMatrix::zeros(self.nrows(), nc * self.context.nbatch());
+        for b in 0..self.context.nbatch() {
+            d.columns_mut(b * nc, old.min(nc))
+                .copy_from(&self.data.columns(self.col(b, 0), old.min(nc)));
+        }
+        self.data = d
+    }
+    fn get_index(&self, i: usize, j: usize) -> T {
+        self.data[(i, self.col(0, j))]
+    }
+    fn from_vec(nr: usize, nc: usize, d: Vec<T>, ctx: Self::C) -> Self {
+        assert_eq!(d.len(), nr * nc * ctx.nbatch());
+        Self {
+            data: DMatrix::from_vec(nr, nc * ctx.nbatch(), d),
+            context: ctx,
         }
     }
-
-    fn get_index(&self, i: IndexType, j: IndexType) -> Self::T {
-        self.data[0][(i, j)]
-    }
-
-    fn from_vec(nrows: IndexType, ncols: IndexType, data: Vec<Self::T>, ctx: Self::C) -> Self {
-        assert_eq!(data.len(), nrows * ncols * ctx.nbatch());
-        let data = data
-            .chunks(nrows * ncols)
-            .map(|data| DMatrix::from_vec(nrows, ncols, data.to_vec()))
-            .collect();
-        Self { data, context: ctx }
-    }
-
-    fn column_mut(&mut self, i: IndexType) -> <Self::V as Vector>::ViewMut<'_> {
-        let data = self
-            .data
-            .iter_mut()
-            .map(|data| data.column_mut(i))
-            .collect();
+    fn column_mut(&mut self, i: usize) -> NalgebraVecMut<'_, T> {
+        if self.context.nbatch() == 1 {
+            return NalgebraVecMut {
+                data: self.data.columns_mut(i, 1),
+                context: self.context,
+            };
+        }
+        let nr = self.nrows();
+        let nc = self.ncols();
+        let nb = self.context.nbatch();
+        let data = unsafe {
+            NaMatrixViewMut::from_slice_with_strides_generic_unchecked(
+                self.data.as_mut_slice(),
+                i * nr,
+                nalgebra::Dyn(nr),
+                nalgebra::Dyn(nb),
+                Const,
+                nalgebra::Dyn(nr * nc),
+            )
+        };
         NalgebraVecMut {
             data,
             context: self.context,
         }
     }
-
-    fn columns_mut(&mut self, start: IndexType, end: IndexType) -> Self::ViewMut<'_> {
-        let data = self
-            .data
-            .iter_mut()
-            .map(|data| data.columns_mut(start, end - start))
-            .collect();
+    fn columns_mut(&mut self, s: usize, e: usize) -> Self::ViewMut<'_> {
         NalgebraMatMut {
-            data,
+            data: self.data.as_view_mut(),
             context: self.context,
+            start: s,
+            end: e,
         }
     }
-
-    fn set_index(&mut self, i: IndexType, j: IndexType, value: Self::T) {
-        for data in &mut self.data {
-            data[(i, j)] = value;
+    fn set_index(&mut self, i: usize, j: usize, v: T) {
+        for b in 0..self.context.nbatch() {
+            self.data.column_mut(self.col(b, j)).row_mut(i).fill(v);
         }
     }
-
-    fn column(&self, i: IndexType) -> <Self::V as Vector>::View<'_> {
-        let data = self.data.iter().map(|data| data.column(i)).collect();
+    fn column(&self, i: usize) -> NalgebraVecRef<'_, T> {
+        if self.context.nbatch() == 1 {
+            return NalgebraVecRef {
+                data: self.data.columns(i, 1),
+                context: self.context,
+            };
+        }
+        let nr = self.nrows();
+        let nc = self.ncols();
+        let nb = self.context.nbatch();
+        let data = unsafe {
+            NaMatrixView::from_slice_with_strides_generic_unchecked(
+                self.data.as_slice(),
+                i * nr,
+                nalgebra::Dyn(nr),
+                nalgebra::Dyn(nb),
+                Const,
+                nalgebra::Dyn(nr * nc),
+            )
+        };
         NalgebraVecRef {
             data,
             context: self.context,
         }
     }
-    fn columns(&self, start: IndexType, end: IndexType) -> Self::View<'_> {
-        let data = self
-            .data
-            .iter()
-            .map(|data| data.columns(start, end - start))
-            .collect();
+    fn columns(&self, s: usize, e: usize) -> Self::View<'_> {
         NalgebraMatRef {
-            data,
+            data: self.data.as_view(),
             context: self.context,
+            start: s,
+            end: e,
         }
     }
-    fn column_axpy(&mut self, alpha: Self::T, j: IndexType, i: IndexType) {
-        if i > self.ncols() {
-            panic!("Column index out of bounds");
-        }
-        if j > self.ncols() {
-            panic!("Column index out of bounds");
-        }
-        if i == j {
-            panic!("Column index cannot be the same");
-        }
-        for data in &mut self.data {
-            let nrows = data.nrows();
-            if i < j {
-                let (left, right) = data.as_mut_slice().split_at_mut(j * nrows);
-                for (dst, src) in left[i * nrows..(i + 1) * nrows]
-                    .iter_mut()
-                    .zip(&right[..nrows])
-                {
-                    *dst += alpha * *src;
-                }
+    fn column_axpy(&mut self, a: T, j: usize, i: usize) {
+        assert_ne!(i, j, "Column index cannot be the same");
+        assert!(i < self.ncols(), "Column index out of bounds");
+        assert!(j < self.ncols(), "Column index out of bounds");
+        for b in 0..self.context.nbatch() {
+            let src = self.col(b, j);
+            let dst = self.col(b, i);
+            if src < dst {
+                let (src, mut dst) = self.data.columns_range_pair_mut(src..src + 1, dst..dst + 1);
+                dst.column_mut(0).axpy(a, &src.column(0), T::one());
             } else {
-                let (left, right) = data.as_mut_slice().split_at_mut(i * nrows);
-                for (dst, src) in right[..nrows]
-                    .iter_mut()
-                    .zip(&left[j * nrows..(j + 1) * nrows])
-                {
-                    *dst += alpha * *src;
-                }
+                let (mut dst, src) = self.data.columns_range_pair_mut(dst..dst + 1, src..src + 1);
+                dst.column_mut(0).axpy(a, &src.column(0), T::one());
             }
         }
     }

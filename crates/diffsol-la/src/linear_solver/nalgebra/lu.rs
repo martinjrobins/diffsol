@@ -35,8 +35,15 @@ impl<T: NalgebraScalar> LinearSolver<NalgebraMat<T>> for LU<T> {
         state
             .context
             .assert_compatible_nbatch(self.lu.len(), "lu_solve");
-        for (batch, state) in state.data.iter_mut().enumerate() {
-            if !self.lu[batch % self.lu.len()].solve_mut(state) {
+        if state.context.nbatch() == 1 {
+            if self.lu[0].solve_mut(&mut state.data) {
+                return Ok(());
+            }
+            return Err(linear_solver_error!(LuSolveFailed));
+        }
+        for batch in 0..state.context.nbatch() {
+            let mut state_batch = state.data.column_mut(batch);
+            if !self.lu[batch % self.lu.len()].solve_mut(&mut state_batch) {
                 return Err(linear_solver_error!(LuSolveFailed));
             }
         }
@@ -51,11 +58,13 @@ impl<T: NalgebraScalar> LinearSolver<NalgebraMat<T>> for LU<T> {
     ) {
         let matrix = self.matrix.as_mut().expect("Matrix not set");
         op.matrix_inplace(matrix);
-        self.lu = matrix
-            .data
-            .iter()
-            .cloned()
-            .map(|matrix| matrix.lu())
+        if matrix.context.nbatch() == 1 {
+            self.lu = vec![matrix.data.clone().lu()];
+            return;
+        }
+        let ncols = matrix.data.ncols() / matrix.context.nbatch();
+        self.lu = (0..matrix.context.nbatch())
+            .map(|batch| matrix.data.columns(batch * ncols, ncols).into_owned().lu())
             .collect();
     }
 
