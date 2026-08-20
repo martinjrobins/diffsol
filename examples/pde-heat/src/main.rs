@@ -46,8 +46,7 @@ fn main() {
 
     let x = (1..=20).map(|i| i as f64 / 21.0).collect::<Vec<f64>>();
     let y = times;
-    let z = sol
-        .inner()
+    let z = sol.inner()[0]
         .col_iter()
         .map(|v| v.iter().copied().collect::<Vec<f64>>())
         .collect::<Vec<Vec<f64>>>();

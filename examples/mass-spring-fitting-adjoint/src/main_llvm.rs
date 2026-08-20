@@ -44,7 +44,7 @@ impl CostFunction for Problem {
         let loss = ys
             .inner()
             .column_iter()
-            .zip(self.ys_data.inner().column_iter())
+            .zip(self.ys_data.inner()[0].column_iter())
             .map(|(a, b)| (a - b).norm_squared())
             .sum::<f64>();
         Ok(loss)

@@ -1,20 +1,25 @@
 use faer::{get_global_parallelism, Par};
 
-use crate::LaError;
-
 /// Context for the faer backend.
-///
-/// Carries the faer parallelism configuration.  Batching (`nbatch > 1`) is
-/// not supported by this backend; use the CUDA backend instead.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct FaerContext {
     pub par: Par,
+    nbatch: usize,
 }
 
 impl FaerContext {
     pub fn new() -> Self {
         Self {
             par: get_global_parallelism(),
+            nbatch: 1,
+        }
+    }
+
+    pub fn with_nbatch(nbatch: usize) -> Self {
+        assert!(nbatch > 0, "nbatch must be > 0");
+        Self {
+            par: get_global_parallelism(),
+            nbatch,
         }
     }
 }
@@ -26,14 +31,15 @@ impl Default for FaerContext {
 }
 
 impl crate::Context for FaerContext {
-    fn clone_with_nbatch(&self, nbatch: usize) -> Result<Self, LaError> {
-        if nbatch != 1 {
-            Err(LaError::Other(
-                "FaerContext does not support batching (nbatch > 1). Use the CUDA backend instead."
-                    .to_string(),
-            ))
-        } else {
-            Ok(Self { par: self.par })
-        }
+    fn nbatch(&self) -> usize {
+        self.nbatch
+    }
+
+    fn clone_with_nbatch(&self, nbatch: usize) -> Result<Self, crate::LaError> {
+        assert!(nbatch > 0, "nbatch must be > 0");
+        Ok(Self {
+            par: self.par,
+            nbatch,
+        })
     }
 }

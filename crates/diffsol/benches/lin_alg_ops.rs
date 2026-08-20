@@ -1,3 +1,5 @@
+use std::hint::black_box;
+
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 #[cfg(feature = "cuda")]
 use diffsol::{CudaMat, CudaVec};
@@ -248,9 +250,7 @@ where
             let ctx = V::C::default();
             let y = V::from_element(ns, 1.0, ctx.clone());
             let x = V::from_element(ns, 2.0, ctx.clone());
-            b.iter(|| {
-                let _ = &y + &x;
-            });
+            b.iter(|| black_box(&y + &x));
         });
     }
     group.finish();
@@ -268,9 +268,7 @@ where
             let ctx = V::C::default();
             let y = V::from_element(ns, 1.0, ctx.clone());
             let x = V::from_element(ns, 2.0, ctx.clone());
-            b.iter(|| {
-                let _ = &y - &x;
-            });
+            b.iter(|| black_box(&y - &x));
         });
     }
     group.finish();
@@ -299,9 +297,7 @@ where
         group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
             let ctx = M::C::default();
             let mat = M::zeros(ns, ns + 1, ctx);
-            b.iter(|| {
-                let _ = mat.column(0);
-            });
+            b.iter(|| black_box(mat.column(0)));
         });
     }
     group.finish();
@@ -319,9 +315,7 @@ where
         group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
             let ctx = M::C::default();
             let mat = M::zeros(ns, ns + 1, ctx);
-            b.iter(|| {
-                let _ = mat.columns(0, 1);
-            });
+            b.iter(|| black_box(mat.columns(0, 1)));
         });
     }
     group.finish();
@@ -358,9 +352,7 @@ where
         group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
             let ctx = V::C::default();
             let y = V::from_element(ns, 1.0, ctx.clone());
-            b.iter(|| {
-                let _ = &y * Scale(2.0);
-            });
+            b.iter(|| black_box(&y * Scale(2.0)));
         });
     }
     group.finish();
@@ -376,9 +368,7 @@ where
         group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
             let ctx = V::C::default();
             let y = V::from_element(ns, 1.0, ctx.clone());
-            b.iter(|| {
-                let _ = y.clone() / Scale(2.0);
-            });
+            b.iter(|| black_box(y.clone() / Scale(2.0)));
         });
     }
     group.finish();
@@ -485,9 +475,7 @@ where
         group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
             let ctx = V::C::default();
             let v = V::from_element(ns, 1.0, ctx.clone());
-            b.iter(|| {
-                let _ = v.get_index(0);
-            });
+            b.iter(|| black_box(v.get_index(0)));
         });
     }
     group.finish();
@@ -545,9 +533,7 @@ where
         group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
             let ctx = V::C::default();
             let v = V::from_element(ns, 1.0, ctx.clone());
-            b.iter(|| {
-                let _ = v.clone();
-            });
+            b.iter(|| black_box(v.clone()));
         });
     }
     group.finish();
@@ -563,9 +549,7 @@ where
         group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
             let ctx = V::C::default();
             let v = V::from_element(ns, 1.0, ctx.clone());
-            b.iter(|| {
-                let _ = v.as_view();
-            });
+            b.iter(|| black_box(v.as_view()));
         });
     }
     group.finish();
@@ -582,7 +566,8 @@ where
             let ctx = V::C::default();
             let mut v = V::from_element(ns, 1.0, ctx.clone());
             b.iter(|| {
-                let _ = v.as_view_mut();
+                let view = v.as_view_mut();
+                black_box(view);
             });
         });
     }
@@ -623,9 +608,7 @@ where
         group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
             let ctx = V::C::default();
             let v = V::from_element(ns, 1.0, ctx.clone());
-            b.iter(|| {
-                let _ = v.as_slice();
-            });
+            b.iter(|| black_box(v.as_slice()));
         });
     }
     group.finish();
@@ -642,7 +625,8 @@ where
             let ctx = V::C::default();
             let mut v = V::from_element(ns, 1.0, ctx.clone());
             b.iter(|| {
-                let _ = v.as_mut_slice();
+                let slice = v.as_mut_slice();
+                black_box(slice);
             });
         });
     }

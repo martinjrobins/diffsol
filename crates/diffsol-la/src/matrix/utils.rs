@@ -7,10 +7,10 @@ macro_rules! impl_matrix_common {
             type Inner = $in;
 
             fn nrows(&self) -> IndexType {
-                self.data.nrows()
+                self.data[0].nrows()
             }
             fn ncols(&self) -> IndexType {
-                self.data.ncols()
+                self.data[0].ncols()
             }
             fn inner(&self) -> &Self::Inner {
                 &self.data
@@ -25,10 +25,10 @@ macro_rules! impl_matrix_common {
             type Inner = $in;
 
             fn nrows(&self) -> IndexType {
-                self.data.nrows()
+                self.data[0].nrows()
             }
             fn ncols(&self) -> IndexType {
-                self.data.ncols()
+                self.data[0].ncols()
             }
             fn inner(&self) -> &Self::Inner {
                 &self.data
@@ -48,10 +48,10 @@ macro_rules! impl_matrix_common_ref {
             type Inner = $in;
 
             fn nrows(&self) -> IndexType {
-                self.data.nrows()
+                self.data[0].nrows()
             }
             fn ncols(&self) -> IndexType {
-                self.data.ncols()
+                self.data[0].ncols()
             }
             fn inner(&self) -> &Self::Inner {
                 &self.data
@@ -66,10 +66,10 @@ macro_rules! impl_matrix_common_ref {
             type Inner = $in;
 
             fn nrows(&self) -> IndexType {
-                self.data.nrows()
+                self.data[0].nrows()
             }
             fn ncols(&self) -> IndexType {
-                self.data.ncols()
+                self.data[0].ncols()
             }
             fn inner(&self) -> &Self::Inner {
                 &self.data
@@ -86,8 +86,15 @@ macro_rules! impl_add {
             type Output = $out;
 
             fn add(self, rhs: $rhs) -> Self::Output {
+                self.context
+                    .assert_compatible_nbatch(rhs.context.nbatch(), "add");
                 Self::Output {
-                    data: self.data + &rhs.data,
+                    data: self
+                        .data
+                        .iter()
+                        .enumerate()
+                        .map(|(b, data)| data + &rhs.data[b % rhs.data.len()])
+                        .collect(),
                     context: self.context,
                 }
             }
@@ -98,8 +105,15 @@ macro_rules! impl_add {
             type Output = $out;
 
             fn add(self, rhs: $rhs) -> Self::Output {
+                self.context
+                    .assert_compatible_nbatch(rhs.context.nbatch(), "add");
                 Self::Output {
-                    data: self.data + &rhs.data,
+                    data: self
+                        .data
+                        .iter()
+                        .enumerate()
+                        .map(|(b, data)| data + &rhs.data[b % rhs.data.len()])
+                        .collect(),
                     context: self.context,
                 }
             }
@@ -114,8 +128,15 @@ macro_rules! impl_sub {
             type Output = $out;
 
             fn sub(self, rhs: $rhs) -> Self::Output {
+                self.context
+                    .assert_compatible_nbatch(rhs.context.nbatch(), "sub");
                 Self::Output {
-                    data: self.data - &rhs.data,
+                    data: self
+                        .data
+                        .iter()
+                        .enumerate()
+                        .map(|(b, data)| data - &rhs.data[b % rhs.data.len()])
+                        .collect(),
                     context: self.context,
                 }
             }
@@ -126,8 +147,15 @@ macro_rules! impl_sub {
             type Output = $out;
 
             fn sub(self, rhs: $rhs) -> Self::Output {
+                self.context
+                    .assert_compatible_nbatch(rhs.context.nbatch(), "sub");
                 Self::Output {
-                    data: self.data - &rhs.data,
+                    data: self
+                        .data
+                        .iter()
+                        .enumerate()
+                        .map(|(b, data)| data - &rhs.data[b % rhs.data.len()])
+                        .collect(),
                     context: self.context,
                 }
             }
@@ -140,14 +168,22 @@ macro_rules! impl_add_assign {
     ($lhs:ty, $rhs:ty) => {
         impl<T: Scalar> AddAssign<$rhs> for $lhs {
             fn add_assign(&mut self, rhs: $rhs) {
-                self.data += &rhs.data;
+                self.context
+                    .assert_compatible_nbatch(rhs.context.nbatch(), "add_assign");
+                for (b, data) in self.data.iter_mut().enumerate() {
+                    *data += &rhs.data[b % rhs.data.len()];
+                }
             }
         }
     };
     ($lhs:ty, $rhs:ty, $bound:path) => {
         impl<T: Scalar + $bound> AddAssign<$rhs> for $lhs {
             fn add_assign(&mut self, rhs: $rhs) {
-                self.data += &rhs.data;
+                self.context
+                    .assert_compatible_nbatch(rhs.context.nbatch(), "add_assign");
+                for (b, data) in self.data.iter_mut().enumerate() {
+                    *data += &rhs.data[b % rhs.data.len()];
+                }
             }
         }
     };
@@ -158,14 +194,22 @@ macro_rules! impl_sub_assign {
     ($lhs:ty, $rhs:ty) => {
         impl<T: Scalar> SubAssign<$rhs> for $lhs {
             fn sub_assign(&mut self, rhs: $rhs) {
-                self.data -= &rhs.data;
+                self.context
+                    .assert_compatible_nbatch(rhs.context.nbatch(), "sub_assign");
+                for (b, data) in self.data.iter_mut().enumerate() {
+                    *data -= &rhs.data[b % rhs.data.len()];
+                }
             }
         }
     };
     ($lhs:ty, $rhs:ty, $bound:path) => {
         impl<T: Scalar + $bound> SubAssign<$rhs> for $lhs {
             fn sub_assign(&mut self, rhs: $rhs) {
-                self.data -= &rhs.data;
+                self.context
+                    .assert_compatible_nbatch(rhs.context.nbatch(), "sub_assign");
+                for (b, data) in self.data.iter_mut().enumerate() {
+                    *data -= &rhs.data[b % rhs.data.len()];
+                }
             }
         }
     };
@@ -177,7 +221,7 @@ macro_rules! impl_index {
         impl<T: Scalar> Index<(IndexType, IndexType)> for $lhs {
             type Output = T;
             fn index(&self, index: (IndexType, IndexType)) -> &T {
-                &self.data[index]
+                &self.data[0][index]
             }
         }
     };
@@ -185,7 +229,7 @@ macro_rules! impl_index {
         impl<T: Scalar + $bound> Index<(IndexType, IndexType)> for $lhs {
             type Output = T;
             fn index(&self, index: (IndexType, IndexType)) -> &T {
-                &self.data[index]
+                &self.data[0][index]
             }
         }
     };
@@ -196,14 +240,14 @@ macro_rules! impl_index_mut {
     ($lhs:ty) => {
         impl<T: Scalar> IndexMut<(IndexType, IndexType)> for $lhs {
             fn index_mut(&mut self, index: (IndexType, IndexType)) -> &mut T {
-                &mut self.data[index]
+                &mut self.data[0][index]
             }
         }
     };
     ($lhs:ty, $bound:path) => {
         impl<T: Scalar + $bound> IndexMut<(IndexType, IndexType)> for $lhs {
             fn index_mut(&mut self, index: (IndexType, IndexType)) -> &mut T {
-                &mut self.data[index]
+                &mut self.data[0][index]
             }
         }
     };

@@ -56,8 +56,8 @@ fn main() {
     }
 
     let time = soln.ts.clone();
-    let q_c: Vec<_> = soln.ys.inner().row(0).into_iter().copied().collect();
-    let q_p1: Vec<_> = soln.ys.inner().row(1).into_iter().copied().collect();
+    let q_c: Vec<_> = soln.ys.inner()[0].row(0).into_iter().copied().collect();
+    let q_p1: Vec<_> = soln.ys.inner()[0].row(1).into_iter().copied().collect();
 
     let mut plot = Plot::new();
     plot.add_trace(

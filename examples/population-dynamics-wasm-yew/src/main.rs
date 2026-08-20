@@ -49,8 +49,8 @@ fn App() -> Html {
         solver.solve(40.0).unwrap()
     };
 
-    let prey: Vec<_> = ys.inner().row(0).into_iter().copied().collect();
-    let predator: Vec<_> = ys.inner().row(1).into_iter().copied().collect();
+    let prey: Vec<_> = ys.inner()[0].row(0).into_iter().copied().collect();
+    let predator: Vec<_> = ys.inner()[0].row(1).into_iter().copied().collect();
     let time: Vec<_> = ts.into_iter().collect();
 
     let prey = Scatter::new(time.clone(), prey)

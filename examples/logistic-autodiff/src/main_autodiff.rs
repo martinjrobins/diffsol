@@ -36,7 +36,7 @@ pub fn main() {
         .unwrap();
 
     let sg = final_state.as_ref();
-    let adjoint_grad = sg.sg[0].inner().as_slice();
+    let adjoint_grad = sg.sg[0].inner()[0].as_slice();
     println!("\nGradient of y({}) w.r.t. parameters (adjoint):", t_final);
     println!("  dy/dr  = {:.6}", adjoint_grad[0]);
     println!("  dy/dk  = {:.6}", adjoint_grad[1]);

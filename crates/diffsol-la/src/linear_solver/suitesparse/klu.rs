@@ -21,37 +21,42 @@ use suitesparse_sys::{
 type KluIndextype = i64;
 
 use crate::{
-    error::LaError, linear_solver::LinearSolver, linear_solver_error, vector::Vector,
+    error::LaError, linear_solver::LinearSolver, linear_solver_error, vector::Vector, Context,
     FaerSparseMat, FaerVec, LinearOp, Matrix,
 };
 
 trait MatrixKLU: Matrix<T = f64> {
     fn column_pointers(&self) -> *const KluIndextype;
     fn row_indices(&self) -> *const KluIndextype;
-    fn values_ptr(&mut self) -> *mut f64;
+    fn values_ptr(&mut self, batch: usize) -> *mut f64;
+    fn nbatches(&self) -> usize;
 }
 
 impl MatrixKLU for FaerSparseMat<f64> {
     fn column_pointers(&self) -> *const KluIndextype {
-        self.data.symbolic().col_ptr().as_ptr() as *const KluIndextype
+        self.data[0].symbolic().col_ptr().as_ptr() as *const KluIndextype
     }
 
     fn row_indices(&self) -> *const KluIndextype {
-        self.data.symbolic().row_idx().as_ptr() as *const KluIndextype
+        self.data[0].symbolic().row_idx().as_ptr() as *const KluIndextype
     }
 
-    fn values_ptr(&mut self) -> *mut f64 {
-        self.data.val_mut().as_mut_ptr()
+    fn values_ptr(&mut self, batch: usize) -> *mut f64 {
+        self.data[batch].val_mut().as_mut_ptr()
+    }
+
+    fn nbatches(&self) -> usize {
+        self.data.len()
     }
 }
 
 trait VectorKLU: Vector {
-    fn values_mut_ptr(&mut self) -> *mut f64;
+    fn values_mut_ptr(&mut self, batch: usize) -> *mut f64;
 }
 
 impl VectorKLU for FaerVec<f64> {
-    fn values_mut_ptr(&mut self) -> *mut f64 {
-        self.data.as_mut().as_ptr_mut()
+    fn values_mut_ptr(&mut self, batch: usize) -> *mut f64 {
+        self.data[batch].as_ptr_mut()
     }
 }
 
@@ -150,7 +155,7 @@ where
 {
     klu_common: RefCell<KluCommon>,
     klu_symbolic: Option<KluSymbolic>,
-    klu_numeric: Option<KluNumeric>,
+    klu_numeric: Vec<KluNumeric>,
     matrix: Option<M>,
 }
 
@@ -163,7 +168,7 @@ where
         let klu_common = RefCell::new(klu_common);
         Self {
             klu_common,
-            klu_numeric: None,
+            klu_numeric: Vec::new(),
             klu_symbolic: None,
             matrix: None,
         }
@@ -178,39 +183,41 @@ where
     fn set_linearisation<C: LinearOp<T = M::T, V = M::V, M = M, C = M::C>>(&mut self, op: &C) {
         let matrix = self.matrix.as_mut().expect("Matrix not set");
         op.matrix_inplace(matrix);
+        let symbolic = self.klu_symbolic.as_mut().expect("Symbolic not set");
         let col_ptrs = matrix.column_pointers() as *mut KluIndextype;
         let row_indices = matrix.row_indices() as *mut KluIndextype;
-        let values = matrix.values_ptr();
-        self.klu_numeric = Some(
-            KluNumeric::try_from_raw(
-                self.klu_symbolic.as_mut().expect("Symbolic not set"),
-                col_ptrs,
-                row_indices,
-                values,
-            )
-            .expect("Failed to factorise matrix"),
-        );
+        self.klu_numeric = (0..matrix.nbatches())
+            .map(|batch| {
+                KluNumeric::try_from_raw(symbolic, col_ptrs, row_indices, matrix.values_ptr(batch))
+                    .expect("Failed to factorise matrix")
+            })
+            .collect();
     }
 
     fn solve_in_place(&self, x: &mut M::V) -> Result<(), LaError> {
-        if self.klu_numeric.is_none() {
+        if self.klu_numeric.is_empty() {
             return Err(linear_solver_error!(LuNotInitialized));
         }
-        let klu_numeric = self.klu_numeric.as_ref().unwrap();
         let klu_symbolic = self.klu_symbolic.as_ref().unwrap();
         let n = self.matrix.as_ref().unwrap().nrows() as KluIndextype;
         let mut klu_common = self.klu_common.borrow_mut();
-        let x_ptr = x.values_mut_ptr();
-        unsafe {
-            klu_solve(
-                klu_symbolic.inner,
-                klu_numeric.inner,
-                n,
-                1,
-                x_ptr,
-                klu_common.as_mut(),
-            )
-        };
+        let x_nbatch = x.context().nbatch();
+        assert!(
+            x_nbatch == 1 || x_nbatch == self.klu_numeric.len(),
+            "incompatible nbatch"
+        );
+        for batch in 0..x_nbatch {
+            unsafe {
+                klu_solve(
+                    klu_symbolic.inner,
+                    self.klu_numeric[batch % self.klu_numeric.len()].inner,
+                    n,
+                    1,
+                    x.values_mut_ptr(batch),
+                    klu_common.as_mut(),
+                )
+            };
+        }
         Ok(())
     }
 

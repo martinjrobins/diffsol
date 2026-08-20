@@ -32,8 +32,7 @@ pub trait Context: Clone + Default {
     /// Other properties of the context (e.g. CUDA stream, faer parallelism)
     /// are preserved.
     ///
-    /// Returns an error if the backend does not support batching (i.e.
-    /// `nbatch > 1` for CPU backends such as faer and nalgebra).
+    /// Returns an error when a backend cannot create a requested batch context.
     fn clone_with_nbatch(&self, nbatch: usize) -> Result<Self, LaError>;
     /// Panics if the two batch counts are incompatible.
     ///

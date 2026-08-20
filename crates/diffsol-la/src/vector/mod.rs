@@ -1137,11 +1137,11 @@ pub(crate) mod tests {
     #[test]
     fn vector_common_for_references_and_default_helpers_work() {
         let mut v = NalgebraVec::from_vec(vec![1.0, 2.0], NalgebraContext::default());
-        assert_eq!(<NalgebraVec<f64> as VectorCommon>::inner(&v).len(), 2);
-        assert_eq!(<&NalgebraVec<f64> as VectorCommon>::inner(&&v).len(), 2);
+        assert_eq!(<NalgebraVec<f64> as VectorCommon>::inner(&v)[0].len(), 2);
+        assert_eq!(<&NalgebraVec<f64> as VectorCommon>::inner(&&v)[0].len(), 2);
         assert_eq!(
             <&mut NalgebraVec<f64> as VectorCommon>::inner(&&mut v).len(),
-            2
+            1
         );
 
         let empty = NalgebraVec::<f64>::zeros(0, NalgebraContext::default());

@@ -1,5 +1,5 @@
-use crate::FaerContext;
 use crate::{error::LaError, linear_solver_error};
+use crate::{Context, FaerContext};
 
 use crate::{linear_solver::LinearSolver, FaerMat, FaerScalar, FaerVec, LinearOp, Matrix};
 
@@ -9,7 +9,7 @@ pub struct LU<T>
 where
     T: FaerScalar,
 {
-    lu: Option<FullPivLu<T>>,
+    lu: Vec<FullPivLu<T>>,
     matrix: Option<FaerMat<T>>,
 }
 
@@ -19,7 +19,7 @@ where
 {
     fn default() -> Self {
         Self {
-            lu: None,
+            lu: Vec::new(),
             matrix: None,
         }
     }
@@ -32,15 +32,22 @@ impl<T: FaerScalar> LinearSolver<FaerMat<T>> for LU<T> {
     ) {
         let matrix = self.matrix.as_mut().expect("Matrix not set");
         op.matrix_inplace(matrix);
-        self.lu = Some(matrix.data.full_piv_lu());
+        self.lu = matrix
+            .data
+            .iter()
+            .map(|matrix| matrix.full_piv_lu())
+            .collect();
     }
 
     fn solve_in_place(&self, x: &mut FaerVec<T>) -> Result<(), LaError> {
-        if self.lu.is_none() {
+        if self.lu.is_empty() {
             return Err(linear_solver_error!(LuNotInitialized));
         }
-        let lu = self.lu.as_ref().unwrap();
-        lu.solve_in_place(&mut x.data);
+        x.context
+            .assert_compatible_nbatch(self.lu.len(), "lu_solve");
+        for (batch, x) in x.data.iter_mut().enumerate() {
+            self.lu[batch % self.lu.len()].solve_in_place(x);
+        }
         Ok(())
     }
 

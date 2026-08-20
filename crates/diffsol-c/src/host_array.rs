@@ -84,6 +84,25 @@ impl<T: Scalar + FaerScalar + 'static> ToHostArray<T> for faer::Col<T> {
     }
 }
 
+// FFI callers are nonbatched. CPU backends now store batch-local objects in a Vec.
+macro_rules! impl_first_batch_host_array {
+    ($inner:ty, $bound:path) => {
+        impl<T: Scalar + $bound + 'static> ToHostArray<T> for Vec<$inner> {
+            fn to_host_array(self) -> HostArray {
+                self.into_iter()
+                    .next()
+                    .expect("CPU batch storage must not be empty")
+                    .to_host_array()
+            }
+        }
+    };
+}
+
+impl_first_batch_host_array!(nalgebra::DMatrix<T>, NalgebraScalar);
+impl_first_batch_host_array!(nalgebra::DVector<T>, NalgebraScalar);
+impl_first_batch_host_array!(faer::Mat<T>, FaerScalar);
+impl_first_batch_host_array!(faer::Col<T>, FaerScalar);
+
 impl<T: Scalar + 'static> ToHostArray<T> for Vec<T> {
     fn to_host_array(self) -> HostArray {
         let owner = Box::new(self);

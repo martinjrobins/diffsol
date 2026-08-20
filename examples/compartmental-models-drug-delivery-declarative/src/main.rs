@@ -34,8 +34,8 @@ fn main() {
 
     let final_time = 24.0;
     let (ys, time, _stop_reason) = solver.solve(final_time).unwrap();
-    let q_c: Vec<_> = ys.inner().row(0).into_iter().copied().collect();
-    let q_p1: Vec<_> = ys.inner().row(1).into_iter().copied().collect();
+    let q_c: Vec<_> = ys.inner()[0].row(0).into_iter().copied().collect();
+    let q_p1: Vec<_> = ys.inner()[0].row(1).into_iter().copied().collect();
 
     let mut plot = Plot::new();
     plot.add_trace(

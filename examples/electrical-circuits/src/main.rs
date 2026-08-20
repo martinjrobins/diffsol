@@ -44,7 +44,7 @@ fn main() {
     let mut solver = problem.bdf::<LS>().unwrap();
     let (ys, ts, _stop_reason) = solver.solve(1.0).unwrap();
 
-    let ir: Vec<_> = ys.inner().row(0).into_iter().copied().collect();
+    let ir: Vec<_> = ys.inner()[0].row(0).into_iter().copied().collect();
     let t: Vec<_> = ts.into_iter().collect();
 
     let ir = Scatter::new(t.clone(), ir).mode(Mode::Lines);

@@ -33,8 +33,8 @@ fn main() {
 
     let final_time = 10.0;
     let (ys, t, _stop_reason) = solver.solve(final_time).unwrap();
-    let x: Vec<_> = ys.inner().row(0).into_iter().copied().collect();
-    let v: Vec<_> = ys.inner().row(1).into_iter().copied().collect();
+    let x: Vec<_> = ys.inner()[0].row(0).into_iter().copied().collect();
+    let v: Vec<_> = ys.inner()[0].row(1).into_iter().copied().collect();
 
     let mut plot = Plot::new();
     plot.add_trace(Scatter::new(t.clone(), x).mode(Mode::Lines).name("x"));
