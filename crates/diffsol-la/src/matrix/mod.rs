@@ -192,6 +192,8 @@ pub trait Matrix:
     ///
     /// This is useful for identifying algebraic constraints, which typically have zero diagonal elements in the mass matrix.
     /// Returns a tuple of (zero_diagonal_indices, non_zero_diagonal_indices).
+    /// For batched matrices the partition is taken from batch 0, so all batches are assumed
+    /// to share the same structure.
     fn partition_indices_by_zero_diagonal(
         &self,
     ) -> (<Self::V as Vector>::Index, <Self::V as Vector>::Index);
@@ -398,9 +400,13 @@ pub trait DenseMatrix:
     fn column_mut(&mut self, i: IndexType) -> <Self::V as Vector>::ViewMut<'_>;
 
     /// Set the value at the given row and column indices.
+    ///
+    /// For batched matrices the value is written to every batch.
     fn set_index(&mut self, i: IndexType, j: IndexType, value: Self::T);
 
     /// Get the value at the given row and column indices.
+    ///
+    /// For batched matrices this reads batch 0, as does `Index`/`IndexMut`.
     fn get_index(&self, i: IndexType, j: IndexType) -> Self::T;
 
     /// Perform matrix-matrix multiplication using GEMM, allocating a new matrix for the result.
@@ -426,6 +432,8 @@ pub trait DenseMatrix:
 #[cfg(test)]
 #[allow(clippy::items_after_test_module)]
 pub(crate) mod tests {
+    use std::ops::{Add, Sub};
+
     use super::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
     use crate::scalar::Scale;
     use crate::{scalar::IndexType, Context, Vector, VectorIndex};
@@ -435,7 +443,7 @@ pub(crate) mod tests {
         M::T::from_f64(x).unwrap()
     }
 
-    fn triplet_values<M: Matrix>(m: &M) -> Vec<M::T> {
+    pub(crate) fn triplet_values<M: Matrix>(m: &M) -> Vec<M::T> {
         let (_, vals) = m.triplet_iter();
         vals.collect()
     }
@@ -942,6 +950,199 @@ pub(crate) mod tests {
                 f::<M>(126.0),
                 f::<M>(147.0),
                 f::<M>(168.0),
+            ]
+        );
+    }
+
+    /// An owned right-hand side may be written into, which reverses the operands of `sub`.
+    ///
+    /// Only wired up for the backends that implement the owned-rhs combinations; move the call
+    /// into `generate_dense_matrix_tests_nonbatched!` once they all do.
+    pub fn test_owned_rhs_m<M>()
+    where
+        M: DenseMatrix,
+        for<'a> &'a M: Add<M, Output = M> + Sub<M, Output = M>,
+        for<'a> M::View<'a>: Add<M, Output = M> + Sub<M, Output = M>,
+    {
+        let values = vec![f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0)];
+        let a = M::from_vec(
+            2,
+            2,
+            vec![f::<M>(10.0), f::<M>(30.0), f::<M>(20.0), f::<M>(40.0)],
+            Default::default(),
+        );
+
+        let b = M::from_vec(2, 2, values.clone(), Default::default());
+        let c = &a - b;
+        assert_eq!(c.get_index(0, 0), f::<M>(9.0));
+        assert_eq!(c.get_index(1, 1), f::<M>(36.0));
+
+        let b = M::from_vec(2, 2, values.clone(), Default::default());
+        let c = &a + b;
+        assert_eq!(c.get_index(0, 0), f::<M>(11.0));
+        assert_eq!(c.get_index(1, 1), f::<M>(44.0));
+
+        let b = M::from_vec(2, 2, values.clone(), Default::default());
+        let c = a.columns(0, 2) - b;
+        assert_eq!(c.get_index(0, 0), f::<M>(9.0));
+        assert_eq!(c.get_index(1, 1), f::<M>(36.0));
+
+        let b = M::from_vec(2, 2, values, Default::default());
+        let c = a.columns(0, 2) + b;
+        assert_eq!(c.get_index(0, 0), f::<M>(11.0));
+        assert_eq!(c.get_index(1, 1), f::<M>(44.0));
+    }
+
+    /// Owned right-hand side with broadcasting in both directions: the right-hand side can
+    /// only be written into when it already has the result's batch count.
+    pub fn test_batched_owned_rhs_broadcast_m<M>(ctx: M::C)
+    where
+        M: Matrix + DenseMatrix,
+        for<'a> &'a M: Sub<M, Output = M>,
+    {
+        assert_eq!(ctx.nbatch(), 2);
+        let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
+        let one_batch = vec![f::<M>(1.0), f::<M>(2.0), f::<M>(3.0), f::<M>(4.0)];
+        let two_batches = vec![
+            f::<M>(10.0),
+            f::<M>(20.0),
+            f::<M>(30.0),
+            f::<M>(40.0),
+            f::<M>(50.0),
+            f::<M>(60.0),
+            f::<M>(70.0),
+            f::<M>(80.0),
+        ];
+
+        // lhs broadcasts over the batches of rhs, which already spans the result
+        let a =
+            M::try_from_triplets(2, 2, indices.clone(), one_batch.clone(), M::C::default()).unwrap();
+        let b =
+            M::try_from_triplets(2, 2, indices.clone(), two_batches.clone(), ctx.clone()).unwrap();
+        let c = &a - b;
+        assert_eq!(c.context().nbatch(), 2);
+        assert_eq!(
+            triplet_values(&c),
+            vec![
+                f::<M>(-9.0),
+                f::<M>(-18.0),
+                f::<M>(-27.0),
+                f::<M>(-36.0),
+                f::<M>(-49.0),
+                f::<M>(-58.0),
+                f::<M>(-67.0),
+                f::<M>(-76.0),
+            ]
+        );
+
+        // rhs holds a single batch, so the two-batch result has to be allocated
+        let a = M::try_from_triplets(2, 2, indices.clone(), two_batches, ctx).unwrap();
+        let b = M::try_from_triplets(2, 2, indices, one_batch, M::C::default()).unwrap();
+        let c = &a - b;
+        assert_eq!(c.context().nbatch(), 2);
+        assert_eq!(
+            triplet_values(&c),
+            vec![
+                f::<M>(9.0),
+                f::<M>(18.0),
+                f::<M>(27.0),
+                f::<M>(36.0),
+                f::<M>(49.0),
+                f::<M>(58.0),
+                f::<M>(67.0),
+                f::<M>(76.0),
+            ]
+        );
+    }
+
+    /// An owned left-hand side may be written into, which must still honour broadcasting in
+    /// both directions.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_batched_owned_lhs_broadcast_m<M>(ctx: M::C)
+    where
+        M: Matrix + for<'a> Sub<&'a M, Output = M>,
+    {
+        assert_eq!(ctx.nbatch(), 2);
+        let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
+        let one_batch = vec![f::<M>(1.0), f::<M>(2.0), f::<M>(3.0), f::<M>(4.0)];
+        let two_batches = vec![
+            f::<M>(10.0),
+            f::<M>(20.0),
+            f::<M>(30.0),
+            f::<M>(40.0),
+            f::<M>(50.0),
+            f::<M>(60.0),
+            f::<M>(70.0),
+            f::<M>(80.0),
+        ];
+
+        // rhs broadcasts over the batches of lhs
+        let a = M::try_from_triplets(2, 2, indices.clone(), two_batches.clone(), ctx.clone())
+            .unwrap();
+        let b =
+            M::try_from_triplets(2, 2, indices.clone(), one_batch.clone(), M::C::default()).unwrap();
+        let c = a - &b;
+        assert_eq!(c.context().nbatch(), 2);
+        assert_eq!(
+            triplet_values(&c),
+            vec![
+                f::<M>(9.0),
+                f::<M>(18.0),
+                f::<M>(27.0),
+                f::<M>(36.0),
+                f::<M>(49.0),
+                f::<M>(58.0),
+                f::<M>(67.0),
+                f::<M>(76.0),
+            ]
+        );
+
+        // lhs broadcasts over the batches of rhs
+        let a = M::try_from_triplets(2, 2, indices.clone(), one_batch, M::C::default()).unwrap();
+        let b = M::try_from_triplets(2, 2, indices, two_batches, ctx).unwrap();
+        let c = a - &b;
+        assert_eq!(c.context().nbatch(), 2);
+        assert_eq!(
+            triplet_values(&c),
+            vec![
+                f::<M>(-9.0),
+                f::<M>(-18.0),
+                f::<M>(-27.0),
+                f::<M>(-36.0),
+                f::<M>(-49.0),
+                f::<M>(-58.0),
+                f::<M>(-67.0),
+                f::<M>(-76.0),
+            ]
+        );
+    }
+
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_batched_scale_add_and_assign_broadcast_m<M: Matrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
+        let x_vals = vec![f::<M>(1.0), f::<M>(2.0), f::<M>(3.0), f::<M>(4.0)];
+        let y_vals = vec![f::<M>(10.0), f::<M>(20.0), f::<M>(30.0), f::<M>(40.0)];
+        // x and y have nbatch == 1, so they broadcast over both batches of result
+        let x = M::try_from_triplets(2, 2, indices.clone(), x_vals.clone(), M::C::default()).unwrap();
+        let y = M::try_from_triplets(2, 2, indices.clone(), y_vals, M::C::default()).unwrap();
+        // result carries the union sparsity (required for sparse matrices) in both batches
+        let mut result_vals = x_vals.clone();
+        result_vals.extend(x_vals);
+        let mut result = M::try_from_triplets(2, 2, indices, result_vals, ctx).unwrap();
+        result.scale_add_and_assign(&x, f::<M>(2.0), &y);
+        let vals = triplet_values(&result);
+        assert_eq!(
+            vals,
+            vec![
+                f::<M>(21.0),
+                f::<M>(42.0),
+                f::<M>(63.0),
+                f::<M>(84.0),
+                f::<M>(21.0),
+                f::<M>(42.0),
+                f::<M>(63.0),
+                f::<M>(84.0),
             ]
         );
     }
@@ -2520,6 +2721,14 @@ macro_rules! generate_matrix_tests_batched {
             #[test]
             fn [<test_batched_scale_add_ $suffix>]() {
                 $crate::matrix::tests::test_batched_scale_add_and_assign_m::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_owned_lhs_broadcast_ $suffix>]() {
+                $crate::matrix::tests::test_batched_owned_lhs_broadcast_m::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_scale_add_broadcast_ $suffix>]() {
+                $crate::matrix::tests::test_batched_scale_add_and_assign_broadcast_m::<$M>($ctx2);
             }
         }
     };

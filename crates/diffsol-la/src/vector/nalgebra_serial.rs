@@ -12,6 +12,10 @@ pub struct NalgebraIndex {
     pub(crate) context: NalgebraContext,
 }
 
+/// A batched vector, stored as one column per batch.
+///
+/// Invariant: `data.ncols() == context.nbatch()` and `data.nrows() == len()`, so
+/// `data.as_slice()` matches the CUDA layout `[batch0 states..., batch1 states..., ...]`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NalgebraVec<T: NalgebraScalar> {
     pub(crate) data: DMatrix<T>,
@@ -30,10 +34,20 @@ pub struct NalgebraVecMut<'a, T: NalgebraScalar> {
     pub(crate) context: NalgebraContext,
 }
 
+/// Column holding `batch`, broadcasting a single-batch vector over all batches.
+macro_rules! batch_method {
+    () => {
+        #[inline]
+        pub(crate) fn batch(&self, batch: usize) -> usize {
+            batch % self.data.ncols()
+        }
+    };
+}
 impl<T: NalgebraScalar> NalgebraVec<T> {
-    fn batch(&self, batch: usize) -> usize {
-        batch % self.data.ncols()
-    }
+    batch_method!();
+}
+impl<T: NalgebraScalar> NalgebraVecRef<'_, T> {
+    batch_method!();
 }
 
 impl<T: NalgebraScalar> From<DVector<T>> for NalgebraVec<T> {
@@ -145,6 +159,8 @@ macro_rules! copy_from_data {
             $other.data.nrows(),
             "copy_from row mismatch"
         );
+        // the unbatched path is column-wise on purpose: nalgebra's whole-matrix copy_from is
+        // ~30% slower than copying the single column (see lin_alg_ops copy_from/nalgebra)
         if $self.context.nbatch() == 1 && $other.context.nbatch() == 1 {
             $self.data.column_mut(0).copy_from(&$other.data.column(0));
             return;
@@ -162,7 +178,88 @@ macro_rules! copy_from_data {
     };
 }
 
-macro_rules! vec_binary_owned {
+/// Weighted error norm of every batch, reduced by taking the maximum.
+macro_rules! squared_norm_data {
+    ($self:ident, $y:ident, $atol:ident, $rtol:ident) => {{
+        $self
+            .context
+            .assert_compatible_nbatch($y.context.nbatch(), "squared_norm");
+        $self
+            .context
+            .assert_compatible_nbatch($atol.context.nbatch(), "squared_norm");
+        let nrows = $self.data.nrows();
+        assert!(
+            nrows == $y.data.nrows() && nrows == $atol.data.nrows(),
+            "squared_norm row mismatch"
+        );
+        let nstates = T::from_f64(nrows as f64).unwrap();
+        // rows of a column are contiguous whatever the batch stride, so each batch is a slice
+        let batch_norm = |xb: usize, yb: usize, atolb: usize| {
+            let x = $self.data.column(xb);
+            let y = $y.data.column(yb);
+            let atol = $atol.data.column(atolb);
+            let norm = x
+                .as_slice()
+                .iter()
+                .zip(y.as_slice().iter().zip(atol.as_slice().iter()))
+                .fold(T::zero(), |norm, (&x, (&y, &atol))| {
+                    let term = x / (y.abs() * $rtol + atol);
+                    norm + term * term
+                });
+            norm / nstates
+        };
+        // the unbatched case keeps a constant column index, which codegens better than the
+        // loop variable below (and folds away `batch`'s modulus)
+        if $self.data.ncols() == 1 {
+            return batch_norm(0, $y.batch(0), $atol.batch(0));
+        }
+        let mut max_norm = T::zero();
+        for b in 0..$self.data.ncols() {
+            max_norm = max_norm.max(batch_norm(b, $y.batch(b), $atol.batch(b)));
+        }
+        max_norm
+    }};
+}
+
+/// `rhs` is owned, so the result is written into its allocation whenever `rhs` already holds
+/// as many batches as the result: `combine(&mut rhs_i, lhs_i)` writes the result in place.
+macro_rules! vec_binary_owned_rhs {
+    ($trait:ident, $method:ident, $lhs:ty, $op:tt, $combine:expr) => {
+        impl<T: NalgebraScalar> $trait<NalgebraVec<T>> for $lhs {
+            type Output = NalgebraVec<T>;
+
+            fn $method(self, mut rhs: NalgebraVec<T>) -> Self::Output {
+                self.context
+                    .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($method));
+                if self.data.ncols() == rhs.data.ncols() {
+                    rhs.data.zip_apply(&self.data, $combine);
+                    return rhs;
+                }
+                if rhs.data.ncols() > self.data.ncols() {
+                    for b in 0..rhs.data.ncols() {
+                        let lhs = self.data.column(self.batch(b));
+                        rhs.data.column_mut(b).zip_apply(&lhs, $combine);
+                    }
+                    return rhs;
+                }
+                // rhs holds fewer batches than the result, so it cannot be written into
+                let nb = self.data.ncols();
+                let mut data = DMatrix::zeros(self.data.nrows(), nb);
+                for b in 0..nb {
+                    let mut column = data.column_mut(b);
+                    column.copy_from(&self.data.column(b));
+                    column $op &rhs.data.column(rhs.batch(b));
+                }
+                NalgebraVec {
+                    data,
+                    context: self.context,
+                }
+            }
+        }
+    };
+}
+
+macro_rules! vec_binary_owned_lhs {
     ($trait:ident, $method:ident, $rhs:ty, $op:tt) => {
         impl<T: NalgebraScalar> $trait<$rhs> for NalgebraVec<T> {
             type Output = NalgebraVec<T>;
@@ -193,19 +290,13 @@ macro_rules! vec_binary_owned {
     };
 }
 macro_rules! binary_set {
-    ($trait:ident,$method:ident,$op:tt,$binary:tt) => {
-        vec_binary_owned!($trait, $method, NalgebraVec<T>, $op);
-        vec_binary_owned!($trait, $method, &NalgebraVec<T>, $op);
-        vec_binary_owned!($trait, $method, NalgebraVecRef<'_, T>, $op);
-        vec_binary_owned!($trait, $method, &NalgebraVecRef<'_, T>, $op);
-        vec_binary!(
-            $trait,
-            $method,
-            NalgebraVecRef<'_, T>,
-            NalgebraVec<T>,
-            $op,
-            $binary
-        );
+    ($trait:ident,$method:ident,$op:tt,$binary:tt,$combine:expr) => {
+        vec_binary_owned_lhs!($trait, $method, NalgebraVec<T>, $op);
+        vec_binary_owned_lhs!($trait, $method, &NalgebraVec<T>, $op);
+        vec_binary_owned_lhs!($trait, $method, NalgebraVecRef<'_, T>, $op);
+        vec_binary_owned_lhs!($trait, $method, &NalgebraVecRef<'_, T>, $op);
+        vec_binary_owned_rhs!($trait, $method, NalgebraVecRef<'_, T>, $op, $combine);
+        vec_binary_owned_rhs!($trait, $method, &NalgebraVec<T>, $op, $combine);
         vec_binary!(
             $trait,
             $method,
@@ -227,14 +318,6 @@ macro_rules! binary_set {
             $method,
             NalgebraVecRef<'_, T>,
             &NalgebraVecRef<'_, T>,
-            $op,
-            $binary
-        );
-        vec_binary!(
-            $trait,
-            $method,
-            &NalgebraVec<T>,
-            NalgebraVec<T>,
             $op,
             $binary
         );
@@ -264,8 +347,8 @@ macro_rules! binary_set {
         );
     };
 }
-binary_set!(Add, add, +=, +);
-binary_set!(Sub, sub, -=, -);
+binary_set!(Add, add, +=, +, |rhs, lhs| *rhs += lhs);
+binary_set!(Sub, sub, -=, -, |rhs, lhs| *rhs = lhs - *rhs);
 macro_rules! assign_set {
     ($trait:ident,$method:ident,$op:tt) => {
         vec_assign!($trait, $method, NalgebraVec<T>, NalgebraVec<T>, $op);
@@ -306,7 +389,7 @@ macro_rules! scale_ref {
             type Output = NalgebraVec<T>;
             fn mul(self, rhs: Scale<T>) -> Self::Output {
                 NalgebraVec {
-                    data: self.data.clone().into_owned() * rhs.value(),
+                    data: self.data.clone_owned() * rhs.value(),
                     context: self.context,
                 }
             }
@@ -399,47 +482,7 @@ impl<'a, T: NalgebraScalar> VectorView<'a> for NalgebraVecRef<'a, T> {
         }
     }
     fn squared_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: T) -> T {
-        self.context
-            .assert_compatible_nbatch(y.context.nbatch(), "squared_norm");
-        self.context
-            .assert_compatible_nbatch(atol.context.nbatch(), "squared_norm");
-        assert_eq!(
-            self.data.nrows(),
-            y.data.nrows(),
-            "squared_norm row mismatch"
-        );
-        assert_eq!(
-            self.data.nrows(),
-            atol.data.nrows(),
-            "squared_norm row mismatch"
-        );
-        let yb = y.batch(0);
-        let atolb = atol.batch(0);
-        let mut norm = T::zero();
-        for i in 0..self.data.nrows() {
-            // Bounds follow shared row count and validated batch broadcasting above.
-            let x = unsafe { *self.data.get_unchecked((i, 0)) };
-            let y = unsafe { *y.data.get_unchecked((i, yb)) };
-            let atol = unsafe { *atol.data.get_unchecked((i, atolb)) };
-            let term = x / (y.abs() * rtol + atol);
-            norm += term * term;
-        }
-        let mut max_norm = T::zero().max(norm / T::from_f64(self.data.nrows() as f64).unwrap());
-        for b in 1..self.data.ncols() {
-            let yb = y.batch(b);
-            let atolb = atol.batch(b);
-            let mut norm = T::zero();
-            for i in 0..self.data.nrows() {
-                // Bounds follow shared row count and validated batch broadcasting above.
-                let x = unsafe { *self.data.get_unchecked((i, b)) };
-                let y = unsafe { *y.data.get_unchecked((i, yb)) };
-                let atol = unsafe { *atol.data.get_unchecked((i, atolb)) };
-                let term = x / (y.abs() * rtol + atol);
-                norm += term * term;
-            }
-            max_norm = max_norm.max(norm / T::from_f64(self.data.nrows() as f64).unwrap());
-        }
-        max_norm
+        squared_norm_data!(self, y, atol, rtol)
     }
 }
 impl<'a, T: NalgebraScalar> VectorViewMut<'a> for NalgebraVecMut<'a, T> {
@@ -489,8 +532,16 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
         &self.context
     }
     fn norm(&self, k: i32) -> T {
+        // LpNorm is a generic elementwise loop, `norm` is the optimised L2 path
         (0..self.data.ncols())
-            .map(|b| self.data.column(b).apply_norm(&LpNorm(k)))
+            .map(|b| {
+                let column = self.data.column(b);
+                if k == 2 {
+                    column.norm()
+                } else {
+                    column.apply_norm(&LpNorm(k))
+                }
+            })
             .fold(T::zero(), |a, b| a.max(b))
     }
     fn get_index(&self, i: IndexType) -> T {
@@ -505,45 +556,7 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
         self.data.row_mut(i).fill(v);
     }
     fn squared_norm(&self, y: &Self, atol: &Self, rtol: T) -> T {
-        self.context
-            .assert_compatible_nbatch(y.context.nbatch(), "squared_norm");
-        self.context
-            .assert_compatible_nbatch(atol.context.nbatch(), "squared_norm");
-        assert_eq!(
-            self.data.nrows(),
-            y.data.nrows(),
-            "squared_norm row mismatch"
-        );
-        assert_eq!(
-            self.data.nrows(),
-            atol.data.nrows(),
-            "squared_norm row mismatch"
-        );
-        let yb = y.batch(0);
-        let atolb = atol.batch(0);
-        let mut norm = T::zero();
-        for i in 0..self.data.nrows() {
-            let x = unsafe { *self.data.get_unchecked((i, 0)) };
-            let y = unsafe { *y.data.get_unchecked((i, yb)) };
-            let atol = unsafe { *atol.data.get_unchecked((i, atolb)) };
-            let term = x / (y.abs() * rtol + atol);
-            norm += term * term;
-        }
-        let mut max_norm = T::zero().max(norm / T::from_f64(self.data.nrows() as f64).unwrap());
-        for b in 1..self.data.ncols() {
-            let yb = y.batch(b);
-            let atolb = atol.batch(b);
-            let mut norm = T::zero();
-            for i in 0..self.data.nrows() {
-                let x = unsafe { *self.data.get_unchecked((i, b)) };
-                let y = unsafe { *y.data.get_unchecked((i, yb)) };
-                let atol = unsafe { *atol.data.get_unchecked((i, atolb)) };
-                let term = x / (y.abs() * rtol + atol);
-                norm += term * term;
-            }
-            max_norm = max_norm.max(norm / T::from_f64(self.data.nrows() as f64).unwrap());
-        }
-        max_norm
+        squared_norm_data!(self, y, atol, rtol)
     }
     fn as_view(&self) -> Self::View<'_> {
         NalgebraVecRef {
@@ -558,35 +571,14 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
         }
     }
     fn get_batch(&self, b: usize) -> Self::View<'_> {
-        assert!(b < self.data.ncols());
         NalgebraVecRef {
-            data: unsafe {
-                MatrixView::from_slice_with_strides_generic_unchecked(
-                    self.data.as_slice(),
-                    b * self.data.nrows(),
-                    Dyn(self.data.nrows()),
-                    Dyn(1),
-                    Const,
-                    Dyn(self.data.nrows()),
-                )
-            },
+            data: self.data.columns(b, 1),
             context: NalgebraContext::default(),
         }
     }
     fn get_batch_mut(&mut self, b: usize) -> Self::ViewMut<'_> {
-        assert!(b < self.data.ncols());
-        let nrows = self.data.nrows();
         NalgebraVecMut {
-            data: unsafe {
-                MatrixViewMut::from_slice_with_strides_generic_unchecked(
-                    self.data.as_mut_slice(),
-                    b * nrows,
-                    Dyn(nrows),
-                    Dyn(1),
-                    Const,
-                    Dyn(nrows),
-                )
-            },
+            data: self.data.columns_mut(b, 1),
             context: NalgebraContext::default(),
         }
     }
@@ -628,7 +620,13 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
         }
     }
     fn axpy(&mut self, a: T, x: &Self, b: T) {
-        self.as_view_mut().axpy(a, x, b)
+        self.context
+            .assert_compatible_nbatch(x.context.nbatch(), "axpy");
+        for c in 0..self.data.ncols() {
+            self.data
+                .column_mut(c)
+                .axpy(a, &x.data.column(x.batch(c)), b);
+        }
     }
     fn axpy_v(&mut self, a: T, x: &Self::View<'_>, b: T) {
         self.context
@@ -672,6 +670,8 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
             o.data.nrows(),
             "component_mul_assign row mismatch"
         );
+        // the elementwise unbatched path beats nalgebra's component_mul_assign by ~25%
+        // (see lin_alg_ops component_mul_assign/nalgebra)
         if self.context.nbatch() == 1 {
             for i in 0..self.data.nrows() {
                 let lhs = unsafe { self.data.get_unchecked_mut((i, 0)) };
@@ -698,9 +698,14 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
             let mut found = false;
             let mut frac = T::zero();
             let mut idx = -1;
-            for i in 0..self.len() {
-                let g0 = unsafe { *self.data.get_unchecked((i, b)) };
-                let g = unsafe { *g1.data.get_unchecked((i, g1.batch(b))) };
+            let g0_column = self.data.column(b);
+            let g1_column = g1.data.column(g1.batch(b));
+            for (i, (&g0, &g)) in g0_column
+                .as_slice()
+                .iter()
+                .zip(g1_column.as_slice())
+                .enumerate()
+            {
                 if g == T::zero() {
                     found = true
                 }
@@ -796,6 +801,40 @@ mod tests {
         let vector = DVector::from_vec(vec![1.0, 2.0, 3.0]);
         let v: NalgebraVec<f64> = vector.into();
         assert_eq!(v.clone_as_vec(), vec![1.0, 2.0, 3.0]);
+    }
+
+    /// nalgebra-specific: the value semantics live in the generic suite, this pins down that
+    /// an owned right-hand side really is written into instead of reallocated.
+    #[test]
+    fn test_owned_rhs_reuses_allocation() {
+        let ctx = NalgebraContext::default();
+        let a = NalgebraVec::<f64>::from_vec(vec![10.0, 20.0], ctx);
+
+        let b = NalgebraVec::<f64>::from_vec(vec![1.0, 2.0], ctx);
+        let buffer = b.data.as_slice().as_ptr();
+        let c = &a - b;
+        assert_eq!(c.clone_as_vec(), vec![9.0, 18.0]);
+        assert_eq!(c.data.as_slice().as_ptr(), buffer, "rhs buffer not reused");
+
+        let b = NalgebraVec::<f64>::from_vec(vec![1.0, 2.0], ctx);
+        let buffer = b.data.as_slice().as_ptr();
+        let c = a.as_view() + b;
+        assert_eq!(c.clone_as_vec(), vec![11.0, 22.0]);
+        assert_eq!(c.data.as_slice().as_ptr(), buffer, "rhs buffer not reused");
+    }
+
+    /// nalgebra-specific: a broadcast lhs still writes into the rhs buffer.
+    #[test]
+    fn test_owned_rhs_broadcast_reuses_allocation() {
+        let a = NalgebraVec::<f64>::from_vec(vec![10.0, 20.0], NalgebraContext::default());
+        let b = NalgebraVec::<f64>::from_vec(
+            vec![1.0, 2.0, 3.0, 4.0],
+            NalgebraContext::with_nbatch(2),
+        );
+        let buffer = b.data.as_slice().as_ptr();
+        let c = &a - b;
+        assert_eq!(c.clone_as_vec(), vec![9.0, 18.0, 7.0, 16.0]);
+        assert_eq!(c.data.as_slice().as_ptr(), buffer, "rhs buffer not reused");
     }
 
     super::super::generate_vector_tests_nonbatched!(nalgebra, NalgebraVec<f64>);

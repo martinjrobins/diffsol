@@ -85,12 +85,88 @@ impl_mul_scalar!(&FaerMat<T>, FaerMat<T>);
 
 impl_mul_assign_scalar!(FaerMatMut<'_, T>);
 
-impl_add!(FaerMat<T>, &FaerMat<T>, FaerMat<T>, FaerScalar);
-impl_add!(FaerMat<T>, &FaerMatRef<'_, T>, FaerMat<T>, FaerScalar);
-impl_add!(FaerMatRef<'_, T>, &FaerMat<T>, FaerMat<T>, FaerScalar);
+/// `self` is owned, so the result is written into its batches whenever it already holds as
+/// many as the result: `*self_b $op rhs_b`.
+macro_rules! matrix_binary_owned_lhs {
+    ($trait:ident, $method:ident, $rhs:ty, $op:tt, $binary:tt) => {
+        impl<T: FaerScalar> $trait<$rhs> for FaerMat<T> {
+            type Output = FaerMat<T>;
 
-impl_sub!(FaerMat<T>, &FaerMat<T>, FaerMat<T>, FaerScalar);
-impl_sub!(FaerMat<T>, &FaerMatRef<'_, T>, FaerMat<T>, FaerScalar);
+            fn $method(mut self, rhs: $rhs) -> Self::Output {
+                self.context
+                    .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($method));
+                let rhs_nbatch = rhs.data.len();
+                if self.data.len() >= rhs_nbatch {
+                    for (batch, data) in self.data.iter_mut().enumerate() {
+                        *data $op &rhs.data[batch % rhs_nbatch];
+                    }
+                    return self;
+                }
+                // self holds fewer batches than the result, so it cannot be written into
+                let self_nbatch = self.data.len();
+                FaerMat {
+                    data: (0..rhs_nbatch)
+                        .map(|batch| &self.data[batch % self_nbatch] $binary &rhs.data[batch])
+                        .collect(),
+                    context: rhs.context,
+                }
+            }
+        }
+    };
+}
+
+/// `rhs` is owned, so the result is written into its batches whenever it already holds as
+/// many as the result: `combine(&mut rhs_b, lhs_b)`.
+macro_rules! matrix_binary_owned_rhs {
+    ($trait:ident, $method:ident, $lhs:ty, $op:tt, $combine:expr) => {
+        impl<T: FaerScalar> $trait<FaerMat<T>> for $lhs {
+            type Output = FaerMat<T>;
+
+            fn $method(self, mut rhs: FaerMat<T>) -> Self::Output {
+                self.context
+                    .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($method));
+                let self_nbatch = self.data.len();
+                if rhs.data.len() >= self_nbatch {
+                    for (batch, data) in rhs.data.iter_mut().enumerate() {
+                        zip!(data.as_mut(), self.data[batch % self_nbatch].as_ref())
+                            .for_each(|unzip!(rhs, lhs)| $combine(rhs, *lhs));
+                    }
+                    return rhs;
+                }
+                // rhs holds fewer batches than the result, so it cannot be written into
+                let rhs_nbatch = rhs.data.len();
+                FaerMat {
+                    data: (0..self_nbatch)
+                        .map(|batch| {
+                            let mut data = self.data[batch].as_ref().to_owned();
+                            data $op &rhs.data[batch % rhs_nbatch];
+                            data
+                        })
+                        .collect(),
+                    context: self.context,
+                }
+            }
+        }
+    };
+}
+
+matrix_binary_owned_lhs!(Add, add, &FaerMat<T>, +=, +);
+matrix_binary_owned_lhs!(Add, add, &FaerMatRef<'_, T>, +=, +);
+matrix_binary_owned_lhs!(Sub, sub, &FaerMat<T>, -=, -);
+matrix_binary_owned_lhs!(Sub, sub, &FaerMatRef<'_, T>, -=, -);
+
+matrix_binary_owned_rhs!(Add, add, &FaerMat<T>, +=, |rhs: &mut T, lhs: T| *rhs += lhs);
+matrix_binary_owned_rhs!(Add, add, FaerMatRef<'_, T>, +=, |rhs: &mut T, lhs: T| *rhs += lhs);
+matrix_binary_owned_rhs!(Sub, sub, &FaerMat<T>, -=, |rhs: &mut T, lhs: T| *rhs = lhs - *rhs);
+matrix_binary_owned_rhs!(
+    Sub,
+    sub,
+    FaerMatRef<'_, T>,
+    -=,
+    |rhs: &mut T, lhs: T| *rhs = lhs - *rhs
+);
+
+impl_add!(FaerMatRef<'_, T>, &FaerMat<T>, FaerMat<T>, FaerScalar);
 impl_sub!(FaerMatRef<'_, T>, &FaerMat<T>, FaerMat<T>, FaerScalar);
 
 impl_add_assign!(FaerMat<T>, &FaerMat<T>, FaerScalar);
@@ -526,11 +602,85 @@ impl<T: FaerScalar> Matrix for FaerMat<T> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::tests::triplet_values;
     use super::*;
 
     #[test]
     fn test_column_axpy() {
         super::super::tests::test_column_axpy::<FaerMat<f64>>();
+    }
+
+    fn mat(values: [f64; 4], ctx: FaerContext) -> FaerMat<f64> {
+        FaerMat::from_vec(2, 2, values.repeat(ctx.nbatch()).to_vec(), ctx)
+    }
+
+    #[test]
+    fn test_owned_rhs() {
+        super::super::tests::test_owned_rhs_m::<FaerMat<f64>>();
+    }
+
+    #[test]
+    fn test_batched_owned_rhs_broadcast() {
+        super::super::tests::test_batched_owned_rhs_broadcast_m::<FaerMat<f64>>(
+            FaerContext::default().clone_with_nbatch(2).unwrap(),
+        );
+    }
+
+    /// faer-specific: the value semantics live in the generic suite, this pins down that an
+    /// owned operand really is written into instead of reallocated.
+    #[test]
+    fn test_owned_operands_reuse_allocation() {
+        let ctx = FaerContext::default();
+        let a = mat([10.0, 20.0, 30.0, 40.0], ctx);
+
+        let lhs = mat([10.0, 20.0, 30.0, 40.0], ctx);
+        let buffer = lhs.data[0].as_ptr();
+        let b = mat([1.0, 2.0, 3.0, 4.0], ctx);
+        let c = lhs - &b;
+        assert_eq!(c.data[0].as_ptr(), buffer, "lhs buffer not reused");
+        assert_eq!(triplet_values(&c), vec![9.0, 18.0, 27.0, 36.0]);
+
+        let rhs = mat([1.0, 2.0, 3.0, 4.0], ctx);
+        let buffer = rhs.data[0].as_ptr();
+        let c = &a - rhs;
+        assert_eq!(c.data[0].as_ptr(), buffer, "rhs buffer not reused");
+        assert_eq!(triplet_values(&c), vec![9.0, 18.0, 27.0, 36.0]);
+
+        let rhs = mat([1.0, 2.0, 3.0, 4.0], ctx);
+        let buffer = rhs.data[0].as_ptr();
+        let ncols = a.ncols();
+        let c = a.columns(0, ncols) + rhs;
+        assert_eq!(c.data[0].as_ptr(), buffer, "rhs buffer not reused");
+        assert_eq!(triplet_values(&c), vec![11.0, 22.0, 33.0, 44.0]);
+    }
+
+    /// faer-specific: the owned rhs is reused when it already spans every batch, and left
+    /// alone when the result needs more batches than it holds.
+    #[test]
+    fn test_owned_rhs_broadcast_reuse() {
+        let ctx1 = FaerContext::default();
+        let ctx2 = FaerContext::default().clone_with_nbatch(2).unwrap();
+
+        let a = mat([10.0, 20.0, 30.0, 40.0], ctx1);
+        let rhs = mat([1.0, 2.0, 3.0, 4.0], ctx2);
+        let buffer = rhs.data[0].as_ptr();
+        let c = &a - rhs;
+        assert_eq!(c.context().nbatch(), 2);
+        assert_eq!(c.data[0].as_ptr(), buffer, "rhs buffer not reused");
+        assert_eq!(
+            triplet_values(&c),
+            vec![9.0, 18.0, 27.0, 36.0, 9.0, 18.0, 27.0, 36.0]
+        );
+
+        // the rhs is a single batch, so the two-batch result has to be allocated
+        let a = mat([10.0, 20.0, 30.0, 40.0], ctx2);
+        let rhs = mat([1.0, 2.0, 3.0, 4.0], ctx1);
+        let c = &a - rhs;
+        assert_eq!(c.context().nbatch(), 2);
+        assert_eq!(
+            triplet_values(&c),
+            vec![9.0, 18.0, 27.0, 36.0, 9.0, 18.0, 27.0, 36.0]
+        );
     }
 
     #[test]

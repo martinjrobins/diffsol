@@ -102,14 +102,25 @@ macro_rules! impl_sub_lhs {
     ($lhs:ty, $rhs:ty, $out:ty) => {
         impl<T: Scalar> Sub<$rhs> for $lhs {
             type Output = $out;
+            // the `%` below is broadcast indexing over batches, not arithmetic on
+            // the operands, which is what the lint is looking for
+            #[allow(clippy::suspicious_arithmetic_impl)]
             fn sub(self, rhs: $rhs) -> Self::Output {
                 self.context
                     .assert_compatible_nbatch(rhs.context.nbatch(), "sub");
+                let nbatch = self.data.len().max(rhs.data.len());
                 Self::Output {
-                    data: (0..self.data.len())
-                        .map(|batch| &self.data[batch] - &rhs.data[batch % rhs.data.len()])
+                    data: (0..nbatch)
+                        .map(|batch| {
+                            &self.data[batch % self.data.len()]
+                                - &rhs.data[batch % rhs.data.len()]
+                        })
                         .collect(),
-                    context: self.context,
+                    context: if self.data.len() == nbatch {
+                        self.context.clone()
+                    } else {
+                        rhs.context.clone()
+                    },
                 }
             }
         }
@@ -117,14 +128,25 @@ macro_rules! impl_sub_lhs {
     ($lhs:ty, $rhs:ty, $out:ty, $bound:path) => {
         impl<T: Scalar + $bound> Sub<$rhs> for $lhs {
             type Output = $out;
+            // the `%` below is broadcast indexing over batches, not arithmetic on
+            // the operands, which is what the lint is looking for
+            #[allow(clippy::suspicious_arithmetic_impl)]
             fn sub(self, rhs: $rhs) -> Self::Output {
                 self.context
                     .assert_compatible_nbatch(rhs.context.nbatch(), "sub");
+                let nbatch = self.data.len().max(rhs.data.len());
                 Self::Output {
-                    data: (0..self.data.len())
-                        .map(|batch| &self.data[batch] - &rhs.data[batch % rhs.data.len()])
+                    data: (0..nbatch)
+                        .map(|batch| {
+                            &self.data[batch % self.data.len()]
+                                - &rhs.data[batch % rhs.data.len()]
+                        })
                         .collect(),
-                    context: self.context,
+                    context: if self.data.len() == nbatch {
+                        self.context.clone()
+                    } else {
+                        rhs.context.clone()
+                    },
                 }
             }
         }
@@ -136,14 +158,25 @@ macro_rules! impl_sub_rhs {
     ($lhs:ty, $rhs:ty, $out:ty) => {
         impl<T: Scalar> Sub<$rhs> for $lhs {
             type Output = $out;
+            // the `%` below is broadcast indexing over batches, not arithmetic on
+            // the operands, which is what the lint is looking for
+            #[allow(clippy::suspicious_arithmetic_impl)]
             fn sub(self, rhs: $rhs) -> Self::Output {
                 rhs.context
                     .assert_compatible_nbatch(self.context.nbatch(), "sub");
+                let nbatch = self.data.len().max(rhs.data.len());
                 Self::Output {
-                    data: (0..rhs.data.len())
-                        .map(|batch| &self.data[batch % self.data.len()] - &rhs.data[batch])
+                    data: (0..nbatch)
+                        .map(|batch| {
+                            &self.data[batch % self.data.len()]
+                                - &rhs.data[batch % rhs.data.len()]
+                        })
                         .collect(),
-                    context: rhs.context,
+                    context: if self.data.len() == nbatch {
+                        self.context.clone()
+                    } else {
+                        rhs.context.clone()
+                    },
                 }
             }
         }
@@ -151,14 +184,25 @@ macro_rules! impl_sub_rhs {
     ($lhs:ty, $rhs:ty, $out:ty, $bound:path) => {
         impl<T: Scalar + $bound> Sub<$rhs> for $lhs {
             type Output = $out;
+            // the `%` below is broadcast indexing over batches, not arithmetic on
+            // the operands, which is what the lint is looking for
+            #[allow(clippy::suspicious_arithmetic_impl)]
             fn sub(self, rhs: $rhs) -> Self::Output {
                 rhs.context
                     .assert_compatible_nbatch(self.context.nbatch(), "sub");
+                let nbatch = self.data.len().max(rhs.data.len());
                 Self::Output {
-                    data: (0..rhs.data.len())
-                        .map(|batch| &self.data[batch % self.data.len()] - &rhs.data[batch])
+                    data: (0..nbatch)
+                        .map(|batch| {
+                            &self.data[batch % self.data.len()]
+                                - &rhs.data[batch % rhs.data.len()]
+                        })
                         .collect(),
-                    context: rhs.context,
+                    context: if self.data.len() == nbatch {
+                        self.context.clone()
+                    } else {
+                        rhs.context.clone()
+                    },
                 }
             }
         }
@@ -170,14 +214,25 @@ macro_rules! impl_sub_both_ref {
     ($lhs:ty, $rhs:ty, $out:ty) => {
         impl<T: Scalar> Sub<$rhs> for $lhs {
             type Output = $out;
+            // the `%` below is broadcast indexing over batches, not arithmetic on
+            // the operands, which is what the lint is looking for
+            #[allow(clippy::suspicious_arithmetic_impl)]
             fn sub(self, rhs: $rhs) -> Self::Output {
                 self.context
                     .assert_compatible_nbatch(rhs.context.nbatch(), "sub");
+                let nbatch = self.data.len().max(rhs.data.len());
                 Self::Output {
-                    data: (0..self.data.len())
-                        .map(|batch| &self.data[batch] - &rhs.data[batch % rhs.data.len()])
+                    data: (0..nbatch)
+                        .map(|batch| {
+                            &self.data[batch % self.data.len()]
+                                - &rhs.data[batch % rhs.data.len()]
+                        })
                         .collect(),
-                    context: self.context.clone(),
+                    context: if self.data.len() == nbatch {
+                        self.context.clone()
+                    } else {
+                        rhs.context.clone()
+                    },
                 }
             }
         }
@@ -185,14 +240,25 @@ macro_rules! impl_sub_both_ref {
     ($lhs:ty, $rhs:ty, $out:ty, $bound:path) => {
         impl<T: Scalar + $bound> Sub<$rhs> for $lhs {
             type Output = $out;
+            // the `%` below is broadcast indexing over batches, not arithmetic on
+            // the operands, which is what the lint is looking for
+            #[allow(clippy::suspicious_arithmetic_impl)]
             fn sub(self, rhs: $rhs) -> Self::Output {
                 self.context
                     .assert_compatible_nbatch(rhs.context.nbatch(), "sub");
+                let nbatch = self.data.len().max(rhs.data.len());
                 Self::Output {
-                    data: (0..self.data.len())
-                        .map(|batch| &self.data[batch] - &rhs.data[batch % rhs.data.len()])
+                    data: (0..nbatch)
+                        .map(|batch| {
+                            &self.data[batch % self.data.len()]
+                                - &rhs.data[batch % rhs.data.len()]
+                        })
                         .collect(),
-                    context: self.context.clone(),
+                    context: if self.data.len() == nbatch {
+                        self.context.clone()
+                    } else {
+                        rhs.context.clone()
+                    },
                 }
             }
         }
@@ -204,14 +270,25 @@ macro_rules! impl_add_lhs {
     ($lhs:ty, $rhs:ty, $out:ty) => {
         impl<T: Scalar> Add<$rhs> for $lhs {
             type Output = $out;
+            // the `%` below is broadcast indexing over batches, not arithmetic on
+            // the operands, which is what the lint is looking for
+            #[allow(clippy::suspicious_arithmetic_impl)]
             fn add(self, rhs: $rhs) -> Self::Output {
                 self.context
                     .assert_compatible_nbatch(rhs.context.nbatch(), "add");
+                let nbatch = self.data.len().max(rhs.data.len());
                 Self::Output {
-                    data: (0..self.data.len())
-                        .map(|batch| &self.data[batch] + &rhs.data[batch % rhs.data.len()])
+                    data: (0..nbatch)
+                        .map(|batch| {
+                            &self.data[batch % self.data.len()]
+                                + &rhs.data[batch % rhs.data.len()]
+                        })
                         .collect(),
-                    context: self.context,
+                    context: if self.data.len() == nbatch {
+                        self.context.clone()
+                    } else {
+                        rhs.context.clone()
+                    },
                 }
             }
         }
@@ -219,14 +296,25 @@ macro_rules! impl_add_lhs {
     ($lhs:ty, $rhs:ty, $out:ty, $bound:path) => {
         impl<T: Scalar + $bound> Add<$rhs> for $lhs {
             type Output = $out;
+            // the `%` below is broadcast indexing over batches, not arithmetic on
+            // the operands, which is what the lint is looking for
+            #[allow(clippy::suspicious_arithmetic_impl)]
             fn add(self, rhs: $rhs) -> Self::Output {
                 self.context
                     .assert_compatible_nbatch(rhs.context.nbatch(), "add");
+                let nbatch = self.data.len().max(rhs.data.len());
                 Self::Output {
-                    data: (0..self.data.len())
-                        .map(|batch| &self.data[batch] + &rhs.data[batch % rhs.data.len()])
+                    data: (0..nbatch)
+                        .map(|batch| {
+                            &self.data[batch % self.data.len()]
+                                + &rhs.data[batch % rhs.data.len()]
+                        })
                         .collect(),
-                    context: self.context,
+                    context: if self.data.len() == nbatch {
+                        self.context.clone()
+                    } else {
+                        rhs.context.clone()
+                    },
                 }
             }
         }
@@ -238,14 +326,25 @@ macro_rules! impl_add_rhs {
     ($lhs:ty, $rhs:ty, $out:ty) => {
         impl<T: Scalar> Add<$rhs> for $lhs {
             type Output = $out;
+            // the `%` below is broadcast indexing over batches, not arithmetic on
+            // the operands, which is what the lint is looking for
+            #[allow(clippy::suspicious_arithmetic_impl)]
             fn add(self, rhs: $rhs) -> Self::Output {
                 rhs.context
                     .assert_compatible_nbatch(self.context.nbatch(), "add");
+                let nbatch = self.data.len().max(rhs.data.len());
                 Self::Output {
-                    data: (0..rhs.data.len())
-                        .map(|batch| &self.data[batch % self.data.len()] + &rhs.data[batch])
+                    data: (0..nbatch)
+                        .map(|batch| {
+                            &self.data[batch % self.data.len()]
+                                + &rhs.data[batch % rhs.data.len()]
+                        })
                         .collect(),
-                    context: rhs.context,
+                    context: if self.data.len() == nbatch {
+                        self.context.clone()
+                    } else {
+                        rhs.context.clone()
+                    },
                 }
             }
         }
@@ -253,14 +352,25 @@ macro_rules! impl_add_rhs {
     ($lhs:ty, $rhs:ty, $out:ty, $bound:path) => {
         impl<T: Scalar + $bound> Add<$rhs> for $lhs {
             type Output = $out;
+            // the `%` below is broadcast indexing over batches, not arithmetic on
+            // the operands, which is what the lint is looking for
+            #[allow(clippy::suspicious_arithmetic_impl)]
             fn add(self, rhs: $rhs) -> Self::Output {
                 rhs.context
                     .assert_compatible_nbatch(self.context.nbatch(), "add");
+                let nbatch = self.data.len().max(rhs.data.len());
                 Self::Output {
-                    data: (0..rhs.data.len())
-                        .map(|batch| &self.data[batch % self.data.len()] + &rhs.data[batch])
+                    data: (0..nbatch)
+                        .map(|batch| {
+                            &self.data[batch % self.data.len()]
+                                + &rhs.data[batch % rhs.data.len()]
+                        })
                         .collect(),
-                    context: rhs.context,
+                    context: if self.data.len() == nbatch {
+                        self.context.clone()
+                    } else {
+                        rhs.context.clone()
+                    },
                 }
             }
         }
@@ -272,14 +382,25 @@ macro_rules! impl_add_both_ref {
     ($lhs:ty, $rhs:ty, $out:ty) => {
         impl<T: Scalar> Add<$rhs> for $lhs {
             type Output = $out;
+            // the `%` below is broadcast indexing over batches, not arithmetic on
+            // the operands, which is what the lint is looking for
+            #[allow(clippy::suspicious_arithmetic_impl)]
             fn add(self, rhs: $rhs) -> Self::Output {
                 self.context
                     .assert_compatible_nbatch(rhs.context.nbatch(), "add");
+                let nbatch = self.data.len().max(rhs.data.len());
                 Self::Output {
-                    data: (0..self.data.len())
-                        .map(|batch| &self.data[batch] + &rhs.data[batch % rhs.data.len()])
+                    data: (0..nbatch)
+                        .map(|batch| {
+                            &self.data[batch % self.data.len()]
+                                + &rhs.data[batch % rhs.data.len()]
+                        })
                         .collect(),
-                    context: self.context.clone(),
+                    context: if self.data.len() == nbatch {
+                        self.context.clone()
+                    } else {
+                        rhs.context.clone()
+                    },
                 }
             }
         }
@@ -287,14 +408,25 @@ macro_rules! impl_add_both_ref {
     ($lhs:ty, $rhs:ty, $out:ty, $bound:path) => {
         impl<T: Scalar + $bound> Add<$rhs> for $lhs {
             type Output = $out;
+            // the `%` below is broadcast indexing over batches, not arithmetic on
+            // the operands, which is what the lint is looking for
+            #[allow(clippy::suspicious_arithmetic_impl)]
             fn add(self, rhs: $rhs) -> Self::Output {
                 self.context
                     .assert_compatible_nbatch(rhs.context.nbatch(), "add");
+                let nbatch = self.data.len().max(rhs.data.len());
                 Self::Output {
-                    data: (0..self.data.len())
-                        .map(|batch| &self.data[batch] + &rhs.data[batch % rhs.data.len()])
+                    data: (0..nbatch)
+                        .map(|batch| {
+                            &self.data[batch % self.data.len()]
+                                + &rhs.data[batch % rhs.data.len()]
+                        })
                         .collect(),
-                    context: self.context.clone(),
+                    context: if self.data.len() == nbatch {
+                        self.context.clone()
+                    } else {
+                        rhs.context.clone()
+                    },
                 }
             }
         }

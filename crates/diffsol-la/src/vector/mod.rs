@@ -496,6 +496,10 @@ macro_rules! generate_vector_tests_nonbatched {
                 $crate::vector::tests::test_sub::<$V>();
             }
             #[test]
+            fn [<test_owned_rhs_ $suffix>]() {
+                $crate::vector::tests::test_owned_rhs::<$V>();
+            }
+            #[test]
             fn [<test_add_assign_ $suffix>]() {
                 $crate::vector::tests::test_add_assign::<$V>();
             }
@@ -650,6 +654,10 @@ macro_rules! generate_vector_tests_batched {
             #[test]
             fn [<test_batched_sub_ $suffix>]() {
                 $crate::vector::tests::test_batched_sub::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_owned_rhs_broadcast_ $suffix>]() {
+                $crate::vector::tests::test_batched_owned_rhs_broadcast::<$V>($ctx2);
             }
             #[test]
             fn [<test_batched_sub_assign_ $suffix>]() {
@@ -817,6 +825,7 @@ pub(crate) use generate_vector_tests_nonbatched;
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use std::ops::{Add, Sub};
     use std::panic::{catch_unwind, AssertUnwindSafe};
 
     use super::{Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
@@ -1012,6 +1021,30 @@ pub(crate) mod tests {
         let b = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0]), Default::default());
         let c = a - b;
         assert_eq!(c.clone_as_vec(), fv::<V>(&[9.0, 18.0, 27.0]));
+    }
+
+    /// A borrowed left-hand side with an owned right-hand side: backends may write the result
+    /// into the right-hand side's storage, which must not flip the operands of `sub`.
+    pub fn test_owned_rhs<V: Vector>()
+    where
+        for<'a> &'a V: Add<V, Output = V> + Sub<V, Output = V>,
+    {
+        let a = V::from_vec(fv::<V>(&[10.0, 20.0, 30.0]), Default::default());
+        let b = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0]), Default::default());
+        let c = &a - b;
+        assert_eq!(c.clone_as_vec(), fv::<V>(&[9.0, 18.0, 27.0]));
+
+        let b = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0]), Default::default());
+        let c = &a + b;
+        assert_eq!(c.clone_as_vec(), fv::<V>(&[11.0, 22.0, 33.0]));
+
+        let b = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0]), Default::default());
+        let c = a.as_view() - b;
+        assert_eq!(c.clone_as_vec(), fv::<V>(&[9.0, 18.0, 27.0]));
+
+        let b = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0]), Default::default());
+        let c = a.as_view() + b;
+        assert_eq!(c.clone_as_vec(), fv::<V>(&[11.0, 22.0, 33.0]));
     }
 
     pub fn test_add_assign<V: Vector>() {
@@ -1333,6 +1366,29 @@ pub(crate) mod tests {
         let b = V::from_vec(fv::<V>(&[1.0, 2.0]), V::C::default());
         a -= &b;
         assert_eq!(a.clone_as_vec(), fv::<V>(&[9.0, 18.0, 29.0, 38.0]));
+    }
+
+    /// Owned right-hand side with broadcasting in both directions: the right-hand side can
+    /// only hold the result when it already has the result's batch count.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_batched_owned_rhs_broadcast<V: Vector>(ctx: V::C)
+    where
+        for<'a> &'a V: Sub<V, Output = V>,
+    {
+        assert_eq!(ctx.nbatch(), 2);
+        // lhs broadcasts over the batches of rhs
+        let a = V::from_vec(fv::<V>(&[10.0, 20.0]), V::C::default());
+        let b = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0]), ctx.clone());
+        let c = &a - b;
+        assert_eq!(c.clone_as_vec(), fv::<V>(&[9.0, 18.0, 7.0, 16.0]));
+        assert_eq!(c.context().nbatch(), 2);
+
+        // rhs broadcasts over the batches of lhs
+        let a = V::from_vec(fv::<V>(&[10.0, 20.0, 30.0, 40.0]), ctx);
+        let b = V::from_vec(fv::<V>(&[1.0, 2.0]), V::C::default());
+        let c = &a - b;
+        assert_eq!(c.clone_as_vec(), fv::<V>(&[9.0, 18.0, 29.0, 38.0]));
+        assert_eq!(c.context().nbatch(), 2);
     }
 
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]

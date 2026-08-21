@@ -17,6 +17,14 @@ pub mod faer;
 ///
 /// It will generally be the case that all the operators / vectors / matrices for the current ode problem
 /// share the same context
+/// Kept out of line so that the panic's formatting does not stop
+/// [`Context::assert_compatible_nbatch`] from being inlined into hot operations.
+#[cold]
+#[inline(never)]
+fn incompatible_nbatch(lhs: usize, rhs: usize, op: &str) -> ! {
+    panic!("incompatible nbatch in {}: lhs={}, rhs={}", op, lhs, rhs);
+}
+
 pub trait Context: Clone + Default {
     /// Returns the batch count for this context.
     ///
@@ -24,6 +32,7 @@ pub trait Context: Clone + Default {
     /// independent ODE systems simultaneously.  Operations between operands
     /// with different batch counts use broadcast semantics: an operand with
     /// `nbatch == 1` is applied to all batches of the other operand.
+    #[inline]
     fn nbatch(&self) -> usize {
         1
     }
@@ -39,13 +48,15 @@ pub trait Context: Clone + Default {
     /// Compatibility rule: two batches are compatible if they are equal, or
     /// if either one is `1` (broadcast).  Only panics when both are `> 1`
     /// and differ.
+    ///
+    /// In-place operations write `self.nbatch()` batches: a right-hand side with
+    /// `nbatch == 1` is broadcast over all of them, and where the left-hand side has
+    /// `nbatch == 1` only batch 0 of the right-hand side is used.
+    #[inline]
     fn assert_compatible_nbatch(&self, other_nbatch: usize, op: &str) {
         let self_nbatch = self.nbatch();
         if self_nbatch != other_nbatch && self_nbatch != 1 && other_nbatch != 1 {
-            panic!(
-                "incompatible nbatch in {}: lhs={}, rhs={}",
-                op, self_nbatch, other_nbatch
-            );
+            incompatible_nbatch(self_nbatch, other_nbatch, op);
         }
     }
     fn vector_from_element<V: Vector<C = Self>>(&self, len: usize, value: V::T) -> V {
