@@ -140,7 +140,7 @@ impl OdeEquations for NeuralOde {
     fn set_params(&mut self, p: &Self::V) {
         self.input_p
             .iter_mut()
-            .zip(p.inner()[0].iter())
+            .zip(p.inner().iter())
             .for_each(|(input_p, p)| *input_p = *p as f32);
     }
 
@@ -212,7 +212,7 @@ impl NonLinearOp for Rhs<'_> {
         let mut y_input = self.0.input_y.borrow_mut();
         y_input
             .iter_mut()
-            .zip(x.inner()[0].iter())
+            .zip(x.inner().iter())
             .for_each(|(y, x)| *y = *x as f32);
         let p_slice = self.0.input_p.as_slice().unwrap();
         let y_slice = y_input.as_slice().unwrap();
@@ -237,12 +237,12 @@ impl NonLinearOpJacobian for Rhs<'_> {
         let mut y_input = self.0.input_y.borrow_mut();
         y_input
             .iter_mut()
-            .zip(x.inner()[0].iter())
+            .zip(x.inner().iter())
             .for_each(|(y, x)| *y = *x as f32);
         let mut v_input = self.0.input_v.borrow_mut();
         v_input
             .iter_mut()
-            .zip(v.inner()[0].iter())
+            .zip(v.inner().iter())
             .for_each(|(v, x)| *v = *x as f32);
         let p_slice = self.0.input_p.as_slice().unwrap();
         let y_slice = y_input.as_slice().unwrap();
@@ -268,12 +268,12 @@ impl NonLinearOpAdjoint for Rhs<'_> {
         let mut y_input = self.0.input_y.borrow_mut();
         y_input
             .iter_mut()
-            .zip(x.inner()[0].iter())
+            .zip(x.inner().iter())
             .for_each(|(y, x)| *y = *x as f32);
         let mut v_input = self.0.input_v.borrow_mut();
         v_input
             .iter_mut()
-            .zip(v.inner()[0].iter())
+            .zip(v.inner().iter())
             .for_each(|(v, x)| *v = *x as f32);
         let p_slice = self.0.input_p.as_slice().unwrap();
         let y_slice = y_input.as_slice().unwrap();
@@ -299,12 +299,12 @@ impl NonLinearOpSensAdjoint for Rhs<'_> {
         let mut y_input = self.0.input_y.borrow_mut();
         y_input
             .iter_mut()
-            .zip(x.inner()[0].iter())
+            .zip(x.inner().iter())
             .for_each(|(y, x)| *y = *x as f32);
         let mut v_input = self.0.input_v.borrow_mut();
         v_input
             .iter_mut()
-            .zip(v.inner()[0].iter())
+            .zip(v.inner().iter())
             .for_each(|(v, x)| *v = *x as f32);
         let p_slice = self.0.input_p.as_slice().unwrap();
         let y_slice = y_input.as_slice().unwrap();
@@ -376,8 +376,8 @@ impl AdamW {
         params
             .inner_mut()
             .iter_mut()
-            .zip(self.v_hat.inner()[0].iter())
-            .zip(self.m_hat.inner()[0].iter())
+            .zip(self.v_hat.inner().iter())
+            .zip(self.m_hat.inner().iter())
             .for_each(|((params_i, v_hat_i), m_hat_i)| {
                 *params_i -= self.lr * m_hat_i / (v_hat_i.sqrt() + self.eps)
             });
@@ -399,7 +399,7 @@ fn loss_fn(
     let mut loss = 0.0;
     for j in 0..g_m.ncols() {
         let delta = ys.column(j) - ys_data.column(j);
-        loss += delta.inner()[0].dot(&delta.inner()[0]);
+        loss += delta.inner().dot(delta.inner());
         let g_m_i = delta * Scale(2.0);
         g_m.column_mut(j).copy_from(&g_m_i);
     }

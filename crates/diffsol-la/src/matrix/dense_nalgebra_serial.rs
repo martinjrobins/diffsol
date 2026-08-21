@@ -489,7 +489,7 @@ impl<T: NalgebraScalar> Matrix for NalgebraMat<T> {
             let j = d / self.nrows();
             for b in 0..self.context.nbatch() {
                 let c = self.col(b, j);
-                self.data[(i, c)] = data.data[(*s, b % data.data.ncols())]
+                self.data[(i, c)] = data.data[(*s, data.batch(b))]
             }
         }
     }
@@ -525,6 +525,8 @@ impl<T: NalgebraScalar> Matrix for NalgebraMat<T> {
         )
     }
     fn add_column_to_vector(&self, j: usize, v: &mut NalgebraVec<T>) {
+        v.context
+            .assert_compatible_nbatch(self.context.nbatch(), "add_column_to_vector");
         if self.context.nbatch() == 1 && v.context.nbatch() == 1 {
             v.data
                 .column_mut(0)
@@ -610,6 +612,8 @@ impl<T: NalgebraScalar> Matrix for NalgebraMat<T> {
         }
     }
     fn set_column(&mut self, j: usize, v: &NalgebraVec<T>) {
+        self.context
+            .assert_compatible_nbatch(v.context.nbatch(), "set_column");
         // unbatched fast path: worth ~4x on lin_alg_ops set_column/nalgebra/10
         if self.context.nbatch() == 1 && v.context.nbatch() == 1 {
             self.data.column_mut(j).copy_from(&v.data.column(0));
@@ -618,7 +622,7 @@ impl<T: NalgebraScalar> Matrix for NalgebraMat<T> {
         for b in 0..self.context.nbatch() {
             self.data
                 .column_mut(self.col(b, j))
-                .copy_from(&v.data.column(b % v.data.ncols()));
+                .copy_from(&v.data.column(v.batch(b)));
         }
     }
     fn scale_add_and_assign(&mut self, x: &Self, b: T, y: &Self) {

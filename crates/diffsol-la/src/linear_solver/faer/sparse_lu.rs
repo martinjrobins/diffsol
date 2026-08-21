@@ -5,7 +5,7 @@ use crate::{
 
 use faer::{
     linalg::solvers::Solve,
-    reborrow::Reborrow,
+    reborrow::{Reborrow, ReborrowMut},
     sparse::linalg::{solvers::Lu, solvers::SymbolicLu},
 };
 
@@ -57,8 +57,9 @@ impl<T: FaerScalar> LinearSolver<FaerSparseMat<T>> for FaerSparseLU<T> {
         }
         x.context
             .assert_compatible_nbatch(self.lu.len(), "sparse_lu_solve");
-        for (batch, x) in x.data.iter_mut().enumerate() {
-            self.lu[batch % self.lu.len()].solve_in_place(x);
+        let nlu = self.lu.len();
+        for batch in 0..x.data.ncols() {
+            self.lu[batch % nlu].solve_in_place(x.data.rb_mut().col_mut(batch));
         }
         Ok(())
     }

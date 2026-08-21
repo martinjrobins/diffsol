@@ -56,7 +56,7 @@ trait VectorKLU: Vector {
 
 impl VectorKLU for FaerVec<f64> {
     fn values_mut_ptr(&mut self, batch: usize) -> *mut f64 {
-        self.data[batch].as_ptr_mut()
+        self.data.col_as_slice_mut(batch).as_mut_ptr()
     }
 }
 

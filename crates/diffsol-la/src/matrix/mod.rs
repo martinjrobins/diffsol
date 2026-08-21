@@ -26,9 +26,6 @@ pub mod default_solver;
 pub mod extract_block;
 pub mod sparsity;
 
-#[macro_use]
-mod utils;
-
 /// Common interface for matrix types, providing access to scalar type, context, and dimensions.
 pub trait MatrixCommon: Sized + Debug {
     type V: Vector<T = Self::T, C = Self::C, Index: VectorIndex<C = Self::C>>;

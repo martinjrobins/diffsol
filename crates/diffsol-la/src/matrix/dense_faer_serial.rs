@@ -1,602 +1,748 @@
 use std::ops::{Add, AddAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 
 use super::default_solver::DefaultSolver;
-use super::utils::*;
-use super::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
+use super::sparsity::{Dense, DenseRef};
 use crate::error::LaError;
-use crate::scalar::{IndexType, Scalar, Scale};
-use crate::VectorIndex;
-use crate::{Context, Dense, DenseRef, FaerContext, FaerScalar, FaerVec, Vector};
-use crate::{FaerLU, FaerVecMut, FaerVecRef};
+use crate::{scalar::Scale, Context, FaerScalar, Vector};
+use crate::{
+    DenseMatrix, FaerContext, FaerLU, FaerVec, FaerVecIndex, FaerVecMut, FaerVecRef, Matrix,
+    MatrixCommon, MatrixView, MatrixViewMut, VectorIndex,
+};
 
-use faer::{get_global_parallelism, unzip, zip, Accum};
-use faer::{linalg::matmul::matmul, Mat, MatMut, MatRef};
+use faer::reborrow::{Reborrow, ReborrowMut};
+use faer::{
+    get_global_parallelism, linalg::matmul::matmul, unzip, zip, Accum, Mat, MatMut, MatRef,
+};
 
+/// A batched matrix, stored as `nbatch` side-by-side blocks of `logical_ncols` columns.
+///
+/// Invariant: `data.ncols() == logical_ncols() * context.nbatch()`, so batch `b` column `j`
+/// lives at physical column `col(b, j)`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FaerMat<T: FaerScalar> {
-    pub(crate) data: Vec<Mat<T>>,
+    pub(crate) data: Mat<T>,
     pub(crate) context: FaerContext,
 }
-
+/// A view of columns `start..end` of every batch of a [`FaerMat`].
+///
+/// A batch's columns are not contiguous with the next batch's, so `data` stays the whole
+/// matrix and the column range is carried in `start`/`end` instead of being sliced out.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FaerMatRef<'a, T: FaerScalar> {
-    pub(crate) data: Vec<MatRef<'a, T>>,
+    pub(crate) data: MatRef<'a, T>,
     pub(crate) context: FaerContext,
+    pub(crate) start: usize,
+    pub(crate) end: usize,
 }
-
+/// Mutable counterpart of [`FaerMatRef`].
 #[derive(Debug, PartialEq)]
 pub struct FaerMatMut<'a, T: FaerScalar> {
-    pub(crate) data: Vec<MatMut<'a, T>>,
+    pub(crate) data: MatMut<'a, T>,
     pub(crate) context: FaerContext,
+    pub(crate) start: usize,
+    pub(crate) end: usize,
 }
 
+/// Column arithmetic shared by both view types: `logical_ncols` is the per-batch column
+/// count of the whole matrix, `ncols_local` the width of this view, and `col` maps a
+/// (batch, local column) pair to a physical column, broadcasting a single-batch operand.
+macro_rules! mat_methods {
+    () => {
+        fn logical_ncols(&self) -> usize {
+            self.data.ncols() / self.context.nbatch()
+        }
+        fn ncols_local(&self) -> usize {
+            self.end - self.start
+        }
+        fn col(&self, b: usize, j: usize) -> usize {
+            (b % self.context.nbatch()) * self.logical_ncols() + self.start + j
+        }
+    };
+}
+impl<T: FaerScalar> FaerMat<T> {
+    fn logical_ncols(&self) -> usize {
+        self.data.ncols() / self.context.nbatch()
+    }
+    fn col(&self, b: usize, j: usize) -> usize {
+        (b % self.context.nbatch()) * self.logical_ncols() + j
+    }
+}
+impl<T: FaerScalar> FaerMatRef<'_, T> {
+    mat_methods!();
+}
+impl<T: FaerScalar> FaerMatMut<'_, T> {
+    mat_methods!();
+}
 impl<T: FaerScalar> DefaultSolver for FaerMat<T> {
     type LS = FaerLU<T>;
 }
 
-impl_matrix_common_ref!(
-    FaerMatMut<'a, T>,
-    FaerVec<T>,
-    FaerContext,
-    Vec<MatMut<'a, T>>,
-    FaerScalar
-);
-impl_matrix_common_ref!(
-    FaerMatRef<'a, T>,
-    FaerVec<T>,
-    FaerContext,
-    Vec<MatRef<'a, T>>,
-    FaerScalar
-);
-impl_matrix_common!(FaerMat<T>, FaerVec<T>, FaerContext, Vec<Mat<T>>, FaerScalar);
-
-macro_rules! impl_mul_scalar {
-    ($mat_type:ty, $out:ty) => {
-        impl<'a, T: FaerScalar> Mul<Scale<T>> for $mat_type {
-            type Output = $out;
-
-            fn mul(self, rhs: Scale<T>) -> Self::Output {
-                let scale: faer::Scale<T> = rhs.into();
-                Self::Output {
-                    data: self.data.iter().map(|data| data * scale).collect(),
-                    context: self.context,
-                }
+impl<T: FaerScalar> MatrixCommon for FaerMat<T> {
+    type T = T;
+    type V = FaerVec<T>;
+    type C = FaerContext;
+    type Inner = Mat<T>;
+    fn nrows(&self) -> usize {
+        self.data.nrows()
+    }
+    fn ncols(&self) -> usize {
+        self.logical_ncols()
+    }
+    fn inner(&self) -> &Self::Inner {
+        &self.data
+    }
+}
+macro_rules! common_ref {
+    ($t:ty,$inner:ty) => {
+        impl<'a, T: FaerScalar> MatrixCommon for $t {
+            type T = T;
+            type V = FaerVec<T>;
+            type C = FaerContext;
+            type Inner = $inner;
+            fn nrows(&self) -> usize {
+                self.data.nrows()
+            }
+            fn ncols(&self) -> usize {
+                self.ncols_local()
+            }
+            fn inner(&self) -> &Self::Inner {
+                &self.data
             }
         }
     };
 }
+common_ref!(FaerMatRef<'a, T>, MatRef<'a, T>);
+common_ref!(FaerMatMut<'a, T>, MatMut<'a, T>);
 
-macro_rules! impl_mul_assign_scalar {
-    ($mat_type:ty) => {
-        impl<T: FaerScalar> MulAssign<Scale<T>> for $mat_type {
-            fn mul_assign(&mut self, rhs: Scale<T>) {
-                let scale: faer::Scale<T> = rhs.into();
-                for data in &mut self.data {
-                    *data *= scale;
-                }
-            }
-        }
-    };
-}
-
-impl_mul_scalar!(FaerMatRef<'_, T>, FaerMat<T>);
-impl_mul_scalar!(FaerMat<T>, FaerMat<T>);
-impl_mul_scalar!(&FaerMat<T>, FaerMat<T>);
-
-impl_mul_assign_scalar!(FaerMatMut<'_, T>);
-
-/// `self` is owned, so the result is written into its batches whenever it already holds as
-/// many as the result: `*self_b $op rhs_b`.
-macro_rules! matrix_binary_owned_lhs {
-    ($trait:ident, $method:ident, $rhs:ty, $op:tt, $binary:tt) => {
-        impl<T: FaerScalar> $trait<$rhs> for FaerMat<T> {
+macro_rules! binary {
+    ($tr:ident, $fn:ident, $l:ty, $r:ty, $op:tt, $binary:tt) => {
+        impl<T: FaerScalar> $tr<$r> for $l {
             type Output = FaerMat<T>;
 
-            fn $method(mut self, rhs: $rhs) -> Self::Output {
+            fn $fn(self, rhs: $r) -> Self::Output {
                 self.context
-                    .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($method));
-                let rhs_nbatch = rhs.data.len();
-                if self.data.len() >= rhs_nbatch {
-                    for (batch, data) in self.data.iter_mut().enumerate() {
-                        *data $op &rhs.data[batch % rhs_nbatch];
+                    .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($fn));
+                let nb = self.context.nbatch().max(rhs.context.nbatch());
+                let nc = self.ncols();
+                if self.context.nbatch() == rhs.context.nbatch()
+                    && self.data.ncols() == nc * nb
+                    && rhs.data.ncols() == nc * nb
+                {
+                    return FaerMat {
+                        data: self.data.rb() $binary rhs.data.rb(),
+                        context: self.context,
+                    };
+                }
+                let mut data = Mat::zeros(self.nrows(), nc * nb);
+                for b in 0..nb {
+                    let mut columns = data.rb_mut().subcols_mut(b * nc, nc);
+                    columns.copy_from(self.data.rb().subcols(self.col(b, 0), nc));
+                    columns $op rhs.data.rb().subcols(rhs.col(b, 0), nc);
+                }
+                FaerMat {
+                    data,
+                    context: if self.context.nbatch() == nb {
+                        self.context
+                    } else {
+                        rhs.context
+                    },
+                }
+            }
+        }
+    };
+}
+binary!(Add, add, FaerMatRef<'_, T>, &FaerMat<T>, +=, +);
+binary!(Sub, sub, FaerMatRef<'_, T>, &FaerMat<T>, -=, -);
+/// `self` is owned, so the result is written into its columns whenever it already holds as
+/// many batches as the result.
+macro_rules! binary_owned_lhs {
+    ($tr:ident, $fn:ident, $rhs:ty, $op:tt) => {
+        impl<T: FaerScalar> $tr<$rhs> for FaerMat<T> {
+            type Output = FaerMat<T>;
+
+            fn $fn(mut self, rhs: $rhs) -> Self::Output {
+                self.context
+                    .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($fn));
+                let nc = self.ncols();
+                if self.context.nbatch() >= rhs.context.nbatch() {
+                    for b in 0..self.context.nbatch() {
+                        let c = self.col(b, 0);
+                        let mut columns = self.data.rb_mut().subcols_mut(c, nc);
+                        columns $op rhs.data.rb().subcols(rhs.col(b, 0), nc);
                     }
                     return self;
                 }
                 // self holds fewer batches than the result, so it cannot be written into
-                let self_nbatch = self.data.len();
+                let nb = rhs.context.nbatch();
+                let mut data = Mat::zeros(self.nrows(), nc * nb);
+                for b in 0..nb {
+                    let mut columns = data.rb_mut().subcols_mut(b * nc, nc);
+                    columns.copy_from(self.data.rb().subcols(self.col(b, 0), nc));
+                    columns $op rhs.data.rb().subcols(rhs.col(b, 0), nc);
+                }
                 FaerMat {
-                    data: (0..rhs_nbatch)
-                        .map(|batch| &self.data[batch % self_nbatch] $binary &rhs.data[batch])
-                        .collect(),
+                    data,
                     context: rhs.context,
                 }
             }
         }
     };
 }
+binary_owned_lhs!(Add, add, &FaerMat<T>, +=);
+binary_owned_lhs!(Add, add, &FaerMatRef<'_, T>, +=);
+binary_owned_lhs!(Sub, sub, &FaerMat<T>, -=);
+binary_owned_lhs!(Sub, sub, &FaerMatRef<'_, T>, -=);
 
-/// `rhs` is owned, so the result is written into its batches whenever it already holds as
-/// many as the result: `combine(&mut rhs_b, lhs_b)`.
-macro_rules! matrix_binary_owned_rhs {
-    ($trait:ident, $method:ident, $lhs:ty, $op:tt, $combine:expr) => {
-        impl<T: FaerScalar> $trait<FaerMat<T>> for $lhs {
+/// `rhs` is owned, so the result is written into its columns whenever it already holds as
+/// many batches as the result: `combine(&mut rhs_ij, lhs_ij)`.
+macro_rules! binary_owned_rhs {
+    ($tr:ident, $fn:ident, $lhs:ty, $op:tt, $combine:expr) => {
+        impl<T: FaerScalar> $tr<FaerMat<T>> for $lhs {
             type Output = FaerMat<T>;
 
-            fn $method(self, mut rhs: FaerMat<T>) -> Self::Output {
+            fn $fn(self, mut rhs: FaerMat<T>) -> Self::Output {
                 self.context
-                    .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($method));
-                let self_nbatch = self.data.len();
-                if rhs.data.len() >= self_nbatch {
-                    for (batch, data) in rhs.data.iter_mut().enumerate() {
-                        zip!(data.as_mut(), self.data[batch % self_nbatch].as_ref())
-                            .for_each(|unzip!(rhs, lhs)| $combine(rhs, *lhs));
+                    .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($fn));
+                let nc = self.ncols();
+                if rhs.context.nbatch() >= self.context.nbatch() {
+                    for b in 0..rhs.context.nbatch() {
+                        let c = rhs.col(b, 0);
+                        let columns = rhs.data.rb_mut().subcols_mut(c, nc);
+                        zip!(columns, self.data.rb().subcols(self.col(b, 0), nc))
+                            .for_each(|unzip!(r, l)| $combine(r, *l));
                     }
                     return rhs;
                 }
                 // rhs holds fewer batches than the result, so it cannot be written into
-                let rhs_nbatch = rhs.data.len();
+                let nb = self.context.nbatch();
+                let mut data = Mat::zeros(self.nrows(), nc * nb);
+                for b in 0..nb {
+                    let mut columns = data.rb_mut().subcols_mut(b * nc, nc);
+                    columns.copy_from(self.data.rb().subcols(self.col(b, 0), nc));
+                    columns $op rhs.data.rb().subcols(rhs.col(b, 0), nc);
+                }
                 FaerMat {
-                    data: (0..self_nbatch)
-                        .map(|batch| {
-                            let mut data = self.data[batch].as_ref().to_owned();
-                            data $op &rhs.data[batch % rhs_nbatch];
-                            data
-                        })
-                        .collect(),
+                    data,
                     context: self.context,
                 }
             }
         }
     };
 }
-
-matrix_binary_owned_lhs!(Add, add, &FaerMat<T>, +=, +);
-matrix_binary_owned_lhs!(Add, add, &FaerMatRef<'_, T>, +=, +);
-matrix_binary_owned_lhs!(Sub, sub, &FaerMat<T>, -=, -);
-matrix_binary_owned_lhs!(Sub, sub, &FaerMatRef<'_, T>, -=, -);
-
-matrix_binary_owned_rhs!(Add, add, &FaerMat<T>, +=, |rhs: &mut T, lhs: T| *rhs += lhs);
-matrix_binary_owned_rhs!(Add, add, FaerMatRef<'_, T>, +=, |rhs: &mut T, lhs: T| *rhs += lhs);
-matrix_binary_owned_rhs!(Sub, sub, &FaerMat<T>, -=, |rhs: &mut T, lhs: T| *rhs = lhs - *rhs);
-matrix_binary_owned_rhs!(
+binary_owned_rhs!(Add, add, &FaerMat<T>, +=, |rhs: &mut T, lhs: T| *rhs += lhs);
+binary_owned_rhs!(Add, add, FaerMatRef<'_, T>, +=, |rhs: &mut T, lhs: T| *rhs += lhs);
+binary_owned_rhs!(Sub, sub, &FaerMat<T>, -=, |rhs: &mut T, lhs: T| *rhs = lhs - *rhs);
+binary_owned_rhs!(
     Sub,
     sub,
     FaerMatRef<'_, T>,
     -=,
     |rhs: &mut T, lhs: T| *rhs = lhs - *rhs
 );
+macro_rules! assign {
+    ($tr:ident, $fn:ident, $l:ty, $r:ty, $op:tt) => {
+        impl<T: FaerScalar> $tr<$r> for $l {
+            fn $fn(&mut self, rhs: $r) {
+                self.context
+                    .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($fn));
+                let nb = self.context.nbatch();
+                let nc = self.ncols();
+                if nb == rhs.context.nbatch()
+                    && self.data.ncols() == nc * nb
+                    && rhs.data.ncols() == nc * nb
+                {
+                    self.data $op rhs.data.rb();
+                    return;
+                }
+                for b in 0..nb {
+                    let c = self.col(b, 0);
+                    let mut columns = self.data.rb_mut().subcols_mut(c, nc);
+                    columns $op rhs.data.rb().subcols(rhs.col(b, 0), nc);
+                }
+            }
+        }
+    };
+}
+assign!(AddAssign, add_assign, FaerMat<T>, &FaerMat<T>, +=);
+assign!(AddAssign, add_assign, FaerMat<T>, &FaerMatRef<'_, T>, +=);
+assign!(
+    AddAssign,
+    add_assign,
+    FaerMatMut<'_, T>,
+    &FaerMatRef<'_, T>,
+    +=
+);
+assign!(
+    AddAssign,
+    add_assign,
+    FaerMatMut<'_, T>,
+    &FaerMatMut<'_, T>,
+    +=
+);
+assign!(SubAssign, sub_assign, FaerMat<T>, &FaerMat<T>, -=);
+assign!(SubAssign, sub_assign, FaerMat<T>, &FaerMatRef<'_, T>, -=);
+assign!(
+    SubAssign,
+    sub_assign,
+    FaerMatMut<'_, T>,
+    &FaerMatRef<'_, T>,
+    -=
+);
+assign!(
+    SubAssign,
+    sub_assign,
+    FaerMatMut<'_, T>,
+    &FaerMatMut<'_, T>,
+    -=
+);
+impl<T: FaerScalar> Mul<Scale<T>> for FaerMat<T> {
+    type Output = Self;
+    fn mul(mut self, r: Scale<T>) -> Self {
+        self.data *= faer::Scale(r.value());
+        self
+    }
+}
+macro_rules! scale_ref {
+    ($t:ty) => {
+        impl<T: FaerScalar> Mul<Scale<T>> for $t {
+            type Output = FaerMat<T>;
+            fn mul(self, r: Scale<T>) -> Self::Output {
+                if self.data.ncols() == self.ncols() * self.context.nbatch() {
+                    return FaerMat {
+                        data: self.data.rb() * faer::Scale(r.value()),
+                        context: self.context,
+                    };
+                }
+                let mut out = FaerMat::zeros(self.nrows(), self.ncols(), self.context);
+                let nc = out.ncols();
+                for b in 0..out.context.nbatch() {
+                    let c = out.col(b, 0);
+                    out.data
+                        .rb_mut()
+                        .subcols_mut(c, nc)
+                        .copy_from(self.data.rb().subcols(self.col(b, 0), nc));
+                }
+                out.data *= faer::Scale(r.value());
+                out
+            }
+        }
+    };
+}
+scale_ref!(&FaerMat<T>);
+scale_ref!(FaerMatRef<'_, T>);
+impl<T: FaerScalar> MulAssign<Scale<T>> for FaerMatMut<'_, T> {
+    fn mul_assign(&mut self, r: Scale<T>) {
+        if self.data.ncols() == self.ncols() * self.context.nbatch() {
+            self.data *= faer::Scale(r.value());
+            return;
+        }
+        let nc = self.ncols();
+        for b in 0..self.context.nbatch() {
+            let c = self.col(b, 0);
+            let mut columns = self.data.rb_mut().subcols_mut(c, nc);
+            columns *= faer::Scale(r.value());
+        }
+    }
+}
+macro_rules! ind {
+    ($t:ty) => {
+        impl<T: FaerScalar> Index<(usize, usize)> for $t {
+            type Output = T;
+            fn index(&self, x: (usize, usize)) -> &T {
+                &self.data[(x.0, self.col(0, x.1))]
+            }
+        }
+    };
+}
+ind!(FaerMat<T>);
+ind!(FaerMatRef<'_, T>);
+impl<T: FaerScalar> IndexMut<(usize, usize)> for FaerMat<T> {
+    fn index_mut(&mut self, x: (usize, usize)) -> &mut T {
+        let c = self.col(0, x.1);
+        &mut self.data[(x.0, c)]
+    }
+}
 
-impl_add!(FaerMatRef<'_, T>, &FaerMat<T>, FaerMat<T>, FaerScalar);
-impl_sub!(FaerMatRef<'_, T>, &FaerMat<T>, FaerMat<T>, FaerScalar);
+/// `y_b = a * self_b * x_b + beta * y_b` for every batch of `y`, broadcasting single-batch
+/// operands.  Shared by the owned matrix and its views: both expose `col` and `ncols`, and
+/// `x` may be an owned vector or a view.
+macro_rules! gemv_data {
+    ($self:ident, $a:ident, $x:ident, $beta:ident, $y:ident, $op:literal) => {{
+        $y.context
+            .assert_compatible_nbatch($self.context.nbatch(), $op);
+        $y.context
+            .assert_compatible_nbatch($x.context.nbatch(), $op);
+        let nc = $self.ncols();
+        for b in 0..$y.data.ncols() {
+            let mut column = $y.data.rb_mut().col_mut(b);
+            column *= faer::Scale($beta);
+            matmul(
+                column,
+                Accum::Add,
+                $self.data.rb().subcols($self.col(b, 0), nc),
+                $x.data.rb().col($x.batch(b)),
+                $a,
+                get_global_parallelism(),
+            );
+        }
+    }};
+}
 
-impl_add_assign!(FaerMat<T>, &FaerMat<T>, FaerScalar);
-impl_add_assign!(FaerMat<T>, &FaerMatRef<'_, T>, FaerScalar);
-impl_add_assign!(FaerMatMut<'_, T>, &FaerMatRef<'_, T>, FaerScalar);
-impl_add_assign!(FaerMatMut<'_, T>, &FaerMatMut<'_, T>, FaerScalar);
+/// Copies columns `start..end` of every batch of a view into a fresh owned matrix.  Shared by
+/// both view types, which expose `col` and `ncols` alike.
+macro_rules! into_owned_data {
+    ($self:ident) => {{
+        let nc = $self.ncols();
+        let mut out = FaerMat::zeros($self.nrows(), nc, $self.context);
+        for b in 0..$self.context.nbatch() {
+            let c = out.col(b, 0);
+            out.data
+                .rb_mut()
+                .subcols_mut(c, nc)
+                .copy_from($self.data.rb().subcols($self.col(b, 0), nc));
+        }
+        out
+    }};
+}
 
-impl_sub_assign!(FaerMat<T>, &FaerMat<T>, FaerScalar);
-impl_sub_assign!(FaerMat<T>, &FaerMatRef<'_, T>, FaerScalar);
-impl_sub_assign!(FaerMatMut<'_, T>, &FaerMatRef<'_, T>, FaerScalar);
-impl_sub_assign!(FaerMatMut<'_, T>, &FaerMatMut<'_, T>, FaerScalar);
-
-impl_index!(FaerMat<T>, FaerScalar);
-impl_index!(FaerMatRef<'_, T>, FaerScalar);
-impl_index_mut!(FaerMat<T>, FaerScalar);
+/// `self_b = a * x_b * y_b + beta * self_b` for every batch of `self`, broadcasting
+/// single-batch operands.  Shared by the owned matrix and its mutable view, with `x` and `y`
+/// either owned matrices or views: all of them expose `col` and `ncols`.
+macro_rules! gemm_data {
+    ($self:ident, $a:ident, $x:ident, $y:ident, $beta:ident, $op:literal) => {{
+        $self
+            .context
+            .assert_compatible_nbatch($x.context.nbatch(), $op);
+        $self
+            .context
+            .assert_compatible_nbatch($y.context.nbatch(), $op);
+        let (nc, xc, yc) = ($self.ncols(), $x.ncols(), $y.ncols());
+        for b in 0..$self.context.nbatch() {
+            let c = $self.col(b, 0);
+            let mut columns = $self.data.rb_mut().subcols_mut(c, nc);
+            columns *= faer::Scale($beta);
+            matmul(
+                columns,
+                Accum::Add,
+                $x.data.rb().subcols($x.col(b, 0), xc),
+                $y.data.rb().subcols($y.col(b, 0), yc),
+                $a,
+                get_global_parallelism(),
+            );
+        }
+    }};
+}
 
 impl<'a, T: FaerScalar> MatrixView<'a> for FaerMatRef<'a, T> {
     type Owned = FaerMat<T>;
-
     fn into_owned(self) -> Self::Owned {
-        Self::Owned {
-            data: self.data.iter().map(|data| data.to_owned()).collect(),
-            context: self.context,
-        }
+        into_owned_data!(self)
     }
-
-    fn gemv_o(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
-        y.context
-            .assert_compatible_nbatch(self.context.nbatch(), "gemv_o");
-        y.context
-            .assert_compatible_nbatch(x.context.nbatch(), "gemv_o");
-        for (b, y) in y.data.iter_mut().enumerate() {
-            *y *= faer::Scale(beta);
-            matmul(
-                y.as_mut(),
-                Accum::Add,
-                self.data[b % self.data.len()].as_ref(),
-                x.data[b % x.data.len()].as_ref(),
-                alpha,
-                get_global_parallelism(),
-            );
-        }
+    fn gemv_v(&self, a: T, x: &FaerVecRef<'_, T>, beta: T, y: &mut FaerVec<T>) {
+        gemv_data!(self, a, x, beta, y, "gemv_v")
     }
-    fn gemv_v(
-        &self,
-        alpha: Self::T,
-        x: &<Self::V as crate::vector::Vector>::View<'_>,
-        beta: Self::T,
-        y: &mut Self::V,
-    ) {
-        y.context
-            .assert_compatible_nbatch(self.context.nbatch(), "gemv_v");
-        y.context
-            .assert_compatible_nbatch(x.context.nbatch(), "gemv_v");
-        for (b, y) in y.data.iter_mut().enumerate() {
-            *y *= faer::Scale(beta);
-            matmul(
-                y.as_mut(),
-                Accum::Add,
-                self.data[b % self.data.len()].as_ref(),
-                x.data[b % x.data.len()],
-                alpha,
-                get_global_parallelism(),
-            );
-        }
+    fn gemv_o(&self, a: T, x: &FaerVec<T>, beta: T, y: &mut FaerVec<T>) {
+        gemv_data!(self, a, x, beta, y, "gemv_o")
     }
 }
-
 impl<'a, T: FaerScalar> MatrixViewMut<'a> for FaerMatMut<'a, T> {
     type Owned = FaerMat<T>;
     type View = FaerMatRef<'a, T>;
-
     fn into_owned(self) -> Self::Owned {
-        Self::Owned {
-            data: self.data.iter().map(|data| data.to_owned()).collect(),
-            context: self.context,
-        }
+        into_owned_data!(self)
     }
-
-    fn gemm_oo(&mut self, alpha: Self::T, a: &Self::Owned, b: &Self::Owned, beta: Self::T) {
-        self.context
-            .assert_compatible_nbatch(a.context.nbatch(), "gemm_oo");
-        self.context
-            .assert_compatible_nbatch(b.context.nbatch(), "gemm_oo");
-        for (batch, data) in self.data.iter_mut().enumerate() {
-            *data *= faer::Scale(beta);
-            matmul(
-                data.as_mut(),
-                Accum::Add,
-                a.data[batch % a.data.len()].as_ref(),
-                b.data[batch % b.data.len()].as_ref(),
-                alpha,
-                get_global_parallelism(),
-            );
-        }
+    fn gemm_oo(&mut self, a: T, x: &Self::Owned, y: &Self::Owned, beta: T) {
+        gemm_data!(self, a, x, y, beta, "gemm_oo")
     }
-    fn gemm_vo(&mut self, alpha: Self::T, a: &Self::View, b: &Self::Owned, beta: Self::T) {
-        self.context
-            .assert_compatible_nbatch(a.context.nbatch(), "gemm_vo");
-        self.context
-            .assert_compatible_nbatch(b.context.nbatch(), "gemm_vo");
-        for (batch, data) in self.data.iter_mut().enumerate() {
-            *data *= faer::Scale(beta);
-            matmul(
-                data.as_mut(),
-                Accum::Add,
-                a.data[batch % a.data.len()],
-                b.data[batch % b.data.len()].as_ref(),
-                alpha,
-                get_global_parallelism(),
-            );
-        }
-    }
-}
-
-impl<T: FaerScalar> DenseMatrix for FaerMat<T> {
-    type View<'a> = FaerMatRef<'a, T>;
-    type ViewMut<'a> = FaerMatMut<'a, T>;
-
-    fn from_vec(nrows: IndexType, ncols: IndexType, data: Vec<Self::T>, ctx: Self::C) -> Self {
-        assert_eq!(data.len(), nrows * ncols * ctx.nbatch());
-        let data = data
-            .chunks(nrows * ncols)
-            .map(|data| Mat::from_fn(nrows, ncols, |i, j| data[i + j * nrows]))
-            .collect();
-        Self { data, context: ctx }
-    }
-
-    fn resize_cols(&mut self, ncols: IndexType) {
-        if ncols == self.ncols() {
-            return;
-        }
-        let nrows = self.nrows();
-        for data in &mut self.data {
-            data.resize_with(nrows, ncols, |_, _| T::zero());
-        }
-    }
-
-    fn get_index(&self, i: IndexType, j: IndexType) -> Self::T {
-        self.data[0][(i, j)]
-    }
-
-    fn gemm(&mut self, alpha: Self::T, a: &Self, b: &Self, beta: Self::T) {
-        self.context
-            .assert_compatible_nbatch(a.context.nbatch(), "gemm");
-        self.context
-            .assert_compatible_nbatch(b.context.nbatch(), "gemm");
-        for (batch, data) in self.data.iter_mut().enumerate() {
-            *data *= faer::Scale(beta);
-            matmul(
-                data.as_mut(),
-                Accum::Add,
-                a.data[batch % a.data.len()].as_ref(),
-                b.data[batch % b.data.len()].as_ref(),
-                alpha,
-                get_global_parallelism(),
-            );
-        }
-    }
-    fn column_mut(&mut self, i: usize) -> <Self::V as Vector>::ViewMut<'_> {
-        let data = self
-            .data
-            .iter_mut()
-            .map(|data| data.get_mut(0..data.nrows(), i))
-            .collect();
-        FaerVecMut {
-            data,
-            context: self.context,
-        }
-    }
-
-    fn columns_mut(&mut self, start: usize, end: usize) -> Self::ViewMut<'_> {
-        let data = self
-            .data
-            .iter_mut()
-            .map(|data| data.get_mut(0..data.nrows(), start..end))
-            .collect();
-        FaerMatMut {
-            data,
-            context: self.context,
-        }
-    }
-
-    fn set_index(&mut self, i: IndexType, j: IndexType, value: Self::T) {
-        for data in &mut self.data {
-            data[(i, j)] = value;
-        }
-    }
-
-    fn column(&self, i: usize) -> <Self::V as Vector>::View<'_> {
-        let data = self
-            .data
-            .iter()
-            .map(|data| data.get(0..data.nrows(), i))
-            .collect();
-        FaerVecRef {
-            data,
-            context: self.context,
-        }
-    }
-    fn columns(&self, start: usize, end: usize) -> Self::View<'_> {
-        let data = self
-            .data
-            .iter()
-            .map(|data| data.get(0..data.nrows(), start..end))
-            .collect();
-        FaerMatRef {
-            data,
-            context: self.context,
-        }
-    }
-
-    fn column_axpy(&mut self, alpha: Self::T, j: IndexType, i: IndexType) {
-        if i > self.ncols() {
-            panic!("Column index out of bounds");
-        }
-        if j > self.ncols() {
-            panic!("Column index out of bounds");
-        }
-        if i == j {
-            panic!("Column index cannot be the same");
-        }
-        for data in &mut self.data {
-            let nrows = data.nrows();
-            if i < j {
-                let (left, right) = data.as_mut().split_at_col_mut(j);
-                zip!(left.get_mut(0..nrows, i), right.get(0..nrows, 0))
-                    .for_each(|unzip!(dst, src)| *dst += alpha * *src);
-            } else {
-                let (left, right) = data.as_mut().split_at_col_mut(i);
-                zip!(right.get_mut(0..nrows, 0), left.get(0..nrows, j))
-                    .for_each(|unzip!(dst, src)| *dst += alpha * *src);
-            }
-        }
+    fn gemm_vo(&mut self, a: T, x: &Self::View, y: &Self::Owned, beta: T) {
+        gemm_data!(self, a, x, y, beta, "gemm_vo")
     }
 }
 
 impl<T: FaerScalar> Matrix for FaerMat<T> {
     type Sparsity = Dense<Self>;
     type SparsityRef<'a> = DenseRef<'a, Self>;
-
     fn sparsity(&self) -> Option<Self::SparsityRef<'_>> {
         None
     }
-
     fn context(&self) -> &Self::C {
         &self.context
     }
     fn inner_mut(&mut self) -> &mut Self::Inner {
         &mut self.data
     }
-
-    fn gather(&mut self, other: &Self, indices: &<Self::V as Vector>::Index) {
-        assert_eq!(indices.len(), self.nrows() * self.ncols());
-        if self.nrows() == 0 || self.ncols() == 0 {
-            return;
-        }
-        self.context
-            .assert_compatible_nbatch(other.context.nbatch(), "gather");
-        let nrows = self.nrows();
-        for (batch, matrix) in self.data.iter_mut().enumerate() {
-            let other = &other.data[batch % other.data.len()];
-            for (j, src_indices) in indices.data.chunks(nrows).enumerate() {
-                for (dst, src) in matrix.col_as_slice_mut(j).iter_mut().zip(src_indices) {
-                    *dst = other[(*src % other.nrows(), *src / other.nrows())];
-                }
+    fn set_data_with_indices(&mut self, dst: &FaerVecIndex, src: &FaerVecIndex, data: &FaerVec<T>) {
+        for (d, s) in dst.data.iter().zip(src.data.iter()) {
+            let i = d % self.nrows();
+            let j = d / self.nrows();
+            for b in 0..self.context.nbatch() {
+                let c = self.col(b, j);
+                self.data[(i, c)] = data.data[(*s, data.batch(b))]
             }
         }
     }
-
-    fn set_data_with_indices(
-        &mut self,
-        dst_indices: &<Self::V as Vector>::Index,
-        src_indices: &<Self::V as Vector>::Index,
-        data: &Self::V,
-    ) {
-        for (dst_i, src_i) in dst_indices.data.iter().zip(src_indices.data.iter()) {
-            let i = dst_i % self.nrows();
-            let j = dst_i / self.nrows();
-            for (batch, matrix) in self.data.iter_mut().enumerate() {
-                matrix[(i, j)] = data.data[batch % data.data.len()][*src_i];
+    fn gather(&mut self, o: &Self, idx: &FaerVecIndex) {
+        for b in 0..self.context.nbatch() {
+            for (d, s) in idx.data.iter().enumerate() {
+                let i = d % self.nrows();
+                let j = d / self.nrows();
+                let oi = s % o.nrows();
+                let oj = s / o.nrows();
+                let c = self.col(b, j);
+                self.data[(i, c)] = o.data[(oi, o.col(b, oj))]
             }
         }
     }
-
-    fn add_column_to_vector(&self, j: IndexType, v: &mut Self::V) {
+    fn partition_indices_by_zero_diagonal(&self) -> (FaerVecIndex, FaerVecIndex) {
+        let (mut z, mut nz) = (Vec::new(), Vec::new());
+        for i in 0..self.nrows() {
+            if self.data[(i, self.col(0, i))].is_zero() {
+                z.push(i)
+            } else {
+                nz.push(i)
+            }
+        }
+        (
+            FaerVecIndex::from_vec(z, self.context),
+            FaerVecIndex::from_vec(nz, self.context),
+        )
+    }
+    fn add_column_to_vector(&self, j: usize, v: &mut FaerVec<T>) {
         v.context
             .assert_compatible_nbatch(self.context.nbatch(), "add_column_to_vector");
-        let nrows = self.nrows();
-        for (batch, v) in v.data.iter_mut().enumerate() {
+        for b in 0..v.context.nbatch() {
             zip!(
-                v.as_mut(),
-                self.data[batch % self.data.len()].get(0..nrows, j)
+                v.data.rb_mut().col_mut(b),
+                self.data.rb().col(self.col(b, j))
             )
             .for_each(|unzip!(v, column)| *v += *column);
         }
     }
-
     fn triplet_iter(
         &self,
     ) -> (
-        impl Iterator<Item = (IndexType, IndexType)> + '_,
-        impl Iterator<Item = Self::T> + '_,
+        impl Iterator<Item = (usize, usize)> + '_,
+        impl Iterator<Item = T> + '_,
     ) {
-        let indices: Vec<_> = (0..self.ncols())
-            .flat_map(move |j| (0..self.nrows()).map(move |i| (i, j)))
+        let pos: Vec<_> = (0..self.ncols())
+            .flat_map(|j| (0..self.nrows()).map(move |i| (i, j)))
             .collect();
-        let values: Vec<_> = self
-            .data
-            .iter()
-            .flat_map(|data| indices.iter().map(|&(i, j)| data[(i, j)]))
-            .collect();
-        (indices.into_iter(), values.into_iter())
-    }
-
-    fn try_from_triplets(
-        nrows: IndexType,
-        ncols: IndexType,
-        indices: Vec<(IndexType, IndexType)>,
-        values: Vec<Self::T>,
-        ctx: Self::C,
-    ) -> Result<Self, LaError> {
-        assert_eq!(values.len(), indices.len() * ctx.nbatch());
-        let data = values
-            .chunks(indices.len())
-            .map(|values| {
-                let mut m = Mat::zeros(nrows, ncols);
-                for ((i, j), v) in indices.iter().zip(values) {
-                    m[(*i, *j)] = *v;
-                }
-                m
+        let val: Vec<_> = (0..self.context.nbatch())
+            .flat_map(|b| {
+                pos.iter()
+                    .map(move |&(i, j)| self.data[(i, self.col(b, j))])
             })
             .collect();
-        Ok(Self { data, context: ctx })
+        (pos.into_iter(), val.into_iter())
     }
-    fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
-        y.context
-            .assert_compatible_nbatch(self.context.nbatch(), "gemv");
-        y.context
-            .assert_compatible_nbatch(x.context.nbatch(), "gemv");
-        for (batch, data) in y.data.iter_mut().enumerate() {
-            *data *= faer::Scale(beta);
-            matmul(
-                data.as_mut(),
-                Accum::Add,
-                self.data[batch % self.data.len()].as_ref(),
-                x.data[batch % x.data.len()].as_ref(),
-                alpha,
-                get_global_parallelism(),
-            );
+    fn try_from_triplets(
+        nr: usize,
+        nc: usize,
+        idx: Vec<(usize, usize)>,
+        v: Vec<T>,
+        ctx: Self::C,
+    ) -> Result<Self, LaError> {
+        assert_eq!(v.len(), idx.len() * ctx.nbatch());
+        let mut out = Self::zeros(nr, nc, ctx);
+        for b in 0..ctx.nbatch() {
+            for (k, &(i, j)) in idx.iter().enumerate() {
+                let c = out.col(b, j);
+                out.data[(i, c)] = v[b * idx.len() + k]
+            }
         }
+        Ok(out)
     }
-    fn zeros(nrows: IndexType, ncols: IndexType, ctx: Self::C) -> Self {
-        let data = (0..ctx.nbatch())
-            .map(|_| Mat::zeros(nrows, ncols))
-            .collect();
-        Self { data, context: ctx }
-    }
-    fn copy_from(&mut self, other: &Self) {
-        self.context
-            .assert_compatible_nbatch(other.context.nbatch(), "copy_from");
-        for (batch, data) in self.data.iter_mut().enumerate() {
-            data.copy_from(&other.data[batch % other.data.len()]);
-        }
-    }
-    fn from_diagonal(v: &Self::V) -> Self {
-        let dim = v.len();
-        let data = v
-            .data
-            .iter()
-            .map(|v| Mat::from_fn(dim, dim, |i, j| if i == j { v[i] } else { T::zero() }))
-            .collect();
+    fn zeros(nr: usize, nc: usize, ctx: Self::C) -> Self {
         Self {
-            data,
-            context: *v.context(),
+            data: Mat::zeros(nr, nc * ctx.nbatch()),
+            context: ctx,
         }
     }
-    fn partition_indices_by_zero_diagonal(
-        &self,
-    ) -> (<Self::V as Vector>::Index, <Self::V as Vector>::Index) {
-        let diagonal = self.data[0].diagonal().column_vector();
-        let (zero_indices, nonzero_indices) = diagonal.iter().enumerate().fold(
-            (Vec::new(), Vec::new()),
-            |(mut zero_indices, mut nonzero_indices), (i, &v)| {
-                if v.is_zero() {
-                    zero_indices.push(i);
-                } else {
-                    nonzero_indices.push(i);
-                }
-                (zero_indices, nonzero_indices)
-            },
-        );
-        (
-            <Self::V as Vector>::Index::from_vec(zero_indices, self.context),
-            <Self::V as Vector>::Index::from_vec(nonzero_indices, self.context),
-        )
+    fn from_diagonal(v: &FaerVec<T>) -> Self {
+        let mut out = Self::zeros(v.len(), v.len(), v.context);
+        let nc = out.ncols();
+        for b in 0..v.context.nbatch() {
+            let c = out.col(b, 0);
+            out.data
+                .rb_mut()
+                .subcols_mut(c, nc)
+                .diagonal_mut()
+                .column_vector_mut()
+                .copy_from(v.data.rb().col(b));
+        }
+        out
     }
-    fn set_column(&mut self, j: IndexType, v: &Self::V) {
+    fn gemv(&self, a: T, x: &FaerVec<T>, beta: T, y: &mut FaerVec<T>) {
+        gemv_data!(self, a, x, beta, y, "gemv")
+    }
+    fn copy_from(&mut self, o: &Self) {
+        self.context
+            .assert_compatible_nbatch(o.context.nbatch(), "copy_from");
+        if self.context.nbatch() == o.context.nbatch() {
+            self.data.rb_mut().copy_from(o.data.rb());
+            return;
+        }
+        let nc = self.ncols();
+        for b in 0..self.context.nbatch() {
+            let c = self.col(b, 0);
+            self.data
+                .rb_mut()
+                .subcols_mut(c, nc)
+                .copy_from(o.data.rb().subcols(o.col(b, 0), nc));
+        }
+    }
+    fn set_column(&mut self, j: usize, v: &FaerVec<T>) {
         self.context
             .assert_compatible_nbatch(v.context.nbatch(), "set_column");
-        let nrows = self.nrows();
-        for (batch, matrix) in self.data.iter_mut().enumerate() {
-            matrix
-                .get_mut(0..nrows, j)
-                .copy_from(v.data[batch % v.data.len()].as_ref());
+        for b in 0..self.context.nbatch() {
+            let c = self.col(b, j);
+            self.data
+                .rb_mut()
+                .col_mut(c)
+                .copy_from(v.data.rb().col(v.batch(b)));
         }
     }
-
-    fn scale_add_and_assign(&mut self, x: &Self, beta: Self::T, y: &Self) {
+    fn scale_add_and_assign(&mut self, x: &Self, b: T, y: &Self) {
         self.context
             .assert_compatible_nbatch(x.context.nbatch(), "scale_add_and_assign");
         self.context
             .assert_compatible_nbatch(y.context.nbatch(), "scale_add_and_assign");
-        for (batch, data) in self.data.iter_mut().enumerate() {
+        let nc = self.ncols();
+        for batch in 0..self.context.nbatch() {
+            let c = self.col(batch, 0);
             zip!(
-                data.as_mut(),
-                x.data[batch % x.data.len()].as_ref(),
-                y.data[batch % y.data.len()].as_ref()
+                self.data.rb_mut().subcols_mut(c, nc),
+                x.data.rb().subcols(x.col(batch, 0), nc),
+                y.data.rb().subcols(y.col(batch, 0), nc)
             )
-            .for_each(|unzip!(s, x, y)| *s = *x + beta * *y);
+            .for_each(|unzip!(s, x, y)| *s = *x + b * *y);
         }
     }
-
-    fn new_from_sparsity(
-        nrows: IndexType,
-        ncols: IndexType,
-        _sparsity: Option<Self::Sparsity>,
-        ctx: Self::C,
-    ) -> Self {
-        Self::zeros(nrows, ncols, ctx)
+    fn new_from_sparsity(nr: usize, nc: usize, _: Option<Self::Sparsity>, ctx: Self::C) -> Self {
+        Self::zeros(nr, nc, ctx)
+    }
+}
+impl<T: FaerScalar> DenseMatrix for FaerMat<T> {
+    type View<'a> = FaerMatRef<'a, T>;
+    type ViewMut<'a> = FaerMatMut<'a, T>;
+    fn gemm(&mut self, a: T, x: &Self, y: &Self, b: T) {
+        gemm_data!(self, a, x, y, b, "gemm")
+    }
+    fn resize_cols(&mut self, nc: usize) {
+        let old = self.ncols();
+        if old == nc {
+            return;
+        }
+        let keep = old.min(nc);
+        let mut d = Mat::zeros(self.nrows(), nc * self.context.nbatch());
+        for b in 0..self.context.nbatch() {
+            d.rb_mut()
+                .subcols_mut(b * nc, keep)
+                .copy_from(self.data.rb().subcols(self.col(b, 0), keep));
+        }
+        self.data = d
+    }
+    fn get_index(&self, i: usize, j: usize) -> T {
+        self.data[(i, self.col(0, j))]
+    }
+    fn from_vec(nr: usize, nc: usize, d: Vec<T>, ctx: Self::C) -> Self {
+        assert_eq!(d.len(), nr * nc * ctx.nbatch());
+        Self {
+            data: Mat::from_fn(nr, nc * ctx.nbatch(), |i, j| d[j * nr + i]),
+            context: ctx,
+        }
+    }
+    fn column_mut(&mut self, i: usize) -> FaerVecMut<'_, T> {
+        let nc = self.ncols();
+        assert!(i < nc, "column index out of bounds");
+        if self.context.nbatch() == 1 {
+            return FaerVecMut {
+                data: self.data.rb_mut().subcols_mut(i, 1),
+                context: self.context,
+            };
+        }
+        let (nr, nb) = (self.nrows(), self.context.nbatch());
+        // column i of every batch: batch b holds it at physical column b * nc + i, so the
+        // batches are `nc` columns apart in the underlying (padded) storage
+        let stride = self.data.col_stride() * nc as isize;
+        let data = unsafe {
+            MatMut::from_raw_parts_mut(
+                self.data.rb_mut().ptr_at_mut(0, i),
+                nr,
+                nb,
+                self.data.row_stride(),
+                stride,
+            )
+        };
+        FaerVecMut {
+            data,
+            context: self.context,
+        }
+    }
+    fn columns_mut(&mut self, s: usize, e: usize) -> Self::ViewMut<'_> {
+        FaerMatMut {
+            data: self.data.rb_mut(),
+            context: self.context,
+            start: s,
+            end: e,
+        }
+    }
+    fn set_index(&mut self, i: usize, j: usize, v: T) {
+        for b in 0..self.context.nbatch() {
+            let c = self.col(b, j);
+            self.data[(i, c)] = v;
+        }
+    }
+    fn column(&self, i: usize) -> FaerVecRef<'_, T> {
+        let nc = self.ncols();
+        assert!(i < nc, "column index out of bounds");
+        if self.context.nbatch() == 1 {
+            return FaerVecRef {
+                data: self.data.rb().subcols(i, 1),
+                context: self.context,
+            };
+        }
+        let (nr, nb) = (self.nrows(), self.context.nbatch());
+        // column i of every batch: batch b holds it at physical column b * nc + i, so the
+        // batches are `nc` columns apart in the underlying (padded) storage
+        let stride = self.data.col_stride() * nc as isize;
+        let data = unsafe {
+            MatRef::from_raw_parts(
+                self.data.rb().ptr_at(0, i),
+                nr,
+                nb,
+                self.data.row_stride(),
+                stride,
+            )
+        };
+        FaerVecRef {
+            data,
+            context: self.context,
+        }
+    }
+    fn columns(&self, s: usize, e: usize) -> Self::View<'_> {
+        FaerMatRef {
+            data: self.data.rb(),
+            context: self.context,
+            start: s,
+            end: e,
+        }
+    }
+    fn column_axpy(&mut self, a: T, j: usize, i: usize) {
+        assert_ne!(i, j, "Column index cannot be the same");
+        assert!(i < self.ncols(), "Column index out of bounds");
+        assert!(j < self.ncols(), "Column index out of bounds");
+        for b in 0..self.context.nbatch() {
+            let src = self.col(b, j);
+            let dst = self.col(b, i);
+            if src < dst {
+                let (left, right) = self.data.rb_mut().split_at_col_mut(dst);
+                zip!(right.col_mut(0), left.col(src)).for_each(|unzip!(d, s)| *d += a * *s);
+            } else {
+                let (left, right) = self.data.rb_mut().split_at_col_mut(src);
+                zip!(left.col_mut(dst), right.col(0)).for_each(|unzip!(d, s)| *d += a * *s);
+            }
+        }
     }
 }
 
@@ -605,13 +751,23 @@ mod tests {
     use super::super::tests::triplet_values;
     use super::*;
 
+    fn mat(values: [f64; 4], ctx: FaerContext) -> FaerMat<f64> {
+        FaerMat::from_vec(2, 2, values.repeat(ctx.nbatch()).to_vec(), ctx)
+    }
+
     #[test]
     fn test_column_axpy() {
         super::super::tests::test_column_axpy::<FaerMat<f64>>();
     }
 
-    fn mat(values: [f64; 4], ctx: FaerContext) -> FaerMat<f64> {
-        FaerMat::from_vec(2, 2, values.repeat(ctx.nbatch()).to_vec(), ctx)
+    #[test]
+    fn test_partition_indices_by_zero_diagonal() {
+        super::super::tests::test_partition_indices_by_zero_diagonal::<FaerMat<f64>>();
+    }
+
+    #[test]
+    fn test_resize_cols() {
+        super::super::tests::test_resize_cols::<FaerMat<f64>>();
     }
 
     #[test]
@@ -622,7 +778,7 @@ mod tests {
     #[test]
     fn test_batched_owned_rhs_broadcast() {
         super::super::tests::test_batched_owned_rhs_broadcast_m::<FaerMat<f64>>(
-            FaerContext::default().clone_with_nbatch(2).unwrap(),
+            FaerContext::with_nbatch(2),
         );
     }
 
@@ -631,27 +787,26 @@ mod tests {
     #[test]
     fn test_owned_operands_reuse_allocation() {
         let ctx = FaerContext::default();
-        let a = mat([10.0, 20.0, 30.0, 40.0], ctx);
+        let values = [1.0, 3.0, 2.0, 4.0];
+        let a = mat([10.0, 30.0, 20.0, 40.0], ctx);
 
-        let lhs = mat([10.0, 20.0, 30.0, 40.0], ctx);
-        let buffer = lhs.data[0].as_ptr();
-        let b = mat([1.0, 2.0, 3.0, 4.0], ctx);
-        let c = lhs - &b;
-        assert_eq!(c.data[0].as_ptr(), buffer, "lhs buffer not reused");
-        assert_eq!(triplet_values(&c), vec![9.0, 18.0, 27.0, 36.0]);
+        let lhs = mat(values, ctx);
+        let buffer = lhs.data.as_ptr();
+        let c = lhs - &a;
+        assert_eq!(c.data.as_ptr(), buffer, "lhs buffer not reused");
 
-        let rhs = mat([1.0, 2.0, 3.0, 4.0], ctx);
-        let buffer = rhs.data[0].as_ptr();
+        let rhs = mat(values, ctx);
+        let buffer = rhs.data.as_ptr();
         let c = &a - rhs;
-        assert_eq!(c.data[0].as_ptr(), buffer, "rhs buffer not reused");
-        assert_eq!(triplet_values(&c), vec![9.0, 18.0, 27.0, 36.0]);
+        assert_eq!(c.data.as_ptr(), buffer, "rhs buffer not reused");
+        assert_eq!(c.get_index(0, 0), 9.0);
 
-        let rhs = mat([1.0, 2.0, 3.0, 4.0], ctx);
-        let buffer = rhs.data[0].as_ptr();
+        let rhs = mat(values, ctx);
+        let buffer = rhs.data.as_ptr();
         let ncols = a.ncols();
         let c = a.columns(0, ncols) + rhs;
-        assert_eq!(c.data[0].as_ptr(), buffer, "rhs buffer not reused");
-        assert_eq!(triplet_values(&c), vec![11.0, 22.0, 33.0, 44.0]);
+        assert_eq!(c.data.as_ptr(), buffer, "rhs buffer not reused");
+        assert_eq!(c.get_index(0, 0), 11.0);
     }
 
     /// faer-specific: the owned rhs is reused when it already spans every batch, and left
@@ -659,14 +814,14 @@ mod tests {
     #[test]
     fn test_owned_rhs_broadcast_reuse() {
         let ctx1 = FaerContext::default();
-        let ctx2 = FaerContext::default().clone_with_nbatch(2).unwrap();
+        let ctx2 = FaerContext::with_nbatch(2);
 
         let a = mat([10.0, 20.0, 30.0, 40.0], ctx1);
         let rhs = mat([1.0, 2.0, 3.0, 4.0], ctx2);
-        let buffer = rhs.data[0].as_ptr();
+        let buffer = rhs.data.as_ptr();
         let c = &a - rhs;
         assert_eq!(c.context().nbatch(), 2);
-        assert_eq!(c.data[0].as_ptr(), buffer, "rhs buffer not reused");
+        assert_eq!(c.data.as_ptr(), buffer, "rhs buffer not reused");
         assert_eq!(
             triplet_values(&c),
             vec![9.0, 18.0, 27.0, 36.0, 9.0, 18.0, 27.0, 36.0]
@@ -681,16 +836,6 @@ mod tests {
             triplet_values(&c),
             vec![9.0, 18.0, 27.0, 36.0, 9.0, 18.0, 27.0, 36.0]
         );
-    }
-
-    #[test]
-    fn test_partition_indices_by_zero_diagonal() {
-        super::super::tests::test_partition_indices_by_zero_diagonal::<FaerMat<f64>>();
-    }
-
-    #[test]
-    fn test_resize_cols() {
-        super::super::tests::test_resize_cols::<FaerMat<f64>>();
     }
 
     super::super::generate_matrix_tests_nonbatched!(faer, FaerMat<f64>);

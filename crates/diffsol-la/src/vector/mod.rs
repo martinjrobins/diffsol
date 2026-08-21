@@ -13,9 +13,6 @@ pub mod nalgebra_serial;
 #[cfg(feature = "cuda")]
 pub mod cuda;
 
-#[macro_use]
-mod utils;
-
 /// A trait for types that represent a collection of indices into a vector.
 ///
 /// This is used to represent subsets of vector elements, typically for algebraic constraints

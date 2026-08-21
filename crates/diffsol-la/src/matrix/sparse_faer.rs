@@ -3,11 +3,10 @@ use std::ops::{Add, Mul, Sub};
 
 use super::extract_block::CscBlock;
 use super::sparsity::MatrixSparsityRef;
-use super::utils::*;
 use super::{Matrix, MatrixCommon, MatrixSparsity};
 use crate::error::{LaError, MatrixError};
 use crate::{Context, FaerContext, FaerVec, FaerVecIndex, Vector, VectorIndex};
-use crate::{DefaultSolver, FaerScalar, FaerSparseLU, IndexType, Scalar, Scale};
+use crate::{DefaultSolver, FaerScalar, FaerSparseLU, IndexType, Scale};
 
 use faer::reborrow::{Reborrow, ReborrowMut};
 use faer::sparse::ops::{ternary_op_assign_into, union_symbolic};
@@ -24,13 +23,22 @@ impl<T: FaerScalar> DefaultSolver for FaerSparseMat<T> {
     type LS = FaerSparseLU<T>;
 }
 
-impl_matrix_common!(
-    FaerSparseMat<T>,
-    FaerVec<T>,
-    FaerContext,
-    Vec<SparseColMat<IndexType, T>>,
-    FaerScalar
-);
+impl<T: FaerScalar> MatrixCommon for FaerSparseMat<T> {
+    type T = T;
+    type V = FaerVec<T>;
+    type C = FaerContext;
+    type Inner = Vec<SparseColMat<IndexType, T>>;
+
+    fn nrows(&self) -> IndexType {
+        self.data[0].nrows()
+    }
+    fn ncols(&self) -> IndexType {
+        self.data[0].ncols()
+    }
+    fn inner(&self) -> &Self::Inner {
+        &self.data
+    }
+}
 
 macro_rules! impl_mul_scalar {
     ($mat_type:ty, $out:ty) => {
@@ -51,19 +59,37 @@ macro_rules! impl_mul_scalar {
 impl_mul_scalar!(FaerSparseMat<T>, FaerSparseMat<T>);
 impl_mul_scalar!(&FaerSparseMat<T>, FaerSparseMat<T>);
 
-impl_add!(
-    FaerSparseMat<T>,
-    &FaerSparseMat<T>,
-    FaerSparseMat<T>,
-    FaerScalar
-);
+macro_rules! sparse_binary {
+    ($trait:ident, $method:ident, $binary:tt) => {
+        impl<T: FaerScalar> $trait<&FaerSparseMat<T>> for FaerSparseMat<T> {
+            type Output = FaerSparseMat<T>;
 
-impl_sub!(
-    FaerSparseMat<T>,
-    &FaerSparseMat<T>,
-    FaerSparseMat<T>,
-    FaerScalar
-);
+            // the `%` below is broadcast indexing over batches, not arithmetic on the
+            // operands, which is what the lint is looking for
+            #[allow(clippy::suspicious_arithmetic_impl)]
+            fn $method(self, rhs: &FaerSparseMat<T>) -> Self::Output {
+                self.context
+                    .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($method));
+                // either side may broadcast, so the result carries the larger batch count
+                let nbatch = self.data.len().max(rhs.data.len());
+                FaerSparseMat {
+                    data: (0..nbatch)
+                        .map(|b| {
+                            &self.data[b % self.data.len()] $binary &rhs.data[b % rhs.data.len()]
+                        })
+                        .collect(),
+                    context: if self.data.len() == nbatch {
+                        self.context
+                    } else {
+                        rhs.context
+                    },
+                }
+            }
+        }
+    };
+}
+sparse_binary!(Add, add, +);
+sparse_binary!(Sub, sub, -);
 
 impl<T: FaerScalar> MatrixSparsity<FaerSparseMat<T>> for SymbolicSparseColMat<IndexType> {
     fn union(
@@ -283,11 +309,12 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
     ) {
         self.context
             .assert_compatible_nbatch(data.context.nbatch(), "set_data_with_indices");
+        let data_nbatch = data.data.ncols();
         for (batch, matrix) in self.data.iter_mut().enumerate() {
             let values = matrix.val_mut();
-            let data = &data.data[batch % data.data.len()];
+            let column = data.data.rb().col(batch % data_nbatch);
             for (dst, src) in dst_indices.data.iter().zip(&src_indices.data) {
-                values[*dst] = data[*src];
+                values[*dst] = column[*src];
             }
         }
     }
@@ -295,11 +322,11 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
     fn add_column_to_vector(&self, j: IndexType, v: &mut Self::V) {
         self.context
             .assert_compatible_nbatch(v.context.nbatch(), "add_column_to_vector");
-        let v_nbatch = v.data.len();
-        for (batch, matrix) in self.data.iter().enumerate() {
-            let v = &mut v.data[batch % v_nbatch];
+        for batch in 0..v.data.ncols() {
+            let matrix = &self.data[batch % self.data.len()];
+            let mut column = v.data.rb_mut().col_mut(batch);
             for i in matrix.col_range(j) {
-                v[matrix.row_idx()[i]] += matrix.val()[i];
+                column[matrix.row_idx()[i]] += matrix.val()[i];
             }
         }
     }
@@ -352,9 +379,10 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
             .assert_compatible_nbatch(x.context.nbatch(), "gemv");
         self.context
             .assert_compatible_nbatch(y.context.nbatch(), "gemv");
-        for (batch, y) in y.data.iter_mut().enumerate() {
-            let tmp = &self.data[batch % self.data.len()] * &x.data[batch % x.data.len()];
-            zip!(y.as_mut(), tmp.as_ref())
+        let x_nbatch = x.data.ncols();
+        for batch in 0..y.data.ncols() {
+            let tmp = &self.data[batch % self.data.len()] * x.data.rb().col(batch % x_nbatch);
+            zip!(y.data.rb_mut().col_mut(batch), tmp.rb())
                 .for_each(|faer::unzip!(y, x)| *y = beta * *y + alpha * *x);
         }
     }
@@ -376,12 +404,11 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
     }
     fn from_diagonal(v: &FaerVec<T>) -> Self {
         let dim = v.len();
-        let data = v
-            .data
-            .iter()
-            .map(|v| {
+        let data = (0..v.data.ncols())
+            .map(|b| {
+                let column = v.data.rb().col(b);
                 let triplets = (0..dim)
-                    .map(|i| Triplet::new(i, i, v[i]))
+                    .map(|i| Triplet::new(i, i, column[i]))
                     .collect::<Vec<_>>();
                 SparseColMat::try_new_from_triplets(dim, dim, &triplets).unwrap()
             })
@@ -421,10 +448,11 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
         assert_eq!(v.len(), self.nrows());
         self.context
             .assert_compatible_nbatch(v.context.nbatch(), "set_column");
+        let v_nbatch = v.data.ncols();
         for (batch, data) in self.data.iter_mut().enumerate() {
-            let v = &v.data[batch % v.data.len()];
+            let column = v.data.rb().col(batch % v_nbatch);
             for i in data.col_range(j) {
-                data.val_mut()[i] = v[data.row_idx()[i]];
+                data.val_mut()[i] = column[data.row_idx()[i]];
             }
         }
     }

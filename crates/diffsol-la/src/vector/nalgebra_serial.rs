@@ -178,6 +178,24 @@ macro_rules! copy_from_data {
     };
 }
 
+/// `self_b = alpha_b * x_b + beta * self_b` for every batch of `self`, broadcasting a
+/// single-batch `x`.  Shared by the owned vector and its mutable view, with `x` either an
+/// owned vector or a view, and `alpha` either one scalar or one value per batch.
+macro_rules! axpy_data {
+    ($self:ident, $x:ident, $beta:expr, $op:literal, |$batch:ident| $alpha:expr) => {{
+        $self
+            .context
+            .assert_compatible_nbatch($x.context.nbatch(), $op);
+        for $batch in 0..$self.data.ncols() {
+            let alpha = $alpha;
+            $self
+                .data
+                .column_mut($batch)
+                .axpy(alpha, &$x.data.column($x.batch($batch)), $beta);
+        }
+    }};
+}
+
 /// Weighted error norm of every batch, reduced by taking the maximum.
 macro_rules! squared_norm_data {
     ($self:ident, $y:ident, $atol:ident, $rtol:ident) => {{
@@ -267,7 +285,11 @@ macro_rules! vec_binary_owned_lhs {
             fn $method(mut self, rhs: $rhs) -> Self::Output {
                 self.context
                     .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($method));
-                if self.data.ncols() >= rhs.data.ncols() {
+                if self.data.ncols() == rhs.data.ncols() {
+                    self.data $op &rhs.data;
+                    return self;
+                }
+                if self.data.ncols() > rhs.data.ncols() {
                     for b in 0..self.data.ncols() {
                         let mut column = self.data.column_mut(b);
                         column $op &rhs.data.column(b % rhs.data.ncols());
@@ -499,13 +521,7 @@ impl<'a, T: NalgebraScalar> VectorViewMut<'a> for NalgebraVecMut<'a, T> {
         self.data.row_mut(i).fill(v);
     }
     fn axpy(&mut self, a: T, x: &Self::Owned, beta: T) {
-        self.context
-            .assert_compatible_nbatch(x.context.nbatch(), "axpy");
-        for b in 0..self.data.ncols() {
-            self.data
-                .column_mut(b)
-                .axpy(a, &x.data.column(x.batch(b)), beta);
-        }
+        axpy_data!(self, x, beta, "axpy", |_batch| a)
     }
 }
 impl<T: NalgebraScalar> VectorHost for NalgebraVec<T> {
@@ -619,39 +635,28 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
             context: ctx,
         }
     }
-    fn axpy(&mut self, a: T, x: &Self, b: T) {
-        self.context
-            .assert_compatible_nbatch(x.context.nbatch(), "axpy");
-        for c in 0..self.data.ncols() {
-            self.data
-                .column_mut(c)
-                .axpy(a, &x.data.column(x.batch(c)), b);
-        }
+    fn axpy(&mut self, a: T, x: &Self, beta: T) {
+        axpy_data!(self, x, beta, "axpy", |_batch| a)
     }
-    fn axpy_v(&mut self, a: T, x: &Self::View<'_>, b: T) {
-        self.context
-            .assert_compatible_nbatch(x.context.nbatch(), "axpy_v");
-        for c in 0..self.data.ncols() {
-            self.data
-                .column_mut(c)
-                .axpy(a, &x.data.column(c % x.data.ncols()), b);
-        }
+    fn axpy_v(&mut self, a: T, x: &Self::View<'_>, beta: T) {
+        axpy_data!(self, x, beta, "axpy_v", |_batch| a)
     }
-    fn batched_axpy(&mut self, a: &[T], x: &Self, b: T) {
+    fn batched_axpy(&mut self, a: &[T], x: &Self, beta: T) {
         assert_eq!(
             a.len(),
             self.context.nbatch(),
             "alpha.len() must equal nbatch"
         );
-        for (c, a) in a.iter().copied().enumerate() {
-            self.data
-                .column_mut(c)
-                .axpy(a, &x.data.column(x.batch(c)), b);
-        }
+        axpy_data!(self, x, beta, "batched_axpy", |batch| a[batch])
     }
     fn component_div_assign(&mut self, o: &Self) {
         self.context
             .assert_compatible_nbatch(o.context.nbatch(), "component_div_assign");
+        assert_eq!(
+            self.data.nrows(),
+            o.data.nrows(),
+            "component_div_assign row mismatch"
+        );
         if self.data.ncols() == o.data.ncols() {
             self.data.component_div_assign(&o.data);
             return;
@@ -693,6 +698,7 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
     fn root_finding(&self, g1: &Self) -> (bool, T, i32) {
         self.context
             .assert_compatible_nbatch(g1.context.nbatch(), "root_finding");
+        assert_eq!(self.len(), g1.len(), "Vector lengths do not match");
         let mut out = None;
         for b in 0..self.data.ncols() {
             let mut found = false;
@@ -736,6 +742,8 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
         }
     }
     fn copy_from_indices(&mut self, o: &Self, idx: &Self::Index) {
+        self.context
+            .assert_compatible_nbatch(o.context.nbatch(), "copy_from_indices");
         for b in 0..self.data.ncols() {
             for i in idx.data.iter() {
                 self.data[(*i, b)] = o.data[(*i, o.batch(b))]
@@ -744,6 +752,8 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
     }
     fn gather(&mut self, o: &Self, idx: &Self::Index) {
         assert_eq!(self.len(), idx.len());
+        self.context
+            .assert_compatible_nbatch(o.context.nbatch(), "gather");
         for b in 0..self.data.ncols() {
             for (i, j) in idx.data.iter().enumerate() {
                 self.data[(i, b)] = o.data[(*j, o.batch(b))]
@@ -752,6 +762,8 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
     }
     fn scatter(&self, idx: &Self::Index, o: &mut Self) {
         assert_eq!(self.len(), idx.len());
+        self.context
+            .assert_compatible_nbatch(o.context.nbatch(), "scatter");
         for b in 0..self.data.ncols() {
             for (i, j) in idx.data.iter().enumerate() {
                 let batch = o.batch(b);
@@ -827,10 +839,8 @@ mod tests {
     #[test]
     fn test_owned_rhs_broadcast_reuses_allocation() {
         let a = NalgebraVec::<f64>::from_vec(vec![10.0, 20.0], NalgebraContext::default());
-        let b = NalgebraVec::<f64>::from_vec(
-            vec![1.0, 2.0, 3.0, 4.0],
-            NalgebraContext::with_nbatch(2),
-        );
+        let b =
+            NalgebraVec::<f64>::from_vec(vec![1.0, 2.0, 3.0, 4.0], NalgebraContext::with_nbatch(2));
         let buffer = b.data.as_slice().as_ptr();
         let c = &a - b;
         assert_eq!(c.clone_as_vec(), vec![9.0, 18.0, 7.0, 16.0]);

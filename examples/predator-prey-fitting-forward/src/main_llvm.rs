@@ -43,7 +43,7 @@ impl CostFunction for Problem {
         let loss = ys
             .inner()
             .column_iter()
-            .zip(self.ys_data.inner()[0].column_iter())
+            .zip(self.ys_data.inner().column_iter())
             .map(|(a, b)| (a - b).norm_squared())
             .sum::<f64>();
         Ok(loss)
@@ -75,7 +75,7 @@ impl Gradient for Problem {
                     .zip(
                         ys.inner()
                             .column_iter()
-                            .zip(self.ys_data.inner()[0].column_iter()),
+                            .zip(self.ys_data.inner().column_iter()),
                     )
                     .map(|(si, (yi, di))| 2.0 * (yi - di).dot(&si))
                     .sum::<f64>()
