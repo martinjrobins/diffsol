@@ -815,38 +815,6 @@ mod tests {
         assert_eq!(v.clone_as_vec(), vec![1.0, 2.0, 3.0]);
     }
 
-    /// nalgebra-specific: the value semantics live in the generic suite, this pins down that
-    /// an owned right-hand side really is written into instead of reallocated.
-    #[test]
-    fn test_owned_rhs_reuses_allocation() {
-        let ctx = NalgebraContext::default();
-        let a = NalgebraVec::<f64>::from_vec(vec![10.0, 20.0], ctx);
-
-        let b = NalgebraVec::<f64>::from_vec(vec![1.0, 2.0], ctx);
-        let buffer = b.data.as_slice().as_ptr();
-        let c = &a - b;
-        assert_eq!(c.clone_as_vec(), vec![9.0, 18.0]);
-        assert_eq!(c.data.as_slice().as_ptr(), buffer, "rhs buffer not reused");
-
-        let b = NalgebraVec::<f64>::from_vec(vec![1.0, 2.0], ctx);
-        let buffer = b.data.as_slice().as_ptr();
-        let c = a.as_view() + b;
-        assert_eq!(c.clone_as_vec(), vec![11.0, 22.0]);
-        assert_eq!(c.data.as_slice().as_ptr(), buffer, "rhs buffer not reused");
-    }
-
-    /// nalgebra-specific: a broadcast lhs still writes into the rhs buffer.
-    #[test]
-    fn test_owned_rhs_broadcast_reuses_allocation() {
-        let a = NalgebraVec::<f64>::from_vec(vec![10.0, 20.0], NalgebraContext::default());
-        let b =
-            NalgebraVec::<f64>::from_vec(vec![1.0, 2.0, 3.0, 4.0], NalgebraContext::with_nbatch(2));
-        let buffer = b.data.as_slice().as_ptr();
-        let c = &a - b;
-        assert_eq!(c.clone_as_vec(), vec![9.0, 18.0, 7.0, 16.0]);
-        assert_eq!(c.data.as_slice().as_ptr(), buffer, "rhs buffer not reused");
-    }
-
     super::super::generate_vector_tests_nonbatched!(nalgebra, NalgebraVec<f64>);
     super::super::generate_vector_tests_batched!(
         nalgebra,

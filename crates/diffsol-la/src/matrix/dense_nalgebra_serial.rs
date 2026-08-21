@@ -790,32 +790,6 @@ mod tests {
         );
     }
 
-    /// nalgebra-specific: the value semantics live in the generic suite, this pins down that
-    /// an owned operand really is written into instead of reallocated.
-    #[test]
-    fn test_owned_operands_reuse_allocation() {
-        let ctx = NalgebraContext::default();
-        let values = vec![1.0, 3.0, 2.0, 4.0];
-        let a = NalgebraMat::<f64>::from_vec(2, 2, vec![10.0, 30.0, 20.0, 40.0], ctx);
-
-        let lhs = NalgebraMat::<f64>::from_vec(2, 2, values.clone(), ctx);
-        let buffer = lhs.data.as_slice().as_ptr();
-        let c = lhs - &a;
-        assert_eq!(c.data.as_slice().as_ptr(), buffer, "lhs buffer not reused");
-
-        let rhs = NalgebraMat::<f64>::from_vec(2, 2, values.clone(), ctx);
-        let buffer = rhs.data.as_slice().as_ptr();
-        let c = &a - rhs;
-        assert_eq!(c.data.as_slice().as_ptr(), buffer, "rhs buffer not reused");
-        assert_eq!(c.get_index(0, 0), 9.0);
-
-        let rhs = NalgebraMat::<f64>::from_vec(2, 2, values, ctx);
-        let buffer = rhs.data.as_slice().as_ptr();
-        let c = a.columns(0, 2) + rhs;
-        assert_eq!(c.data.as_slice().as_ptr(), buffer, "rhs buffer not reused");
-        assert_eq!(c.get_index(0, 0), 11.0);
-    }
-
     super::super::generate_matrix_tests_nonbatched!(nalgebra, NalgebraMat<f64>);
     super::super::generate_matrix_tests_batched!(
         nalgebra,

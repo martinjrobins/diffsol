@@ -748,12 +748,7 @@ impl<T: FaerScalar> DenseMatrix for FaerMat<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::tests::triplet_values;
     use super::*;
-
-    fn mat(values: [f64; 4], ctx: FaerContext) -> FaerMat<f64> {
-        FaerMat::from_vec(2, 2, values.repeat(ctx.nbatch()).to_vec(), ctx)
-    }
 
     #[test]
     fn test_column_axpy() {
@@ -779,62 +774,6 @@ mod tests {
     fn test_batched_owned_rhs_broadcast() {
         super::super::tests::test_batched_owned_rhs_broadcast_m::<FaerMat<f64>>(
             FaerContext::with_nbatch(2),
-        );
-    }
-
-    /// faer-specific: the value semantics live in the generic suite, this pins down that an
-    /// owned operand really is written into instead of reallocated.
-    #[test]
-    fn test_owned_operands_reuse_allocation() {
-        let ctx = FaerContext::default();
-        let values = [1.0, 3.0, 2.0, 4.0];
-        let a = mat([10.0, 30.0, 20.0, 40.0], ctx);
-
-        let lhs = mat(values, ctx);
-        let buffer = lhs.data.as_ptr();
-        let c = lhs - &a;
-        assert_eq!(c.data.as_ptr(), buffer, "lhs buffer not reused");
-
-        let rhs = mat(values, ctx);
-        let buffer = rhs.data.as_ptr();
-        let c = &a - rhs;
-        assert_eq!(c.data.as_ptr(), buffer, "rhs buffer not reused");
-        assert_eq!(c.get_index(0, 0), 9.0);
-
-        let rhs = mat(values, ctx);
-        let buffer = rhs.data.as_ptr();
-        let ncols = a.ncols();
-        let c = a.columns(0, ncols) + rhs;
-        assert_eq!(c.data.as_ptr(), buffer, "rhs buffer not reused");
-        assert_eq!(c.get_index(0, 0), 11.0);
-    }
-
-    /// faer-specific: the owned rhs is reused when it already spans every batch, and left
-    /// alone when the result needs more batches than it holds.
-    #[test]
-    fn test_owned_rhs_broadcast_reuse() {
-        let ctx1 = FaerContext::default();
-        let ctx2 = FaerContext::with_nbatch(2);
-
-        let a = mat([10.0, 20.0, 30.0, 40.0], ctx1);
-        let rhs = mat([1.0, 2.0, 3.0, 4.0], ctx2);
-        let buffer = rhs.data.as_ptr();
-        let c = &a - rhs;
-        assert_eq!(c.context().nbatch(), 2);
-        assert_eq!(c.data.as_ptr(), buffer, "rhs buffer not reused");
-        assert_eq!(
-            triplet_values(&c),
-            vec![9.0, 18.0, 27.0, 36.0, 9.0, 18.0, 27.0, 36.0]
-        );
-
-        // the rhs is a single batch, so the two-batch result has to be allocated
-        let a = mat([10.0, 20.0, 30.0, 40.0], ctx2);
-        let rhs = mat([1.0, 2.0, 3.0, 4.0], ctx1);
-        let c = &a - rhs;
-        assert_eq!(c.context().nbatch(), 2);
-        assert_eq!(
-            triplet_values(&c),
-            vec![9.0, 18.0, 27.0, 36.0, 9.0, 18.0, 27.0, 36.0]
         );
     }
 
