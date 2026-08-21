@@ -134,40 +134,70 @@ macro_rules! vec_assign {
         }
     };
 }
+
+macro_rules! copy_from_data {
+    ($self:ident, $other:ident, $method:literal) => {
+        $self
+            .context
+            .assert_compatible_nbatch($other.context.nbatch(), $method);
+        assert_eq!(
+            $self.data.nrows(),
+            $other.data.nrows(),
+            "copy_from row mismatch"
+        );
+        if $self.context.nbatch() == 1 && $other.context.nbatch() == 1 {
+            $self.data.column_mut(0).copy_from(&$other.data.column(0));
+            return;
+        }
+        if $self.data.ncols() == $other.data.ncols() {
+            $self.data.copy_from(&$other.data);
+            return;
+        }
+        for b in 0..$self.data.ncols() {
+            $self
+                .data
+                .column_mut(b)
+                .copy_from(&$other.data.column(b % $other.data.ncols()));
+        }
+    };
+}
+
+macro_rules! vec_binary_owned {
+    ($trait:ident, $method:ident, $rhs:ty, $op:tt) => {
+        impl<T: NalgebraScalar> $trait<$rhs> for NalgebraVec<T> {
+            type Output = NalgebraVec<T>;
+
+            fn $method(mut self, rhs: $rhs) -> Self::Output {
+                self.context
+                    .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($method));
+                if self.data.ncols() >= rhs.data.ncols() {
+                    for b in 0..self.data.ncols() {
+                        let mut column = self.data.column_mut(b);
+                        column $op &rhs.data.column(b % rhs.data.ncols());
+                    }
+                    return self;
+                }
+                let nb = rhs.data.ncols();
+                let mut data = DMatrix::zeros(self.data.nrows(), nb);
+                for b in 0..nb {
+                    let mut column = data.column_mut(b);
+                    column.copy_from(&self.data.column(b % self.data.ncols()));
+                    column $op &rhs.data.column(b);
+                }
+                NalgebraVec {
+                    data,
+                    context: rhs.context,
+                }
+            }
+        }
+    };
+}
 macro_rules! binary_set {
     ($trait:ident,$method:ident,$op:tt,$binary:tt) => {
-        vec_binary!(
-            $trait,
-            $method,
-            NalgebraVec<T>,
-            NalgebraVec<T>,
-            $op,
-            $binary
-        );
-        vec_binary!(
-            $trait,
-            $method,
-            NalgebraVec<T>,
-            &NalgebraVec<T>,
-            $op,
-            $binary
-        );
-        vec_binary!(
-            $trait,
-            $method,
-            NalgebraVec<T>,
-            NalgebraVecRef<'_, T>,
-            $op,
-            $binary
-        );
-        vec_binary!(
-            $trait,
-            $method,
-            NalgebraVec<T>,
-            &NalgebraVecRef<'_, T>,
-            $op,
-            $binary
-        );
+        vec_binary_owned!($trait, $method, NalgebraVec<T>, $op);
+        vec_binary_owned!($trait, $method, &NalgebraVec<T>, $op);
+        vec_binary_owned!($trait, $method, NalgebraVecRef<'_, T>, $op);
+        vec_binary_owned!($trait, $method, &NalgebraVecRef<'_, T>, $op);
         vec_binary!(
             $trait,
             $method,
@@ -263,7 +293,14 @@ macro_rules! assign_set {
 assign_set!(AddAssign, add_assign, +=);
 assign_set!(SubAssign, sub_assign, -=);
 
-macro_rules! scale {
+impl<T: NalgebraScalar> Mul<Scale<T>> for NalgebraVec<T> {
+    type Output = Self;
+    fn mul(mut self, rhs: Scale<T>) -> Self {
+        self.data *= rhs.value();
+        self
+    }
+}
+macro_rules! scale_ref {
     ($t:ty) => {
         impl<T: NalgebraScalar> Mul<Scale<T>> for $t {
             type Output = NalgebraVec<T>;
@@ -276,9 +313,8 @@ macro_rules! scale {
         }
     };
 }
-scale!(NalgebraVec<T>);
-scale!(&NalgebraVec<T>);
-scale!(NalgebraVecRef<'_, T>);
+scale_ref!(&NalgebraVec<T>);
+scale_ref!(NalgebraVecRef<'_, T>);
 impl<T: NalgebraScalar> Mul<Scale<T>> for NalgebraVecMut<'_, T> {
     type Output = NalgebraVec<T>;
     fn mul(self, rhs: Scale<T>) -> Self::Output {
@@ -367,8 +403,29 @@ impl<'a, T: NalgebraScalar> VectorView<'a> for NalgebraVecRef<'a, T> {
             .assert_compatible_nbatch(y.context.nbatch(), "squared_norm");
         self.context
             .assert_compatible_nbatch(atol.context.nbatch(), "squared_norm");
-        let mut max_norm = T::zero();
-        for b in 0..self.data.ncols() {
+        assert_eq!(
+            self.data.nrows(),
+            y.data.nrows(),
+            "squared_norm row mismatch"
+        );
+        assert_eq!(
+            self.data.nrows(),
+            atol.data.nrows(),
+            "squared_norm row mismatch"
+        );
+        let yb = y.batch(0);
+        let atolb = atol.batch(0);
+        let mut norm = T::zero();
+        for i in 0..self.data.nrows() {
+            // Bounds follow shared row count and validated batch broadcasting above.
+            let x = unsafe { *self.data.get_unchecked((i, 0)) };
+            let y = unsafe { *y.data.get_unchecked((i, yb)) };
+            let atol = unsafe { *atol.data.get_unchecked((i, atolb)) };
+            let term = x / (y.abs() * rtol + atol);
+            norm += term * term;
+        }
+        let mut max_norm = T::zero().max(norm / T::from_f64(self.data.nrows() as f64).unwrap());
+        for b in 1..self.data.ncols() {
             let yb = y.batch(b);
             let atolb = atol.batch(b);
             let mut norm = T::zero();
@@ -390,38 +447,10 @@ impl<'a, T: NalgebraScalar> VectorViewMut<'a> for NalgebraVecMut<'a, T> {
     type View = NalgebraVecRef<'a, T>;
     type Index = NalgebraIndex;
     fn copy_from(&mut self, o: &Self::Owned) {
-        self.context
-            .assert_compatible_nbatch(o.context.nbatch(), "copy_from");
-        if self.context.nbatch() == 1 && self.data.nrows() <= 10 {
-            self.data.column_mut(0).copy_from(&o.data.column(0));
-            return;
-        }
-        if self.data.ncols() == o.data.ncols() {
-            self.data.copy_from(&o.data);
-            return;
-        }
-        for b in 0..self.data.ncols() {
-            self.data
-                .column_mut(b)
-                .copy_from(&o.data.column(b % o.data.ncols()));
-        }
+        copy_from_data!(self, o, "copy_from");
     }
     fn copy_from_view(&mut self, o: &Self::View) {
-        self.context
-            .assert_compatible_nbatch(o.context.nbatch(), "copy_from_view");
-        if self.context.nbatch() == 1 && self.data.nrows() <= 10 {
-            self.data.column_mut(0).copy_from(&o.data.column(0));
-            return;
-        }
-        if self.data.ncols() == o.data.ncols() {
-            self.data.copy_from(&o.data);
-            return;
-        }
-        for b in 0..self.data.ncols() {
-            self.data
-                .column_mut(b)
-                .copy_from(&o.data.column(b % o.data.ncols()));
-        }
+        copy_from_data!(self, o, "copy_from_view");
     }
     fn set_index(&mut self, i: IndexType, v: T) {
         self.data.row_mut(i).fill(v);
@@ -480,8 +509,28 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
             .assert_compatible_nbatch(y.context.nbatch(), "squared_norm");
         self.context
             .assert_compatible_nbatch(atol.context.nbatch(), "squared_norm");
-        let mut max_norm = T::zero();
-        for b in 0..self.data.ncols() {
+        assert_eq!(
+            self.data.nrows(),
+            y.data.nrows(),
+            "squared_norm row mismatch"
+        );
+        assert_eq!(
+            self.data.nrows(),
+            atol.data.nrows(),
+            "squared_norm row mismatch"
+        );
+        let yb = y.batch(0);
+        let atolb = atol.batch(0);
+        let mut norm = T::zero();
+        for i in 0..self.data.nrows() {
+            let x = unsafe { *self.data.get_unchecked((i, 0)) };
+            let y = unsafe { *y.data.get_unchecked((i, yb)) };
+            let atol = unsafe { *atol.data.get_unchecked((i, atolb)) };
+            let term = x / (y.abs() * rtol + atol);
+            norm += term * term;
+        }
+        let mut max_norm = T::zero().max(norm / T::from_f64(self.data.nrows() as f64).unwrap());
+        for b in 1..self.data.ncols() {
             let yb = y.batch(b);
             let atolb = atol.batch(b);
             let mut norm = T::zero();
@@ -542,13 +591,13 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
         }
     }
     fn copy_from(&mut self, o: &Self) {
-        self.as_view_mut().copy_from(o)
+        copy_from_data!(self, o, "copy_from");
     }
     fn fill(&mut self, v: T) {
         self.data.fill(v)
     }
     fn copy_from_view(&mut self, o: &Self::View<'_>) {
-        self.as_view_mut().copy_from_view(o)
+        copy_from_data!(self, o, "copy_from_view");
     }
     fn from_element(n: usize, v: T, ctx: Self::C) -> Self {
         Self {
@@ -618,6 +667,19 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
     fn component_mul_assign(&mut self, o: &Self) {
         self.context
             .assert_compatible_nbatch(o.context.nbatch(), "component_mul_assign");
+        assert_eq!(
+            self.data.nrows(),
+            o.data.nrows(),
+            "component_mul_assign row mismatch"
+        );
+        if self.context.nbatch() == 1 {
+            for i in 0..self.data.nrows() {
+                let lhs = unsafe { self.data.get_unchecked_mut((i, 0)) };
+                let rhs = unsafe { *o.data.get_unchecked((i, 0)) };
+                *lhs *= rhs;
+            }
+            return;
+        }
         if self.data.ncols() == o.data.ncols() {
             self.data.component_mul_assign(&o.data);
             return;
@@ -637,8 +699,8 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
             let mut frac = T::zero();
             let mut idx = -1;
             for i in 0..self.len() {
-                let g0 = self.data[(i, b)];
-                let g = g1.data[(i, g1.batch(b))];
+                let g0 = unsafe { *self.data.get_unchecked((i, b)) };
+                let g = unsafe { *g1.data.get_unchecked((i, g1.batch(b))) };
                 if g == T::zero() {
                     found = true
                 }
