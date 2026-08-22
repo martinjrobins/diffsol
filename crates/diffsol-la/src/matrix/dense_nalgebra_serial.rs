@@ -742,19 +742,28 @@ impl<T: NalgebraScalar> DenseMatrix for NalgebraMat<T> {
             end: e,
         }
     }
-    fn column_axpy(&mut self, a: T, j: usize, i: usize) {
-        assert_ne!(i, j, "Column index cannot be the same");
-        assert!(i < self.ncols(), "Column index out of bounds");
-        assert!(j < self.ncols(), "Column index out of bounds");
+    fn update_backward_diff(&mut self, order: usize, d: &NalgebraVec<T>) {
+        assert!(order + 2 < self.logical_ncols(), "order out of bounds");
+        self.context
+            .assert_compatible_nbatch(d.context.nbatch(), "update_backward_diff");
         for b in 0..self.context.nbatch() {
-            let src = self.col(b, j);
-            let dst = self.col(b, i);
-            if src < dst {
-                let (src, mut dst) = self.data.columns_range_pair_mut(src..src + 1, dst..dst + 1);
-                dst.column_mut(0).axpy(a, &src.column(0), T::one());
-            } else {
-                let (mut dst, src) = self.data.columns_range_pair_mut(dst..dst + 1, src..src + 1);
-                dst.column_mut(0).axpy(a, &src.column(0), T::one());
+            let base = self.col(b, 0);
+            let d_col = d.batch(b);
+            // diff[:, order+2] = d - diff[:, order+1]
+            {
+                let (src, mut dst) = self.data.columns_range_pair_mut(
+                    base + order + 1..base + order + 2,
+                    base + order + 2..base + order + 3,
+                );
+                dst.column_mut(0).copy_from(&d.data.column(d_col));
+                dst.column_mut(0).axpy(-T::one(), &src.column(0), T::one());
+            }
+            // for i in (0..=order+1).rev(): diff[:, i] += diff[:, i+1]
+            for i in (0..=order + 1).rev() {
+                let (mut dst, src) = self
+                    .data
+                    .columns_range_pair_mut(base + i..base + i + 1, base + i + 1..base + i + 2);
+                dst.column_mut(0).axpy(T::one(), &src.column(0), T::one());
             }
         }
     }
@@ -765,8 +774,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_column_axpy() {
-        super::super::tests::test_column_axpy::<NalgebraMat<f64>>();
+    fn test_update_backward_diff() {
+        super::super::tests::test_update_backward_diff::<NalgebraMat<f64>>();
     }
 
     #[test]
