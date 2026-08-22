@@ -367,7 +367,8 @@ macro_rules! gemv_data {
     ($self:ident, $a:ident, $x:ident, $beta:ident, $y:ident, $op:literal) => {{
         $y.context
             .assert_compatible_nbatch($self.context.nbatch(), $op);
-        $y.context.assert_compatible_nbatch($x.context.nbatch(), $op);
+        $y.context
+            .assert_compatible_nbatch($x.context.nbatch(), $op);
         let nc = $self.ncols();
         // the unbatched case keeps constant column indices, which codegens better than the
         // loop variable below

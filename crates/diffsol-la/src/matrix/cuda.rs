@@ -482,11 +482,8 @@ macro_rules! impl_sub_lhs {
                 if nbatch < rhs.context.nbatch() {
                     // self holds fewer batches than the result, so it cannot be written into
                     let out_nbatch = rhs.context.nbatch();
-                    let mut ret = Self::Output::zeros(
-                        self.nrows(),
-                        self.ncols(),
-                        rhs.context.clone(),
-                    );
+                    let mut ret =
+                        Self::Output::zeros(self.nrows(), self.ncols(), rhs.context.clone());
                     let self_nbatch_i32 = nbatch as i32;
                     let ret_nbatch = out_nbatch as i32;
                     let ret_stride = (ret.nrows() * ret.ncols()) as i32;
@@ -503,8 +500,9 @@ macro_rules! impl_sub_lhs {
                         .arg(&rhs_nbatch)
                         .arg(&ret_stride)
                         .arg(&ret_nbatch);
-                    let config =
-                        self.context.launch_config_2d(nstates, out_nbatch as u32, &f);
+                    let config = self
+                        .context
+                        .launch_config_2d(nstates, out_nbatch as u32, &f);
                     unsafe { build.launch(config) }.expect("Failed to launch kernel");
                     return ret;
                 }
@@ -588,11 +586,8 @@ macro_rules! impl_add_lhs {
                 if nbatch < rhs.context.nbatch() {
                     // self holds fewer batches than the result, so it cannot be written into
                     let out_nbatch = rhs.context.nbatch();
-                    let mut ret = Self::Output::zeros(
-                        self.nrows(),
-                        self.ncols(),
-                        rhs.context.clone(),
-                    );
+                    let mut ret =
+                        Self::Output::zeros(self.nrows(), self.ncols(), rhs.context.clone());
                     let self_nbatch_i32 = nbatch as i32;
                     let ret_nbatch = out_nbatch as i32;
                     let ret_stride = (ret.nrows() * ret.ncols()) as i32;
@@ -609,8 +604,9 @@ macro_rules! impl_add_lhs {
                         .arg(&rhs_nbatch)
                         .arg(&ret_stride)
                         .arg(&ret_nbatch);
-                    let config =
-                        self.context.launch_config_2d(nstates, out_nbatch as u32, &f);
+                    let config = self
+                        .context
+                        .launch_config_2d(nstates, out_nbatch as u32, &f);
                     unsafe { build.launch(config) }.expect("Failed to launch kernel");
                     return ret;
                 }

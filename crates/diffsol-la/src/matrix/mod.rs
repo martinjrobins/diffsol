@@ -1012,8 +1012,8 @@ pub(crate) mod tests {
         ];
 
         // lhs broadcasts over the batches of rhs, which already spans the result
-        let a =
-            M::try_from_triplets(2, 2, indices.clone(), one_batch.clone(), M::C::default()).unwrap();
+        let a = M::try_from_triplets(2, 2, indices.clone(), one_batch.clone(), M::C::default())
+            .unwrap();
         let b =
             M::try_from_triplets(2, 2, indices.clone(), two_batches.clone(), ctx.clone()).unwrap();
         let c = &a - b;
@@ -1074,10 +1074,10 @@ pub(crate) mod tests {
         ];
 
         // rhs broadcasts over the batches of lhs
-        let a = M::try_from_triplets(2, 2, indices.clone(), two_batches.clone(), ctx.clone())
+        let a =
+            M::try_from_triplets(2, 2, indices.clone(), two_batches.clone(), ctx.clone()).unwrap();
+        let b = M::try_from_triplets(2, 2, indices.clone(), one_batch.clone(), M::C::default())
             .unwrap();
-        let b =
-            M::try_from_triplets(2, 2, indices.clone(), one_batch.clone(), M::C::default()).unwrap();
         let c = a - &b;
         assert_eq!(c.context().nbatch(), 2);
         assert_eq!(
@@ -1121,7 +1121,8 @@ pub(crate) mod tests {
         let x_vals = vec![f::<M>(1.0), f::<M>(2.0), f::<M>(3.0), f::<M>(4.0)];
         let y_vals = vec![f::<M>(10.0), f::<M>(20.0), f::<M>(30.0), f::<M>(40.0)];
         // x and y have nbatch == 1, so they broadcast over both batches of result
-        let x = M::try_from_triplets(2, 2, indices.clone(), x_vals.clone(), M::C::default()).unwrap();
+        let x =
+            M::try_from_triplets(2, 2, indices.clone(), x_vals.clone(), M::C::default()).unwrap();
         let y = M::try_from_triplets(2, 2, indices.clone(), y_vals, M::C::default()).unwrap();
         // result carries the union sparsity (required for sparse matrices) in both batches
         let mut result_vals = x_vals.clone();
