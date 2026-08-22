@@ -60,6 +60,23 @@ pub trait Scalar:
     fn cos(self) -> Self;
     /// Maximum of two values.
     fn max(self, other: Self) -> Self;
+
+    /// Addition, potentially reassociated/relaxed for speed under the `algebraic-ops` feature.
+    fn algebraic_add(self, other: Self) -> Self {
+        self + other
+    }
+    /// Subtraction, potentially reassociated/relaxed for speed under the `algebraic-ops` feature.
+    fn algebraic_sub(self, other: Self) -> Self {
+        self - other
+    }
+    /// Multiplication, potentially reassociated/relaxed for speed under the `algebraic-ops` feature.
+    fn algebraic_mul(self, other: Self) -> Self {
+        self * other
+    }
+    /// Division, potentially reassociated/relaxed for speed under the `algebraic-ops` feature.
+    fn algebraic_div(self, other: Self) -> Self {
+        self / other
+    }
 }
 
 /// A [`Scalar`] that also satisfies nalgebra's numeric field requirements.
@@ -106,6 +123,22 @@ impl Scalar for f64 {
     fn max(self, other: Self) -> Self {
         self.max(other)
     }
+    #[cfg(feature = "algebraic-ops")]
+    fn algebraic_add(self, other: Self) -> Self {
+        self.algebraic_add(other)
+    }
+    #[cfg(feature = "algebraic-ops")]
+    fn algebraic_sub(self, other: Self) -> Self {
+        self.algebraic_sub(other)
+    }
+    #[cfg(feature = "algebraic-ops")]
+    fn algebraic_mul(self, other: Self) -> Self {
+        self.algebraic_mul(other)
+    }
+    #[cfg(feature = "algebraic-ops")]
+    fn algebraic_div(self, other: Self) -> Self {
+        self.algebraic_div(other)
+    }
 }
 
 impl Scalar for f32 {
@@ -129,6 +162,22 @@ impl Scalar for f32 {
     }
     fn max(self, other: Self) -> Self {
         self.max(other)
+    }
+    #[cfg(feature = "algebraic-ops")]
+    fn algebraic_add(self, other: Self) -> Self {
+        self.algebraic_add(other)
+    }
+    #[cfg(feature = "algebraic-ops")]
+    fn algebraic_sub(self, other: Self) -> Self {
+        self.algebraic_sub(other)
+    }
+    #[cfg(feature = "algebraic-ops")]
+    fn algebraic_mul(self, other: Self) -> Self {
+        self.algebraic_mul(other)
+    }
+    #[cfg(feature = "algebraic-ops")]
+    fn algebraic_div(self, other: Self) -> Self {
+        self.algebraic_div(other)
     }
 }
 

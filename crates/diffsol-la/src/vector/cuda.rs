@@ -1432,7 +1432,7 @@ impl<T: ScalarCuda> VectorView<'_> for CudaVecRef<'_, T> {
             let start = b * blocks_per_batch;
             let sum = partial_sums[start..start + blocks_per_batch]
                 .iter()
-                .fold(T::zero(), |acc, x| acc + *x);
+                .fold(T::zero(), |acc, x| acc.algebraic_add(*x));
             let norm = sum / nstates_t;
             if norm > max_norm {
                 max_norm = norm;

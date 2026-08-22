@@ -273,8 +273,8 @@ macro_rules! squared_norm_data {
             let norm = x.iter().zip(y.iter().zip(atol.iter())).fold(
                 T::zero(),
                 |norm, (&x, (&y, &atol))| {
-                    let term = x / (y.abs() * $rtol + atol);
-                    norm + term * term
+                    let term = x.algebraic_div(y.abs().algebraic_mul($rtol).algebraic_add(atol));
+                    norm.algebraic_add(term.algebraic_mul(term))
                 },
             );
             norm / nstates
@@ -605,7 +605,7 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
                     2 => column.norm_l2(),
                     _ => column
                         .iter()
-                        .fold(T::zero(), |acc, x| acc + x.abs().pow(k))
+                        .fold(T::zero(), |acc, x| acc.algebraic_add(x.abs().pow(k)))
                         .pow(T::one() / T::from_f64(k as f64).unwrap()),
                 }
             })
