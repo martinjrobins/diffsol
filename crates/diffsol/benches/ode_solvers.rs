@@ -21,18 +21,22 @@ use common::{bench_explicit, bench_implicit, bench_implicit_cg, bench_implicit_r
 
 macro_rules! bench_diffsl {
     ($g:ident, $name:ident, $solver:ident, $ls:ident, $problem:ident, $m:ty) => {
+        // the problem is built (and the diffsl source JIT compiled) outside the
+        // benchmark loop, otherwise the compile dominates the measurement
         #[cfg(feature = "diffsl-llvm")]
-        $g.bench_function(stringify!($name), |b| {
-            b.iter(|| {
-                let (problem, soln) = $problem::<$m, LlvmModule>();
-                let t_evals = soln
-                    .solution_points
-                    .iter()
-                    .map(|sp| sp.t)
-                    .collect::<Vec<_>>();
-                common::$solver::<_, $ls<_>>(&problem, &t_evals);
-            })
-        });
+        {
+            let (problem, soln) = $problem::<$m, LlvmModule>();
+            let t_evals = soln
+                .solution_points
+                .iter()
+                .map(|sp| sp.t)
+                .collect::<Vec<_>>();
+            $g.bench_function(stringify!($name), |b| {
+                b.iter(|| {
+                    common::$solver::<_, $ls<_>>(&problem, &t_evals);
+                })
+            });
+        }
     };
 }
 
@@ -40,17 +44,19 @@ macro_rules! bench_diffsl_cg {
     ($g:ident, $name:ident, $solver:ident, $ls:ident, $problem:ident, $m:ty, $($N:expr),+ $(,)?) => {
         $(
             #[cfg(feature = "diffsl-llvm")]
-            $g.bench_function(concat!(stringify!($name), "_", $N), |b| {
-                b.iter(|| {
-                    let (problem, soln) = $problem::<$m, LlvmModule, $N>();
-                    let t_evals = soln
-                        .solution_points
-                        .iter()
-                        .map(|sp| sp.t)
-                        .collect::<Vec<_>>();
-                    common::$solver::<_, $ls<_>>(&problem, &t_evals);
-                })
-            });
+            {
+                let (problem, soln) = $problem::<$m, LlvmModule, $N>();
+                let t_evals = soln
+                    .solution_points
+                    .iter()
+                    .map(|sp| sp.t)
+                    .collect::<Vec<_>>();
+                $g.bench_function(concat!(stringify!($name), "_", $N), |b| {
+                    b.iter(|| {
+                        common::$solver::<_, $ls<_>>(&problem, &t_evals);
+                    })
+                });
+            }
         )+
     };
 }
@@ -59,17 +65,19 @@ macro_rules! bench_diffsl_explicit_cg {
     ($g:ident, $name:ident, $solver:ident, $problem:ident, $m:ty, $($N:expr),+ $(,)?) => {
         $(
             #[cfg(feature = "diffsl-llvm")]
-            $g.bench_function(concat!(stringify!($name), "_", $N), |b| {
-                b.iter(|| {
-                    let (problem, soln) = $problem::<$m, LlvmModule, $N>();
-                    let t_evals = soln
-                        .solution_points
-                        .iter()
-                        .map(|sp| sp.t)
-                        .collect::<Vec<_>>();
-                    common::$solver::<_>(&problem, &t_evals);
-                })
-            });
+            {
+                let (problem, soln) = $problem::<$m, LlvmModule, $N>();
+                let t_evals = soln
+                    .solution_points
+                    .iter()
+                    .map(|sp| sp.t)
+                    .collect::<Vec<_>>();
+                $g.bench_function(concat!(stringify!($name), "_", $N), |b| {
+                    b.iter(|| {
+                        common::$solver::<_>(&problem, &t_evals);
+                    })
+                });
+            }
         )+
     };
 }

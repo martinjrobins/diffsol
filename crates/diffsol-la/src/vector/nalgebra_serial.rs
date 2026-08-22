@@ -1,9 +1,8 @@
 use std::ops::{Add, AddAssign, Div, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 
-use super::utils::*;
-use nalgebra::{DVector, DVectorView, DVectorViewMut, LpNorm};
+use nalgebra::{Const, DMatrix, DVector, Dyn, LpNorm, MatrixView, MatrixViewMut};
 
-use crate::{IndexType, NalgebraContext, NalgebraMat, NalgebraScalar, Scalar, Scale, VectorHost};
+use crate::{Context, IndexType, NalgebraContext, NalgebraMat, NalgebraScalar, Scale, VectorHost};
 
 use super::{DefaultDenseMatrix, Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
 
@@ -13,28 +12,48 @@ pub struct NalgebraIndex {
     pub(crate) context: NalgebraContext,
 }
 
+/// A batched vector, stored as one column per batch.
+///
+/// Invariant: `data.ncols() == context.nbatch()` and `data.nrows() == len()`, so
+/// `data.as_slice()` matches the CUDA layout `[batch0 states..., batch1 states..., ...]`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NalgebraVec<T: NalgebraScalar> {
-    pub(crate) data: DVector<T>,
+    pub(crate) data: DMatrix<T>,
     pub(crate) context: NalgebraContext,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct NalgebraVecRef<'a, T: NalgebraScalar> {
-    pub(crate) data: DVectorView<'a, T>,
+    pub(crate) data: MatrixView<'a, T, Dyn, Dyn, Const<1>, Dyn>,
     pub(crate) context: NalgebraContext,
 }
 
 #[derive(Debug, PartialEq)]
 pub struct NalgebraVecMut<'a, T: NalgebraScalar> {
-    pub(crate) data: DVectorViewMut<'a, T>,
+    pub(crate) data: MatrixViewMut<'a, T, Dyn, Dyn, Const<1>, Dyn>,
     pub(crate) context: NalgebraContext,
+}
+
+/// Column holding `batch`, broadcasting a single-batch vector over all batches.
+macro_rules! batch_method {
+    () => {
+        #[inline]
+        pub(crate) fn batch(&self, batch: usize) -> usize {
+            batch % self.data.ncols()
+        }
+    };
+}
+impl<T: NalgebraScalar> NalgebraVec<T> {
+    batch_method!();
+}
+impl<T: NalgebraScalar> NalgebraVecRef<'_, T> {
+    batch_method!();
 }
 
 impl<T: NalgebraScalar> From<DVector<T>> for NalgebraVec<T> {
     fn from(data: DVector<T>) -> Self {
         Self {
-            data,
+            data: DMatrix::from_column_slice(data.len(), 1, data.as_slice()),
             context: NalgebraContext::default(),
         }
     }
@@ -44,267 +63,425 @@ impl<T: NalgebraScalar> DefaultDenseMatrix for NalgebraVec<T> {
     type M = NalgebraMat<T>;
 }
 
-impl_vector_common!(NalgebraVec<T>, NalgebraContext, DVector<T>, NalgebraScalar);
-impl_vector_common_ref!(
+macro_rules! common {
+    ($t:ty, $inner:ty) => {
+        impl<T: NalgebraScalar> VectorCommon for $t {
+            type T = T;
+            type C = NalgebraContext;
+            type Inner = $inner;
+            fn inner(&self) -> &Self::Inner {
+                &self.data
+            }
+        }
+    };
+}
+common!(NalgebraVec<T>, DMatrix<T>);
+macro_rules! common_ref {
+    ($t:ty, $inner:ty) => {
+        impl<'a, T: NalgebraScalar> VectorCommon for $t {
+            type T = T;
+            type C = NalgebraContext;
+            type Inner = $inner;
+            fn inner(&self) -> &Self::Inner {
+                &self.data
+            }
+        }
+    };
+}
+common_ref!(
     NalgebraVecRef<'a, T>,
-    NalgebraContext,
-    DVectorView<'a, T>,
-    NalgebraScalar
+    MatrixView<'a, T, Dyn, Dyn, Const<1>, Dyn>
 );
-impl_vector_common_ref!(
+common_ref!(
     NalgebraVecMut<'a, T>,
-    NalgebraContext,
-    DVectorViewMut<'a, T>,
-    NalgebraScalar
+    MatrixViewMut<'a, T, Dyn, Dyn, Const<1>, Dyn>
 );
 
-macro_rules! impl_mul_scalar {
-    ($lhs:ty, $out:ty, $scalar:ty) => {
-        impl<T: NalgebraScalar> Mul<Scale<T>> for $lhs {
-            type Output = $out;
-            #[inline]
+macro_rules! vec_binary {
+    ($trait:ident, $method:ident, $lhs:ty, $rhs:ty, $op:tt, $binary:tt) => {
+        impl<T: NalgebraScalar> $trait<$rhs> for $lhs {
+            type Output = NalgebraVec<T>;
+
+            fn $method(self, rhs: $rhs) -> Self::Output {
+                self.context
+                    .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($method));
+                if self.data.ncols() == rhs.data.ncols() {
+                    return NalgebraVec {
+                        data: &self.data $binary &rhs.data,
+                        context: self.context,
+                    };
+                }
+                let nb = self.data.ncols().max(rhs.data.ncols());
+                let mut data = DMatrix::zeros(self.data.nrows(), nb);
+                for b in 0..nb {
+                    let mut column = data.column_mut(b);
+                    column.copy_from(&self.data.column(b % self.data.ncols()));
+                    column $op &rhs.data.column(b % rhs.data.ncols());
+                }
+                NalgebraVec {
+                    data,
+                    context: if self.data.ncols() == nb {
+                        self.context
+                    } else {
+                        rhs.context
+                    },
+                }
+            }
+        }
+    };
+}
+macro_rules! vec_assign {
+    ($trait:ident, $method:ident, $lhs:ty, $rhs:ty, $op:tt) => {
+        impl<T: NalgebraScalar> $trait<$rhs> for $lhs {
+            fn $method(&mut self, rhs: $rhs) {
+                self.context
+                    .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($method));
+                if self.data.ncols() == rhs.data.ncols() {
+                    self.data $op &rhs.data;
+                    return;
+                }
+                for b in 0..self.data.ncols() {
+                    let mut column = self.data.column_mut(b);
+                    column $op &rhs.data.column(b % rhs.data.ncols());
+                }
+            }
+        }
+    };
+}
+
+macro_rules! copy_from_data {
+    ($self:ident, $other:ident, $method:literal) => {
+        $self
+            .context
+            .assert_compatible_nbatch($other.context.nbatch(), $method);
+        assert_eq!(
+            $self.data.nrows(),
+            $other.data.nrows(),
+            "copy_from row mismatch"
+        );
+        // the unbatched path is column-wise on purpose: nalgebra's whole-matrix copy_from is
+        // ~30% slower than copying the single column (see lin_alg_ops copy_from/nalgebra)
+        if $self.context.nbatch() == 1 && $other.context.nbatch() == 1 {
+            $self.data.column_mut(0).copy_from(&$other.data.column(0));
+            return;
+        }
+        if $self.data.ncols() == $other.data.ncols() {
+            $self.data.copy_from(&$other.data);
+            return;
+        }
+        for b in 0..$self.data.ncols() {
+            $self
+                .data
+                .column_mut(b)
+                .copy_from(&$other.data.column(b % $other.data.ncols()));
+        }
+    };
+}
+
+/// `self_b = alpha_b * x_b + beta * self_b` for every batch of `self`, broadcasting a
+/// single-batch `x`.  Shared by the owned vector and its mutable view, with `x` either an
+/// owned vector or a view, and `alpha` either one scalar or one value per batch.
+macro_rules! axpy_data {
+    ($self:ident, $x:ident, $beta:expr, $op:literal, |$batch:ident| $alpha:expr) => {{
+        $self
+            .context
+            .assert_compatible_nbatch($x.context.nbatch(), $op);
+        for $batch in 0..$self.data.ncols() {
+            let alpha = $alpha;
+            $self
+                .data
+                .column_mut($batch)
+                .axpy(alpha, &$x.data.column($x.batch($batch)), $beta);
+        }
+    }};
+}
+
+/// Weighted error norm of every batch, reduced by taking the maximum.
+macro_rules! squared_norm_data {
+    ($self:ident, $y:ident, $atol:ident, $rtol:ident) => {{
+        $self
+            .context
+            .assert_compatible_nbatch($y.context.nbatch(), "squared_norm");
+        $self
+            .context
+            .assert_compatible_nbatch($atol.context.nbatch(), "squared_norm");
+        let nrows = $self.data.nrows();
+        assert!(
+            nrows == $y.data.nrows() && nrows == $atol.data.nrows(),
+            "squared_norm row mismatch"
+        );
+        let nstates = T::from_f64(nrows as f64).unwrap();
+        // rows of a column are contiguous whatever the batch stride, so each batch is a slice
+        let batch_norm = |xb: usize, yb: usize, atolb: usize| {
+            let x = $self.data.column(xb);
+            let y = $y.data.column(yb);
+            let atol = $atol.data.column(atolb);
+            let norm = x
+                .as_slice()
+                .iter()
+                .zip(y.as_slice().iter().zip(atol.as_slice().iter()))
+                .fold(T::zero(), |norm, (&x, (&y, &atol))| {
+                    let term = x / (y.abs() * $rtol + atol);
+                    norm + term * term
+                });
+            norm / nstates
+        };
+        // the unbatched case keeps a constant column index, which codegens better than the
+        // loop variable below (and folds away `batch`'s modulus)
+        if $self.data.ncols() == 1 {
+            return batch_norm(0, $y.batch(0), $atol.batch(0));
+        }
+        let mut max_norm = T::zero();
+        for b in 0..$self.data.ncols() {
+            max_norm = max_norm.max(batch_norm(b, $y.batch(b), $atol.batch(b)));
+        }
+        max_norm
+    }};
+}
+
+/// `rhs` is owned, so the result is written into its allocation whenever `rhs` already holds
+/// as many batches as the result: `combine(&mut rhs_i, lhs_i)` writes the result in place.
+macro_rules! vec_binary_owned_rhs {
+    ($trait:ident, $method:ident, $lhs:ty, $op:tt, $combine:expr) => {
+        impl<T: NalgebraScalar> $trait<NalgebraVec<T>> for $lhs {
+            type Output = NalgebraVec<T>;
+
+            fn $method(self, mut rhs: NalgebraVec<T>) -> Self::Output {
+                self.context
+                    .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($method));
+                if self.data.ncols() == rhs.data.ncols() {
+                    rhs.data.zip_apply(&self.data, $combine);
+                    return rhs;
+                }
+                if rhs.data.ncols() > self.data.ncols() {
+                    for b in 0..rhs.data.ncols() {
+                        let lhs = self.data.column(self.batch(b));
+                        rhs.data.column_mut(b).zip_apply(&lhs, $combine);
+                    }
+                    return rhs;
+                }
+                // rhs holds fewer batches than the result, so it cannot be written into
+                let nb = self.data.ncols();
+                let mut data = DMatrix::zeros(self.data.nrows(), nb);
+                for b in 0..nb {
+                    let mut column = data.column_mut(b);
+                    column.copy_from(&self.data.column(b));
+                    column $op &rhs.data.column(rhs.batch(b));
+                }
+                NalgebraVec {
+                    data,
+                    context: self.context,
+                }
+            }
+        }
+    };
+}
+
+macro_rules! vec_binary_owned_lhs {
+    ($trait:ident, $method:ident, $rhs:ty, $op:tt) => {
+        impl<T: NalgebraScalar> $trait<$rhs> for NalgebraVec<T> {
+            type Output = NalgebraVec<T>;
+
+            fn $method(mut self, rhs: $rhs) -> Self::Output {
+                self.context
+                    .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($method));
+                if self.data.ncols() == rhs.data.ncols() {
+                    self.data $op &rhs.data;
+                    return self;
+                }
+                if self.data.ncols() > rhs.data.ncols() {
+                    for b in 0..self.data.ncols() {
+                        let mut column = self.data.column_mut(b);
+                        column $op &rhs.data.column(b % rhs.data.ncols());
+                    }
+                    return self;
+                }
+                let nb = rhs.data.ncols();
+                let mut data = DMatrix::zeros(self.data.nrows(), nb);
+                for b in 0..nb {
+                    let mut column = data.column_mut(b);
+                    column.copy_from(&self.data.column(b % self.data.ncols()));
+                    column $op &rhs.data.column(b);
+                }
+                NalgebraVec {
+                    data,
+                    context: rhs.context,
+                }
+            }
+        }
+    };
+}
+macro_rules! binary_set {
+    ($trait:ident,$method:ident,$op:tt,$binary:tt,$combine:expr) => {
+        vec_binary_owned_lhs!($trait, $method, NalgebraVec<T>, $op);
+        vec_binary_owned_lhs!($trait, $method, &NalgebraVec<T>, $op);
+        vec_binary_owned_lhs!($trait, $method, NalgebraVecRef<'_, T>, $op);
+        vec_binary_owned_lhs!($trait, $method, &NalgebraVecRef<'_, T>, $op);
+        vec_binary_owned_rhs!($trait, $method, NalgebraVecRef<'_, T>, $op, $combine);
+        vec_binary_owned_rhs!($trait, $method, &NalgebraVec<T>, $op, $combine);
+        vec_binary!(
+            $trait,
+            $method,
+            NalgebraVecRef<'_, T>,
+            &NalgebraVec<T>,
+            $op,
+            $binary
+        );
+        vec_binary!(
+            $trait,
+            $method,
+            NalgebraVecRef<'_, T>,
+            NalgebraVecRef<'_, T>,
+            $op,
+            $binary
+        );
+        vec_binary!(
+            $trait,
+            $method,
+            NalgebraVecRef<'_, T>,
+            &NalgebraVecRef<'_, T>,
+            $op,
+            $binary
+        );
+        vec_binary!(
+            $trait,
+            $method,
+            &NalgebraVec<T>,
+            &NalgebraVec<T>,
+            $op,
+            $binary
+        );
+        vec_binary!(
+            $trait,
+            $method,
+            &NalgebraVec<T>,
+            NalgebraVecRef<'_, T>,
+            $op,
+            $binary
+        );
+        vec_binary!(
+            $trait,
+            $method,
+            &NalgebraVec<T>,
+            &NalgebraVecRef<'_, T>,
+            $op,
+            $binary
+        );
+    };
+}
+binary_set!(Add, add, +=, +, |rhs, lhs| *rhs += lhs);
+binary_set!(Sub, sub, -=, -, |rhs, lhs| *rhs = lhs - *rhs);
+macro_rules! assign_set {
+    ($trait:ident,$method:ident,$op:tt) => {
+        vec_assign!($trait, $method, NalgebraVec<T>, NalgebraVec<T>, $op);
+        vec_assign!($trait, $method, NalgebraVec<T>, &NalgebraVec<T>, $op);
+        vec_assign!($trait, $method, NalgebraVec<T>, NalgebraVecRef<'_, T>, $op);
+        vec_assign!($trait, $method, NalgebraVec<T>, &NalgebraVecRef<'_, T>, $op);
+        vec_assign!($trait, $method, NalgebraVecMut<'_, T>, NalgebraVec<T>, $op);
+        vec_assign!($trait, $method, NalgebraVecMut<'_, T>, &NalgebraVec<T>, $op);
+        vec_assign!(
+            $trait,
+            $method,
+            NalgebraVecMut<'_, T>,
+            NalgebraVecRef<'_, T>,
+            $op
+        );
+        vec_assign!(
+            $trait,
+            $method,
+            NalgebraVecMut<'_, T>,
+            &NalgebraVecRef<'_, T>,
+            $op
+        );
+    };
+}
+assign_set!(AddAssign, add_assign, +=);
+assign_set!(SubAssign, sub_assign, -=);
+
+impl<T: NalgebraScalar> Mul<Scale<T>> for NalgebraVec<T> {
+    type Output = Self;
+    fn mul(mut self, rhs: Scale<T>) -> Self {
+        self.data *= rhs.value();
+        self
+    }
+}
+macro_rules! scale_ref {
+    ($t:ty) => {
+        impl<T: NalgebraScalar> Mul<Scale<T>> for $t {
+            type Output = NalgebraVec<T>;
             fn mul(self, rhs: Scale<T>) -> Self::Output {
-                let scale: $scalar = rhs.value();
-                Self::Output {
-                    data: &self.data * scale,
+                NalgebraVec {
+                    data: self.data.clone_owned() * rhs.value(),
                     context: self.context,
                 }
             }
         }
     };
 }
-
-macro_rules! impl_div_scalar {
-    ($lhs:ty, $out:ty, $scalar:expr) => {
-        impl<'a, T: NalgebraScalar> Div<Scale<T>> for $lhs {
-            type Output = $out;
-            #[inline]
-            fn div(self, rhs: Scale<T>) -> Self::Output {
-                let inv_rhs: T = T::one() / rhs.value();
-                Self::Output {
-                    data: self.data * inv_rhs,
-                    context: self.context,
-                }
+scale_ref!(&NalgebraVec<T>);
+scale_ref!(NalgebraVecRef<'_, T>);
+impl<T: NalgebraScalar> Mul<Scale<T>> for NalgebraVecMut<'_, T> {
+    type Output = NalgebraVec<T>;
+    fn mul(self, rhs: Scale<T>) -> Self::Output {
+        NalgebraVec {
+            data: self.data.into_owned() * rhs.value(),
+            context: self.context,
+        }
+    }
+}
+impl<T: NalgebraScalar> Div<Scale<T>> for NalgebraVec<T> {
+    type Output = Self;
+    fn div(self, rhs: Scale<T>) -> Self {
+        Self {
+            data: self.data * (T::one() / rhs.value()),
+            context: self.context,
+        }
+    }
+}
+impl<T: NalgebraScalar> MulAssign<Scale<T>> for NalgebraVec<T> {
+    fn mul_assign(&mut self, rhs: Scale<T>) {
+        self.data *= rhs.value();
+    }
+}
+impl<T: NalgebraScalar> MulAssign<Scale<T>> for NalgebraVecMut<'_, T> {
+    fn mul_assign(&mut self, rhs: Scale<T>) {
+        self.data *= rhs.value();
+    }
+}
+macro_rules! index {
+    ($t:ty) => {
+        impl<T: NalgebraScalar> Index<IndexType> for $t {
+            type Output = T;
+            fn index(&self, i: IndexType) -> &T {
+                &self.data[(i, 0)]
             }
         }
     };
 }
-
-macro_rules! impl_mul_assign_scalar {
-    ($col_type:ty, $scalar:ty) => {
-        impl<'a, T: NalgebraScalar> MulAssign<Scale<T>> for $col_type {
-            #[inline]
-            fn mul_assign(&mut self, rhs: Scale<T>) {
-                let scale = rhs.value();
-                self.data *= scale;
-            }
-        }
-    };
+index!(NalgebraVec<T>);
+index!(NalgebraVecRef<'_, T>);
+impl<T: NalgebraScalar> IndexMut<IndexType> for NalgebraVec<T> {
+    fn index_mut(&mut self, i: IndexType) -> &mut T {
+        &mut self.data[(i, 0)]
+    }
 }
-
-impl_mul_scalar!(NalgebraVec<T>, NalgebraVec<T>, T);
-impl_mul_scalar!(&NalgebraVec<T>, NalgebraVec<T>, T);
-impl_mul_scalar!(NalgebraVecRef<'_, T>, NalgebraVec<T>, T);
-impl_mul_scalar!(NalgebraVecMut<'_, T>, NalgebraVec<T>, T);
-impl_div_scalar!(NalgebraVec<T>, NalgebraVec<T>, T);
-impl_mul_assign_scalar!(NalgebraVecMut<'a, T>, T);
-impl_mul_assign_scalar!(NalgebraVec<T>, T);
-
-impl_sub_assign!(NalgebraVec<T>, NalgebraVec<T>, NalgebraScalar);
-impl_sub_assign!(NalgebraVec<T>, &NalgebraVec<T>, NalgebraScalar);
-impl_sub_assign!(NalgebraVec<T>, NalgebraVecRef<'_, T>, NalgebraScalar);
-impl_sub_assign!(NalgebraVec<T>, &NalgebraVecRef<'_, T>, NalgebraScalar);
-
-impl_sub_assign!(NalgebraVecMut<'_, T>, NalgebraVec<T>, NalgebraScalar);
-impl_sub_assign!(NalgebraVecMut<'_, T>, &NalgebraVec<T>, NalgebraScalar);
-impl_sub_assign!(NalgebraVecMut<'_, T>, NalgebraVecRef<'_, T>, NalgebraScalar);
-impl_sub_assign!(
-    NalgebraVecMut<'_, T>,
-    &NalgebraVecRef<'_, T>,
-    NalgebraScalar
-);
-
-impl_add_assign!(NalgebraVec<T>, NalgebraVec<T>, NalgebraScalar);
-impl_add_assign!(NalgebraVec<T>, &NalgebraVec<T>, NalgebraScalar);
-impl_add_assign!(NalgebraVec<T>, NalgebraVecRef<'_, T>, NalgebraScalar);
-impl_add_assign!(NalgebraVec<T>, &NalgebraVecRef<'_, T>, NalgebraScalar);
-
-impl_add_assign!(NalgebraVecMut<'_, T>, NalgebraVec<T>, NalgebraScalar);
-impl_add_assign!(NalgebraVecMut<'_, T>, &NalgebraVec<T>, NalgebraScalar);
-impl_add_assign!(NalgebraVecMut<'_, T>, NalgebraVecRef<'_, T>, NalgebraScalar);
-impl_add_assign!(
-    NalgebraVecMut<'_, T>,
-    &NalgebraVecRef<'_, T>,
-    NalgebraScalar
-);
-
-impl_sub_both_ref!(
-    &NalgebraVec<T>,
-    &NalgebraVec<T>,
-    NalgebraVec<T>,
-    NalgebraScalar
-);
-impl_sub_rhs!(
-    &NalgebraVec<T>,
-    NalgebraVec<T>,
-    NalgebraVec<T>,
-    NalgebraScalar
-);
-impl_sub_both_ref!(
-    &NalgebraVec<T>,
-    NalgebraVecRef<'_, T>,
-    NalgebraVec<T>,
-    NalgebraScalar
-);
-impl_sub_both_ref!(
-    &NalgebraVec<T>,
-    &NalgebraVecRef<'_, T>,
-    NalgebraVec<T>,
-    NalgebraScalar
-);
-
-impl_sub_lhs!(
-    NalgebraVec<T>,
-    NalgebraVec<T>,
-    NalgebraVec<T>,
-    NalgebraScalar
-);
-impl_sub_lhs!(
-    NalgebraVec<T>,
-    &NalgebraVec<T>,
-    NalgebraVec<T>,
-    NalgebraScalar
-);
-impl_sub_lhs!(
-    NalgebraVec<T>,
-    NalgebraVecRef<'_, T>,
-    NalgebraVec<T>,
-    NalgebraScalar
-);
-impl_sub_lhs!(
-    NalgebraVec<T>,
-    &NalgebraVecRef<'_, T>,
-    NalgebraVec<T>,
-    NalgebraScalar
-);
-
-impl_sub_rhs!(
-    NalgebraVecRef<'_, T>,
-    NalgebraVec<T>,
-    NalgebraVec<T>,
-    NalgebraScalar
-);
-impl_sub_both_ref!(
-    NalgebraVecRef<'_, T>,
-    &NalgebraVec<T>,
-    NalgebraVec<T>,
-    NalgebraScalar
-);
-impl_sub_both_ref!(
-    NalgebraVecRef<'_, T>,
-    NalgebraVecRef<'_, T>,
-    NalgebraVec<T>,
-    NalgebraScalar
-);
-impl_sub_both_ref!(
-    NalgebraVecRef<'_, T>,
-    &NalgebraVecRef<'_, T>,
-    NalgebraVec<T>,
-    NalgebraScalar
-);
-
-impl_add_both_ref!(
-    &NalgebraVec<T>,
-    &NalgebraVec<T>,
-    NalgebraVec<T>,
-    NalgebraScalar
-);
-impl_add_rhs!(
-    &NalgebraVec<T>,
-    NalgebraVec<T>,
-    NalgebraVec<T>,
-    NalgebraScalar
-);
-impl_add_both_ref!(
-    &NalgebraVec<T>,
-    NalgebraVecRef<'_, T>,
-    NalgebraVec<T>,
-    NalgebraScalar
-);
-impl_add_both_ref!(
-    &NalgebraVec<T>,
-    &NalgebraVecRef<'_, T>,
-    NalgebraVec<T>,
-    NalgebraScalar
-);
-
-impl_add_lhs!(
-    NalgebraVec<T>,
-    NalgebraVec<T>,
-    NalgebraVec<T>,
-    NalgebraScalar
-);
-impl_add_lhs!(
-    NalgebraVec<T>,
-    &NalgebraVec<T>,
-    NalgebraVec<T>,
-    NalgebraScalar
-);
-impl_add_lhs!(
-    NalgebraVec<T>,
-    NalgebraVecRef<'_, T>,
-    NalgebraVec<T>,
-    NalgebraScalar
-);
-impl_add_lhs!(
-    NalgebraVec<T>,
-    &NalgebraVecRef<'_, T>,
-    NalgebraVec<T>,
-    NalgebraScalar
-);
-
-impl_add_rhs!(
-    NalgebraVecRef<'_, T>,
-    NalgebraVec<T>,
-    NalgebraVec<T>,
-    NalgebraScalar
-);
-impl_add_both_ref!(
-    NalgebraVecRef<'_, T>,
-    &NalgebraVec<T>,
-    NalgebraVec<T>,
-    NalgebraScalar
-);
-impl_add_both_ref!(
-    NalgebraVecRef<'_, T>,
-    NalgebraVecRef<'_, T>,
-    NalgebraVec<T>,
-    NalgebraScalar
-);
-impl_add_both_ref!(
-    NalgebraVecRef<'_, T>,
-    &NalgebraVecRef<'_, T>,
-    NalgebraVec<T>,
-    NalgebraScalar
-);
-
-impl_index!(NalgebraVec<T>, NalgebraScalar);
-impl_index_mut!(NalgebraVec<T>, NalgebraScalar);
-
-impl_index!(NalgebraVecRef<'_, T>, NalgebraScalar);
 
 impl VectorIndex for NalgebraIndex {
     type C = NalgebraContext;
     fn zeros(len: IndexType, ctx: Self::C) -> Self {
-        let data = DVector::from_element(len, 0);
-        Self { data, context: ctx }
+        Self {
+            data: DVector::zeros(len),
+            context: ctx,
+        }
     }
-    fn len(&self) -> crate::IndexType {
+    fn len(&self) -> IndexType {
         self.data.len()
     }
     fn from_vec(v: Vec<IndexType>, ctx: Self::C) -> Self {
-        let data = DVector::from_vec(v);
-        Self { data, context: ctx }
+        Self {
+            data: DVector::from_vec(v),
+            context: ctx,
+        }
     }
     fn clone_as_vec(&self) -> Vec<IndexType> {
         self.data.iter().copied().collect()
@@ -316,66 +493,53 @@ impl VectorIndex for NalgebraIndex {
 
 impl<'a, T: NalgebraScalar> VectorView<'a> for NalgebraVecRef<'a, T> {
     type Owned = NalgebraVec<T>;
-
-    fn get_index(&self, index: IndexType) -> Self::T {
-        self.data[index]
+    fn get_index(&self, i: IndexType) -> T {
+        assert_eq!(self.context.nbatch(), 1, "get_index requires nbatch == 1");
+        self.data[(i, 0)]
     }
-
     fn into_owned(self) -> Self::Owned {
-        Self::Owned {
+        NalgebraVec {
             data: self.data.into_owned(),
             context: self.context,
         }
     }
-    fn squared_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: Self::T) -> Self::T {
-        let mut acc = T::zero();
-        if y.len() != self.data.len() || y.len() != atol.len() {
-            panic!("Vector lengths do not match");
-        }
-        for i in 0..self.data.len() {
-            let yi = unsafe { y.data.get_unchecked(i) };
-            let ai = unsafe { atol.data.get_unchecked(i) };
-            let xi = unsafe { self.data.get_unchecked(i) };
-            let term = *xi / (yi.abs() * rtol + *ai);
-            acc += term * term;
-        }
-        acc / Self::T::from_f64(self.data.len() as f64).unwrap()
+    fn squared_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: T) -> T {
+        squared_norm_data!(self, y, atol, rtol)
     }
 }
-
 impl<'a, T: NalgebraScalar> VectorViewMut<'a> for NalgebraVecMut<'a, T> {
     type Owned = NalgebraVec<T>;
     type View = NalgebraVecRef<'a, T>;
     type Index = NalgebraIndex;
-    fn copy_from(&mut self, other: &Self::Owned) {
-        self.data.copy_from(&other.data);
+    fn copy_from(&mut self, o: &Self::Owned) {
+        copy_from_data!(self, o, "copy_from");
     }
-    fn copy_from_view(&mut self, other: &Self::View) {
-        self.data.copy_from(&other.data);
+    fn copy_from_view(&mut self, o: &Self::View) {
+        copy_from_data!(self, o, "copy_from_view");
     }
-    fn set_index(&mut self, index: IndexType, value: Self::T) {
-        self.data[index] = value;
+    fn set_index(&mut self, i: IndexType, v: T) {
+        self.data.row_mut(i).fill(v);
     }
-    fn axpy(&mut self, alpha: Self::T, x: &Self::Owned, beta: Self::T) {
-        self.data.axpy(alpha, &x.data, beta);
+    fn axpy(&mut self, a: T, x: &Self::Owned, beta: T) {
+        axpy_data!(self, x, beta, "axpy", |_batch| a)
     }
 }
-
 impl<T: NalgebraScalar> VectorHost for NalgebraVec<T> {
-    fn as_slice(&self) -> &[Self::T] {
+    fn as_slice(&self) -> &[T] {
+        assert_eq!(self.context.nbatch(), 1);
         self.data.as_slice()
     }
-    fn as_mut_slice(&mut self) -> &mut [Self::T] {
+    fn as_mut_slice(&mut self) -> &mut [T] {
+        assert_eq!(self.context.nbatch(), 1);
         self.data.as_mut_slice()
     }
 }
-
 impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
     type View<'a> = NalgebraVecRef<'a, T>;
     type ViewMut<'a> = NalgebraVecMut<'a, T>;
     type Index = NalgebraIndex;
     fn len(&self) -> IndexType {
-        self.data.len()
+        self.data.nrows()
     }
     fn inner_mut(&mut self) -> &mut Self::Inner {
         &mut self.data
@@ -383,149 +547,228 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
     fn context(&self) -> &Self::C {
         &self.context
     }
-    fn norm(&self, k: i32) -> Self::T {
-        self.data.apply_norm(&LpNorm(k))
+    fn norm(&self, k: i32) -> T {
+        // LpNorm is a generic elementwise loop, `norm` is the optimised L2 path
+        (0..self.data.ncols())
+            .map(|b| {
+                let column = self.data.column(b);
+                if k == 2 {
+                    column.norm()
+                } else {
+                    column.apply_norm(&LpNorm(k))
+                }
+            })
+            .fold(T::zero(), |a, b| a.max(b))
     }
-    fn get_index(&self, index: IndexType) -> Self::T {
-        self.data[index]
+    fn get_index(&self, i: IndexType) -> T {
+        assert_eq!(
+            self.context.nbatch(),
+            1,
+            "get_index not supported for batched vectors"
+        );
+        self.data[(i, 0)]
     }
-    fn set_index(&mut self, index: IndexType, value: Self::T) {
-        self.data[index] = value;
+    fn set_index(&mut self, i: IndexType, v: T) {
+        self.data.row_mut(i).fill(v);
     }
-    fn squared_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T {
-        let mut acc = T::zero();
-        if y.len() != self.len() || y.len() != atol.len() {
-            panic!("Vector lengths do not match");
-        }
-        for i in 0..self.len() {
-            let yi = unsafe { y.data.get_unchecked(i) };
-            let ai = unsafe { atol.data.get_unchecked(i) };
-            let xi = unsafe { self.data.get_unchecked(i) };
-            let term = *xi / (yi.abs() * rtol + *ai);
-            acc += term * term;
-        }
-        acc / Self::T::from_f64(self.len() as f64).unwrap()
+    fn squared_norm(&self, y: &Self, atol: &Self, rtol: T) -> T {
+        squared_norm_data!(self, y, atol, rtol)
     }
     fn as_view(&self) -> Self::View<'_> {
-        Self::View {
+        NalgebraVecRef {
             data: self.data.as_view(),
             context: self.context,
         }
     }
     fn as_view_mut(&mut self) -> Self::ViewMut<'_> {
-        Self::ViewMut {
+        NalgebraVecMut {
             data: self.data.as_view_mut(),
             context: self.context,
         }
     }
-    fn get_batch(&self, batch: usize) -> Self::View<'_> {
+    fn get_batch(&self, b: usize) -> Self::View<'_> {
+        NalgebraVecRef {
+            data: self.data.columns(b, 1),
+            context: NalgebraContext::default(),
+        }
+    }
+    fn get_batch_mut(&mut self, b: usize) -> Self::ViewMut<'_> {
+        NalgebraVecMut {
+            data: self.data.columns_mut(b, 1),
+            context: NalgebraContext::default(),
+        }
+    }
+    fn copy_from(&mut self, o: &Self) {
+        copy_from_data!(self, o, "copy_from");
+    }
+    fn fill(&mut self, v: T) {
+        self.data.fill(v)
+    }
+    fn copy_from_view(&mut self, o: &Self::View<'_>) {
+        copy_from_data!(self, o, "copy_from_view");
+    }
+    fn from_element(n: usize, v: T, ctx: Self::C) -> Self {
+        Self {
+            data: DMatrix::from_element(n, ctx.nbatch(), v),
+            context: ctx,
+        }
+    }
+    fn from_vec(v: Vec<T>, ctx: Self::C) -> Self {
         assert!(
-            batch == 0,
-            "NalgebraVec does not support batching (nbatch > 1)."
+            v.len().is_multiple_of(ctx.nbatch()),
+            "vector length must be divisible by nbatch"
         );
-        self.as_view()
+        Self {
+            data: DMatrix::from_vec(v.len() / ctx.nbatch(), ctx.nbatch(), v),
+            context: ctx,
+        }
     }
-    fn get_batch_mut(&mut self, batch: usize) -> Self::ViewMut<'_> {
-        assert!(
-            batch == 0,
-            "NalgebraVec does not support batching (nbatch > 1)."
-        );
-        self.as_view_mut()
+    fn from_slice(v: &[T], ctx: Self::C) -> Self {
+        Self::from_vec(v.to_vec(), ctx)
     }
-    fn copy_from(&mut self, other: &Self) {
-        self.data.copy_from(&other.data);
-    }
-    fn fill(&mut self, value: Self::T) {
-        self.data.iter_mut().for_each(|x: &mut _| *x = value);
-    }
-    fn copy_from_view(&mut self, other: &Self::View<'_>) {
-        self.data.copy_from(&other.data);
-    }
-    fn from_element(nstates: usize, value: T, ctx: Self::C) -> Self {
-        let data = DVector::from_element(nstates, value);
-        Self { data, context: ctx }
-    }
-    fn from_vec(vec: Vec<T>, ctx: Self::C) -> Self {
-        let data = DVector::from_vec(vec);
-        Self { data, context: ctx }
-    }
-    fn from_slice(slice: &[T], ctx: Self::C) -> Self {
-        let data = DVector::from_column_slice(slice);
-        Self { data, context: ctx }
-    }
-    fn clone_as_vec(&self) -> Vec<Self::T> {
+    fn clone_as_vec(&self) -> Vec<T> {
         self.data.iter().copied().collect()
     }
-    fn zeros(nstates: usize, ctx: Self::C) -> Self {
-        let data = DVector::zeros(nstates);
-        Self { data, context: ctx }
+    fn zeros(n: usize, ctx: Self::C) -> Self {
+        Self {
+            data: DMatrix::zeros(n, ctx.nbatch()),
+            context: ctx,
+        }
     }
-    fn axpy(&mut self, alpha: T, x: &Self, beta: T) {
-        self.data.axpy(alpha, &x.data, beta);
+    fn axpy(&mut self, a: T, x: &Self, beta: T) {
+        axpy_data!(self, x, beta, "axpy", |_batch| a)
     }
-    fn axpy_v(&mut self, alpha: Self::T, x: &Self::View<'_>, beta: Self::T) {
-        self.data.axpy(alpha, &x.data, beta);
+    fn axpy_v(&mut self, a: T, x: &Self::View<'_>, beta: T) {
+        axpy_data!(self, x, beta, "axpy_v", |_batch| a)
     }
-    fn batched_axpy(&mut self, alpha: &[Self::T], x: &Self, beta: Self::T) {
+    fn batched_axpy(&mut self, a: &[T], x: &Self, beta: T) {
         assert_eq!(
-            alpha.len(),
-            1,
-            "NalgebraVec does not support batching (nbatch > 1)."
+            a.len(),
+            self.context.nbatch(),
+            "alpha.len() must equal nbatch"
         );
-        self.axpy(alpha[0], x, beta);
+        axpy_data!(self, x, beta, "batched_axpy", |batch| a[batch])
     }
-    fn component_div_assign(&mut self, other: &Self) {
-        self.data.component_div_assign(&other.data);
+    fn component_div_assign(&mut self, o: &Self) {
+        self.context
+            .assert_compatible_nbatch(o.context.nbatch(), "component_div_assign");
+        assert_eq!(
+            self.data.nrows(),
+            o.data.nrows(),
+            "component_div_assign row mismatch"
+        );
+        if self.data.ncols() == o.data.ncols() {
+            self.data.component_div_assign(&o.data);
+            return;
+        }
+        for c in 0..self.data.ncols() {
+            self.data
+                .column_mut(c)
+                .component_div_assign(&o.data.column(o.batch(c)));
+        }
     }
-    fn component_mul_assign(&mut self, other: &Self) {
-        self.data.component_mul_assign(&other.data);
-    }
-
-    fn root_finding(&self, g1: &Self) -> (bool, Self::T, i32) {
-        let mut max_frac = T::zero();
-        let mut max_frac_index = -1;
-        let mut found_root = false;
-        assert_eq!(self.len(), g1.len(), "Vector lengths do not match");
-        for i in 0..self.len() {
-            let g0 = unsafe { *self.data.get_unchecked(i) };
-            let g1 = unsafe { *g1.data.get_unchecked(i) };
-            if g1 == T::zero() {
-                found_root = true;
+    fn component_mul_assign(&mut self, o: &Self) {
+        self.context
+            .assert_compatible_nbatch(o.context.nbatch(), "component_mul_assign");
+        assert_eq!(
+            self.data.nrows(),
+            o.data.nrows(),
+            "component_mul_assign row mismatch"
+        );
+        // the elementwise unbatched path beats nalgebra's component_mul_assign by ~25%
+        // (see lin_alg_ops component_mul_assign/nalgebra)
+        if self.context.nbatch() == 1 {
+            for i in 0..self.data.nrows() {
+                let lhs = unsafe { self.data.get_unchecked_mut((i, 0)) };
+                let rhs = unsafe { *o.data.get_unchecked((i, 0)) };
+                *lhs *= rhs;
             }
-            if g0 * g1 < T::zero() {
-                let frac = (g1 / (g1 - g0)).abs();
-                if frac > max_frac {
-                    max_frac = frac;
-                    max_frac_index = i as i32;
+            return;
+        }
+        if self.data.ncols() == o.data.ncols() {
+            self.data.component_mul_assign(&o.data);
+            return;
+        }
+        for c in 0..self.data.ncols() {
+            self.data
+                .column_mut(c)
+                .component_mul_assign(&o.data.column(o.batch(c)));
+        }
+    }
+    fn root_finding(&self, g1: &Self) -> (bool, T, i32) {
+        self.context
+            .assert_compatible_nbatch(g1.context.nbatch(), "root_finding");
+        assert_eq!(self.len(), g1.len(), "Vector lengths do not match");
+        let mut out = None;
+        for b in 0..self.data.ncols() {
+            let mut found = false;
+            let mut frac = T::zero();
+            let mut idx = -1;
+            let g0_column = self.data.column(b);
+            let g1_column = g1.data.column(g1.batch(b));
+            for (i, (&g0, &g)) in g0_column
+                .as_slice()
+                .iter()
+                .zip(g1_column.as_slice())
+                .enumerate()
+            {
+                if g == T::zero() {
+                    found = true
+                }
+                if g0 * g < T::zero() {
+                    let q = (g / (g - g0)).abs();
+                    if q > frac {
+                        frac = q;
+                        idx = i as i32
+                    }
                 }
             }
+            if let Some(x) = out {
+                assert_eq!(
+                    x,
+                    (found, frac, idx),
+                    "root finding results differ across batches"
+                )
+            }
+            out = Some((found, frac, idx));
         }
-        (found_root, max_frac, max_frac_index)
+        out.unwrap_or((false, T::zero(), -1))
     }
-
-    fn assign_at_indices(&mut self, indices: &Self::Index, value: Self::T) {
-        for i in indices.data.iter() {
-            self[*i] = value;
-        }
-    }
-
-    fn copy_from_indices(&mut self, other: &Self, indices: &Self::Index) {
-        for i in indices.data.iter() {
-            self[*i] = other[*i];
-        }
-    }
-
-    fn gather(&mut self, other: &Self, indices: &Self::Index) {
-        assert_eq!(self.len(), indices.len(), "Vector lengths do not match");
-        for (s, o) in self.data.iter_mut().zip(indices.data.iter()) {
-            *s = other[*o];
+    fn assign_at_indices(&mut self, idx: &Self::Index, v: T) {
+        for b in 0..self.data.ncols() {
+            for i in idx.data.iter() {
+                self.data[(*i, b)] = v
+            }
         }
     }
-
-    fn scatter(&self, indices: &Self::Index, other: &mut Self) {
-        assert_eq!(self.len(), indices.len(), "Vector lengths do not match");
-        for (s, o) in self.data.iter().zip(indices.data.iter()) {
-            other[*o] = *s;
+    fn copy_from_indices(&mut self, o: &Self, idx: &Self::Index) {
+        self.context
+            .assert_compatible_nbatch(o.context.nbatch(), "copy_from_indices");
+        for b in 0..self.data.ncols() {
+            for i in idx.data.iter() {
+                self.data[(*i, b)] = o.data[(*i, o.batch(b))]
+            }
+        }
+    }
+    fn gather(&mut self, o: &Self, idx: &Self::Index) {
+        assert_eq!(self.len(), idx.len());
+        self.context
+            .assert_compatible_nbatch(o.context.nbatch(), "gather");
+        for b in 0..self.data.ncols() {
+            for (i, j) in idx.data.iter().enumerate() {
+                self.data[(i, b)] = o.data[(*j, o.batch(b))]
+            }
+        }
+    }
+    fn scatter(&self, idx: &Self::Index, o: &mut Self) {
+        assert_eq!(self.len(), idx.len());
+        self.context
+            .assert_compatible_nbatch(o.context.nbatch(), "scatter");
+        for b in 0..self.data.ncols() {
+            for (i, j) in idx.data.iter().enumerate() {
+                let batch = o.batch(b);
+                o.data[(*j, batch)] = self.data[(i, b)]
+            }
         }
     }
 }
@@ -544,7 +787,7 @@ mod tests {
         tmp += &atol;
         let mut r = v.clone();
         r.component_div_assign(&tmp);
-        let errorn_check = r.data.norm_squared() / 3.0;
+        let errorn_check = r.data.column(0).norm_squared() / 3.0;
         assert_eq!(v.squared_norm(&y, &atol, rtol), errorn_check);
         let vview = v.as_view();
         assert_eq!(
@@ -567,10 +810,21 @@ mod tests {
 
     #[test]
     fn test_into() {
-        let vec = DVector::from_vec(vec![1.0, 2.0, 3.0]);
-        let v: NalgebraVec<f64> = vec.into();
+        let vector = DVector::from_vec(vec![1.0, 2.0, 3.0]);
+        let v: NalgebraVec<f64> = vector.into();
         assert_eq!(v.clone_as_vec(), vec![1.0, 2.0, 3.0]);
     }
 
+    #[test]
+    fn test_host_only() {
+        super::super::tests::test_host_only::<NalgebraVec<f64>>();
+    }
+
     super::super::generate_vector_tests_nonbatched!(nalgebra, NalgebraVec<f64>);
+    super::super::generate_vector_tests_batched!(
+        nalgebra,
+        NalgebraVec<f64>,
+        NalgebraContext::with_nbatch(2),
+        NalgebraContext::with_nbatch(3)
+    );
 }

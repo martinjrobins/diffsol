@@ -1535,14 +1535,15 @@ mod test {
         }
 
         let nparams = problem.eqn.nparams();
+        assert_eq!(ret_sens.len(), nparams);
         let nstates = problem.eqn.rhs().nstates();
-        let ctx = problem.eqn.context().clone();
-        let mut p_nom = NalgebraVec::zeros(nparams, ctx.clone());
+        let ctx = *problem.eqn.context();
+        let mut p_nom = NalgebraVec::zeros(nparams, ctx);
         problem.eqn.get_params(&mut p_nom);
 
         let fd_eps = 1e-6;
 
-        for iparam in 0..nparams {
+        for (iparam, ret_sens_i) in ret_sens.iter().enumerate() {
             let p_nom_i = p_nom.get_index(iparam);
             let h = fd_eps * (1.0 + p_nom_i.abs());
 
@@ -1571,8 +1572,8 @@ mod test {
                 let fd_sens = (y_plus.column(jcol).into_owned()
                     - y_minus.column(jcol).into_owned())
                     / scale(2.0 * h);
-                let actual_sens = ret_sens[iparam].column(jcol).into_owned();
-                let fd_atol = NalgebraVec::from_element(nstates, 1e-4_f64, ctx.clone());
+                let actual_sens = ret_sens_i.column(jcol).into_owned();
+                let fd_atol = NalgebraVec::from_element(nstates, 1e-4_f64, ctx);
                 let fd_rtol = 1e-4_f64;
                 fd_sens.assert_eq_norm(&actual_sens, &fd_atol, fd_rtol, 20.0);
             }
@@ -1599,14 +1600,15 @@ mod test {
         }
 
         let nparams = problem.eqn.nparams();
+        assert_eq!(ret_sens.len(), nparams);
         let nstates = problem.eqn.rhs().nstates();
-        let ctx = problem.eqn.context().clone();
-        let mut p_nom = NalgebraVec::zeros(nparams, ctx.clone());
+        let ctx = *problem.eqn.context();
+        let mut p_nom = NalgebraVec::zeros(nparams, ctx);
         problem.eqn.get_params(&mut p_nom);
 
         let fd_eps = 1e-6;
 
-        for iparam in 0..nparams {
+        for (iparam, ret_sens_i) in ret_sens.iter().enumerate() {
             let p_nom_i = p_nom.get_index(iparam);
             let h = fd_eps * (1.0 + p_nom_i.abs());
 
@@ -1635,8 +1637,8 @@ mod test {
                 let fd_sens = (y_plus.column(jcol).into_owned()
                     - y_minus.column(jcol).into_owned())
                     / scale(2.0 * h);
-                let actual_sens = ret_sens[iparam].column(jcol).into_owned();
-                let fd_atol = NalgebraVec::from_element(nstates, 1e-4_f64, ctx.clone());
+                let actual_sens = ret_sens_i.column(jcol).into_owned();
+                let fd_atol = NalgebraVec::from_element(nstates, 1e-4_f64, ctx);
                 let fd_rtol = 1e-4_f64;
                 fd_sens.assert_eq_norm(&actual_sens, &fd_atol, fd_rtol, 20.0);
             }

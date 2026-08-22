@@ -35,8 +35,27 @@ __device__ inline bool batch_binary_setup(
     return true;
 }
 
-// (c) Ternary: three arrays, second and third may broadcast (first never does).
-// Used by: vec_add, vec_sub, mat_scale_add_assign
+// (c) Binary operator with an output array: every operand may broadcast, so the output
+// carries the largest batch count and each side is indexed modulo its own.
+// Used by: vec_add, vec_sub
+__device__ inline bool batch_binary_op_setup(
+    int* elem, int nstates,
+    int* li, int lhs_stride, int lhs_nbatch,
+    int* ri, int rhs_stride, int rhs_nbatch,
+    int* oi, int out_stride, int out_nbatch
+) {
+    *elem = blockIdx.x * blockDim.x + threadIdx.x;
+    if (*elem >= nstates) return false;
+    int b = blockIdx.y;
+    *li = (b % lhs_nbatch) * lhs_stride + *elem;
+    *ri = (b % rhs_nbatch) * rhs_stride + *elem;
+    *oi = (b % out_nbatch) * out_stride + *elem;
+    return true;
+}
+
+// (d) Ternary: three arrays, second and third may broadcast (the first is the destination
+// and always carries the launch's batch count).
+// Used by: mat_scale_add_assign
 __device__ inline bool batch_ternary_setup(
     int* elem, int nstates,
     int* li, int lhs_stride,

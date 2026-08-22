@@ -1,4 +1,4 @@
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 #[cfg(feature = "cuda")]
 use diffsol::{CudaMat, CudaVec};
 use diffsol::{
@@ -287,6 +287,54 @@ where
             b.iter(|| {
                 black_box(&y - &x);
             });
+        });
+    }
+    group.finish();
+}
+
+/// 🔴 add (owned lhs) — `V + &V`, which writes into the left operand's allocation.  The
+/// left operand is rebuilt outside the timed section, so only the addition is measured.
+fn bench_add_owned_lhs<V: Vector<T = f64> + 'static>(c: &mut Criterion, label: &str)
+where
+    V::C: Default + Clone,
+{
+    let mut group = c.benchmark_group(label);
+    for &ns in VSIZES {
+        group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
+            let ctx = V::C::default();
+            let y = V::from_element(ns, 1.0, ctx.clone());
+            let x = V::from_element(ns, 2.0, ctx.clone());
+            b.iter_batched(
+                || y.clone(),
+                |y| {
+                    black_box(y + &x);
+                },
+                BatchSize::SmallInput,
+            );
+        });
+    }
+    group.finish();
+}
+
+/// 🔴 sub (owned lhs) — `V - &V`, the Newton-residual shape: the left operand is consumed
+/// and reused for the result.
+fn bench_sub_owned_lhs<V: Vector<T = f64> + 'static>(c: &mut Criterion, label: &str)
+where
+    V::C: Default + Clone,
+{
+    let mut group = c.benchmark_group(label);
+    for &ns in VSIZES {
+        group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
+            let ctx = V::C::default();
+            let y = V::from_element(ns, 1.0, ctx.clone());
+            let x = V::from_element(ns, 2.0, ctx.clone());
+            b.iter_batched(
+                || y.clone(),
+                |y| {
+                    black_box(y - &x);
+                },
+                BatchSize::SmallInput,
+            );
         });
     }
     group.finish();
@@ -725,6 +773,8 @@ macro_rules! bench_vector_backend {
         bench_add_assign::<$V>($c, concat!("add_assign/", $label));
         bench_add_ref_ref::<$V>($c, concat!("add_ref_ref/", $label));
         bench_sub_ref_ref::<$V>($c, concat!("sub_ref_ref/", $label));
+        bench_add_owned_lhs::<$V>($c, concat!("add_owned_lhs/", $label));
+        bench_sub_owned_lhs::<$V>($c, concat!("sub_owned_lhs/", $label));
         bench_squared_norm::<$V>($c, concat!("squared_norm/", $label));
         bench_axpy_v::<$V>($c, concat!("axpy_v/", $label));
         bench_copy_from_view::<$V>($c, concat!("copy_from_view/", $label));

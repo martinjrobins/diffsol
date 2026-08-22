@@ -2368,7 +2368,7 @@ mod tests {
             let nrows = sens_mat.nrows();
             for j in 0..ncols {
                 for i in 0..nrows {
-                    col_sum = col_sum + sens_mat.get_index(i, j);
+                    col_sum += sens_mat.get_index(i, j);
                 }
             }
             fwd_vec.set_index(p, col_sum);

@@ -1,15 +1,17 @@
-use crate::LaError;
-
 /// Context for the nalgebra backend.
-///
-/// Batching (`nbatch > 1`) is not supported by this backend; use the CUDA
-/// backend instead.
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub struct NalgebraContext {}
+pub struct NalgebraContext {
+    nbatch: usize,
+}
 
 impl NalgebraContext {
     pub fn new() -> Self {
-        Self {}
+        Self { nbatch: 1 }
+    }
+
+    pub fn with_nbatch(nbatch: usize) -> Self {
+        assert!(nbatch > 0, "nbatch must be > 0");
+        Self { nbatch }
     }
 }
 
@@ -20,14 +22,12 @@ impl Default for NalgebraContext {
 }
 
 impl crate::Context for NalgebraContext {
-    fn clone_with_nbatch(&self, nbatch: usize) -> Result<Self, LaError> {
-        if nbatch != 1 {
-            Err(LaError::Other(
-                "NalgebraContext does not support batching (nbatch > 1). Use the CUDA backend instead."
-                    .to_string(),
-            ))
-        } else {
-            Ok(Self {})
-        }
+    fn nbatch(&self) -> usize {
+        self.nbatch
+    }
+
+    fn clone_with_nbatch(&self, nbatch: usize) -> Result<Self, crate::LaError> {
+        assert!(nbatch > 0, "nbatch must be > 0");
+        Ok(Self { nbatch })
     }
 }

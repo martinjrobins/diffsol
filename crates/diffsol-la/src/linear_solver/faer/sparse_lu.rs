@@ -1,11 +1,11 @@
 use crate::{
-    error::LaError, linear_solver::LinearSolver, linear_solver_error, scalar::IndexType,
+    error::LaError, linear_solver::LinearSolver, linear_solver_error, scalar::IndexType, Context,
     FaerContext, FaerScalar, FaerSparseMat, FaerVec, LinearOp, Matrix,
 };
 
 use faer::{
     linalg::solvers::Solve,
-    reborrow::Reborrow,
+    reborrow::{Reborrow, ReborrowMut},
     sparse::linalg::{solvers::Lu, solvers::SymbolicLu},
 };
 
@@ -14,7 +14,7 @@ pub struct FaerSparseLU<T>
 where
     T: FaerScalar,
 {
-    lu: Option<Lu<IndexType, T>>,
+    lu: Vec<Lu<IndexType, T>>,
     lu_symbolic: Option<SymbolicLu<IndexType>>,
     matrix: Option<FaerSparseMat<T>>,
 }
@@ -25,7 +25,7 @@ where
 {
     fn default() -> Self {
         Self {
-            lu: None,
+            lu: Vec::new(),
             matrix: None,
             lu_symbolic: None,
         }
@@ -41,18 +41,26 @@ impl<T: FaerScalar> LinearSolver<FaerSparseMat<T>> for FaerSparseLU<T> {
     ) {
         let matrix = self.matrix.as_mut().expect("Matrix not set");
         op.matrix_inplace(matrix);
-        self.lu = Some(
-            Lu::try_new_with_symbolic(self.lu_symbolic.as_ref().unwrap().clone(), matrix.data.rb())
-                .expect("Failed to factorise matrix"),
-        );
+        self.lu = matrix
+            .data
+            .iter()
+            .map(|matrix| {
+                Lu::try_new_with_symbolic(self.lu_symbolic.as_ref().unwrap().clone(), matrix.rb())
+                    .expect("Failed to factorise matrix")
+            })
+            .collect();
     }
 
     fn solve_in_place(&self, x: &mut FaerVec<T>) -> Result<(), LaError> {
-        let lu = self
-            .lu
-            .as_ref()
-            .ok_or_else(|| linear_solver_error!(LuNotInitialized))?;
-        lu.solve_in_place(&mut x.data);
+        if self.lu.is_empty() {
+            return Err(linear_solver_error!(LuNotInitialized));
+        }
+        x.context
+            .assert_compatible_nbatch(self.lu.len(), "sparse_lu_solve");
+        let nlu = self.lu.len();
+        for batch in 0..x.data.ncols() {
+            self.lu[batch % nlu].solve_in_place(x.data.rb_mut().col_mut(batch));
+        }
         Ok(())
     }
 
@@ -64,7 +72,7 @@ impl<T: FaerScalar> LinearSolver<FaerSparseMat<T>> for FaerSparseLU<T> {
         let nrows = op.nrows();
         let matrix = C::M::new_from_sparsity(nrows, ncols, op.sparsity(), *op.context());
         self.lu_symbolic = Some(
-            SymbolicLu::try_new(matrix.data.symbolic()).expect("Failed to create symbolic LU"),
+            SymbolicLu::try_new(matrix.data[0].symbolic()).expect("Failed to create symbolic LU"),
         );
         self.matrix = Some(matrix);
     }

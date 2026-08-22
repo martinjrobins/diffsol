@@ -448,18 +448,26 @@ macro_rules! impl_binary {
                 let other_nbatch = rhs.context.nbatch();
                 ctx.assert_compatible_nbatch(other_nbatch, $label);
                 let nstates = self.len();
-                let mut ret = CudaVec::zeros(nstates, ctx.clone());
+                // either operand may broadcast, so the result carries the larger batch count
+                let ret_nbatch = self_nbatch.max(other_nbatch);
+                let ret_ctx = if self_nbatch == ret_nbatch {
+                    ctx.clone()
+                } else {
+                    rhs.context.clone()
+                };
+                let mut ret = CudaVec::zeros(nstates, ret_ctx);
                 if nstates == 0 {
                     return ret;
                 }
                 let f = ctx.function::<T>($kernel);
                 let n_u32 = nstates as u32;
-                let nb_u32 = self_nbatch as u32;
+                let nb_u32 = ret_nbatch as u32;
                 let self_stride = self.stride() as i32;
                 let rhs_stride = rhs.stride() as i32;
                 let other_nbatch_i32 = other_nbatch as i32;
                 let nstates_i32 = nstates as i32;
                 let self_nbatch_i32 = self_nbatch as i32;
+                let ret_nbatch_i32 = ret_nbatch as i32;
                 let config = ctx.launch_config_2d(n_u32, nb_u32, &f);
                 {
                     let mut build = ctx.stream.launch_builder(&f);
@@ -471,10 +479,11 @@ macro_rules! impl_binary {
                         .arg(&mut ret.data)
                         .arg(&n_u32)
                         .arg(&self_stride)
+                        .arg(&self_nbatch_i32)
                         .arg(&rhs_stride)
                         .arg(&other_nbatch_i32)
                         .arg(&nstates_i32)
-                        .arg(&self_nbatch_i32);
+                        .arg(&ret_nbatch_i32);
                     unsafe { build.launch(config) }.expect(concat!("Failed to launch ", $kernel));
                 }
                 ret
