@@ -1529,6 +1529,7 @@ mod test {
             .unwrap()
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn scalar_problem_adjoint_with_reset_root<RF, RJ, RA, RSA, GF, GJ, GA, GSA>(
         lambda: f64,
         reset_fn: RF,
