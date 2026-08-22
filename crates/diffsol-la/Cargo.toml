@@ -15,6 +15,7 @@ faer = []
 nalgebra = []
 cuda = ["dep:cudarc"]
 suitesparse = ["dep:suitesparse_sys"]
+algebraic-ops = []
 
 [dependencies]
 nalgebra = { workspace = true }
