@@ -1,5 +1,3 @@
-use std::hint::black_box;
-
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 #[cfg(feature = "cuda")]
 use diffsol::{CudaMat, CudaVec};
@@ -7,6 +5,7 @@ use diffsol::{
     DenseMatrix, FaerMat, FaerSparseMat, FaerVec, Matrix, MatrixCommon, NalgebraMat, NalgebraVec,
     Scale, Vector, VectorHost,
 };
+use std::hint::black_box;
 
 const VSIZES: &[usize] = &[2, 10, 100, 500];
 const MSIZES: &[usize] = &[10, 100, 500];
@@ -26,7 +25,10 @@ where
             let ctx = V::C::default();
             let mut y = V::from_element(ns, 1.0, ctx.clone());
             let x = V::from_element(ns, 2.0, ctx.clone());
-            b.iter(|| op(&mut y, &x));
+            b.iter(|| {
+                op(&mut y, &x);
+                black_box(&y);
+            });
         });
     }
     group.finish();
@@ -61,7 +63,10 @@ where
         group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
             let ctx = V::C::default();
             let mut v = V::from_element(ns, 1.0, ctx.clone());
-            b.iter(|| op(&mut v));
+            b.iter(|| {
+                op(&mut v);
+                black_box(&v);
+            });
         });
     }
     group.finish();
@@ -142,7 +147,10 @@ fn bench_matrix_op<M>(
             setup_mat(&mut mat, ns);
             let x = M::V::zeros(ns, ctx.clone());
             let mut y = M::V::zeros(ns, ctx.clone());
-            b.iter(|| op(&mat, &x, &mut y));
+            b.iter(|| {
+                op(&mat, &x, &mut y);
+                black_box(&y);
+            });
         });
     }
     group.finish();
@@ -214,7 +222,10 @@ where
             let mut y = V::from_element(ns, 1.0, ctx.clone());
             let x = V::from_element(ns, 2.0, ctx.clone());
             let x_view = x.as_view();
-            b.iter(|| y.axpy_v(1.0, &x_view, 0.5));
+            b.iter(|| {
+                y.axpy_v(1.0, &x_view, 0.5);
+                black_box(&y);
+            });
         });
     }
     group.finish();
@@ -232,7 +243,10 @@ where
             let mut y = V::from_element(ns, 1.0, ctx.clone());
             let x = V::from_element(ns, 2.0, ctx.clone());
             let x_view = x.as_view();
-            b.iter(|| y.copy_from_view(&x_view));
+            b.iter(|| {
+                y.copy_from_view(&x_view);
+                black_box(&y);
+            });
         });
     }
     group.finish();
@@ -250,7 +264,9 @@ where
             let ctx = V::C::default();
             let y = V::from_element(ns, 1.0, ctx.clone());
             let x = V::from_element(ns, 2.0, ctx.clone());
-            b.iter(|| black_box(&y + &x));
+            b.iter(|| {
+                black_box(&y + &x);
+            });
         });
     }
     group.finish();
@@ -268,7 +284,9 @@ where
             let ctx = V::C::default();
             let y = V::from_element(ns, 1.0, ctx.clone());
             let x = V::from_element(ns, 2.0, ctx.clone());
-            b.iter(|| black_box(&y - &x));
+            b.iter(|| {
+                black_box(&y - &x);
+            });
         });
     }
     group.finish();
@@ -286,7 +304,13 @@ where
             let ctx = V::C::default();
             let y = V::from_element(ns, 1.0, ctx.clone());
             let x = V::from_element(ns, 2.0, ctx.clone());
-            b.iter_batched(|| y.clone(), |y| black_box(y + &x), BatchSize::SmallInput);
+            b.iter_batched(
+                || y.clone(),
+                |y| {
+                    black_box(y + &x);
+                },
+                BatchSize::SmallInput,
+            );
         });
     }
     group.finish();
@@ -304,7 +328,13 @@ where
             let ctx = V::C::default();
             let y = V::from_element(ns, 1.0, ctx.clone());
             let x = V::from_element(ns, 2.0, ctx.clone());
-            b.iter_batched(|| y.clone(), |y| black_box(y - &x), BatchSize::SmallInput);
+            b.iter_batched(
+                || y.clone(),
+                |y| {
+                    black_box(y - &x);
+                },
+                BatchSize::SmallInput,
+            );
         });
     }
     group.finish();
@@ -333,7 +363,9 @@ where
         group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
             let ctx = M::C::default();
             let mat = M::zeros(ns, ns + 1, ctx);
-            b.iter(|| black_box(mat.column(0)));
+            b.iter(|| {
+                black_box(mat.column(0));
+            });
         });
     }
     group.finish();
@@ -351,7 +383,9 @@ where
         group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
             let ctx = M::C::default();
             let mat = M::zeros(ns, ns + 1, ctx);
-            b.iter(|| black_box(mat.columns(0, 1)));
+            b.iter(|| {
+                black_box(mat.columns(0, 1));
+            });
         });
     }
     group.finish();
@@ -388,7 +422,9 @@ where
         group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
             let ctx = V::C::default();
             let y = V::from_element(ns, 1.0, ctx.clone());
-            b.iter(|| black_box(&y * Scale(2.0)));
+            b.iter(|| {
+                black_box(&y * Scale(2.0));
+            });
         });
     }
     group.finish();
@@ -404,7 +440,9 @@ where
         group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
             let ctx = V::C::default();
             let y = V::from_element(ns, 1.0, ctx.clone());
-            b.iter(|| black_box(y.clone() / Scale(2.0)));
+            b.iter(|| {
+                black_box(y.clone() / Scale(2.0));
+            });
         });
     }
     group.finish();
@@ -446,7 +484,10 @@ where
             let ctx = M::C::default();
             let mut mat = M::zeros(ns, ns, ctx.clone());
             let v = M::V::from_element(ns, 2.0, ctx.clone());
-            b.iter(|| mat.set_column(0, &v));
+            b.iter(|| {
+                mat.set_column(0, &v);
+                black_box(&mat);
+            });
         });
     }
     group.finish();
@@ -465,7 +506,10 @@ where
             let mut mat = M::zeros(ns, ns, ctx.clone());
             let x = M::zeros(ns, ns, ctx.clone());
             let y = M::zeros(ns, ns, ctx.clone());
-            b.iter(|| mat.scale_add_and_assign(&x, 2.0, &y));
+            b.iter(|| {
+                mat.scale_add_and_assign(&x, 2.0, &y);
+                black_box(&mat);
+            });
         });
     }
     group.finish();
@@ -483,7 +527,10 @@ where
             let ctx = M::C::default();
             let mut mat = M::zeros(ns, ns, ctx.clone());
             let other = M::zeros(ns, ns, ctx.clone());
-            b.iter(|| mat.copy_from(&other));
+            b.iter(|| {
+                mat.copy_from(&other);
+                black_box(&mat);
+            });
         });
     }
     group.finish();
@@ -511,7 +558,9 @@ where
         group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
             let ctx = V::C::default();
             let v = V::from_element(ns, 1.0, ctx.clone());
-            b.iter(|| black_box(v.get_index(0)));
+            b.iter(|| {
+                black_box(v.get_index(0));
+            });
         });
     }
     group.finish();
@@ -569,7 +618,9 @@ where
         group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
             let ctx = V::C::default();
             let v = V::from_element(ns, 1.0, ctx.clone());
-            b.iter(|| black_box(v.clone()));
+            b.iter(|| {
+                black_box(v.clone());
+            });
         });
     }
     group.finish();
@@ -585,7 +636,9 @@ where
         group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
             let ctx = V::C::default();
             let v = V::from_element(ns, 1.0, ctx.clone());
-            b.iter(|| black_box(v.as_view()));
+            b.iter(|| {
+                black_box(v.as_view());
+            });
         });
     }
     group.finish();
@@ -602,8 +655,7 @@ where
             let ctx = V::C::default();
             let mut v = V::from_element(ns, 1.0, ctx.clone());
             b.iter(|| {
-                let view = v.as_view_mut();
-                black_box(view);
+                black_box(v.as_view_mut());
             });
         });
     }
@@ -644,7 +696,9 @@ where
         group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
             let ctx = V::C::default();
             let v = V::from_element(ns, 1.0, ctx.clone());
-            b.iter(|| black_box(v.as_slice()));
+            b.iter(|| {
+                black_box(v.as_slice());
+            });
         });
     }
     group.finish();
@@ -661,8 +715,7 @@ where
             let ctx = V::C::default();
             let mut v = V::from_element(ns, 1.0, ctx.clone());
             b.iter(|| {
-                let slice = v.as_mut_slice();
-                black_box(slice);
+                black_box(v.as_mut_slice());
             });
         });
     }
@@ -699,7 +752,10 @@ where
             let mut mat = M::zeros(ns, ns, ctx.clone());
             fill_dense(&mut mat, ns);
             let mut v = M::V::zeros(ns, ctx.clone());
-            b.iter(|| mat.add_column_to_vector(0, &mut v));
+            b.iter(|| {
+                mat.add_column_to_vector(0, &mut v);
+                black_box(&v);
+            });
         });
     }
     group.finish();
