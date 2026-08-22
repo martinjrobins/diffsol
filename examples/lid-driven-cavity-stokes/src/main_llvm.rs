@@ -129,13 +129,14 @@ pub(crate) fn main() {
 
         let ts = std::time::Instant::now();
         let mut tmp = Col::zeros(n_free);
-        zip!(tmp.as_mut(), &m_lumped, solver.state().y.inner())
+        zip!(tmp.as_mut(), &m_lumped, solver.state().y.inner().col(0))
             .for_each(|unzip!(t, m, u)| *t = m * u * inv_h);
         let mut phi = &gt * &tmp;
         zip!(phi.as_mut(), &f_div_col).for_each(|unzip!(p, f)| *p += f * inv_h);
         l_lu.solve_in_place(&mut phi);
         let grad = &g * &phi;
-        zip!(solver.state_mut().y.inner_mut(), &grad).for_each(|unzip!(u, gphi)| *u -= h * gphi);
+        zip!(solver.state_mut().y.inner_mut().col_mut(0), &grad)
+            .for_each(|unzip!(u, gphi)| *u -= h * gphi);
         total_proj += ts.elapsed().as_secs_f64();
 
         if t > next_save - 1e-12 {

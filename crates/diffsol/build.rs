@@ -221,6 +221,7 @@ fn main() -> Result<(), String> {
         // link to sundials
         if let Some(dir) = sundials.lib.as_ref() {
             println!("cargo:rustc-link-search=native={}", dir);
+            println!("cargo:rustc-link-arg=-Wl,-rpath,{}", dir);
         }
         let library_type = "dylib";
         for lib_name in LINK_SUNDIALS_LIBRARIES {
@@ -235,7 +236,7 @@ fn main() -> Result<(), String> {
         // link to klu
         if let Some(dir) = suitesparse.lib.as_ref() {
             println!("cargo:rustc-link-search=native={}", dir);
-            println!("cargo:rustc-env=LD_LIBRARY_PATH={}", dir);
+            println!("cargo:rustc-link-arg=-Wl,-rpath,{}", dir);
         }
         println!("cargo:rustc-link-lib={}=klu", library_type);
     }
