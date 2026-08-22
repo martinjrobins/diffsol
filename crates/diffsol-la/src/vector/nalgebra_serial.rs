@@ -815,6 +815,11 @@ mod tests {
         assert_eq!(v.clone_as_vec(), vec![1.0, 2.0, 3.0]);
     }
 
+    #[test]
+    fn test_host_only() {
+        super::super::tests::test_host_only::<NalgebraVec<f64>>();
+    }
+
     super::super::generate_vector_tests_nonbatched!(nalgebra, NalgebraVec<f64>);
     super::super::generate_vector_tests_batched!(
         nalgebra,

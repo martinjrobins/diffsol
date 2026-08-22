@@ -544,6 +544,18 @@ macro_rules! generate_vector_tests_nonbatched {
             fn [<test_view_mut_copy_from_view_ $suffix>]() {
                 $crate::vector::tests::test_view_mut_copy_from_view::<$V>();
             }
+            #[test]
+            fn [<test_view_add_sub_ $suffix>]() {
+                $crate::vector::tests::test_view_add_sub::<$V>();
+            }
+            #[test]
+            fn [<test_index_zeros_and_is_empty_ $suffix>]() {
+                $crate::vector::tests::test_index_zeros_and_is_empty::<$V>();
+            }
+            #[test]
+            fn [<test_inner_ $suffix>]() {
+                $crate::vector::tests::test_inner::<$V>();
+            }
         }
     };
 }
@@ -655,6 +667,10 @@ macro_rules! generate_vector_tests_batched {
             #[test]
             fn [<test_batched_owned_rhs_broadcast_ $suffix>]() {
                 $crate::vector::tests::test_batched_owned_rhs_broadcast::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_view_add_broadcast_ $suffix>]() {
+                $crate::vector::tests::test_batched_view_add_broadcast::<$V>($ctx2);
             }
             #[test]
             fn [<test_batched_sub_assign_ $suffix>]() {
@@ -825,7 +841,7 @@ pub(crate) mod tests {
     use std::ops::{Add, Sub};
     use std::panic::{catch_unwind, AssertUnwindSafe};
 
-    use super::{Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
+    use super::{Vector, VectorCommon, VectorHost, VectorIndex, VectorView, VectorViewMut};
     use crate::context::nalgebra::NalgebraContext;
     use crate::scalar::Scale;
     use crate::vector::nalgebra_serial::NalgebraVec;
@@ -838,6 +854,18 @@ pub(crate) mod tests {
 
     fn fv<V: Vector>(xs: &[f64]) -> Vec<V::T> {
         xs.iter().map(|&x| f::<V>(x)).collect()
+    }
+
+    /// `Index`/`IndexMut` operator syntax and `as_slice`/`as_mut_slice`: only host vectors
+    /// implement `VectorHost`, so this isn't wired into the shared (CUDA-inclusive) macro suite.
+    pub fn test_host_only<V: VectorHost>() {
+        let mut v = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0]), Default::default());
+        assert_eq!(v[0], f::<V>(1.0));
+        v[1] = f::<V>(20.0);
+        assert_eq!(v.clone_as_vec(), fv::<V>(&[1.0, 20.0, 3.0]));
+        assert_eq!(v.as_slice(), fv::<V>(&[1.0, 20.0, 3.0]).as_slice());
+        v.as_mut_slice()[2] = f::<V>(30.0);
+        assert_eq!(v.clone_as_vec(), fv::<V>(&[1.0, 20.0, 30.0]));
     }
 
     pub fn test_root_finding<V: Vector>() {
@@ -1042,6 +1070,27 @@ pub(crate) mod tests {
         let b = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0]), Default::default());
         let c = a.as_view() + b;
         assert_eq!(c.clone_as_vec(), fv::<V>(&[11.0, 22.0, 33.0]));
+    }
+
+    /// Both sides borrowed via `as_view()`: exercises the view+view arithmetic impls that
+    /// `VectorView` requires but the owned/ref-hand-side tests above never reach.
+    pub fn test_view_add_sub<V: Vector>() {
+        let a = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0]), Default::default());
+        let b = V::from_vec(fv::<V>(&[10.0, 20.0, 30.0]), Default::default());
+        let c = a.as_view() + b.as_view();
+        assert_eq!(c.clone_as_vec(), fv::<V>(&[11.0, 22.0, 33.0]));
+        let d = a.as_view() - b.as_view();
+        assert_eq!(d.clone_as_vec(), fv::<V>(&[-9.0, -18.0, -27.0]));
+    }
+
+    /// `VectorIndex::is_empty` and `VectorIndex::zeros` are default/trait methods never called
+    /// through the index-construction helpers used elsewhere.
+    pub fn test_index_zeros_and_is_empty<V: Vector>() {
+        let empty = V::Index::zeros(0, Default::default());
+        assert!(empty.is_empty());
+        let non_empty = V::Index::zeros(3, Default::default());
+        assert!(!non_empty.is_empty());
+        assert_eq!(non_empty.clone_as_vec(), vec![0; 3]);
     }
 
     pub fn test_add_assign<V: Vector>() {
@@ -1385,6 +1434,26 @@ pub(crate) mod tests {
         let b = V::from_vec(fv::<V>(&[1.0, 2.0]), V::C::default());
         let c = &a - b;
         assert_eq!(c.clone_as_vec(), fv::<V>(&[9.0, 18.0, 29.0, 38.0]));
+        assert_eq!(c.context().nbatch(), 2);
+    }
+
+    /// View+view addition with mismatched batch counts, in both broadcast directions: exercises
+    /// the general (non-equal-ncols) branch of the view/ref arithmetic impls.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_batched_view_add_broadcast<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        // lhs broadcasts over the batches of rhs
+        let a = V::from_vec(fv::<V>(&[10.0, 20.0]), V::C::default());
+        let b = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0]), ctx.clone());
+        let c = a.as_view() + b.as_view();
+        assert_eq!(c.clone_as_vec(), fv::<V>(&[11.0, 22.0, 13.0, 24.0]));
+        assert_eq!(c.context().nbatch(), 2);
+
+        // rhs broadcasts over the batches of lhs
+        let a = V::from_vec(fv::<V>(&[10.0, 20.0, 30.0, 40.0]), ctx);
+        let b = V::from_vec(fv::<V>(&[1.0, 2.0]), V::C::default());
+        let c = a.as_view() + b.as_view();
+        assert_eq!(c.clone_as_vec(), fv::<V>(&[11.0, 22.0, 31.0, 42.0]));
         assert_eq!(c.context().nbatch(), 2);
     }
 

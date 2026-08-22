@@ -756,6 +756,14 @@ mod tests {
     }
 
     #[test]
+    fn test_index_operator() {
+        let mut mat = FaerMat::from_vec(2, 2, vec![1.0, 3.0, 2.0, 4.0], FaerContext::default());
+        assert_eq!(mat[(1, 0)], 3.0);
+        mat[(1, 0)] = 30.0;
+        assert_eq!(mat.get_index(1, 0), 30.0);
+    }
+
+    #[test]
     fn test_partition_indices_by_zero_diagonal() {
         super::super::tests::test_partition_indices_by_zero_diagonal::<FaerMat<f64>>();
     }

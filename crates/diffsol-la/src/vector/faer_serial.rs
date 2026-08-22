@@ -914,6 +914,11 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_host_only() {
+        super::super::tests::test_host_only::<FaerVec<f64>>();
+    }
+
     super::super::generate_vector_tests_nonbatched!(faer, FaerVec<f64>);
     super::super::generate_vector_tests_batched!(
         faer,

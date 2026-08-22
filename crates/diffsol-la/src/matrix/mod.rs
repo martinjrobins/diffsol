@@ -431,9 +431,9 @@ pub trait DenseMatrix:
 pub(crate) mod tests {
     use std::ops::{Add, Sub};
 
-    use super::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
+    use super::{DenseMatrix, Matrix, MatrixCommon, MatrixSparsity, MatrixSparsityRef, MatrixView, MatrixViewMut};
     use crate::scalar::Scale;
-    use crate::{scalar::IndexType, Context, Vector, VectorIndex};
+    use crate::{scalar::IndexType, Context, Vector, VectorIndex, VectorViewMut};
     use num_traits::{FromPrimitive, One, Zero};
 
     fn f<M: Matrix>(x: f64) -> M::T {
@@ -487,6 +487,19 @@ pub(crate) mod tests {
             Vec::<IndexType>::new()
         );
         assert_eq!(non_zero_diagonal_indices.clone_as_vec(), vec![0, 1, 2, 3]);
+
+        // column 2 has a single stored entry below the diagonal (row 3) and none at (2, 2):
+        // the sparse backend's early-exit ("row index has passed the diagonal") branch fires.
+        let indices = vec![(3, 2)];
+        let values = vec![M::T::one()];
+        let m = M::try_from_triplets(4, 4, indices, values, Default::default()).unwrap();
+        let (zero_diagonal_indices, non_zero_diagonal_indices) =
+            m.partition_indices_by_zero_diagonal();
+        assert_eq!(zero_diagonal_indices.clone_as_vec(), vec![0, 1, 2, 3]);
+        assert_eq!(
+            non_zero_diagonal_indices.clone_as_vec(),
+            Vec::<IndexType>::new()
+        );
     }
 
     // --- Matrix-generic tests (work with both dense and sparse) ---
@@ -498,6 +511,43 @@ pub(crate) mod tests {
         let vals = triplet_values(&a);
         assert!(vals.is_empty() || vals.iter().all(|v| v.is_zero()));
         assert_eq!(M::is_sparse(), a.sparsity().is_some());
+    }
+
+    /// `M::Sparsity`/`M::SparsityRef<'_>` trait methods (`nrows`/`ncols`/`is_sparse`/`indices`/
+    /// `union`/`new_diagonal`/`get_index`/`as_ref`/`to_owned`/`split`): only `is_sparse` was ever
+    /// called generically before, via `test_zeros`, so none of the sparsity pattern machinery
+    /// itself (used by both the `Dense` stand-in for dense backends and the real sparse pattern)
+    /// was exercised.
+    pub fn test_sparsity<M: Matrix>() {
+        let a = M::Sparsity::try_from_indices(2, 2, vec![(0, 0), (1, 1)]).unwrap();
+        assert_eq!(MatrixSparsity::<M>::nrows(&a), 2);
+        assert_eq!(MatrixSparsity::<M>::ncols(&a), 2);
+        assert_eq!(M::is_sparse(), <M::Sparsity as MatrixSparsity<M>>::is_sparse());
+        let _ = a.indices();
+        let diag = M::Sparsity::new_diagonal(3);
+        assert_eq!(MatrixSparsity::<M>::nrows(&diag), 3);
+        assert_eq!(MatrixSparsity::<M>::ncols(&diag), 3);
+
+        let b = M::Sparsity::try_from_indices(2, 2, vec![(0, 1)]).unwrap();
+        let unioned = a.clone().union(b.as_ref()).unwrap();
+        assert_eq!(MatrixSparsity::<M>::nrows(&unioned), 2);
+        assert_eq!(MatrixSparsity::<M>::ncols(&unioned), 2);
+
+        let idx = a.get_index(&[(0, 0), (1, 1)], Default::default());
+        assert_eq!(idx.len(), 2);
+
+        let a_ref = a.as_ref();
+        assert_eq!(MatrixSparsityRef::<M>::nrows(&a_ref), 2);
+        assert_eq!(MatrixSparsityRef::<M>::ncols(&a_ref), 2);
+        assert_eq!(M::is_sparse(), <M::SparsityRef<'_> as MatrixSparsityRef<M>>::is_sparse());
+        let _ = a_ref.indices();
+        let owned = a_ref.to_owned();
+        assert_eq!(MatrixSparsity::<M>::nrows(&owned), 2);
+
+        let algebraic = <M::V as Vector>::Index::from_vec(vec![1], Default::default());
+        let [(ul, _), (_, _), (_, _), (lr, _)] = a_ref.split(&algebraic);
+        assert_eq!(MatrixSparsity::<M>::nrows(&ul), 1);
+        assert_eq!(MatrixSparsity::<M>::nrows(&lr), 1);
     }
 
     pub fn test_matrix_common_by_ref<M: Matrix>() {
@@ -606,6 +656,16 @@ pub(crate) mod tests {
 
     // --- DenseMatrix-specific tests ---
 
+    /// `Dense<M>`'s `try_from_indices`/`union` error branches: dense matrices ignore the actual
+    /// index pattern (their `Sparsity` is just a bounding box), so only a zero dimension or a
+    /// shape mismatch can make these fail — inputs the sparse backend wouldn't reject the same way.
+    pub fn test_sparsity_dense_errors<M: DenseMatrix>() {
+        assert!(M::Sparsity::try_from_indices(0, 3, vec![]).is_err());
+        let a = M::Sparsity::try_from_indices(2, 2, vec![]).unwrap();
+        let b = M::Sparsity::try_from_indices(3, 3, vec![]).unwrap();
+        assert!(a.union(b.as_ref()).is_err());
+    }
+
     pub fn test_column_axpy<M: DenseMatrix>() {
         let mut a = M::zeros(2, 2, Default::default());
         a.set_index(0, 0, M::T::one());
@@ -618,6 +678,11 @@ pub(crate) mod tests {
         assert_eq!(a.get_index(0, 1), M::T::from_f64(4.0).unwrap());
         assert_eq!(a.get_index(1, 0), M::T::from_f64(3.0).unwrap());
         assert_eq!(a.get_index(1, 1), M::T::from_f64(10.0).unwrap());
+
+        // opposite direction (dst column before src column in storage)
+        a.column_axpy(M::T::from_f64(2.0).unwrap(), 1, 0);
+        assert_eq!(a.get_index(0, 0), M::T::from_f64(9.0).unwrap());
+        assert_eq!(a.get_index(1, 0), M::T::from_f64(23.0).unwrap());
     }
 
     pub fn test_resize_cols<M: DenseMatrix>() {
@@ -626,6 +691,11 @@ pub(crate) mod tests {
         a.set_index(0, 1, M::T::from_f64(2.0).unwrap());
         a.set_index(1, 0, M::T::from_f64(3.0).unwrap());
         a.set_index(1, 1, M::T::from_f64(4.0).unwrap());
+
+        // resizing to the current column count is a no-op
+        a.resize_cols(2);
+        assert_eq!(a.ncols(), 2);
+        assert_eq!(a.get_index(0, 0), M::T::one());
 
         a.resize_cols(3);
         assert_eq!(a.ncols(), 3);
@@ -882,6 +952,32 @@ pub(crate) mod tests {
         );
     }
 
+    /// `copy_from` with mismatched batch counts: the source broadcasts over the destination's
+    /// batches, exercising the per-batch loop instead of the equal-nbatch whole-matrix copy.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_batched_copy_from_broadcast_m<M: Matrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
+        let values = vec![f::<M>(1.0), f::<M>(2.0), f::<M>(3.0), f::<M>(4.0)];
+        let a = M::try_from_triplets(2, 2, indices, values, M::C::default()).unwrap();
+        let mut b = M::zeros(2, 2, ctx);
+        b.copy_from(&a);
+        let vals = triplet_values(&b);
+        assert_eq!(
+            vals,
+            vec![
+                f::<M>(1.0),
+                f::<M>(2.0),
+                f::<M>(3.0),
+                f::<M>(4.0),
+                f::<M>(1.0),
+                f::<M>(2.0),
+                f::<M>(3.0),
+                f::<M>(4.0),
+            ]
+        );
+    }
+
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_set_column_m<M: Matrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
@@ -1122,6 +1218,62 @@ pub(crate) mod tests {
                 f::<M>(-58.0),
                 f::<M>(-67.0),
                 f::<M>(-76.0),
+            ]
+        );
+    }
+
+    /// A borrowed view on the left with a borrowed matrix on the right, with mismatched batch
+    /// counts in both directions: exercises `MatrixView`'s `&Owned` arithmetic under broadcast.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_batched_view_add_ref_broadcast_m<M: DenseMatrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let one_batch = vec![f::<M>(1.0), f::<M>(2.0), f::<M>(3.0), f::<M>(4.0)];
+        let two_batches = vec![
+            f::<M>(10.0),
+            f::<M>(20.0),
+            f::<M>(30.0),
+            f::<M>(40.0),
+            f::<M>(50.0),
+            f::<M>(60.0),
+            f::<M>(70.0),
+            f::<M>(80.0),
+        ];
+
+        // rhs (a borrowed &M) broadcasts over the batches of the view
+        let a = M::from_vec(2, 2, two_batches.clone(), ctx.clone());
+        let b = M::from_vec(2, 2, one_batch.clone(), M::C::default());
+        let c = a.columns(0, 2) + &b;
+        assert_eq!(c.context().nbatch(), 2);
+        assert_eq!(
+            triplet_values(&c),
+            vec![
+                f::<M>(11.0),
+                f::<M>(22.0),
+                f::<M>(33.0),
+                f::<M>(44.0),
+                f::<M>(51.0),
+                f::<M>(62.0),
+                f::<M>(73.0),
+                f::<M>(84.0),
+            ]
+        );
+
+        // the view broadcasts over the batches of the rhs
+        let a = M::from_vec(2, 2, one_batch, M::C::default());
+        let b = M::from_vec(2, 2, two_batches, ctx);
+        let c = a.columns(0, 2) + &b;
+        assert_eq!(c.context().nbatch(), 2);
+        assert_eq!(
+            triplet_values(&c),
+            vec![
+                f::<M>(11.0),
+                f::<M>(22.0),
+                f::<M>(33.0),
+                f::<M>(44.0),
+                f::<M>(51.0),
+                f::<M>(62.0),
+                f::<M>(73.0),
+                f::<M>(84.0),
             ]
         );
     }
@@ -1839,6 +1991,58 @@ pub(crate) mod tests {
         assert_eq!(a.get_index(1, 1), f::<M>(4.0));
     }
 
+    /// A borrowed view on the left with a borrowed matrix on the right: `MatrixView` requires
+    /// this combination, but `test_add`/`test_owned_rhs_m` only ever exercise owned/owned-rhs.
+    pub fn test_view_add_ref<M: DenseMatrix>() {
+        let a = M::from_vec(
+            2,
+            2,
+            vec![f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0)],
+            Default::default(),
+        );
+        let b = M::from_vec(
+            2,
+            2,
+            vec![f::<M>(5.0), f::<M>(7.0), f::<M>(6.0), f::<M>(8.0)],
+            Default::default(),
+        );
+        let c = a.columns(0, 2) + &b;
+        assert_eq!(c.get_index(0, 0), f::<M>(6.0));
+        assert_eq!(c.get_index(1, 1), f::<M>(12.0));
+        let d = a.columns(0, 2) - &b;
+        assert_eq!(d.get_index(0, 0), f::<M>(-4.0));
+        assert_eq!(d.get_index(1, 1), f::<M>(-4.0));
+    }
+
+    /// `MatrixCommon::inner` on the backend's own view/mut-view types: `test_matrix_common_by_ref`
+    /// only reaches the generic `&M`/`&mut M` blanket impls, not `M::View`/`M::ViewMut`.
+    pub fn test_view_inner<M: DenseMatrix>() {
+        let mut a = M::zeros(2, 2, Default::default());
+        {
+            let view = a.columns(0, 2);
+            let _ = <M::View<'_> as MatrixCommon>::inner(&view);
+        }
+        {
+            let view_mut = a.columns_mut(0, 2);
+            let _ = <M::ViewMut<'_> as MatrixCommon>::inner(&view_mut);
+        }
+        let _ = a.inner_mut();
+    }
+
+    /// `column_mut` on an unbatched (nbatch == 1) matrix: existing coverage only calls it through
+    /// batched helpers, which take a different code path than the single-batch fast path.
+    pub fn test_column_mut<M: DenseMatrix>() {
+        let mut a = M::from_vec(
+            2,
+            2,
+            vec![f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0)],
+            Default::default(),
+        );
+        a.column_mut(1).set_index(0, f::<M>(20.0));
+        assert_eq!(a.get_index(0, 1), f::<M>(20.0));
+        assert_eq!(a.get_index(1, 1), f::<M>(4.0));
+    }
+
     pub fn test_gather<M: DenseMatrix>() {
         let mat1 = M::from_vec(
             3,
@@ -1888,6 +2092,20 @@ pub(crate) mod tests {
         }
         assert_eq!(mat.get_index(0, 0), f::<M>(2.0));
         assert_eq!(mat.get_index(1, 1), f::<M>(8.0));
+    }
+
+    /// A full-width, non-strided view multiplied by `Scale`: `test_strided_matrix_view_mul_scalar`
+    /// only exercises the broadcast/non-contiguous branch, never the equal-column-count fast path.
+    pub fn test_view_mul_scalar<M: DenseMatrix>() {
+        let mat = M::from_vec(
+            2,
+            2,
+            vec![f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0)],
+            Default::default(),
+        );
+        let result = mat.columns(0, 2) * Scale(f::<M>(2.0));
+        assert_eq!(result.get_index(0, 0), f::<M>(2.0));
+        assert_eq!(result.get_index(1, 1), f::<M>(8.0));
     }
 
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
@@ -2635,6 +2853,10 @@ macro_rules! generate_matrix_tests_nonbatched {
                 $crate::matrix::tests::test_zeros::<$M>();
             }
             #[test]
+            fn [<test_sparsity_ $suffix>]() {
+                $crate::matrix::tests::test_sparsity::<$M>();
+            }
+            #[test]
             fn [<test_matrix_common_by_ref_ $suffix>]() {
                 $crate::matrix::tests::test_matrix_common_by_ref::<$M>();
             }
@@ -2729,6 +2951,10 @@ macro_rules! generate_matrix_tests_batched {
                 $crate::matrix::tests::test_batched_copy_from_m::<$M>($ctx2);
             }
             #[test]
+            fn [<test_batched_copy_from_broadcast_ $suffix>]() {
+                $crate::matrix::tests::test_batched_copy_from_broadcast_m::<$M>($ctx2);
+            }
+            #[test]
             fn [<test_batched_set_column_ $suffix>]() {
                 $crate::matrix::tests::test_batched_set_column_m::<$M>($ctx2);
             }
@@ -2777,6 +3003,10 @@ macro_rules! generate_dense_matrix_tests_nonbatched {
                 $crate::matrix::tests::test_column_view::<$M>();
             }
             #[test]
+            fn [<test_sparsity_dense_errors_ $suffix>]() {
+                $crate::matrix::tests::test_sparsity_dense_errors::<$M>();
+            }
+            #[test]
             fn [<test_column_axpy_ $suffix>]() {
                 $crate::matrix::tests::test_column_axpy::<$M>();
             }
@@ -2791,6 +3021,18 @@ macro_rules! generate_dense_matrix_tests_nonbatched {
             #[test]
             fn [<test_sub_ $suffix>]() {
                 $crate::matrix::tests::test_sub::<$M>();
+            }
+            #[test]
+            fn [<test_view_add_ref_ $suffix>]() {
+                $crate::matrix::tests::test_view_add_ref::<$M>();
+            }
+            #[test]
+            fn [<test_view_inner_ $suffix>]() {
+                $crate::matrix::tests::test_view_inner::<$M>();
+            }
+            #[test]
+            fn [<test_column_mut_ $suffix>]() {
+                $crate::matrix::tests::test_column_mut::<$M>();
             }
             #[test]
             fn [<test_add_assign_ $suffix>]() {
@@ -2811,6 +3053,10 @@ macro_rules! generate_dense_matrix_tests_nonbatched {
             #[test]
             fn [<test_mul_assign_scalar_ $suffix>]() {
                 $crate::matrix::tests::test_mul_assign_scalar::<$M>();
+            }
+            #[test]
+            fn [<test_view_mul_scalar_ $suffix>]() {
+                $crate::matrix::tests::test_view_mul_scalar::<$M>();
             }
             #[test]
             fn [<test_view_mut_into_owned_ $suffix>]() {
@@ -2840,6 +3086,10 @@ macro_rules! generate_dense_matrix_tests_batched {
             #[test]
             fn [<test_batched_column_axpy_ $suffix>]() {
                 $crate::matrix::tests::test_batched_column_axpy::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_view_add_ref_broadcast_ $suffix>]() {
+                $crate::matrix::tests::test_batched_view_add_ref_broadcast_m::<$M>($ctx2);
             }
             #[test]
             fn [<test_batched_mat_mul_ $suffix>]() {
