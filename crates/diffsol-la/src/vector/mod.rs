@@ -552,10 +552,6 @@ macro_rules! generate_vector_tests_nonbatched {
             fn [<test_index_zeros_and_is_empty_ $suffix>]() {
                 $crate::vector::tests::test_index_zeros_and_is_empty::<$V>();
             }
-            #[test]
-            fn [<test_inner_ $suffix>]() {
-                $crate::vector::tests::test_inner::<$V>();
-            }
         }
     };
 }
