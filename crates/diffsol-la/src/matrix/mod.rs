@@ -431,7 +431,10 @@ pub trait DenseMatrix:
 pub(crate) mod tests {
     use std::ops::{Add, Sub};
 
-    use super::{DenseMatrix, Matrix, MatrixCommon, MatrixSparsity, MatrixSparsityRef, MatrixView, MatrixViewMut};
+    use super::{
+        DenseMatrix, Matrix, MatrixCommon, MatrixSparsity, MatrixSparsityRef, MatrixView,
+        MatrixViewMut,
+    };
     use crate::scalar::Scale;
     use crate::{scalar::IndexType, Context, Vector, VectorIndex, VectorViewMut};
     use num_traits::{FromPrimitive, One, Zero};
@@ -522,7 +525,10 @@ pub(crate) mod tests {
         let a = M::Sparsity::try_from_indices(2, 2, vec![(0, 0), (1, 1)]).unwrap();
         assert_eq!(MatrixSparsity::<M>::nrows(&a), 2);
         assert_eq!(MatrixSparsity::<M>::ncols(&a), 2);
-        assert_eq!(M::is_sparse(), <M::Sparsity as MatrixSparsity<M>>::is_sparse());
+        assert_eq!(
+            M::is_sparse(),
+            <M::Sparsity as MatrixSparsity<M>>::is_sparse()
+        );
         let _ = a.indices();
         let diag = M::Sparsity::new_diagonal(3);
         assert_eq!(MatrixSparsity::<M>::nrows(&diag), 3);
@@ -539,7 +545,10 @@ pub(crate) mod tests {
         let a_ref = a.as_ref();
         assert_eq!(MatrixSparsityRef::<M>::nrows(&a_ref), 2);
         assert_eq!(MatrixSparsityRef::<M>::ncols(&a_ref), 2);
-        assert_eq!(M::is_sparse(), <M::SparsityRef<'_> as MatrixSparsityRef<M>>::is_sparse());
+        assert_eq!(
+            M::is_sparse(),
+            <M::SparsityRef<'_> as MatrixSparsityRef<M>>::is_sparse()
+        );
         let _ = a_ref.indices();
         let owned = a_ref.to_owned();
         assert_eq!(MatrixSparsity::<M>::nrows(&owned), 2);

@@ -771,12 +771,8 @@ mod tests {
 
     #[test]
     fn test_index_operator() {
-        let mut mat = NalgebraMat::from_vec(
-            2,
-            2,
-            vec![1.0, 3.0, 2.0, 4.0],
-            NalgebraContext::default(),
-        );
+        let mut mat =
+            NalgebraMat::from_vec(2, 2, vec![1.0, 3.0, 2.0, 4.0], NalgebraContext::default());
         assert_eq!(mat[(1, 0)], 3.0);
         mat[(1, 0)] = 30.0;
         assert_eq!(mat.get_index(1, 0), 30.0);
