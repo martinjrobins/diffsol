@@ -497,6 +497,18 @@ pub(crate) mod tests {
         assert_eq!(a.ncols(), 3);
         let vals = triplet_values(&a);
         assert!(vals.is_empty() || vals.iter().all(|v| v.is_zero()));
+        assert_eq!(M::is_sparse(), a.sparsity().is_some());
+    }
+
+    pub fn test_matrix_common_by_ref<M: Matrix>() {
+        fn via_common<T: MatrixCommon>(m: T) -> (IndexType, IndexType) {
+            let dims = (m.nrows(), m.ncols());
+            let _ = m.inner();
+            dims
+        }
+        let mut a = M::zeros(2, 3, Default::default());
+        assert_eq!(via_common(&a), (2, 3));
+        assert_eq!(via_common(&mut a), (2, 3));
     }
 
     pub fn test_from_diagonal<M: Matrix>() {
@@ -2621,6 +2633,10 @@ macro_rules! generate_matrix_tests_nonbatched {
             #[test]
             fn [<test_zeros_ $suffix>]() {
                 $crate::matrix::tests::test_zeros::<$M>();
+            }
+            #[test]
+            fn [<test_matrix_common_by_ref_ $suffix>]() {
+                $crate::matrix::tests::test_matrix_common_by_ref::<$M>();
             }
             #[test]
             fn [<test_from_diagonal_ $suffix>]() {

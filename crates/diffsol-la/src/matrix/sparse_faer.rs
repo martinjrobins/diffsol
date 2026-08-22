@@ -19,6 +19,17 @@ pub struct FaerSparseMat<T: FaerScalar> {
     pub(crate) context: FaerContext,
 }
 
+impl<T: FaerScalar> FaerSparseMat<T> {
+    /// Matrix holding `batch`, broadcasting a single-batch operand over all batches.
+    ///
+    /// The dense backends return a column index here; a batch of a sparse matrix is a
+    /// whole `SparseColMat`, so this returns that instead.
+    #[inline]
+    pub(crate) fn batch(&self, batch: usize) -> &SparseColMat<IndexType, T> {
+        &self.data[batch % self.data.len()]
+    }
+}
+
 impl<T: FaerScalar> DefaultSolver for FaerSparseMat<T> {
     type LS = FaerSparseLU<T>;
 }
@@ -64,9 +75,6 @@ macro_rules! sparse_binary {
         impl<T: FaerScalar> $trait<&FaerSparseMat<T>> for FaerSparseMat<T> {
             type Output = FaerSparseMat<T>;
 
-            // the `%` below is broadcast indexing over batches, not arithmetic on the
-            // operands, which is what the lint is looking for
-            #[allow(clippy::suspicious_arithmetic_impl)]
             fn $method(self, rhs: &FaerSparseMat<T>) -> Self::Output {
                 self.context
                     .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($method));
@@ -74,9 +82,7 @@ macro_rules! sparse_binary {
                 let nbatch = self.data.len().max(rhs.data.len());
                 FaerSparseMat {
                     data: (0..nbatch)
-                        .map(|b| {
-                            &self.data[b % self.data.len()] $binary &rhs.data[b % rhs.data.len()]
-                        })
+                        .map(|b| self.batch(b) $binary rhs.batch(b))
                         .collect(),
                     context: if self.data.len() == nbatch {
                         self.context
@@ -294,7 +300,7 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
         self.context
             .assert_compatible_nbatch(other.context.nbatch(), "gather");
         for (batch, data) in self.data.iter_mut().enumerate() {
-            let src = other.data[batch % other.data.len()].val();
+            let src = other.batch(batch).val();
             for (dst, index) in data.val_mut().iter_mut().zip(&indices.data) {
                 *dst = src[*index];
             }
@@ -309,10 +315,9 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
     ) {
         self.context
             .assert_compatible_nbatch(data.context.nbatch(), "set_data_with_indices");
-        let data_nbatch = data.data.ncols();
         for (batch, matrix) in self.data.iter_mut().enumerate() {
             let values = matrix.val_mut();
-            let column = data.data.rb().col(batch % data_nbatch);
+            let column = data.data.rb().col(data.batch(batch));
             for (dst, src) in dst_indices.data.iter().zip(&src_indices.data) {
                 values[*dst] = column[*src];
             }
@@ -323,7 +328,7 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
         self.context
             .assert_compatible_nbatch(v.context.nbatch(), "add_column_to_vector");
         for batch in 0..v.data.ncols() {
-            let matrix = &self.data[batch % self.data.len()];
+            let matrix = self.batch(batch);
             let mut column = v.data.rb_mut().col_mut(batch);
             for i in matrix.col_range(j) {
                 column[matrix.row_idx()[i]] += matrix.val()[i];
@@ -379,9 +384,8 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
             .assert_compatible_nbatch(x.context.nbatch(), "gemv");
         self.context
             .assert_compatible_nbatch(y.context.nbatch(), "gemv");
-        let x_nbatch = x.data.ncols();
         for batch in 0..y.data.ncols() {
-            let tmp = &self.data[batch % self.data.len()] * x.data.rb().col(batch % x_nbatch);
+            let tmp = self.batch(batch) * x.data.rb().col(x.batch(batch));
             zip!(y.data.rb_mut().col_mut(batch), tmp.rb())
                 .for_each(|faer::unzip!(y, x)| *y = beta * *y + alpha * *x);
         }
@@ -398,7 +402,7 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
         self.context
             .assert_compatible_nbatch(other.context.nbatch(), "copy_from");
         for (batch, data) in self.data.iter_mut().enumerate() {
-            let other = &other.data[batch % other.data.len()];
+            let other = other.batch(batch);
             *data = SparseColMat::new(other.symbolic().to_owned().unwrap(), other.val().to_vec());
         }
     }
@@ -448,9 +452,8 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
         assert_eq!(v.len(), self.nrows());
         self.context
             .assert_compatible_nbatch(v.context.nbatch(), "set_column");
-        let v_nbatch = v.data.ncols();
         for (batch, data) in self.data.iter_mut().enumerate() {
-            let column = v.data.rb().col(batch % v_nbatch);
+            let column = v.data.rb().col(v.batch(batch));
             for i in data.col_range(j) {
                 data.val_mut()[i] = column[data.row_idx()[i]];
             }
@@ -465,8 +468,8 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
         for (batch, data) in self.data.iter_mut().enumerate() {
             ternary_op_assign_into(
                 data.rb_mut(),
-                x.data[batch % x.data.len()].rb(),
-                y.data[batch % y.data.len()].rb(),
+                x.batch(batch).rb(),
+                y.batch(batch).rb(),
                 |s, x, y| *s = *x.unwrap_or(&T::zero()) + beta * *y.unwrap_or(&T::zero()),
             );
         }
