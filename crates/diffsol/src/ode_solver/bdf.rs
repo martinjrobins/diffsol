@@ -1,6 +1,5 @@
 use log::{debug, info, trace};
 use std::cell::Ref;
-use std::ops::AddAssign;
 
 use crate::{
     error::{DiffsolError, OdeSolverError},
@@ -665,7 +664,7 @@ where
     fn _predict_using_diff(y_predict: &mut Eqn::V, diff: &M, order: usize) {
         y_predict.fill(Eqn::T::zero());
         for i in 0..=order {
-            y_predict.add_assign(diff.column(i));
+            diff.add_column_to_vector(i, y_predict);
         }
     }
 
