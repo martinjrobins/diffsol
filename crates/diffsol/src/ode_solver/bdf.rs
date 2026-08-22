@@ -15,7 +15,7 @@ use crate::{
     AugmentedOdeEquations, BdfState, DenseMatrix, JacobianUpdate, MatrixViewMut, NonLinearOp,
     NonLinearSolver, OdeEquationsImplicit, OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens,
     OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, Scalar,
-    SensEquations, Vector, VectorRef, VectorView, VectorViewMut,
+    SensEquations, Vector, VectorRef, VectorView,
 };
 
 use super::adjoint::AdjointOdeSolverMethod;
@@ -653,11 +653,7 @@ where
         //D^{j + 1} y_n = D^{j} y_n - D^{j} y_{n - 1}
         //
         //Combining these gives the following algorithm
-        diff.column_mut(order + 2).copy_from(d);
-        diff.column_axpy(-Eqn::T::one(), order + 1, order + 2);
-        for i in (0..=order + 1).rev() {
-            diff.column_axpy(Eqn::T::one(), i + 1, i);
-        }
+        diff.update_backward_diff(order, d);
     }
 
     // predict forward to new step (eq 2 in [1])

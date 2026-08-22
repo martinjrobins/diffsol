@@ -1,5 +1,6 @@
 #include "cuda_kernels_common.h"
 extern "C" {
+#include "backward_diff_update.cu"
 #include "mat_from_diagonal.cu"
 #include "mat_get_diagonal.cu"
 #include "mat_scale_add_assign.cu"

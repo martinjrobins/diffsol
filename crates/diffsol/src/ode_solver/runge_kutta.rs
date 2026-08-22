@@ -37,7 +37,7 @@ where
 {
     problem: &'a OdeSolverProblem<Eqn>,
     tableau: Tableau<M>,
-    state: RkState<Eqn::V>,
+    state: Box<RkState<Eqn::V>>,
     a_rows: Vec<Eqn::V>,
     statistics: OdeSolverStatistics,
     root_finder: Option<RootFinder<Eqn::V>>,
@@ -46,7 +46,9 @@ where
     sdiff: Vec<M>,
     sgdiff: Vec<M>,
     gdiff: M,
-    old_state: RkState<Eqn::V>,
+    // boxed so that swapping state/old_state each accepted step (see `step_accepted`)
+    // is a pointer swap instead of a memcpy of the whole (large) RkState struct
+    old_state: Box<RkState<Eqn::V>>,
     is_state_mutated: bool,
 
     error: Option<Eqn::V>,
@@ -173,8 +175,8 @@ where
 
         Ok(Self {
             tableau,
-            state,
-            old_state,
+            state: Box::new(state),
+            old_state: Box::new(old_state),
             problem,
             a_rows,
             statistics,
@@ -364,16 +366,16 @@ where
 
     pub(crate) fn set_state(&mut self, state: RkState<Eqn::V>) {
         self.is_state_mutated = true;
-        self.state = state;
+        *self.state = state;
     }
 
     pub(crate) fn into_state(mut self) -> RkState<Eqn::V> {
         let ctx = self.problem().eqn.context().clone();
-        std::mem::replace(&mut self.state, RkState::new_empty(ctx))
+        *std::mem::replace(&mut self.state, Box::new(RkState::new_empty(ctx)))
     }
 
     pub(crate) fn checkpoint(&mut self) -> RkState<Eqn::V> {
-        self.state.clone()
+        (*self.state).clone()
     }
 
     pub(crate) fn order(&self) -> usize {

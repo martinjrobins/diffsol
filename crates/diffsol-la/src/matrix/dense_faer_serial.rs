@@ -728,19 +728,27 @@ impl<T: FaerScalar> DenseMatrix for FaerMat<T> {
             end: e,
         }
     }
-    fn column_axpy(&mut self, a: T, j: usize, i: usize) {
-        assert_ne!(i, j, "Column index cannot be the same");
-        assert!(i < self.ncols(), "Column index out of bounds");
-        assert!(j < self.ncols(), "Column index out of bounds");
+    fn update_backward_diff(&mut self, order: usize, d: &FaerVec<T>) {
+        assert!(order + 2 < self.logical_ncols(), "order out of bounds");
+        self.context
+            .assert_compatible_nbatch(d.context.nbatch(), "update_backward_diff");
         for b in 0..self.context.nbatch() {
-            let src = self.col(b, j);
-            let dst = self.col(b, i);
-            if src < dst {
+            let base = self.col(b, 0);
+            let d_col = d.batch(b);
+            // diff[:, order+2] = d - diff[:, order+1]
+            {
+                let src = base + order + 1;
+                let dst = base + order + 2;
                 let (left, right) = self.data.rb_mut().split_at_col_mut(dst);
-                zip!(right.col_mut(0), left.col(src)).for_each(|unzip!(d, s)| *d += a * *s);
-            } else {
+                zip!(right.col_mut(0), d.data.rb().col(d_col), left.col(src))
+                    .for_each(|unzip!(out, dval, sval)| *out = *dval - *sval);
+            }
+            // for i in (0..=order+1).rev(): diff[:, i] += diff[:, i+1]
+            for i in (0..=order + 1).rev() {
+                let dst = base + i;
+                let src = base + i + 1;
                 let (left, right) = self.data.rb_mut().split_at_col_mut(src);
-                zip!(left.col_mut(dst), right.col(0)).for_each(|unzip!(d, s)| *d += a * *s);
+                zip!(left.col_mut(dst), right.col(0)).for_each(|unzip!(d, s)| *d += *s);
             }
         }
     }
@@ -751,8 +759,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_column_axpy() {
-        super::super::tests::test_column_axpy::<FaerMat<f64>>();
+    fn test_update_backward_diff() {
+        super::super::tests::test_update_backward_diff::<FaerMat<f64>>();
     }
 
     #[test]
