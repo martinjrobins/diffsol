@@ -654,11 +654,9 @@ where
         //D^{j + 1} y_n = D^{j} y_n - D^{j} y_{n - 1}
         //
         //Combining these gives the following algorithm
-        let d_minus_order_plus_one = d - diff.column(order + 1);
-        diff.column_mut(order + 2)
-            .copy_from(&d_minus_order_plus_one);
-        diff.column_mut(order + 1).copy_from(d);
-        for i in (0..=order).rev() {
+        diff.column_mut(order + 2).copy_from(d);
+        diff.column_axpy(-Eqn::T::one(), order + 1, order + 2);
+        for i in (0..=order + 1).rev() {
             diff.column_axpy(Eqn::T::one(), i + 1, i);
         }
     }
