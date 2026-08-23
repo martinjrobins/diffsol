@@ -665,6 +665,10 @@ macro_rules! generate_vector_tests_batched {
                 $crate::vector::tests::test_batched_owned_rhs_broadcast::<$V>($ctx2);
             }
             #[test]
+            fn [<test_batched_owned_lhs_broadcast_ $suffix>]() {
+                $crate::vector::tests::test_batched_owned_lhs_broadcast::<$V>($ctx2);
+            }
+            #[test]
             fn [<test_batched_view_add_broadcast_ $suffix>]() {
                 $crate::vector::tests::test_batched_view_add_broadcast::<$V>($ctx2);
             }
@@ -1430,6 +1434,26 @@ pub(crate) mod tests {
         let b = V::from_vec(fv::<V>(&[1.0, 2.0]), V::C::default());
         let c = &a - b;
         assert_eq!(c.clone_as_vec(), fv::<V>(&[9.0, 18.0, 29.0, 38.0]));
+        assert_eq!(c.context().nbatch(), 2);
+    }
+
+    /// Owned left-hand side with broadcasting in both directions: the left-hand side can only
+    /// be written into in place when it already has the result's batch count.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_batched_owned_lhs_broadcast<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        // lhs holds the result's batch count, so rhs broadcasts over it in place
+        let a = V::from_vec(fv::<V>(&[10.0, 20.0, 30.0, 40.0]), ctx.clone());
+        let b = V::from_vec(fv::<V>(&[1.0, 2.0]), V::C::default());
+        let c = a - b;
+        assert_eq!(c.clone_as_vec(), fv::<V>(&[9.0, 18.0, 29.0, 38.0]));
+        assert_eq!(c.context().nbatch(), 2);
+
+        // rhs holds the result's batch count, so lhs must be broadcast into a fresh allocation
+        let a = V::from_vec(fv::<V>(&[10.0, 20.0]), V::C::default());
+        let b = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0]), ctx);
+        let c = a - b;
+        assert_eq!(c.clone_as_vec(), fv::<V>(&[9.0, 18.0, 7.0, 16.0]));
         assert_eq!(c.context().nbatch(), 2);
     }
 
