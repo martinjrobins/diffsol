@@ -388,9 +388,7 @@ pub trait DenseMatrix:
     /// for i in (0..=order+1).rev() { self[:, i] += self[:, i+1] }
     /// ```
     /// where each addition uses the just-updated value of column `i+1` (a
-    /// right-to-left cumulative scan), implemented as a single fused pass so
-    /// backends can optimise it as one operation instead of `order+2`
-    /// separate column ops.
+    /// right-to-left cumulative scan).
     fn update_backward_diff(&mut self, order: IndexType, d: &Self::V);
 
     /// Get an immutable view of columns from `start` (inclusive) to `end` (exclusive).
