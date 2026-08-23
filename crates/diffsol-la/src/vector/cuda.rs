@@ -558,33 +558,46 @@ impl_binary!(
     &CudaVecRef<'a, T>, &CudaVecRef<'b, T>
 );
 
-// consuming-self (delegates to SubAssign)
+// consuming-self (delegates to SubAssign when self already holds enough batches to be
+// written into in place; otherwise self must broadcast up, which needs a fresh allocation)
 impl<T: ScalarCuda> Sub<CudaVec<T>> for CudaVec<T> {
     type Output = CudaVec<T>;
     fn sub(mut self, rhs: CudaVec<T>) -> CudaVec<T> {
-        self.sub_assign(&rhs);
-        self
+        if self.context.nbatch() >= rhs.context.nbatch() {
+            self.sub_assign(&rhs);
+            return self;
+        }
+        &self - &rhs
     }
 }
 impl<T: ScalarCuda> Sub<&CudaVec<T>> for CudaVec<T> {
     type Output = CudaVec<T>;
     fn sub(mut self, rhs: &CudaVec<T>) -> CudaVec<T> {
-        self.sub_assign(rhs);
-        self
+        if self.context.nbatch() >= rhs.context.nbatch() {
+            self.sub_assign(rhs);
+            return self;
+        }
+        &self - rhs
     }
 }
 impl<T: ScalarCuda> Sub<CudaVecRef<'_, T>> for CudaVec<T> {
     type Output = CudaVec<T>;
     fn sub(mut self, rhs: CudaVecRef<'_, T>) -> CudaVec<T> {
-        self.sub_assign(&rhs);
-        self
+        if self.context.nbatch() >= rhs.context.nbatch() {
+            self.sub_assign(&rhs);
+            return self;
+        }
+        &self - &rhs
     }
 }
 impl<T: ScalarCuda> Sub<&CudaVecRef<'_, T>> for CudaVec<T> {
     type Output = CudaVec<T>;
     fn sub(mut self, rhs: &CudaVecRef<'_, T>) -> CudaVec<T> {
-        self.sub_assign(rhs);
-        self
+        if self.context.nbatch() >= rhs.context.nbatch() {
+            self.sub_assign(rhs);
+            return self;
+        }
+        &self - rhs
     }
 }
 
@@ -642,33 +655,46 @@ impl_binary!(
     &CudaVecRef<'a, T>, &CudaVecRef<'b, T>
 );
 
-// consuming-self (delegates to AddAssign)
+// consuming-self (delegates to AddAssign when self already holds enough batches to be
+// written into in place; otherwise self must broadcast up, which needs a fresh allocation)
 impl<T: ScalarCuda> Add<CudaVec<T>> for CudaVec<T> {
     type Output = CudaVec<T>;
     fn add(mut self, rhs: CudaVec<T>) -> CudaVec<T> {
-        self.add_assign(&rhs);
-        self
+        if self.context.nbatch() >= rhs.context.nbatch() {
+            self.add_assign(&rhs);
+            return self;
+        }
+        &self + &rhs
     }
 }
 impl<T: ScalarCuda> Add<&CudaVec<T>> for CudaVec<T> {
     type Output = CudaVec<T>;
     fn add(mut self, rhs: &CudaVec<T>) -> CudaVec<T> {
-        self.add_assign(rhs);
-        self
+        if self.context.nbatch() >= rhs.context.nbatch() {
+            self.add_assign(rhs);
+            return self;
+        }
+        &self + rhs
     }
 }
 impl<T: ScalarCuda> Add<CudaVecRef<'_, T>> for CudaVec<T> {
     type Output = CudaVec<T>;
     fn add(mut self, rhs: CudaVecRef<'_, T>) -> CudaVec<T> {
-        self.add_assign(&rhs);
-        self
+        if self.context.nbatch() >= rhs.context.nbatch() {
+            self.add_assign(&rhs);
+            return self;
+        }
+        &self + &rhs
     }
 }
 impl<T: ScalarCuda> Add<&CudaVecRef<'_, T>> for CudaVec<T> {
     type Output = CudaVec<T>;
     fn add(mut self, rhs: &CudaVecRef<'_, T>) -> CudaVec<T> {
-        self.add_assign(rhs);
-        self
+        if self.context.nbatch() >= rhs.context.nbatch() {
+            self.add_assign(rhs);
+            return self;
+        }
+        &self + rhs
     }
 }
 
