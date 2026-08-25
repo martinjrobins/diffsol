@@ -52,6 +52,8 @@ pub trait Scalar:
     fn is_nan(self) -> bool;
     /// Square root.
     fn sqrt(self) -> Self;
+    /// Cube root.
+    fn cbrt(self) -> Self;
     /// Exponential.
     fn exp(self) -> Self;
     /// Sine.
@@ -111,6 +113,9 @@ impl Scalar for f64 {
     fn sqrt(self) -> Self {
         self.sqrt()
     }
+    fn cbrt(self) -> Self {
+        self.cbrt()
+    }
     fn exp(self) -> Self {
         self.exp()
     }
@@ -150,6 +155,9 @@ impl Scalar for f32 {
     }
     fn sqrt(self) -> Self {
         self.sqrt()
+    }
+    fn cbrt(self) -> Self {
+        self.cbrt()
     }
     fn exp(self) -> Self {
         self.exp()
