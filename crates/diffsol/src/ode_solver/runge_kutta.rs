@@ -1320,7 +1320,7 @@ fn pow_neg_pow2_fast<T: crate::Scalar>(x: T, exponent: T) -> T {
     let neg = exponent < T::zero();
     let ax = if neg { -exponent } else { exponent };
     let mut candidate = T::one();
-    for k in 0..=4 {
+    for k in 0..=3 {
         if ax == candidate {
             let mut r = x;
             for _ in 0..k {
