@@ -180,7 +180,7 @@ impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
     ) {
         let mut phi = self.phi.borrow_mut();
         phi.copy_from(y0);
-        diff.gemv_o(h, a, Eqn::T::one(), &mut phi);
+        diff.gemv(h, a, Eqn::T::one(), &mut phi);
     }
 
     // tmp = phi + c * x

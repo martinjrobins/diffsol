@@ -445,11 +445,8 @@ impl<'a, T: FaerScalar> MatrixView<'a> for FaerMatRef<'a, T> {
     fn into_owned(self) -> Self::Owned {
         into_owned_data!(self)
     }
-    fn gemv_v(&self, a: T, x: &FaerVecRef<'_, T>, beta: T, y: &mut FaerVec<T>) {
-        gemv_data!(self, a, x, beta, y, "gemv_v")
-    }
-    fn gemv_o(&self, a: T, x: &FaerVec<T>, beta: T, y: &mut FaerVec<T>) {
-        gemv_data!(self, a, x, beta, y, "gemv_o")
+    fn gemv(&self, a: T, x: &FaerVec<T>, beta: T, y: &mut FaerVec<T>) {
+        gemv_data!(self, a, x, beta, y, "gemv")
     }
 }
 impl<'a, T: FaerScalar> MatrixViewMut<'a> for FaerMatMut<'a, T> {

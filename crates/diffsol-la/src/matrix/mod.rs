@@ -138,17 +138,8 @@ pub trait MatrixView<'a>:
     /// Convert this view into an owned matrix, cloning the data if necessary.
     fn into_owned(self) -> Self::Owned;
 
-    /// Perform a matrix-vector multiplication with a vector view: y = alpha * self * x + beta * y
-    fn gemv_v(
-        &self,
-        alpha: Self::T,
-        x: &<Self::V as Vector>::View<'_>,
-        beta: Self::T,
-        y: &mut Self::V,
-    );
-
     /// Perform a matrix-vector multiplication with an owned vector: y = alpha * self * x + beta * y
-    fn gemv_o(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V);
+    fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V);
 }
 
 /// A base matrix trait supporting both sparse and dense matrices.
@@ -1449,14 +1440,14 @@ pub(crate) mod tests {
         let owned = view.into_owned();
         assert_eq!(owned.nrows(), 2);
         assert_eq!(owned.ncols(), 2);
-        // Verify via gemv_o: multiply columns(0,2) by [1,1] for each batch
+        // Verify via gemv: multiply columns(0,2) by [1,1] for each batch
         let view2 = a.columns(0, 2);
         let x = M::V::from_vec(
             vec![f::<M>(1.0), f::<M>(1.0), f::<M>(1.0), f::<M>(1.0)],
             ctx.clone(),
         );
         let mut y = M::V::zeros(2, ctx);
-        view2.gemv_o(f::<M>(1.0), &x, f::<M>(0.0), &mut y);
+        view2.gemv(f::<M>(1.0), &x, f::<M>(0.0), &mut y);
         // batch0: [1,2]*1 + [3,4]*1 = [4,6], batch1: [7,8]*1 + [9,10]*1 = [16,18]
         assert_eq!(
             y.clone_as_vec(),
@@ -1497,48 +1488,12 @@ pub(crate) mod tests {
             ctx.clone(),
         );
         let mut y = M::V::zeros(2, ctx);
-        view.gemv_o(f::<M>(1.0), &x, f::<M>(0.0), &mut y);
+        view.gemv(f::<M>(1.0), &x, f::<M>(0.0), &mut y);
         // batch0: [[1,2],[4,5]] * [1,1] = [1+2, 4+5] = [3, 9]
         // batch1: [[7,8],[10,11]] * [2,2] = [14+16, 20+22] = [30, 42]
         assert_eq!(
             y.clone_as_vec(),
             vec![f::<M>(3.0), f::<M>(9.0), f::<M>(30.0), f::<M>(42.0)]
-        );
-    }
-
-    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
-    pub fn test_batched_gemv_v_broadcast_mat<M: DenseMatrix>(ctx3: M::C) {
-        assert_eq!(ctx3.nbatch(), 2);
-        // matrix view with nbatch=1 broadcasts to x/y with nbatch=2
-        let ctx1 = M::C::default();
-        // 2x3 matrix, nbatch=1: [[1,2,3],[4,5,6]]
-        let diff = M::from_vec(
-            2,
-            3,
-            vec![
-                f::<M>(1.0),
-                f::<M>(4.0),
-                f::<M>(2.0),
-                f::<M>(5.0),
-                f::<M>(3.0),
-                f::<M>(6.0),
-            ],
-            ctx1,
-        );
-        let view = diff.columns(0, 2);
-        // x with nbatch=2, length=2
-        // batch0: [1,1], batch1: [2,2]
-        let x = M::V::from_vec(
-            vec![f::<M>(1.0), f::<M>(1.0), f::<M>(2.0), f::<M>(2.0)],
-            ctx3.clone(),
-        );
-        let mut y = M::V::zeros(2, ctx3);
-        view.gemv_v(f::<M>(1.0), &x.as_view(), f::<M>(0.0), &mut y);
-        // batch0: [[1,2],[4,5]] * [1,1] = [3, 9]
-        // batch1: [[1,2],[4,5]] * [2,2] = [6, 18]
-        assert_eq!(
-            y.clone_as_vec(),
-            vec![f::<M>(3.0), f::<M>(9.0), f::<M>(6.0), f::<M>(18.0)]
         );
     }
 
@@ -1569,7 +1524,7 @@ pub(crate) mod tests {
             ctx3.clone(),
         );
         let mut y = M::V::zeros(2, ctx3);
-        view.gemv_o(f::<M>(1.0), &x, f::<M>(0.0), &mut y);
+        view.gemv(f::<M>(1.0), &x, f::<M>(0.0), &mut y);
         // batch0: [[1,2],[4,5]] * [1,1] = [3, 9]
         // batch1: [[1,2],[4,5]] * [2,2] = [6, 18]
         assert_eq!(
@@ -1730,7 +1685,7 @@ pub(crate) mod tests {
         // x with nbatch=1, length=2 (broadcast)
         let x = M::V::from_vec(vec![f::<M>(1.0), f::<M>(1.0)], Default::default());
         let mut y = M::V::zeros(2, ctx);
-        view.gemv_o(f::<M>(1.0), &x, f::<M>(0.0), &mut y);
+        view.gemv(f::<M>(1.0), &x, f::<M>(0.0), &mut y);
         // batch0: [[1,2],[4,5]] * [1,1] = [3, 9]
         // batch1: [[7,8],[10,11]] * [1,1] = [15, 21]
         assert_eq!(
@@ -3194,10 +3149,6 @@ macro_rules! generate_dense_matrix_tests_batched {
             #[test]
             fn [<test_batched_gemv_o_broadcast_x_ $suffix>]() {
                 $crate::matrix::tests::test_batched_gemv_o_broadcast_x::<$M>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_gemv_v_broadcast_mat_ $suffix>]() {
-                $crate::matrix::tests::test_batched_gemv_v_broadcast_mat::<$M>($ctx2);
             }
             #[test]
             fn [<test_batched_gemv_o_broadcast_mat_ $suffix>]() {

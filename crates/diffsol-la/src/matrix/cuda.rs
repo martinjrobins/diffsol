@@ -665,10 +665,10 @@ impl<'a, T: ScalarCuda> MatrixView<'a> for CudaMatRef<'a, T> {
         }
     }
 
-    fn gemv_o(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
+    fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
         let nbatch = self.context.nbatch();
         let x_nbatch = x.context.nbatch();
-        self.context.assert_compatible_nbatch(x_nbatch, "gemv_o");
+        self.context.assert_compatible_nbatch(x_nbatch, "gemv");
         let effective_nbatch = nbatch.max(x_nbatch);
         for b in 0..effective_nbatch {
             let self_b = if nbatch == 1 { 0 } else { b };
@@ -676,38 +676,6 @@ impl<'a, T: ScalarCuda> MatrixView<'a> for CudaMatRef<'a, T> {
             let x_nstates = self.ncols;
             let a_start = self_b * self.batch_stride;
             let x_start = x_b * x_nstates;
-            let y_start = b * self.nrows;
-            let a_slice = self.data.slice(a_start..a_start + self.nrows * self.ncols);
-            let x_slice = x.data.slice(x_start..x_start + self.ncols);
-            let mut y_slice = y.data.slice_mut(y_start..y_start + self.nrows);
-            self.context.gemv(
-                self.nrows,
-                self.ncols,
-                alpha,
-                beta,
-                &a_slice,
-                &x_slice,
-                &mut y_slice,
-            );
-        }
-    }
-    fn gemv_v(
-        &self,
-        alpha: Self::T,
-        x: &<Self::V as crate::vector::Vector>::View<'_>,
-        beta: Self::T,
-        y: &mut Self::V,
-    ) {
-        let nbatch = self.context.nbatch();
-        let x_nbatch = x.context.nbatch();
-        self.context.assert_compatible_nbatch(x_nbatch, "gemv_v");
-        let effective_nbatch = nbatch.max(x_nbatch);
-        for b in 0..effective_nbatch {
-            let self_b = if nbatch == 1 { 0 } else { b };
-            let x_b = if x_nbatch == 1 { 0 } else { b };
-            let x_stride_val = self.ncols;
-            let a_start = self_b * self.batch_stride;
-            let x_start = x_b * x_stride_val + x.col_offset;
             let y_start = b * self.nrows;
             let a_slice = self.data.slice(a_start..a_start + self.nrows * self.ncols);
             let x_slice = x.data.slice(x_start..x_start + self.ncols);
