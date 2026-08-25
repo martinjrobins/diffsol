@@ -188,10 +188,8 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
         psi: &mut Eqn::V,
     ) {
         // update psi term as defined in second equation on page 9 of [1]
-        psi.axpy_v(gamma[1], &diff.column(1), Eqn::T::zero());
-        for (i, &gamma_i) in gamma.iter().enumerate().take(order + 1).skip(2) {
-            psi.axpy_v(gamma_i, &diff.column(i), Eqn::T::one());
-        }
+        debug_assert!(order >= 1, "BDF order is always at least one");
+        diff.weighted_column_sum(1, order + 1, Some(&gamma[1..=order]), psi);
         psi.mul_assign(scale(alpha[order]));
     }
     pub fn set_psi_and_y0<M: DenseMatrix<V = Eqn::V, T = Eqn::T>>(

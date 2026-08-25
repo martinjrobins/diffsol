@@ -27,4 +27,5 @@ extern "C" {
 #include "vec_squared_norm.cu"
 #include "vec_sub_assign.cu"
 #include "vec_sub.cu"
+#include "weighted_column_sum.cu"
 }

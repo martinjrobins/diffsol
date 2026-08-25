@@ -861,6 +861,24 @@ impl<'a, T: ScalarCuda> MatrixViewMut<'a> for CudaMatMut<'a, T> {
     }
 }
 
+/// Maximum number of weights passed by value to `weighted_column_sum_f64` in one launch.
+///
+/// Must match `WEIGHTED_COLUMN_SUM_MAX_WEIGHTS` in
+/// `src/cuda_kernels/weighted_column_sum.cu`.
+const MAX_KERNEL_WEIGHTS: usize = 8;
+
+/// Kernel-argument counterpart of `struct WeightedColumnSumWeights_f64`, passed by value so
+/// the weights reach the device without a host-to-device copy per call.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct KernelWeights<T: ScalarCuda> {
+    w: [T; MAX_KERNEL_WEIGHTS],
+}
+
+// SAFETY: `KernelWeights` is `repr(C)` and holds only `T: ScalarCuda` values, which are
+// themselves `DeviceRepr`, so its layout matches the kernel's struct parameter.
+unsafe impl<T: ScalarCuda> cudarc::driver::DeviceRepr for KernelWeights<T> {}
+
 impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
     type View<'a> = CudaMatRef<'a, T>;
     type ViewMut<'a> = CudaMatMut<'a, T>;
@@ -1089,6 +1107,66 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
             .arg(&d_stride)
             .arg(&d_nbatch_i32);
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
+    }
+
+    fn weighted_column_sum(
+        &self,
+        start: IndexType,
+        end: IndexType,
+        weights: Option<&[T]>,
+        y: &mut Self::V,
+    ) {
+        self.context
+            .assert_compatible_nbatch(y.context.nbatch(), "weighted_column_sum");
+        assert!(end <= self.ncols(), "column range out of bounds");
+        assert!(
+            weights.is_none_or(|w| w.len() == end - start),
+            "weights length must match the column range"
+        );
+        if start >= end {
+            y.fill(T::zero());
+            return;
+        }
+        let nrows = self.nrows();
+        let y_nbatch = y.context.nbatch();
+        let mat_nbatch = self.context.nbatch();
+        let f = self.context.function::<T>("weighted_column_sum");
+        let config = self
+            .context
+            .launch_config_2d(nrows as u32, y_nbatch as u32, &f);
+        let nrows_i32 = nrows as i32;
+        let y_stride = (y.data.len() / y_nbatch) as i32;
+        let mat_stride = (nrows * self.ncols()) as i32;
+        let mat_nbatch_i32 = mat_nbatch as i32;
+
+        // more columns than fit in one launch: accumulate chunk by chunk
+        for (chunk, chunk_start) in (start..end).step_by(MAX_KERNEL_WEIGHTS).enumerate() {
+            let chunk_end = end.min(chunk_start + MAX_KERNEL_WEIGHTS);
+            let nw = chunk_end - chunk_start;
+            let mut kernel_weights = KernelWeights {
+                w: [T::one(); MAX_KERNEL_WEIGHTS],
+            };
+            if let Some(weights) = weights {
+                kernel_weights.w[..nw]
+                    .copy_from_slice(&weights[chunk_start - start..chunk_end - start]);
+            }
+            let nw_i32 = nw as i32;
+            let beta = if chunk == 0 { T::zero() } else { T::one() };
+            let chunk_start_i32 = chunk_start as i32;
+            let mut build = self.context.stream.launch_builder(&f);
+            build
+                .arg(&mut y.data)
+                .arg(&self.data)
+                .arg(&kernel_weights)
+                .arg(&nw_i32)
+                .arg(&beta)
+                .arg(&chunk_start_i32)
+                .arg(&nrows_i32)
+                .arg(&y_stride)
+                .arg(&mat_stride)
+                .arg(&mat_nbatch_i32);
+            unsafe { build.launch(config) }.expect("Failed to launch kernel");
+        }
     }
 }
 

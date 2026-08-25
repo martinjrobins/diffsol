@@ -662,6 +662,45 @@ impl<T: NalgebraScalar> DenseMatrix for NalgebraMat<T> {
     fn get_index(&self, i: usize, j: usize) -> T {
         self.data[(i, self.col(0, j))]
     }
+    fn weighted_column_sum(
+        &self,
+        start: usize,
+        end: usize,
+        weights: Option<&[T]>,
+        y: &mut NalgebraVec<T>,
+    ) {
+        y.context
+            .assert_compatible_nbatch(self.context.nbatch(), "weighted_column_sum");
+        assert!(end <= self.logical_ncols(), "column range out of bounds");
+        assert!(
+            weights.is_none_or(|w| w.len() == end - start),
+            "weights length must match the column range"
+        );
+        if start >= end {
+            y.fill(T::zero());
+            return;
+        }
+        let nrows = self.nrows();
+        let nbatch = y.data.ncols();
+        let src = self.data.as_slice();
+        let dst = y.data.as_mut_slice();
+        for b in 0..nbatch {
+            let ycol = &mut dst[b * nrows..(b + 1) * nrows];
+            for (k, j) in (start..end).enumerate() {
+                let w = weights.map_or(T::one(), |weights| weights[k]);
+                let col = &src[self.col(b, j) * nrows..][..nrows];
+                if k == 0 {
+                    for (yi, xi) in ycol.iter_mut().zip(col) {
+                        *yi = w.algebraic_mul(*xi);
+                    }
+                } else {
+                    for (yi, xi) in ycol.iter_mut().zip(col) {
+                        *yi = yi.algebraic_add(w.algebraic_mul(*xi));
+                    }
+                }
+            }
+        }
+    }
     fn from_vec(nr: usize, nc: usize, d: Vec<T>, ctx: Self::C) -> Self {
         assert_eq!(d.len(), nr * nc * ctx.nbatch());
         Self {

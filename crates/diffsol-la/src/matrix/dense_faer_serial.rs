@@ -649,6 +649,38 @@ impl<T: FaerScalar> DenseMatrix for FaerMat<T> {
     fn get_index(&self, i: usize, j: usize) -> T {
         self.data[(i, self.col(0, j))]
     }
+    fn weighted_column_sum(
+        &self,
+        start: usize,
+        end: usize,
+        weights: Option<&[T]>,
+        y: &mut FaerVec<T>,
+    ) {
+        y.context
+            .assert_compatible_nbatch(self.context.nbatch(), "weighted_column_sum");
+        assert!(end <= self.logical_ncols(), "column range out of bounds");
+        assert!(
+            weights.is_none_or(|w| w.len() == end - start),
+            "weights length must match the column range"
+        );
+        if start >= end {
+            y.fill(T::zero());
+            return;
+        }
+        for b in 0..y.data.ncols() {
+            for (k, j) in (start..end).enumerate() {
+                let w = weights.map_or(T::one(), |weights| weights[k]);
+                let src = self.data.rb().col(self.col(b, j));
+                let dst = y.data.rb_mut().col_mut(b);
+                if k == 0 {
+                    zip!(dst, src).for_each(|unzip!(y, x)| *y = w.algebraic_mul(*x));
+                } else {
+                    zip!(dst, src)
+                        .for_each(|unzip!(y, x)| *y = y.algebraic_add(w.algebraic_mul(*x)));
+                }
+            }
+        }
+    }
     fn from_vec(nr: usize, nc: usize, d: Vec<T>, ctx: Self::C) -> Self {
         assert_eq!(d.len(), nr * nc * ctx.nbatch());
         Self {

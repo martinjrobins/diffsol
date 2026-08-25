@@ -19,6 +19,7 @@ use crate::{
 };
 
 use super::adjoint::AdjointOdeSolverMethod;
+use super::bdf_state::MAX_ORDER;
 use super::config::BdfConfig;
 use super::jacobian_update::SolverState;
 use super::method::AugmentedOdeSolverMethod;
@@ -658,10 +659,7 @@ where
 
     // predict forward to new step (eq 2 in [1])
     fn _predict_using_diff(y_predict: &mut Eqn::V, diff: &M, order: usize) {
-        y_predict.fill(Eqn::T::zero());
-        for i in 0..=order {
-            diff.add_column_to_vector(i, y_predict);
-        }
+        diff.weighted_column_sum(0, order + 1, None, y_predict);
     }
 
     fn _predict_forward(&mut self) {
@@ -765,13 +763,15 @@ where
         order: usize,
         y: &mut Eqn::V,
     ) {
+        let mut weights = [Eqn::T::zero(); MAX_ORDER + 1];
         let mut time_factor = Eqn::T::one();
-        y.copy_from_view(&diff.column(0));
-        for i in 0..order {
-            let i_t = <Eqn::T as FromPrimitive>::from_f64(i as f64).unwrap();
+        weights[0] = Eqn::T::one();
+        for (i, weight) in weights.iter_mut().enumerate().skip(1).take(order) {
+            let i_t = <Eqn::T as FromPrimitive>::from_f64((i - 1) as f64).unwrap();
             time_factor *= (t - (t1 - h * i_t)) / (h * (Eqn::T::one() + i_t));
-            y.axpy_v(time_factor, &diff.column(i + 1), Eqn::T::one());
+            *weight = time_factor;
         }
+        diff.weighted_column_sum(0, order + 1, Some(&weights[..=order]), y);
     }
 
     // Interpolate the time derivative dy/dt of the BDF polynomial at time t.
@@ -786,10 +786,11 @@ where
         order: usize,
         dy: &mut Eqn::V,
     ) {
+        // weights[i] is the weight of column i + 1; column 0 is constant in t so it drops out
+        let mut weights = [Eqn::T::zero(); MAX_ORDER + 1];
         let mut pi = Eqn::T::one();
         let mut d_pi = Eqn::T::zero();
-        dy.fill(Eqn::T::zero());
-        for i in 0..order {
+        for (i, weight) in weights.iter_mut().enumerate().take(order) {
             let i_t = <Eqn::T as FromPrimitive>::from_f64(i as f64).unwrap();
             let denom = h * (Eqn::T::one() + i_t);
             let w = (t - (t1 - h * i_t)) / denom;
@@ -798,8 +799,10 @@ where
             let new_d_pi = d_pi * w + pi * dw;
             pi *= w;
             d_pi = new_d_pi;
-            dy.axpy_v(d_pi, &diff.column(i + 1), Eqn::T::one());
+            *weight = d_pi;
         }
+        // an order of zero leaves an empty range, which zeroes dy
+        diff.weighted_column_sum(1, order + 1, Some(&weights[..order]), dy);
     }
 
     fn error_control(&self) -> Eqn::T {

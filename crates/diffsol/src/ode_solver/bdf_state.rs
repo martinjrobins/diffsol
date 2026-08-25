@@ -36,12 +36,16 @@ where
     pub(crate) sgdiff_initialised: bool,
 }
 
+/// Highest BDF order, free-standing so it can size arrays in generic code
+/// (an associated const of a generic type cannot).
+pub(crate) const MAX_ORDER: IndexType = 5;
+
 impl<V, M> BdfState<V, M>
 where
     V: Vector + DefaultDenseMatrix,
     M: DenseMatrix<T = V::T, V = V, C = V::C>,
 {
-    pub(crate) const MAX_ORDER: IndexType = 5;
+    pub(crate) const MAX_ORDER: IndexType = MAX_ORDER;
 
     pub(crate) fn new_empty(ctx: V::C) -> Self {
         let default_v = V::zeros(0, ctx.clone());

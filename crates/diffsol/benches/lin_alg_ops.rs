@@ -391,6 +391,33 @@ where
     group.finish();
 }
 
+/// 🔴 weighted_column_sum — y = sum_j w_j * diff[:, j], a BDF order + 1 column sum.
+/// Called twice every BDF step (predictor and psi), plus once per interpolation.
+fn bench_weighted_column_sum<M: Matrix<T = f64> + DenseMatrix + 'static>(
+    c: &mut Criterion,
+    label: &str,
+) where
+    M::C: Default + Clone,
+    M::V: Vector<T = f64, C = M::C> + Clone,
+{
+    let mut group = c.benchmark_group(label);
+    // a fifth-order BDF difference table: sum columns 0..=5
+    let weights = [1.0, 0.5, 0.25, 0.125, 0.0625, 0.03125];
+    for &ns in MSIZES {
+        group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
+            let ctx = M::C::default();
+            let mut mat = M::zeros(ns, weights.len() + 3, ctx.clone());
+            fill_dense(&mut mat, ns);
+            let mut v = M::V::zeros(ns, ctx.clone());
+            b.iter(|| {
+                mat.weighted_column_sum(0, weights.len(), Some(&weights), &mut v);
+                black_box(&v);
+            });
+        });
+    }
+    group.finish();
+}
+
 // ═════════════════════════════════════════════════════════
 // 🟡 MEDIUM — once or few times per step
 // ═════════════════════════════════════════════════════════
@@ -821,6 +848,7 @@ macro_rules! bench_dense_matrix_backend {
     ($c:expr, $label:expr, $M:ty) => {
         bench_matrix_column::<$M>($c, concat!("matrix_column/", $label));
         bench_matrix_columns::<$M>($c, concat!("matrix_columns/", $label));
+        bench_weighted_column_sum::<$M>($c, concat!("weighted_column_sum/", $label));
     };
 }
 

@@ -382,6 +382,23 @@ pub trait DenseMatrix:
     /// right-to-left cumulative scan).
     fn update_backward_diff(&mut self, order: IndexType, d: &Self::V);
 
+    /// Sum a range of columns into a vector, optionally weighted:
+    ///
+    /// ```text
+    /// y = sum_{j in start..end} w[j - start] * self[:, j]
+    /// ```
+    ///
+    /// `weights` of `None` means all weights are one. If `Some`, `weights.len()`
+    /// must equal `end - start`. `y` is overwritten (not accumulated into), so an
+    /// empty range zeroes `y`.
+    fn weighted_column_sum(
+        &self,
+        start: IndexType,
+        end: IndexType,
+        weights: Option<&[Self::T]>,
+        y: &mut Self::V,
+    );
+
     /// Get an immutable view of columns from `start` (inclusive) to `end` (exclusive).
     fn columns(&self, start: IndexType, end: IndexType) -> Self::View<'_>;
 
@@ -710,6 +727,80 @@ pub(crate) mod tests {
         assert_eq!(a.get_index(1, 1), f::<M>(1020.0));
         assert_eq!(a.get_index(0, 0), f::<M>(103.0));
         assert_eq!(a.get_index(1, 0), f::<M>(1030.0));
+    }
+
+    pub fn test_weighted_column_sum<M: DenseMatrix>() {
+        // columns: [1, 10], [2, 20], [3, 30], [4, 40]
+        let a = M::from_vec(
+            2,
+            4,
+            (1..=4)
+                .flat_map(|j| [f::<M>(j as f64), f::<M>(10.0 * j as f64)])
+                .collect(),
+            Default::default(),
+        );
+        let mut y = M::V::from_vec(vec![f::<M>(-1.0), f::<M>(-1.0)], Default::default());
+
+        // unweighted sum of columns 0..3
+        a.weighted_column_sum(0, 3, None, &mut y);
+        assert_eq!(y.clone_as_vec(), vec![f::<M>(6.0), f::<M>(60.0)]);
+
+        // weighted sum of every column
+        a.weighted_column_sum(
+            0,
+            4,
+            Some(&[f::<M>(1.0), f::<M>(2.0), f::<M>(3.0), f::<M>(4.0)]),
+            &mut y,
+        );
+        assert_eq!(y.clone_as_vec(), vec![f::<M>(30.0), f::<M>(300.0)]);
+
+        // weights line up with the start of the range, not with column zero
+        a.weighted_column_sum(2, 4, Some(&[f::<M>(2.0), f::<M>(3.0)]), &mut y);
+        assert_eq!(y.clone_as_vec(), vec![f::<M>(18.0), f::<M>(180.0)]);
+
+        // a single column, and an empty range which zeroes y
+        a.weighted_column_sum(1, 2, Some(&[f::<M>(0.5)]), &mut y);
+        assert_eq!(y.clone_as_vec(), vec![f::<M>(1.0), f::<M>(10.0)]);
+        a.weighted_column_sum(1, 1, None, &mut y);
+        assert_eq!(y.clone_as_vec(), vec![f::<M>(0.0), f::<M>(0.0)]);
+    }
+
+    /// Same sums as [`test_weighted_column_sum`], run on 2 independent batches: the weights
+    /// are shared by every batch, the columns are not.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_batched_weighted_column_sum_m<M: DenseMatrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        // batch 0 columns: [1, 10], [2, 20]; batch 1 columns: [3, 30], [4, 40]
+        let a = M::from_vec(
+            2,
+            2,
+            (1..=4)
+                .flat_map(|j| [f::<M>(j as f64), f::<M>(10.0 * j as f64)])
+                .collect(),
+            ctx.clone(),
+        );
+        let mut y = M::V::from_vec(
+            vec![f::<M>(-1.0), f::<M>(-1.0), f::<M>(-1.0), f::<M>(-1.0)],
+            ctx,
+        );
+
+        a.weighted_column_sum(0, 2, None, &mut y);
+        assert_eq!(
+            y.clone_as_vec(),
+            vec![f::<M>(3.0), f::<M>(30.0), f::<M>(7.0), f::<M>(70.0)]
+        );
+
+        a.weighted_column_sum(0, 2, Some(&[f::<M>(2.0), f::<M>(3.0)]), &mut y);
+        assert_eq!(
+            y.clone_as_vec(),
+            vec![f::<M>(8.0), f::<M>(80.0), f::<M>(18.0), f::<M>(180.0)]
+        );
+
+        a.weighted_column_sum(1, 2, Some(&[f::<M>(0.5)]), &mut y);
+        assert_eq!(
+            y.clone_as_vec(),
+            vec![f::<M>(1.0), f::<M>(10.0), f::<M>(2.0), f::<M>(20.0)]
+        );
     }
 
     pub fn test_resize_cols<M: DenseMatrix>() {
@@ -3034,6 +3125,10 @@ macro_rules! generate_dense_matrix_tests_nonbatched {
                 $crate::matrix::tests::test_update_backward_diff::<$M>();
             }
             #[test]
+            fn [<test_weighted_column_sum_ $suffix>]() {
+                $crate::matrix::tests::test_weighted_column_sum::<$M>();
+            }
+            #[test]
             fn [<test_resize_cols_ $suffix>]() {
                 $crate::matrix::tests::test_resize_cols::<$M>();
             }
@@ -3109,6 +3204,10 @@ macro_rules! generate_dense_matrix_tests_batched {
             #[test]
             fn [<test_batched_update_backward_diff_ $suffix>]() {
                 $crate::matrix::tests::test_batched_update_backward_diff::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_weighted_column_sum_ $suffix>]() {
+                $crate::matrix::tests::test_batched_weighted_column_sum_m::<$M>($ctx2);
             }
             #[test]
             fn [<test_batched_view_add_ref_broadcast_ $suffix>]() {
