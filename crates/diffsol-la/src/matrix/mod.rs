@@ -624,6 +624,10 @@ pub(crate) mod tests {
         let mut y = M::V::zeros(2, Default::default());
         a.gemv(f::<M>(1.0), &x, f::<M>(0.0), &mut y);
         assert_eq!(y.clone_as_vec(), vec![f::<M>(5.0), f::<M>(11.0)]);
+
+        // beta = 1.0: accumulate onto the pre-existing value of y
+        a.gemv(f::<M>(1.0), &x, f::<M>(1.0), &mut y);
+        assert_eq!(y.clone_as_vec(), vec![f::<M>(10.0), f::<M>(22.0)]);
     }
 
     pub fn test_set_column<M: Matrix>() {

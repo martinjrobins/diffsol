@@ -375,10 +375,17 @@ macro_rules! gemv_data {
         let nc = $self.ncols();
         for b in 0..$y.data.ncols() {
             let mut column = $y.data.rb_mut().col_mut(b);
-            column *= faer::Scale($beta);
+            let accum = if $beta.is_zero() {
+                Accum::Replace
+            } else {
+                if !$beta.is_one() {
+                    column *= faer::Scale($beta);
+                }
+                Accum::Add
+            };
             matmul(
                 column,
-                Accum::Add,
+                accum,
                 $self.data.rb().subcols($self.col(b, 0), nc),
                 $x.data.rb().col($x.batch(b)),
                 $a,
