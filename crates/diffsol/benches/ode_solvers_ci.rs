@@ -6,7 +6,7 @@ use diffsol::{
         exponential_decay::exponential_decay_problem, foodweb::foodweb_problem,
         heat2d::head2d_problem, robertson::robertson, robertson_ode::robertson_ode,
     },
-    FaerLU, FaerMat, FaerSparseLU, FaerSparseMat, NalgebraLU, NalgebraMat,
+    FaerLU, FaerMat, FaerSparseLU, FaerSparseMat, NalgebraLU, NalgebraMat, NalgebraNativeLU,
 };
 
 mod common;
@@ -28,6 +28,14 @@ fn criterion_benchmark(c: &mut Criterion) {
             nalgebra_bdf,
             bdf,
             NalgebraLU,
+            exponential_decay_problem,
+            NalgebraMat<f64>
+        );
+        bench_implicit!(
+            g,
+            nalgebra_bdf_native,
+            bdf,
+            NalgebraNativeLU,
             exponential_decay_problem,
             NalgebraMat<f64>
         );
@@ -91,6 +99,14 @@ fn criterion_benchmark(c: &mut Criterion) {
             nalgebra_bdf,
             bdf,
             NalgebraLU,
+            robertson,
+            NalgebraMat<f64>
+        );
+        bench_implicit!(
+            g,
+            nalgebra_bdf_native,
+            bdf,
+            NalgebraNativeLU,
             robertson,
             NalgebraMat<f64>
         );
