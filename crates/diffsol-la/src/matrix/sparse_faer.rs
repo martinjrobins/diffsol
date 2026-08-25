@@ -9,9 +9,10 @@ use crate::{Context, FaerContext, FaerVec, FaerVecIndex, Vector, VectorIndex};
 use crate::{DefaultSolver, FaerScalar, FaerSparseLU, IndexType, Scale};
 
 use faer::reborrow::{Reborrow, ReborrowMut};
+use faer::sparse::linalg::matmul::sparse_dense_matmul;
 use faer::sparse::ops::{ternary_op_assign_into, union_symbolic};
 use faer::sparse::{Pair, SparseColMat, SymbolicSparseColMat, SymbolicSparseColMatRef, Triplet};
-use faer::zip;
+use faer::{get_global_parallelism, Accum};
 
 #[derive(Clone, Debug)]
 pub struct FaerSparseMat<T: FaerScalar> {
@@ -385,9 +386,23 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
         self.context
             .assert_compatible_nbatch(y.context.nbatch(), "gemv");
         for batch in 0..y.data.ncols() {
-            let tmp = self.batch(batch) * x.data.rb().col(x.batch(batch));
-            zip!(y.data.rb_mut().col_mut(batch), tmp.rb())
-                .for_each(|faer::unzip!(y, x)| *y = beta * *y + alpha * *x);
+            let mut ycol = y.data.rb_mut().col_mut(batch);
+            let accum = if beta.is_zero() {
+                Accum::Replace
+            } else {
+                if !beta.is_one() {
+                    ycol *= faer::Scale(beta);
+                }
+                Accum::Add
+            };
+            sparse_dense_matmul(
+                ycol.as_mat_mut(),
+                accum,
+                self.batch(batch).rb(),
+                x.data.rb().col(x.batch(batch)).as_mat(),
+                alpha,
+                get_global_parallelism(),
+            );
         }
     }
     fn zeros(nrows: IndexType, ncols: IndexType, ctx: Self::C) -> Self {
