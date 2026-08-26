@@ -1093,45 +1093,33 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
         }
     }
 
-    fn column_axpy(&mut self, alpha: Self::T, j: IndexType, i: IndexType) {
-        if i >= self.ncols() {
-            panic!("Column index out of bounds");
-        }
-        if j >= self.ncols() {
-            panic!("Column index out of bounds");
-        }
-        if i == j {
-            panic!("Column index cannot be the same");
-        }
+    fn update_backward_diff(&mut self, order: IndexType, d: &Self::V) {
+        assert!(order + 2 < self.ncols(), "order out of bounds");
+        self.context
+            .assert_compatible_nbatch(d.context.nbatch(), "update_backward_diff");
 
         let nbatch = self.context.nbatch();
         let nrows = self.nrows();
         let ncols = self.ncols();
-        let f = self.context.function::<T>("vec_axpy_offset");
+        let d_nbatch = d.context.nbatch();
+        let d_stride = (d.data.len() / d_nbatch) as i32;
+        let f = self.context.function::<T>("backward_diff_update");
         let nrows_u32 = nrows as u32;
         let nbatch_u32 = nbatch as u32;
         let config = self.context.launch_config_2d(nrows_u32, nbatch_u32, &f);
         let mut build = self.context.stream.launch_builder(&f);
-        let alpha_val = alpha;
-        let beta_val = T::one();
-        let stride = (nrows * ncols) as i32;
-        let nbatch_i32 = nbatch as i32;
-        let x_offset = (j * nrows) as i32;
-        let y_offset = (i * nrows) as i32;
-        let data_ptr = &mut self.data as *mut CudaSlice<T>;
-        unsafe {
-            build
-                .arg(&mut *data_ptr)
-                .arg(&*data_ptr)
-                .arg(&alpha_val)
-                .arg(&beta_val)
-                .arg(&y_offset)
-                .arg(&x_offset)
-                .arg(&nrows_u32)
-                .arg(&stride)
-                .arg(&stride)
-                .arg(&nbatch_i32);
-        }
+        let order_i32 = order as i32;
+        let nrows_i32 = nrows as i32;
+        let diff_stride = (nrows * ncols) as i32;
+        let d_nbatch_i32 = d_nbatch as i32;
+        build
+            .arg(&mut self.data)
+            .arg(&d.data)
+            .arg(&order_i32)
+            .arg(&nrows_i32)
+            .arg(&diff_stride)
+            .arg(&d_stride)
+            .arg(&d_nbatch_i32);
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
     }
 }

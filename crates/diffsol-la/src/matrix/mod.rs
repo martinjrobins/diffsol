@@ -379,10 +379,17 @@ pub trait DenseMatrix:
     /// Perform a matrix-matrix multiplication: self = alpha * a * b + beta * self
     fn gemm(&mut self, alpha: Self::T, a: &Self, b: &Self, beta: Self::T);
 
-    /// Perform a column AXPY operation: column i = alpha * column j + column i
+    /// Update a table of backward differences held in columns `0..=order+2` of
+    /// this matrix, given the newly computed highest-order correction `d`.
     ///
-    /// This is equivalent to: self[:, i] += alpha * self[:, j]
-    fn column_axpy(&mut self, alpha: Self::T, j: IndexType, i: IndexType);
+    /// Equivalent to:
+    /// ```text
+    /// self[:, order+2] = d - self[:, order+1]
+    /// for i in (0..=order+1).rev() { self[:, i] += self[:, i+1] }
+    /// ```
+    /// where each addition uses the just-updated value of column `i+1` (a
+    /// right-to-left cumulative scan).
+    fn update_backward_diff(&mut self, order: IndexType, d: &Self::V);
 
     /// Get an immutable view of columns from `start` (inclusive) to `end` (exclusive).
     fn columns(&self, start: IndexType, end: IndexType) -> Self::View<'_>;
@@ -436,7 +443,7 @@ pub(crate) mod tests {
         MatrixViewMut,
     };
     use crate::scalar::Scale;
-    use crate::{scalar::IndexType, Context, Vector, VectorIndex, VectorViewMut};
+    use crate::{scalar::IndexType, Context, Vector, VectorIndex, VectorView, VectorViewMut};
     use num_traits::{FromPrimitive, One, Zero};
 
     fn f<M: Matrix>(x: f64) -> M::T {
@@ -675,23 +682,39 @@ pub(crate) mod tests {
         assert!(a.union(b.as_ref()).is_err());
     }
 
-    pub fn test_column_axpy<M: DenseMatrix>() {
-        let mut a = M::zeros(2, 2, Default::default());
-        a.set_index(0, 0, M::T::one());
-        a.set_index(0, 1, M::T::from_f64(2.0).unwrap());
-        a.set_index(1, 0, M::T::from_f64(3.0).unwrap());
-        a.set_index(1, 1, M::T::from_f64(4.0).unwrap());
+    /// Order 1: 4 columns (`0..=order+2`), column 3 starts as garbage (overwritten).
+    /// Expected values are the right-to-left cumulative scan replayed by hand:
+    ///   col3 = d - col2
+    ///   col2 += col3 (updated); col1 += col2 (updated); col0 += col1 (updated)
+    pub fn test_update_backward_diff<M: DenseMatrix>() {
+        let order = 1;
+        let mut a = M::from_vec(
+            2,
+            4,
+            vec![
+                f::<M>(1.0),
+                f::<M>(10.0),
+                f::<M>(2.0),
+                f::<M>(20.0),
+                f::<M>(3.0),
+                f::<M>(30.0),
+                f::<M>(0.0),
+                f::<M>(0.0),
+            ],
+            Default::default(),
+        );
+        let d = M::V::from_vec(vec![f::<M>(100.0), f::<M>(1000.0)], Default::default());
 
-        a.column_axpy(M::T::from_f64(2.0).unwrap(), 0, 1);
-        assert_eq!(a.get_index(0, 0), M::T::one());
-        assert_eq!(a.get_index(0, 1), M::T::from_f64(4.0).unwrap());
-        assert_eq!(a.get_index(1, 0), M::T::from_f64(3.0).unwrap());
-        assert_eq!(a.get_index(1, 1), M::T::from_f64(10.0).unwrap());
+        a.update_backward_diff(order, &d);
 
-        // opposite direction (dst column before src column in storage)
-        a.column_axpy(M::T::from_f64(2.0).unwrap(), 1, 0);
-        assert_eq!(a.get_index(0, 0), M::T::from_f64(9.0).unwrap());
-        assert_eq!(a.get_index(1, 0), M::T::from_f64(23.0).unwrap());
+        assert_eq!(a.get_index(0, 3), f::<M>(97.0));
+        assert_eq!(a.get_index(1, 3), f::<M>(970.0));
+        assert_eq!(a.get_index(0, 2), f::<M>(100.0));
+        assert_eq!(a.get_index(1, 2), f::<M>(1000.0));
+        assert_eq!(a.get_index(0, 1), f::<M>(102.0));
+        assert_eq!(a.get_index(1, 1), f::<M>(1020.0));
+        assert_eq!(a.get_index(0, 0), f::<M>(103.0));
+        assert_eq!(a.get_index(1, 0), f::<M>(1030.0));
     }
 
     pub fn test_resize_cols<M: DenseMatrix>() {
@@ -2314,29 +2337,61 @@ pub(crate) mod tests {
         assert_eq!(nonzero_idx.clone_as_vec(), vec![0, 2]);
     }
 
+    /// Same order-1 scan as [`test_update_backward_diff`], run on 2 independent batches with
+    /// distinct data, verified via `column(..).clone_as_vec()` so both batches are checked
+    /// (`get_index` only ever reads batch 0).
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
-    pub fn test_batched_column_axpy<M: DenseMatrix>(ctx: M::C) {
+    pub fn test_batched_update_backward_diff<M: DenseMatrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
+        let order = 1;
         let mut a = M::from_vec(
             2,
-            2,
+            4,
             vec![
+                // batch 0
                 f::<M>(1.0),
-                f::<M>(3.0),
+                f::<M>(10.0),
                 f::<M>(2.0),
-                f::<M>(4.0),
+                f::<M>(20.0),
+                f::<M>(3.0),
+                f::<M>(30.0),
+                f::<M>(0.0),
+                f::<M>(0.0),
+                // batch 1
                 f::<M>(5.0),
-                f::<M>(7.0),
+                f::<M>(50.0),
                 f::<M>(6.0),
-                f::<M>(8.0),
+                f::<M>(60.0),
+                f::<M>(7.0),
+                f::<M>(70.0),
+                f::<M>(0.0),
+                f::<M>(0.0),
             ],
+            ctx.clone(),
+        );
+        let d = M::V::from_vec(
+            vec![f::<M>(100.0), f::<M>(1000.0), f::<M>(200.0), f::<M>(2000.0)],
             ctx,
         );
-        a.column_axpy(f::<M>(2.0), 0, 1);
-        assert_eq!(a.get_index(0, 0), f::<M>(1.0));
-        assert_eq!(a.get_index(0, 1), f::<M>(4.0));
-        assert_eq!(a.get_index(1, 0), f::<M>(3.0));
-        assert_eq!(a.get_index(1, 1), f::<M>(10.0));
+
+        a.update_backward_diff(order, &d);
+
+        assert_eq!(
+            a.column(3).into_owned().clone_as_vec(),
+            vec![f::<M>(97.0), f::<M>(970.0), f::<M>(193.0), f::<M>(1930.0)]
+        );
+        assert_eq!(
+            a.column(2).into_owned().clone_as_vec(),
+            vec![f::<M>(100.0), f::<M>(1000.0), f::<M>(200.0), f::<M>(2000.0)]
+        );
+        assert_eq!(
+            a.column(1).into_owned().clone_as_vec(),
+            vec![f::<M>(102.0), f::<M>(1020.0), f::<M>(206.0), f::<M>(2060.0)]
+        );
+        assert_eq!(
+            a.column(0).into_owned().clone_as_vec(),
+            vec![f::<M>(103.0), f::<M>(1030.0), f::<M>(211.0), f::<M>(2110.0)]
+        );
     }
 
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
@@ -3016,8 +3071,8 @@ macro_rules! generate_dense_matrix_tests_nonbatched {
                 $crate::matrix::tests::test_sparsity_dense_errors::<$M>();
             }
             #[test]
-            fn [<test_column_axpy_ $suffix>]() {
-                $crate::matrix::tests::test_column_axpy::<$M>();
+            fn [<test_update_backward_diff_ $suffix>]() {
+                $crate::matrix::tests::test_update_backward_diff::<$M>();
             }
             #[test]
             fn [<test_resize_cols_ $suffix>]() {
@@ -3093,8 +3148,8 @@ macro_rules! generate_dense_matrix_tests_batched {
     ($suffix:ident, $M:ty, $ctx1:expr, $ctx2:expr) => {
         paste::paste! {
             #[test]
-            fn [<test_batched_column_axpy_ $suffix>]() {
-                $crate::matrix::tests::test_batched_column_axpy::<$M>($ctx2);
+            fn [<test_batched_update_backward_diff_ $suffix>]() {
+                $crate::matrix::tests::test_batched_update_backward_diff::<$M>($ctx2);
             }
             #[test]
             fn [<test_batched_view_add_ref_broadcast_ $suffix>]() {
