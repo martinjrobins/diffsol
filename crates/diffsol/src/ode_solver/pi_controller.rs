@@ -5,29 +5,14 @@
 
 use crate::Scalar;
 
-/// Computes `x.pow(exponent)`, but takes a cheap exact shortcut via chained
-/// square roots when `|exponent|` is a small negative power of two (as is the
-/// case for the default PI-controller gains at low solver orders) instead of
-/// a full transcendental `pow()` call. Falls back to `x.pow(exponent)` for any
-/// other exponent, so non-default gains are unaffected.
-fn pow_neg_pow2_fast<T: Scalar>(x: T, exponent: T) -> T {
-    let neg = exponent < T::zero();
-    let ax = if neg { -exponent } else { exponent };
-    let mut candidate = T::one();
-    for k in 0..=3 {
-        if ax == candidate {
-            let mut r = x;
-            for _ in 0..k {
-                r = r.sqrt();
-            }
-            return if neg { T::one() / r } else { r };
-        }
-        candidate /= T::one() + T::one();
-    }
-    x.pow(exponent)
-}
-
 /// PI controller raw factor computation (before safety multiplier and clamping).
+///
+/// The exponentiations go through `pow` rather than a chained-`sqrt` shortcut for exponents that
+/// happen to be negative powers of two. The shortcut is not value-preserving — it changes which
+/// steps the solver takes — and it only covers `|exponent|` in `{1, 1/2, 1/4, 1/8}`, so the
+/// remaining orders still reach the platform's `pow`. Mixing the two made the step counts of
+/// stiff problems diverge between libm implementations, which broke the snapshot tests on
+/// Windows while passing on Linux.
 pub(crate) fn pi_controller_raw<T: Scalar>(
     error_norm: T,
     prev_error_norm: Option<T>,
@@ -38,16 +23,16 @@ pub(crate) fn pi_controller_raw<T: Scalar>(
     let order_f = T::from_usize(eff_order).unwrap();
     let ki = pi_integral / order_f;
     if pi_proportional == T::zero() {
-        pow_neg_pow2_fast(error_norm, -ki)
+        error_norm.pow(-ki)
     } else {
         match &prev_error_norm {
             Some(prev) => {
                 let kp = pi_proportional / order_f;
-                let e_iexp = pow_neg_pow2_fast(error_norm, -(ki + kp));
-                let e_pexp = pow_neg_pow2_fast(*prev, kp);
+                let e_iexp = error_norm.pow(-(ki + kp));
+                let e_pexp = prev.pow(kp);
                 e_iexp * e_pexp
             }
-            None => pow_neg_pow2_fast(error_norm, -ki),
+            None => error_norm.pow(-ki),
         }
     }
 }

@@ -2327,21 +2327,21 @@ mod test {
         let mut s = problem.bdf_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 448
-        number_of_steps: 933
-        number_of_error_test_failures: 294
-        number_of_nonlinear_solver_iterations: 6044
-        number_of_nonlinear_solver_fails: 15
+        number_of_linear_solver_setups: 487
+        number_of_steps: 1002
+        number_of_error_test_failures: 324
+        number_of_nonlinear_solver_iterations: 6528
+        number_of_nonlinear_solver_fails: 17
         number_of_linear_solver_setups_from_checkpoint: 1
-        number_of_linear_solver_setups_from_first_convergence_fail: 15
+        number_of_linear_solver_setups_from_first_convergence_fail: 17
         number_of_linear_solver_setups_from_second_convergence_fail: 0
-        number_of_linear_solver_setups_from_error_test_fail: 294
-        number_of_linear_solver_setups_from_step_success: 138
+        number_of_linear_solver_setups_from_error_test_fail: 324
+        number_of_linear_solver_setups_from_step_success: 145
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 1580
-        number_of_jac_muls: 4568
-        number_of_matrix_evals: 25
+        number_of_calls: 1688
+        number_of_jac_muls: 4955
+        number_of_matrix_evals: 28
         number_of_jac_adj_muls: 0
         "###);
     }
