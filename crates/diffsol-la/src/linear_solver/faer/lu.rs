@@ -1,15 +1,18 @@
-use crate::FaerContext;
 use crate::{error::LaError, linear_solver_error};
+use crate::{Context, FaerContext};
 
-use crate::{linear_solver::LinearSolver, FaerMat, FaerScalar, FaerVec, LinearOp, Matrix};
+use crate::{
+    linear_solver::LinearSolver, FaerMat, FaerScalar, FaerVec, LinearOp, Matrix, MatrixCommon,
+};
 
+use faer::reborrow::{Reborrow, ReborrowMut};
 use faer::{linalg::solvers::FullPivLu, linalg::solvers::Solve};
 /// A [LinearSolver] that uses the LU decomposition in the [`faer`](https://github.com/sarah-ek/faer-rs) library to solve the linear system.
 pub struct LU<T>
 where
     T: FaerScalar,
 {
-    lu: Option<FullPivLu<T>>,
+    lu: Vec<FullPivLu<T>>,
     matrix: Option<FaerMat<T>>,
 }
 
@@ -19,7 +22,7 @@ where
 {
     fn default() -> Self {
         Self {
-            lu: None,
+            lu: Vec::new(),
             matrix: None,
         }
     }
@@ -32,15 +35,22 @@ impl<T: FaerScalar> LinearSolver<FaerMat<T>> for LU<T> {
     ) {
         let matrix = self.matrix.as_mut().expect("Matrix not set");
         op.matrix_inplace(matrix);
-        self.lu = Some(matrix.data.full_piv_lu());
+        let nc = matrix.ncols();
+        self.lu = (0..matrix.context.nbatch())
+            .map(|b| matrix.data.rb().subcols(b * nc, nc).full_piv_lu())
+            .collect();
     }
 
     fn solve_in_place(&self, x: &mut FaerVec<T>) -> Result<(), LaError> {
-        if self.lu.is_none() {
+        if self.lu.is_empty() {
             return Err(linear_solver_error!(LuNotInitialized));
         }
-        let lu = self.lu.as_ref().unwrap();
-        lu.solve_in_place(&mut x.data);
+        x.context
+            .assert_compatible_nbatch(self.lu.len(), "lu_solve");
+        let nlu = self.lu.len();
+        for batch in 0..x.data.ncols() {
+            self.lu[batch % nlu].solve_in_place(x.data.rb_mut().col_mut(batch));
+        }
         Ok(())
     }
 

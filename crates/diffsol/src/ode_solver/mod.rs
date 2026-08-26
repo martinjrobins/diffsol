@@ -1954,20 +1954,14 @@ fn sens_param_scale_small_parameter() {
         .sens_atol([1e-7])
         .param_scales([p])
         .rhs_sens_implicit(
-            {
-                let p = p;
-                move |x, params, t, y| {
-                    y[0] = 1e3 * ((params[0] / p) * (1e3 * t).sin() - x[0]);
-                }
+            move |x, params, t, y| {
+                y[0] = 1e3 * ((params[0] / p) * (1e3 * t).sin() - x[0]);
             },
             move |_x, _params, _t, v, y| {
                 y[0] = -1e3 * v[0];
             },
-            {
-                let p = p;
-                move |_x, _params, t, v, y| {
-                    y[0] = (1e3 / p) * (1e3 * t).sin() * v[0];
-                }
+            move |_x, _params, t, v, y| {
+                y[0] = (1e3 / p) * (1e3 * t).sin() * v[0];
             },
         )
         .init_sens(|_p, _t, y| y[0] = 0.0, |_p, _t, _v, y| y[0] = 0.0, 1)
