@@ -43,22 +43,6 @@ where
 /// parameters at every use.
 pub(crate) const MAX_ORDER: IndexType = 5;
 
-/// Length of a per-order BDF coefficient list — `gamma`, `alpha`, `error_const2`, the
-/// interpolation weights.
-pub(crate) const SMALL_VEC_LEN: usize = MAX_ORDER + 1;
-
-/// Length of a square per-order BDF coefficient block held column-major — the `R`, `U` and
-/// `R * U` matrices of section 3.2 of the BDF paper.
-pub(crate) const SMALL_MAT_LEN: usize = SMALL_VEC_LEN * SMALL_VEC_LEN;
-
-/// A per-order BDF coefficient list, sized once for the maximum order. Only the leading
-/// `order + 1` entries are meaningful at any given step.
-pub(crate) type SmallVec<T> = [T; SMALL_VEC_LEN];
-
-/// A square per-order BDF coefficient block, column-major, sized once for the maximum order.
-/// Only the leading `(order + 1)^2` entries are meaningful at any given step.
-pub(crate) type SmallMat<T> = [T; SMALL_MAT_LEN];
-
 impl<V, M> BdfState<V, M>
 where
     V: Vector + DefaultDenseMatrix,

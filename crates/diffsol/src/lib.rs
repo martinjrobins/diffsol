@@ -351,6 +351,10 @@ pub use diffsol_la::scalar;
 /// Re-exported from the [`diffsol_la`] crate.
 pub use diffsol_la::vector;
 
+/// Fixed-capacity host-side containers for the solvers' small coefficient arrays.
+pub mod small;
+pub use small::{SmallMat, SmallVec};
+
 /// Error types and handling.
 ///
 /// This module defines the [DiffsolError] enum and specialized error variants
@@ -433,6 +437,7 @@ pub use ode_solver::{
     solution::Solution,
     state::OdeSolverState,
     tableau::Tableau,
+    tableau::{TableauMat, TableauVec},
 };
 pub use op::constant_op::{ConstantOp, ConstantOpSens, ConstantOpSensAdjoint};
 pub use op::linear_op::{LinearOp, LinearOpSens, LinearOpTranspose};

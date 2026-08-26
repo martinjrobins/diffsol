@@ -1,6 +1,5 @@
 use crate::error::DiffsolError;
 use crate::error::OdeSolverError;
-use crate::matrix::MAX_SMALL_COLS;
 use crate::op::sdirk::SdirkCallable;
 use crate::scale;
 use crate::AugmentedOdeEquationsImplicit;
@@ -14,11 +13,13 @@ use crate::{
     NonLinearOp, NonLinearSolver, OdeEquations, OdeSolverProblem, OdeSolverState, Op, Scalar,
     Vector, VectorViewMut,
 };
+use crate::{TableauMat, TableauVec};
 use log::info;
 use log::trace;
 use num_traits::{abs, FromPrimitive, One, ToPrimitive, Zero};
 
 use super::jacobian_update::SolverState;
+use super::pi_controller::pi_controller_raw;
 use super::OdeSolverStatistics;
 use std::ops::{MulAssign, SubAssign};
 
@@ -37,18 +38,8 @@ where
     Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
 {
     problem: &'a OdeSolverProblem<Eqn>,
-    tableau: Tableau<M>,
+    tableau: Tableau<Eqn::T>,
     state: Box<RkState<Eqn::V>>,
-    /// Rows of the tableau's `a` matrix, host-side: `a_rows[i]` is `a[i, 0..i]`, the
-    /// coefficients `gemv_cols` wants for stage `i`. Host because they are read off the
-    /// tableau once with `get_index` and then only ever used as a coefficient slice.
-    a_rows: Vec<Vec<Eqn::T>>,
-    /// The tableau's `b` and `d` vectors and its `beta` matrix (`s x poly_order`, row-major),
-    /// host-side for the same reason.
-    b_host: Vec<Eqn::T>,
-    d_host: Vec<Eqn::T>,
-    beta_host: Option<Vec<Eqn::T>>,
-    beta_poly_order: usize,
     statistics: OdeSolverStatistics,
     root_finder: Option<RootFinder<Eqn::V>>,
     tstop: Option<Eqn::T>,
@@ -89,14 +80,9 @@ where
     fn clone(&self) -> Self {
         Self {
             old_state: self.old_state.clone(),
-            tableau: self.tableau.clone(),
+            tableau: self.tableau,
             problem: self.problem,
             state: self.state.clone(),
-            a_rows: self.a_rows.clone(),
-            b_host: self.b_host.clone(),
-            d_host: self.d_host.clone(),
-            beta_host: self.beta_host.clone(),
-            beta_poly_order: self.beta_poly_order,
             statistics: self.statistics.clone(),
             root_finder: self.root_finder.clone(),
             tstop: self.tstop,
@@ -123,7 +109,7 @@ where
     pub(crate) fn new(
         problem: &'a OdeSolverProblem<Eqn>,
         state: RkState<Eqn::V>,
-        tableau: Tableau<M>,
+        tableau: Tableau<Eqn::T>,
     ) -> Result<Self, DiffsolError> {
         Self::_new(problem, state, tableau, true)
     }
@@ -131,7 +117,7 @@ where
     fn _new(
         problem: &'a OdeSolverProblem<Eqn>,
         mut state: RkState<Eqn::V>,
-        tableau: Tableau<M>,
+        tableau: Tableau<Eqn::T>,
         integrate_main_eqn: bool,
     ) -> Result<Self, DiffsolError> {
         // update statistics
@@ -142,41 +128,7 @@ where
         let nstates = state.y.len();
         let order = tableau.s();
 
-        let s = tableau.s();
         let ctx = problem.context();
-        // Every coefficient the stage, error and interpolation kernels need is read off the
-        // tableau once here and kept on the host: `gemv_cols` takes a slice, so nothing is
-        // gained by these living in vectors, and the interpolation weights can then be built
-        // in a stack array instead of allocating per call.
-        let mut a_rows = Vec::with_capacity(s);
-        for i in 0..s {
-            let mut row = Vec::with_capacity(i);
-            for j in 0..i {
-                row.push(tableau.a().get_index(i, j));
-            }
-            a_rows.push(row);
-        }
-        let b_host = (0..s).map(|i| tableau.b().get_index(i)).collect::<Vec<_>>();
-        let d_host = (0..s).map(|i| tableau.d().get_index(i)).collect::<Vec<_>>();
-        let (beta_host, beta_poly_order) = match tableau.beta() {
-            Some(beta) => {
-                let poly_order = beta.ncols();
-                if s > MAX_SMALL_COLS {
-                    return Err(ode_solver_error!(
-                        InvalidTableau,
-                        format!("Invalid tableau, at most {MAX_SMALL_COLS} stages are supported")
-                    ));
-                }
-                let mut flat = Vec::with_capacity(s * poly_order);
-                for i in 0..s {
-                    for k in 0..poly_order {
-                        flat.push(beta.get_index(i, k));
-                    }
-                }
-                (Some(flat), poly_order)
-            }
-            None => (None, 0),
-        };
 
         state.set_problem(problem)?;
         let root_finder = if integrate_main_eqn {
@@ -216,11 +168,6 @@ where
             state: Box::new(state),
             old_state: Box::new(old_state),
             problem,
-            a_rows,
-            b_host,
-            d_host,
-            beta_host,
-            beta_poly_order,
             statistics,
             root_finder,
             tstop: None,
@@ -240,7 +187,7 @@ where
     pub(crate) fn new_augmented<AugmentedEqn: AugmentedOdeEquations<Eqn>>(
         problem: &'a OdeSolverProblem<Eqn>,
         state: RkState<Eqn::V>,
-        tableau: Tableau<M>,
+        tableau: Tableau<Eqn::T>,
         augmented_eqn: &AugmentedEqn,
     ) -> Result<Self, DiffsolError> {
         state.check_sens_consistent_with_problem(problem, augmented_eqn)?;
@@ -275,7 +222,7 @@ where
 
     pub(crate) fn check_explicit_rk(
         problem: &'a OdeSolverProblem<Eqn>,
-        tableau: &Tableau<M>,
+        tableau: &Tableau<Eqn::T>,
     ) -> Result<(), DiffsolError> {
         // check that there isn't any mass matrix
         if problem.eqn.mass().is_some() {
@@ -285,14 +232,14 @@ where
         let s = tableau.s();
         for i in 0..s {
             for j in i..s {
-                if tableau.a().get_index(i, j) != Eqn::T::zero() {
+                if tableau.a(i, j) != Eqn::T::zero() {
                     return Err(ode_solver_error!(
                         InvalidTableau,
                         format!(
                             "Invalid tableau, expected a(i, j) = 0 for i >= j, but found a({}, {}) = {}",
                             i,
                             j,
-                            tableau.a().get_index(i, j)
+                            tableau.a(i, j)
                         )
                     ));
                 }
@@ -301,7 +248,7 @@ where
 
         // check last row of a is the same as b
         for i in 0..s {
-            if tableau.a().get_index(s - 1, i) != tableau.b().get_index(i) {
+            if tableau.a(s - 1, i) != tableau.b()[i] {
                 return Err(ode_solver_error!(
                     InvalidTableau,
                     "Invalid tableau, expected a(s-1, i) = b(i)"
@@ -310,7 +257,7 @@ where
         }
 
         // check that last c is 1
-        if tableau.c().get_index(s - 1) != Eqn::T::one() {
+        if tableau.c()[s - 1] != Eqn::T::one() {
             return Err(ode_solver_error!(
                 InvalidTableau,
                 "Invalid tableau, expected c(s-1) = 1"
@@ -318,7 +265,7 @@ where
         }
 
         // check that first c is 0
-        if tableau.c().get_index(0) != Eqn::T::zero() {
+        if tableau.c()[0] != Eqn::T::zero() {
             return Err(ode_solver_error!(
                 InvalidTableau,
                 "Invalid tableau, expected c(0) = 0"
@@ -328,15 +275,15 @@ where
     }
 
     pub(crate) fn skip_first_stage(&self) -> bool {
-        self.tableau.a().get_index(0, 0) == Eqn::T::zero()
+        self.tableau.a(0, 0) == Eqn::T::zero()
     }
 
-    pub(crate) fn check_sdirk_rk(tableau: &Tableau<M>) -> Result<(), DiffsolError> {
+    pub(crate) fn check_sdirk_rk(tableau: &Tableau<Eqn::T>) -> Result<(), DiffsolError> {
         // check that the upper triangular part of a is zero
         let s = tableau.s();
         for i in 0..s {
             for j in (i + 1)..s {
-                if tableau.a().get_index(i, j) != Eqn::T::zero() {
+                if tableau.a(i, j) != Eqn::T::zero() {
                     return Err(ode_solver_error!(
                         InvalidTableau,
                         "Invalid tableau, expected a(i, j) = 0 for i > j"
@@ -344,10 +291,10 @@ where
                 }
             }
         }
-        let gamma = tableau.a().get_index(1, 1);
+        let gamma = tableau.a(1, 1);
         //check that for i = 1..s-1, a(i, i) = gamma
         for i in 1..tableau.s() {
-            if tableau.a().get_index(i, i) != gamma {
+            if tableau.a(i, i) != gamma {
                 return Err(ode_solver_error!(
                     InvalidTableau,
                     format!("Invalid tableau, expected a(i, i) = gamma = {gamma} for i = 1..s-1")
@@ -358,17 +305,17 @@ where
         // if a(0, 0) = 0, then we're a ESDIRK method
         // otherwise, error
         let zero = Eqn::T::zero();
-        if tableau.a().get_index(0, 0) != zero && tableau.a().get_index(0, 0) != gamma {
+        if tableau.a(0, 0) != zero && tableau.a(0, 0) != gamma {
             return Err(ode_solver_error!(
                 InvalidTableau,
                 "Invalid tableau, expected a(0, 0) = 0 or a(0, 0) = gamma"
             ));
         }
-        let is_sdirk = tableau.a().get_index(0, 0) == gamma;
+        let is_sdirk = tableau.a(0, 0) == gamma;
 
         // check last row of a is the same as b
         for i in 0..s {
-            if tableau.a().get_index(s - 1, i) != tableau.b().get_index(i) {
+            if tableau.a(s - 1, i) != tableau.b()[i] {
                 return Err(ode_solver_error!(
                     InvalidTableau,
                     "Invalid tableau, expected a(s-1, i) = b(i)"
@@ -377,7 +324,7 @@ where
         }
 
         // check that last c is 1
-        if tableau.c().get_index(s - 1) != Eqn::T::one() {
+        if tableau.c()[s - 1] != Eqn::T::one() {
             return Err(ode_solver_error!(
                 InvalidTableau,
                 "Invalid tableau, expected c(s-1) = 1"
@@ -385,7 +332,7 @@ where
         }
 
         // check that the first c is 0 for esdirk methods
-        if !is_sdirk && tableau.c().get_index(0) != Eqn::T::zero() {
+        if !is_sdirk && tableau.c()[0] != Eqn::T::zero() {
             return Err(ode_solver_error!(
                 InvalidTableau,
                 "Invalid tableau, expected c(0) = 0 for esdirk methods"
@@ -394,7 +341,7 @@ where
         Ok(())
     }
 
-    pub(crate) fn tableau(&self) -> &Tableau<M> {
+    pub(crate) fn tableau(&self) -> &Tableau<Eqn::T> {
         &self.tableau
     }
 
@@ -584,7 +531,7 @@ where
         h: Eqn::T,
         augmented_eqn: Option<&mut impl AugmentedOdeEquations<Eqn>>,
     ) {
-        let t = self.state.t + self.tableau.c().get_index(i) * h;
+        let t = self.state.t + self.tableau.c()[i] * h;
 
         // main equation
         let integrate_main_eqn = augmented_eqn
@@ -597,7 +544,7 @@ where
                 0,
                 i,
                 Eqn::T::one(),
-                &self.a_rows[i],
+                self.tableau.stage_coeffs(i),
                 Eqn::T::one(),
                 &mut self.old_state.y,
             );
@@ -631,7 +578,7 @@ where
                     0,
                     i,
                     Eqn::T::one(),
-                    &self.a_rows[i],
+                    self.tableau.stage_coeffs(i),
                     Eqn::T::one(),
                     &mut self.old_state.s[j],
                 );
@@ -661,15 +608,15 @@ where
         dy0: &Eqn::V,
         diff: &M,
         hdy: &mut Eqn::V,
-        tableau: &Tableau<M>,
+        tableau: &Tableau<Eqn::T>,
     ) {
         if i == 0 {
             hdy.axpy(h, dy0, Eqn::T::zero());
         } else if i == 1 {
             hdy.copy_from_view(&diff.column(i - 1));
         } else {
-            let c = (tableau.c().get_index(i) - tableau.c().get_index(i - 2))
-                / (tableau.c().get_index(i - 1) - tableau.c().get_index(i - 2));
+            let c =
+                (tableau.c()[i] - tableau.c()[i - 2]) / (tableau.c()[i - 1] - tableau.c()[i - 2]);
             // dy = c1  + c * (c1 - c2)
             hdy.copy_from_view(&diff.column(i - 1));
             hdy.axpy_v(-c, &diff.column(i - 2), Eqn::T::one() + c);
@@ -689,10 +636,16 @@ where
         Eqn: OdeEquationsImplicit,
         AugEqn: AugmentedOdeEquationsImplicit<Eqn>,
     {
-        let t = self.state.t + self.tableau.c().get_index(i) * h;
+        let t = self.state.t + self.tableau.c()[i] * h;
         // main equation
         if let Some(op) = op {
-            op.set_phi(Eqn::T::one(), &self.diff, i, &self.state.y, &self.a_rows[i]);
+            op.set_phi(
+                Eqn::T::one(),
+                &self.diff,
+                i,
+                &self.state.y,
+                self.tableau.stage_coeffs(i),
+            );
             Self::predict_stage_sdirk(
                 i,
                 h,
@@ -744,7 +697,7 @@ where
                     &self.sdiff[j],
                     i,
                     &self.state.s[j],
-                    &self.a_rows[i],
+                    self.tableau.stage_coeffs(i),
                 );
                 op.eqn_mut().set_index(j);
                 Self::predict_stage_sdirk(
@@ -833,8 +786,14 @@ where
         let s = self.tableau.s();
         let mut error_norm = Eqn::T::zero();
         if let Some(error) = self.error.as_mut() {
-            self.diff
-                .gemv_cols(0, s, Eqn::T::one(), &self.d_host, Eqn::T::zero(), error);
+            self.diff.gemv_cols(
+                0,
+                s,
+                Eqn::T::one(),
+                self.tableau.d().as_slice(),
+                Eqn::T::zero(),
+                error,
+            );
             linear_solver(error)?;
 
             // compute error norm
@@ -846,8 +805,14 @@ where
 
         if let Some(out_error) = self.out_error.as_mut() {
             // output errors
-            self.gdiff
-                .gemv_cols(0, s, Eqn::T::one(), &self.d_host, Eqn::T::zero(), out_error);
+            self.gdiff.gemv_cols(
+                0,
+                s,
+                Eqn::T::one(),
+                self.tableau.d().as_slice(),
+                Eqn::T::zero(),
+                out_error,
+            );
             let atol = self.problem.out_atol.as_ref().unwrap();
             let rtol = self.problem.out_rtol.unwrap();
             let out_error_norm = out_error.squared_norm(&self.state.g, atol, rtol);
@@ -863,7 +828,7 @@ where
                     0,
                     s,
                     Eqn::T::one(),
-                    &self.d_host,
+                    self.tableau.d().as_slice(),
                     Eqn::T::zero(),
                     sens_error,
                 );
@@ -883,7 +848,7 @@ where
                     0,
                     s,
                     Eqn::T::one(),
-                    &self.d_host,
+                    self.tableau.d().as_slice(),
                     Eqn::T::zero(),
                     sens_out_error,
                 );
@@ -959,7 +924,7 @@ where
                 0,
                 s,
                 Eqn::T::one(),
-                &self.b_host,
+                self.tableau.b().as_slice(),
                 Eqn::T::one(),
                 &mut self.old_state.g,
             );
@@ -971,7 +936,7 @@ where
                 0,
                 s,
                 Eqn::T::one(),
-                &self.b_host,
+                self.tableau.b().as_slice(),
                 Eqn::T::one(),
                 &mut self.old_state.sg[i],
             );
@@ -1024,22 +989,19 @@ where
         diff.gemv_cols(0, beta_f.len(), M::T::one(), beta_f, M::T::one(), ret);
     }
 
-    /// Writes `beta * [theta, theta^2, ..., theta^p]`, scaled by `scale`, into the leading `s`
-    /// entries of `out` and returns that sub-slice.
+    /// `beta * [theta, theta^2, ..., theta^p]`, scaled by `scale`: one weight per stage.
     ///
-    /// `beta_host` is the tableau's beta matrix, `s x poly_order` row-major. This is host
-    /// arithmetic on at most `MAX_SMALL_COLS * poly_order` values, so it replaces what used to be
-    /// three allocations and a `gemv` per interpolation call.
-    fn interpolate_beta_weights<'w>(
+    /// `beta_t` is the tableau's beta matrix transposed, so stage `i`'s polynomial coefficients
+    /// are the contiguous column `i`. The returned length is the stage count, which is what
+    /// callers hand to `gemv_cols` as the column count.
+    fn interpolate_beta_weights(
         theta: M::T,
-        beta_host: &[M::T],
-        poly_order: usize,
+        beta_t: &TableauMat<M::T>,
         scale: M::T,
-        out: &'w mut [M::T; MAX_SMALL_COLS],
-    ) -> &'w [M::T] {
-        let s = beta_host.len() / poly_order;
-        for (i, o) in out[..s].iter_mut().enumerate() {
-            let row = &beta_host[i * poly_order..][..poly_order];
+    ) -> TableauVec<M::T> {
+        let mut out = TableauVec::zeros(beta_t.ncols());
+        for (i, o) in out.as_mut_slice().iter_mut().enumerate() {
+            let row = beta_t.as_col_slice(i);
             // theta^(k+1), accumulated as k advances
             let mut theta_pow = theta;
             let mut acc = M::T::zero();
@@ -1049,21 +1011,19 @@ where
             }
             *o = scale * acc;
         }
-        &out[..s]
+        out
     }
 
     /// Derivative of [`Self::interpolate_beta_weights`] w.r.t. `theta`:
     /// `d/dtheta [theta, theta^2, ..., theta^p] = [1, 2*theta, ..., p*theta^{p-1}]`.
-    fn interpolate_beta_weights_deriv<'w>(
+    fn interpolate_beta_weights_deriv(
         theta: M::T,
-        beta_host: &[M::T],
-        poly_order: usize,
+        beta_t: &TableauMat<M::T>,
         scale: M::T,
-        out: &'w mut [M::T; MAX_SMALL_COLS],
-    ) -> &'w [M::T] {
-        let s = beta_host.len() / poly_order;
-        for (i, o) in out[..s].iter_mut().enumerate() {
-            let row = &beta_host[i * poly_order..][..poly_order];
+    ) -> TableauVec<M::T> {
+        let mut out = TableauVec::zeros(beta_t.ncols());
+        for (i, o) in out.as_mut_slice().iter_mut().enumerate() {
+            let row = beta_t.as_col_slice(i);
             let mut theta_pow = M::T::one();
             let mut acc = M::T::zero();
             for (k, r) in row.iter().enumerate() {
@@ -1073,7 +1033,7 @@ where
             }
             *o = scale * acc;
         }
-        &out[..s]
+        out
     }
 
     fn interpolate_hermite(
@@ -1185,16 +1145,9 @@ where
             (t - self.old_state.t) / dt
         };
         let scale_diff = Eqn::T::one();
-        if let Some(beta_host) = self.beta_host.as_deref() {
-            let mut buf = [Eqn::T::zero(); MAX_SMALL_COLS];
-            let beta_f = Self::interpolate_beta_weights(
-                theta,
-                beta_host,
-                self.beta_poly_order,
-                scale_diff,
-                &mut buf,
-            );
-            Self::interpolate_from_diff(&self.old_state.y, beta_f, &self.diff, ret);
+        if let Some(beta_t) = self.tableau.beta_t() {
+            let beta_f = Self::interpolate_beta_weights(theta, beta_t, scale_diff);
+            Self::interpolate_from_diff(&self.old_state.y, beta_f.as_slice(), &self.diff, ret);
         } else {
             Self::interpolate_hermite(
                 scale_diff,
@@ -1245,19 +1198,18 @@ where
         }
         let theta = (t - self.old_state.t) / dt;
         let scale_diff = Eqn::T::one();
-        if let Some(beta_host) = self.beta_host.as_deref() {
+        if let Some(beta_t) = self.tableau.beta_t() {
             // dy/dt = (scale_diff / dt) * diff * d_beta_f, with the scalar folded into the
             // weights so no extra pass is needed
-            let mut buf = [Eqn::T::zero(); MAX_SMALL_COLS];
-            let d_beta_f = Self::interpolate_beta_weights_deriv(
-                theta,
-                beta_host,
-                self.beta_poly_order,
-                scale_diff / dt,
-                &mut buf,
+            let d_beta_f = Self::interpolate_beta_weights_deriv(theta, beta_t, scale_diff / dt);
+            self.diff.gemv_cols(
+                0,
+                d_beta_f.len(),
+                M::T::one(),
+                d_beta_f.as_slice(),
+                M::T::zero(),
+                dy,
             );
-            self.diff
-                .gemv_cols(0, d_beta_f.len(), M::T::one(), d_beta_f, M::T::zero(), dy);
         } else {
             Self::interpolate_hermite_deriv(
                 scale_diff,
@@ -1309,16 +1261,9 @@ where
             (t - self.old_state.t) / dt
         };
         let scale_diff = Eqn::T::one();
-        if let Some(beta_host) = self.beta_host.as_deref() {
-            let mut buf = [Eqn::T::zero(); MAX_SMALL_COLS];
-            let beta_f = Self::interpolate_beta_weights(
-                theta,
-                beta_host,
-                self.beta_poly_order,
-                scale_diff,
-                &mut buf,
-            );
-            Self::interpolate_from_diff(&self.old_state.g, beta_f, &self.gdiff, g);
+        if let Some(beta_t) = self.tableau.beta_t() {
+            let beta_f = Self::interpolate_beta_weights(theta, beta_t, scale_diff);
+            Self::interpolate_from_diff(&self.old_state.g, beta_f.as_slice(), &self.gdiff, g);
         } else {
             Self::interpolate_hermite(
                 scale_diff,
@@ -1381,15 +1326,8 @@ where
             (t - self.old_state.t) / dt
         };
         let scale_diff = Eqn::T::one();
-        if let Some(beta_host) = self.beta_host.as_deref() {
-            let mut buf = [Eqn::T::zero(); MAX_SMALL_COLS];
-            let beta_f = Self::interpolate_beta_weights(
-                theta,
-                beta_host,
-                self.beta_poly_order,
-                scale_diff,
-                &mut buf,
-            );
+        if let Some(beta_t) = self.tableau.beta_t() {
+            let beta_f = Self::interpolate_beta_weights(theta, beta_t, scale_diff);
             for ((y, diff), r) in self
                 .old_state
                 .s
@@ -1397,7 +1335,7 @@ where
                 .zip(self.sdiff.iter())
                 .zip(ret.iter_mut())
             {
-                Self::interpolate_from_diff(y, beta_f, diff, r);
+                Self::interpolate_from_diff(y, beta_f.as_slice(), diff, r);
             }
         } else {
             for ((s0, s1), (diff, r)) in self
@@ -1414,53 +1352,6 @@ where
     }
 }
 
-/// Computes `x.pow(exponent)`, but takes a cheap exact shortcut via chained
-/// square roots when `|exponent|` is a small negative power of two (as is the
-/// case for the default PI-controller gains at low solver orders) instead of
-/// a full transcendental `pow()` call. Falls back to `x.pow(exponent)` for any
-/// other exponent, so non-default gains are unaffected.
-fn pow_neg_pow2_fast<T: crate::Scalar>(x: T, exponent: T) -> T {
-    let neg = exponent < T::zero();
-    let ax = if neg { -exponent } else { exponent };
-    let mut candidate = T::one();
-    for k in 0..=3 {
-        if ax == candidate {
-            let mut r = x;
-            for _ in 0..k {
-                r = r.sqrt();
-            }
-            return if neg { T::one() / r } else { r };
-        }
-        candidate /= T::one() + T::one();
-    }
-    x.pow(exponent)
-}
-
-/// PI controller raw factor computation (before safety multiplier and clamping).
-pub(crate) fn pi_controller_raw<T: crate::Scalar>(
-    error_norm: T,
-    prev_error_norm: Option<T>,
-    pi_integral: T,
-    pi_proportional: T,
-    eff_order: usize,
-) -> T {
-    let order_f = T::from_usize(eff_order).unwrap();
-    let ki = pi_integral / order_f;
-    if pi_proportional == T::zero() {
-        pow_neg_pow2_fast(error_norm, -ki)
-    } else {
-        match &prev_error_norm {
-            Some(prev) => {
-                let kp = pi_proportional / order_f;
-                let e_iexp = pow_neg_pow2_fast(error_norm, -(ki + kp));
-                let e_pexp = pow_neg_pow2_fast(*prev, kp);
-                e_iexp * e_pexp
-            }
-            None => pow_neg_pow2_fast(error_norm, -ki),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use crate::{
@@ -1471,16 +1362,17 @@ mod tests {
             exponential_decay::exponential_decay_problem,
             exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem,
         },
-        DefaultDenseMatrix, DenseMatrix, OdeEquations, OdeSolverProblem, Tableau,
+        DefaultDenseMatrix, OdeEquations, OdeSolverProblem, Tableau,
     };
 
     use super::Rk;
+    use crate::TableauMat;
 
     type M = NalgebraMat<f64>;
 
     fn check_sdirk_for_problem<Eqn>(
         _problem: &OdeSolverProblem<Eqn>,
-        tableau: &Tableau<M>,
+        tableau: &Tableau<Eqn::T>,
     ) -> Result<(), DiffsolError>
     where
         Eqn: OdeEquations<T = f64, V = crate::NalgebraVec<f64>, C = NalgebraContext>,
@@ -1489,32 +1381,32 @@ mod tests {
         Rk::<Eqn, M>::check_sdirk_rk(tableau)
     }
 
-    fn make_invalid_explicit_tableau() -> Tableau<M> {
-        let base = Tableau::<M>::tsit45(Default::default());
-        let mut a = base.a().clone();
-        a.set_index(0, 0, 1.0);
+    /// `base` with `a[0, 0]` overwritten, rebuilt through the public natural-orientation API.
+    fn tableau_with_a00(base: Tableau<f64>, a00: f64) -> Tableau<f64> {
+        let s = base.s();
+        let mut a = TableauMat::zeros(s, s);
+        for i in 0..s {
+            for j in 0..s {
+                a[(i, j)] = base.a(i, j);
+            }
+        }
+        a[(0, 0)] = a00;
         Tableau::new(
             a,
-            base.b().clone(),
-            base.c().clone(),
-            base.d().clone(),
+            *base.b(),
+            *base.c(),
+            *base.d(),
             base.order(),
-            base.beta().cloned(),
+            base.beta_t().map(|beta_t| beta_t.transposed()),
         )
     }
 
-    fn make_invalid_sdirk_tableau() -> Tableau<M> {
-        let base = Tableau::<M>::tr_bdf2(Default::default());
-        let mut a = base.a().clone();
-        a.set_index(0, 0, 0.25);
-        Tableau::new(
-            a,
-            base.b().clone(),
-            base.c().clone(),
-            base.d().clone(),
-            base.order(),
-            base.beta().cloned(),
-        )
+    fn make_invalid_explicit_tableau() -> Tableau<f64> {
+        tableau_with_a00(Tableau::tsit45(), 1.0)
+    }
+
+    fn make_invalid_sdirk_tableau() -> Tableau<f64> {
+        tableau_with_a00(Tableau::tr_bdf2(), 0.25)
     }
 
     fn expect_invalid_tableau(err: DiffsolError) {
@@ -1524,8 +1416,7 @@ mod tests {
     #[test]
     fn explicit_rk_rejects_mass_matrices() {
         let (problem, _soln) = exponential_decay_with_algebraic_problem::<M>(false);
-        let err =
-            Rk::check_explicit_rk(&problem, &Tableau::<M>::tsit45(Default::default())).unwrap_err();
+        let err = Rk::<_, M>::check_explicit_rk(&problem, &Tableau::tsit45()).unwrap_err();
         assert!(matches!(
             err,
             DiffsolError::OdeSolverError(OdeSolverError::MassMatrixNotSupported)
@@ -1535,7 +1426,8 @@ mod tests {
     #[test]
     fn explicit_rk_rejects_invalid_a_diagonal() {
         let (problem, _soln) = exponential_decay_problem::<M>(false);
-        let err = Rk::check_explicit_rk(&problem, &make_invalid_explicit_tableau()).unwrap_err();
+        let err =
+            Rk::<_, M>::check_explicit_rk(&problem, &make_invalid_explicit_tableau()).unwrap_err();
         expect_invalid_tableau(err);
     }
 
