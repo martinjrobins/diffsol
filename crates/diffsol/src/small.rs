@@ -2,10 +2,10 @@
 //!
 //! Runge-Kutta tableaux and the BDF difference-table coefficients are only ever a handful of
 //! values, are computed from host scalars, and are consumed as plain `&[T]` slices by
-//! [`DenseMatrix::gemv_cols`](diffsol_la::DenseMatrix::gemv_cols) and
-//! [`mul_cols_by`](diffsol_la::DenseMatrix::mul_cols_by). Holding them in backend vectors costs
-//! an allocation and — on CUDA — a device-to-host copy per element read. These two types hold
-//! them inline instead, so they need no allocation and reading one is just an index.
+//! [`DenseMatrix::gemv_cols`] and [`DenseMatrix::mul_cols_by`]. Holding them in backend
+//! vectors costs an allocation and — on CUDA — a device-to-host copy per element read. These
+//! two types hold them inline instead, so they need no allocation and reading one is just an
+//! index.
 //!
 //! Both are capacity-`N` with a runtime shape. That is deliberate rather than
 //! `SmallMat<T, ROWS, COLS>`: the interpolation `beta` matrix is not square (7x4 for `tsit45`),
