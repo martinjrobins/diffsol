@@ -1,5 +1,12 @@
 #pragma once
 
+// Largest column range the small-coefficient kernels accept, and the size of the by-value
+// coefficient arrays they take. Must match `MAX_SMALL_COLS` in `src/matrix/mod.rs`.
+//
+// Two things drive it: the BDF difference table is at most MAX_ORDER + 1 = 6 columns wide, and
+// the widest built-in Runge-Kutta tableau (tsit45) has 7 stages. 8 covers both.
+#define MAX_SMALL_COLS 8
+
 //
 // Shared inline functions for 2D grid kernel launches.
 //

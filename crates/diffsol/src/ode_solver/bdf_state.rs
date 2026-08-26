@@ -36,17 +36,34 @@ where
     pub(crate) sgdiff_initialised: bool,
 }
 
-/// Highest BDF order, free-standing so it can size arrays in generic code
-/// (an associated const of a generic type cannot).
+/// Highest BDF order.
+///
+/// Free-standing rather than an associated const of [`BdfState`]: an associated const of a
+/// generic type cannot size an array, and referring to one means spelling out the generic
+/// parameters at every use.
 pub(crate) const MAX_ORDER: IndexType = 5;
+
+/// Length of a per-order BDF coefficient list — `gamma`, `alpha`, `error_const2`, the
+/// interpolation weights.
+pub(crate) const SMALL_VEC_LEN: usize = MAX_ORDER + 1;
+
+/// Length of a square per-order BDF coefficient block held column-major — the `R`, `U` and
+/// `R * U` matrices of section 3.2 of the BDF paper.
+pub(crate) const SMALL_MAT_LEN: usize = SMALL_VEC_LEN * SMALL_VEC_LEN;
+
+/// A per-order BDF coefficient list, sized once for the maximum order. Only the leading
+/// `order + 1` entries are meaningful at any given step.
+pub(crate) type SmallVec<T> = [T; SMALL_VEC_LEN];
+
+/// A square per-order BDF coefficient block, column-major, sized once for the maximum order.
+/// Only the leading `(order + 1)^2` entries are meaningful at any given step.
+pub(crate) type SmallMat<T> = [T; SMALL_MAT_LEN];
 
 impl<V, M> BdfState<V, M>
 where
     V: Vector + DefaultDenseMatrix,
     M: DenseMatrix<T = V::T, V = V, C = V::C>,
 {
-    pub(crate) const MAX_ORDER: IndexType = MAX_ORDER;
-
     pub(crate) fn new_empty(ctx: V::C) -> Self {
         let default_v = V::zeros(0, ctx.clone());
         let default_m = M::zeros(0, 0, ctx.clone());
@@ -189,11 +206,11 @@ where
         } = state;
         let nstates = y.len();
         let ctx = y.context();
-        let diff = M::zeros(nstates, Self::MAX_ORDER + 3, ctx.clone());
-        let sdiff = vec![M::zeros(nstates, Self::MAX_ORDER + 3, ctx.clone()); s.len()];
-        let gdiff = M::zeros(g.len(), Self::MAX_ORDER + 3, ctx.clone());
+        let diff = M::zeros(nstates, MAX_ORDER + 3, ctx.clone());
+        let sdiff = vec![M::zeros(nstates, MAX_ORDER + 3, ctx.clone()); s.len()];
+        let gdiff = M::zeros(g.len(), MAX_ORDER + 3, ctx.clone());
         let sgdiff = if !sg.is_empty() {
-            vec![M::zeros(sg[0].len(), Self::MAX_ORDER + 3, ctx.clone()); sg.len()]
+            vec![M::zeros(sg[0].len(), MAX_ORDER + 3, ctx.clone()); sg.len()]
         } else {
             Vec::new()
         };

@@ -179,6 +179,8 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
     pub fn set_c(&self, h: Eqn::T, alpha: Eqn::T) {
         self.c.replace(h * alpha);
     }
+    /// `gamma` must be `gamma[1..]`, i.e. offset to line up with the `1..order + 1` column
+    /// range psi sums over.
     fn set_psi<M: DenseMatrix<V = Eqn::V, T = Eqn::T>>(
         &self,
         diff: &M,
@@ -189,7 +191,7 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
     ) {
         // update psi term as defined in second equation on page 9 of [1]
         debug_assert!(order >= 1, "BDF order is always at least one");
-        diff.weighted_column_sum(1, order + 1, Some(&gamma[1..=order]), psi);
+        diff.gemv_cols(1, order + 1, Eqn::T::one(), gamma, Eqn::T::zero(), psi);
         psi.mul_assign(scale(alpha[order]));
     }
     pub fn set_psi_and_y0<M: DenseMatrix<V = Eqn::V, T = Eqn::T>>(

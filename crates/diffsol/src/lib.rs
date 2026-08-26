@@ -241,7 +241,7 @@
 //!
 //! If you wish to use your own matrix and vector types, you will need to implement the following
 //! traits:
-//!   - For matrices: [Matrix], [MatrixView], [MatrixViewMut], [DenseMatrix], and
+//!   - For matrices: [Matrix], [DenseMatrix], and
 //!     [MatrixCommon].
 //!   - For vectors: [Vector], [VectorIndex], [VectorView], [VectorViewMut], and
 //!     [VectorCommon].
@@ -391,9 +391,7 @@ pub use diffsol_la::{
     FaerVec, FaerVecIndex, FaerVecMut, FaerVecRef, NalgebraVec, NalgebraVecMut, NalgebraVecRef,
     Vector, VectorCommon, VectorHost, VectorIndex, VectorRef, VectorView, VectorViewMut,
 };
-use diffsol_la::{
-    MatrixHost, MatrixRef, MatrixSparsity, MatrixSparsityRef, MatrixView, MatrixViewMut,
-};
+use diffsol_la::{MatrixHost, MatrixRef, MatrixSparsity, MatrixSparsityRef};
 use nonlinear_solver::{convergence::Convergence, root::RootFinder};
 pub use nonlinear_solver::{
     line_search::{BacktrackingLineSearch, LineSearch, NoLineSearch},
@@ -461,9 +459,9 @@ use op::{
 #[cfg(feature = "cuda")]
 pub use diffsol_la::CudaContext;
 #[cfg(feature = "cuda")]
-pub use diffsol_la::{CudaIndex, CudaVec, CudaVecMut, CudaVecRef};
+pub use diffsol_la::CudaMat;
 #[cfg(feature = "cuda")]
-pub use diffsol_la::{CudaMat, CudaMatMut, CudaMatRef};
+pub use diffsol_la::{CudaIndex, CudaVec, CudaVecMut, CudaVecRef};
 #[cfg(feature = "cuda")]
 pub use diffsol_la::{CudaType, ScalarCuda};
 #[cfg(feature = "cuda")]

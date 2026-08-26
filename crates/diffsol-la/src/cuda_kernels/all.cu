@@ -1,11 +1,13 @@
 #include "cuda_kernels_common.h"
 extern "C" {
 #include "backward_diff_update.cu"
+#include "gemv_cols.cu"
 #include "mat_from_diagonal.cu"
 #include "mat_get_diagonal.cu"
 #include "mat_scale_add_assign.cu"
 #include "mat_set_column.cu"
 #include "mat_set_data_with_indices.cu"
+#include "mul_cols_by.cu"
 #include "vec_add_assign.cu"
 #include "vec_add.cu"
 #include "vec_assign_at_indices.cu"
@@ -27,5 +29,4 @@ extern "C" {
 #include "vec_squared_norm.cu"
 #include "vec_sub_assign.cu"
 #include "vec_sub.cu"
-#include "weighted_column_sum.cu"
 }

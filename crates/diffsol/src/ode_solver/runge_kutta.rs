@@ -1,5 +1,6 @@
 use crate::error::DiffsolError;
 use crate::error::OdeSolverError;
+use crate::matrix::MAX_SMALL_COLS;
 use crate::op::sdirk::SdirkCallable;
 use crate::scale;
 use crate::AugmentedOdeEquationsImplicit;
@@ -9,9 +10,9 @@ use crate::RkState;
 use crate::RootFinder;
 use crate::Tableau;
 use crate::{
-    ode_solver_error, AugmentedOdeEquations, Context, Convergence, DefaultDenseMatrix, DenseMatrix,
-    MatrixView, NonLinearOp, NonLinearSolver, OdeEquations, OdeSolverProblem, OdeSolverState, Op,
-    Scalar, Vector, VectorViewMut,
+    ode_solver_error, AugmentedOdeEquations, Convergence, DefaultDenseMatrix, DenseMatrix,
+    NonLinearOp, NonLinearSolver, OdeEquations, OdeSolverProblem, OdeSolverState, Op, Scalar,
+    Vector, VectorViewMut,
 };
 use log::info;
 use log::trace;
@@ -38,7 +39,16 @@ where
     problem: &'a OdeSolverProblem<Eqn>,
     tableau: Tableau<M>,
     state: Box<RkState<Eqn::V>>,
-    a_rows: Vec<Eqn::V>,
+    /// Rows of the tableau's `a` matrix, host-side: `a_rows[i]` is `a[i, 0..i]`, the
+    /// coefficients `gemv_cols` wants for stage `i`. Host because they are read off the
+    /// tableau once with `get_index` and then only ever used as a coefficient slice.
+    a_rows: Vec<Vec<Eqn::T>>,
+    /// The tableau's `b` and `d` vectors and its `beta` matrix (`s x poly_order`, row-major),
+    /// host-side for the same reason.
+    b_host: Vec<Eqn::T>,
+    d_host: Vec<Eqn::T>,
+    beta_host: Option<Vec<Eqn::T>>,
+    beta_poly_order: usize,
     statistics: OdeSolverStatistics,
     root_finder: Option<RootFinder<Eqn::V>>,
     tstop: Option<Eqn::T>,
@@ -83,6 +93,10 @@ where
             problem: self.problem,
             state: self.state.clone(),
             a_rows: self.a_rows.clone(),
+            b_host: self.b_host.clone(),
+            d_host: self.d_host.clone(),
+            beta_host: self.beta_host.clone(),
+            beta_poly_order: self.beta_poly_order,
             statistics: self.statistics.clone(),
             root_finder: self.root_finder.clone(),
             tstop: self.tstop,
@@ -129,16 +143,40 @@ where
         let order = tableau.s();
 
         let s = tableau.s();
-        let mut a_rows = Vec::with_capacity(s);
         let ctx = problem.context();
-        let solver_ctx = ctx.clone_with_nbatch(1).unwrap();
+        // Every coefficient the stage, error and interpolation kernels need is read off the
+        // tableau once here and kept on the host: `gemv_cols` takes a slice, so nothing is
+        // gained by these living in vectors, and the interpolation weights can then be built
+        // in a stack array instead of allocating per call.
+        let mut a_rows = Vec::with_capacity(s);
         for i in 0..s {
             let mut row = Vec::with_capacity(i);
             for j in 0..i {
                 row.push(tableau.a().get_index(i, j));
             }
-            a_rows.push(Eqn::V::from_vec(row, solver_ctx.clone()));
+            a_rows.push(row);
         }
+        let b_host = (0..s).map(|i| tableau.b().get_index(i)).collect::<Vec<_>>();
+        let d_host = (0..s).map(|i| tableau.d().get_index(i)).collect::<Vec<_>>();
+        let (beta_host, beta_poly_order) = match tableau.beta() {
+            Some(beta) => {
+                let poly_order = beta.ncols();
+                if s > MAX_SMALL_COLS {
+                    return Err(ode_solver_error!(
+                        InvalidTableau,
+                        format!("Invalid tableau, at most {MAX_SMALL_COLS} stages are supported")
+                    ));
+                }
+                let mut flat = Vec::with_capacity(s * poly_order);
+                for i in 0..s {
+                    for k in 0..poly_order {
+                        flat.push(beta.get_index(i, k));
+                    }
+                }
+                (Some(flat), poly_order)
+            }
+            None => (None, 0),
+        };
 
         state.set_problem(problem)?;
         let root_finder = if integrate_main_eqn {
@@ -179,6 +217,10 @@ where
             old_state: Box::new(old_state),
             problem,
             a_rows,
+            b_host,
+            d_host,
+            beta_host,
+            beta_poly_order,
             statistics,
             root_finder,
             tstop: None,
@@ -551,7 +593,9 @@ where
             .unwrap_or(true);
         if integrate_main_eqn {
             self.old_state.y.copy_from(&self.state.y);
-            self.diff.columns(0, i).gemv(
+            self.diff.gemv_cols(
+                0,
+                i,
                 Eqn::T::one(),
                 &self.a_rows[i],
                 Eqn::T::one(),
@@ -583,7 +627,9 @@ where
             for j in 0..self.sdiff.len() {
                 aug_eqn.set_index(j);
                 self.old_state.s[j].copy_from(&self.state.s[j]);
-                self.sdiff[j].columns(0, i).gemv(
+                self.sdiff[j].gemv_cols(
+                    0,
+                    i,
                     Eqn::T::one(),
                     &self.a_rows[i],
                     Eqn::T::one(),
@@ -646,12 +692,7 @@ where
         let t = self.state.t + self.tableau.c().get_index(i) * h;
         // main equation
         if let Some(op) = op {
-            op.set_phi(
-                Eqn::T::one(),
-                &self.diff.columns(0, i),
-                &self.state.y,
-                &self.a_rows[i],
-            );
+            op.set_phi(Eqn::T::one(), &self.diff, i, &self.state.y, &self.a_rows[i]);
             Self::predict_stage_sdirk(
                 i,
                 h,
@@ -700,7 +741,8 @@ where
             for j in 0..self.sdiff.len() {
                 op.set_phi(
                     Eqn::T::one(),
-                    &self.sdiff[j].columns(0, i),
+                    &self.sdiff[j],
+                    i,
                     &self.state.s[j],
                     &self.a_rows[i],
                 );
@@ -788,10 +830,11 @@ where
         augmented_eqn: Option<&mut impl AugmentedOdeEquations<Eqn>>,
         linear_solver: impl FnOnce(&mut Eqn::V) -> Result<(), DiffsolError>,
     ) -> Result<Eqn::T, DiffsolError> {
+        let s = self.tableau.s();
         let mut error_norm = Eqn::T::zero();
         if let Some(error) = self.error.as_mut() {
             self.diff
-                .gemv(Eqn::T::one(), self.tableau.d(), Eqn::T::zero(), error);
+                .gemv_cols(0, s, Eqn::T::one(), &self.d_host, Eqn::T::zero(), error);
             linear_solver(error)?;
 
             // compute error norm
@@ -804,7 +847,7 @@ where
         if let Some(out_error) = self.out_error.as_mut() {
             // output errors
             self.gdiff
-                .gemv(Eqn::T::one(), self.tableau.d(), Eqn::T::zero(), out_error);
+                .gemv_cols(0, s, Eqn::T::one(), &self.d_host, Eqn::T::zero(), out_error);
             let atol = self.problem.out_atol.as_ref().unwrap();
             let rtol = self.problem.out_rtol.unwrap();
             let out_error_norm = out_error.squared_norm(&self.state.g, atol, rtol);
@@ -816,7 +859,14 @@ where
             let aug_eqn = augmented_eqn.as_ref().unwrap();
             let rtol = aug_eqn.rtol().unwrap();
             for i in 0..self.sdiff.len() {
-                self.sdiff[i].gemv(Eqn::T::one(), self.tableau.d(), Eqn::T::zero(), sens_error);
+                self.sdiff[i].gemv_cols(
+                    0,
+                    s,
+                    Eqn::T::one(),
+                    &self.d_host,
+                    Eqn::T::zero(),
+                    sens_error,
+                );
                 let atol = aug_eqn.atol(i).unwrap();
                 let err = sens_error.squared_norm(&self.state.s[i], atol, rtol);
                 error_norm = error_norm.max(err);
@@ -829,9 +879,11 @@ where
             let atol = aug_eqn.out_atol().unwrap();
             let rtol = aug_eqn.out_rtol().unwrap();
             for i in 0..self.sgdiff.len() {
-                self.sgdiff[i].gemv(
+                self.sgdiff[i].gemv_cols(
+                    0,
+                    s,
                     Eqn::T::one(),
-                    self.tableau.d(),
+                    &self.d_host,
                     Eqn::T::zero(),
                     sens_out_error,
                 );
@@ -899,12 +951,15 @@ where
         new_h: Eqn::T,
         rescale_dy: bool,
     ) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError> {
+        let s = self.tableau.s();
         // step accepted, so integrate output functions
         if self.problem.integrate_out {
             self.old_state.g.copy_from(&self.state.g);
-            self.gdiff.gemv(
+            self.gdiff.gemv_cols(
+                0,
+                s,
                 Eqn::T::one(),
-                self.tableau.b(),
+                &self.b_host,
                 Eqn::T::one(),
                 &mut self.old_state.g,
             );
@@ -912,9 +967,11 @@ where
 
         for i in 0..self.sgdiff.len() {
             self.old_state.sg[i].copy_from(&self.state.sg[i]);
-            self.sgdiff[i].gemv(
+            self.sgdiff[i].gemv_cols(
+                0,
+                s,
                 Eqn::T::one(),
-                self.tableau.b(),
+                &self.b_host,
                 Eqn::T::one(),
                 &mut self.old_state.sg[i],
             );
@@ -961,46 +1018,62 @@ where
         Ok(OdeSolverStopReason::InternalTimestep)
     }
 
-    fn interpolate_from_diff(scale_diff: M::T, y0: &M::V, beta_f: &M::V, diff: &M, ret: &mut M::V) {
+    fn interpolate_from_diff(y0: &M::V, beta_f: &[M::T], diff: &M, ret: &mut M::V) {
         // ret = old_y + sum_{i=0}^{s_star-1} beta[i] * diff[:, i]
         ret.copy_from(y0);
-        diff.gemv(scale_diff, beta_f, M::T::one(), ret);
+        diff.gemv_cols(0, beta_f.len(), M::T::one(), beta_f, M::T::one(), ret);
     }
 
-    fn interpolate_beta_function(theta: M::T, beta: &M) -> M::V {
-        let poly_order = beta.ncols();
-        let s_star = beta.nrows();
-        let mut thetav = Vec::with_capacity(poly_order);
-        thetav.push(theta);
-        for i in 1..poly_order {
-            thetav.push(theta * thetav[i - 1]);
+    /// Writes `beta * [theta, theta^2, ..., theta^p]`, scaled by `scale`, into the leading `s`
+    /// entries of `out` and returns that sub-slice.
+    ///
+    /// `beta_host` is the tableau's beta matrix, `s x poly_order` row-major. This is host
+    /// arithmetic on at most `MAX_SMALL_COLS * poly_order` values, so it replaces what used to be
+    /// three allocations and a `gemv` per interpolation call.
+    fn interpolate_beta_weights<'w>(
+        theta: M::T,
+        beta_host: &[M::T],
+        poly_order: usize,
+        scale: M::T,
+        out: &'w mut [M::T; MAX_SMALL_COLS],
+    ) -> &'w [M::T] {
+        let s = beta_host.len() / poly_order;
+        for (i, o) in out[..s].iter_mut().enumerate() {
+            let row = &beta_host[i * poly_order..][..poly_order];
+            // theta^(k+1), accumulated as k advances
+            let mut theta_pow = theta;
+            let mut acc = M::T::zero();
+            for r in row {
+                acc += *r * theta_pow;
+                theta_pow *= theta;
+            }
+            *o = scale * acc;
         }
-        // beta_poly = beta * thetav
-        let thetav = M::V::from_vec(thetav, beta.context().clone());
-        let mut beta_f = <M::V as Vector>::zeros(s_star, beta.context().clone());
-        beta.gemv(M::T::one(), &thetav, M::T::zero(), &mut beta_f);
-        beta_f
+        &out[..s]
     }
 
-    // Derivative of interpolate_beta_function w.r.t theta.
-    // d/dtheta [theta, theta^2, ..., theta^p] = [1, 2*theta, ..., p*theta^{p-1}]
-    fn interpolate_beta_function_deriv(theta: M::T, beta: &M) -> M::V {
-        let poly_order = beta.ncols();
-        let s_star = beta.nrows();
-        // d_thetav[0] = 1 (d/dtheta theta)
-        // d_thetav[i] = (i+1) * theta^i for i >= 1, computed iteratively
-        let mut d_thetav = Vec::with_capacity(poly_order);
-        d_thetav.push(M::T::one());
-        let mut theta_pow = theta; // theta^1
-        for i in 1..poly_order {
-            let coeff = M::T::from_f64(i as f64 + 1.0).unwrap();
-            d_thetav.push(coeff * theta_pow); // (i+1) * theta^i
-            theta_pow *= theta; // theta^{i+1} for next iteration
+    /// Derivative of [`Self::interpolate_beta_weights`] w.r.t. `theta`:
+    /// `d/dtheta [theta, theta^2, ..., theta^p] = [1, 2*theta, ..., p*theta^{p-1}]`.
+    fn interpolate_beta_weights_deriv<'w>(
+        theta: M::T,
+        beta_host: &[M::T],
+        poly_order: usize,
+        scale: M::T,
+        out: &'w mut [M::T; MAX_SMALL_COLS],
+    ) -> &'w [M::T] {
+        let s = beta_host.len() / poly_order;
+        for (i, o) in out[..s].iter_mut().enumerate() {
+            let row = &beta_host[i * poly_order..][..poly_order];
+            let mut theta_pow = M::T::one();
+            let mut acc = M::T::zero();
+            for (k, r) in row.iter().enumerate() {
+                let coeff = M::T::from_f64(k as f64 + 1.0).unwrap();
+                acc += *r * coeff * theta_pow;
+                theta_pow *= theta;
+            }
+            *o = scale * acc;
         }
-        let d_thetav = M::V::from_vec(d_thetav, beta.context().clone());
-        let mut d_beta_f = <M::V as Vector>::zeros(s_star, beta.context().clone());
-        beta.gemv(M::T::one(), &d_thetav, M::T::zero(), &mut d_beta_f);
-        d_beta_f
+        &out[..s]
     }
 
     fn interpolate_hermite(
@@ -1112,9 +1185,16 @@ where
             (t - self.old_state.t) / dt
         };
         let scale_diff = Eqn::T::one();
-        if let Some(beta) = self.tableau.beta() {
-            let beta_f = Self::interpolate_beta_function(theta, beta);
-            Self::interpolate_from_diff(scale_diff, &self.old_state.y, &beta_f, &self.diff, ret);
+        if let Some(beta_host) = self.beta_host.as_deref() {
+            let mut buf = [Eqn::T::zero(); MAX_SMALL_COLS];
+            let beta_f = Self::interpolate_beta_weights(
+                theta,
+                beta_host,
+                self.beta_poly_order,
+                scale_diff,
+                &mut buf,
+            );
+            Self::interpolate_from_diff(&self.old_state.y, beta_f, &self.diff, ret);
         } else {
             Self::interpolate_hermite(
                 scale_diff,
@@ -1165,10 +1245,19 @@ where
         }
         let theta = (t - self.old_state.t) / dt;
         let scale_diff = Eqn::T::one();
-        if let Some(beta) = self.tableau.beta() {
-            let d_beta_f = Self::interpolate_beta_function_deriv(theta, beta);
-            // dy/dt = (scale_diff / dt) * diff * d_beta_f
-            self.diff.gemv(scale_diff / dt, &d_beta_f, M::T::zero(), dy);
+        if let Some(beta_host) = self.beta_host.as_deref() {
+            // dy/dt = (scale_diff / dt) * diff * d_beta_f, with the scalar folded into the
+            // weights so no extra pass is needed
+            let mut buf = [Eqn::T::zero(); MAX_SMALL_COLS];
+            let d_beta_f = Self::interpolate_beta_weights_deriv(
+                theta,
+                beta_host,
+                self.beta_poly_order,
+                scale_diff / dt,
+                &mut buf,
+            );
+            self.diff
+                .gemv_cols(0, d_beta_f.len(), M::T::one(), d_beta_f, M::T::zero(), dy);
         } else {
             Self::interpolate_hermite_deriv(
                 scale_diff,
@@ -1220,9 +1309,16 @@ where
             (t - self.old_state.t) / dt
         };
         let scale_diff = Eqn::T::one();
-        if let Some(beta) = self.tableau.beta() {
-            let beta_f = Self::interpolate_beta_function(theta, beta);
-            Self::interpolate_from_diff(scale_diff, &self.old_state.g, &beta_f, &self.gdiff, g);
+        if let Some(beta_host) = self.beta_host.as_deref() {
+            let mut buf = [Eqn::T::zero(); MAX_SMALL_COLS];
+            let beta_f = Self::interpolate_beta_weights(
+                theta,
+                beta_host,
+                self.beta_poly_order,
+                scale_diff,
+                &mut buf,
+            );
+            Self::interpolate_from_diff(&self.old_state.g, beta_f, &self.gdiff, g);
         } else {
             Self::interpolate_hermite(
                 scale_diff,
@@ -1285,8 +1381,15 @@ where
             (t - self.old_state.t) / dt
         };
         let scale_diff = Eqn::T::one();
-        if let Some(beta) = self.tableau.beta() {
-            let beta_f = Self::interpolate_beta_function(theta, beta);
+        if let Some(beta_host) = self.beta_host.as_deref() {
+            let mut buf = [Eqn::T::zero(); MAX_SMALL_COLS];
+            let beta_f = Self::interpolate_beta_weights(
+                theta,
+                beta_host,
+                self.beta_poly_order,
+                scale_diff,
+                &mut buf,
+            );
             for ((y, diff), r) in self
                 .old_state
                 .s
@@ -1294,7 +1397,7 @@ where
                 .zip(self.sdiff.iter())
                 .zip(ret.iter_mut())
             {
-                Self::interpolate_from_diff(scale_diff, y, &beta_f, diff, r);
+                Self::interpolate_from_diff(y, beta_f, diff, r);
             }
         } else {
             for ((s0, s1), (diff, r)) in self

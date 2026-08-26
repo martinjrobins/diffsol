@@ -38,7 +38,6 @@ pub mod linear_solver;
 ///
 /// This module defines the [Matrix] trait and related traits for matrix operations:
 /// - [DenseMatrix] for dense column-major matrices
-/// - [MatrixView] and [MatrixViewMut] for borrowed views
 /// - Sparsity detection and handling
 ///
 /// Implementations are provided for:
@@ -88,7 +87,7 @@ pub use matrix::{
 pub(crate) use matrix::extract_block::ColMajBlock;
 pub use matrix::{
     sparsity::Dense, sparsity::DenseRef, sparsity::MatrixSparsity, sparsity::MatrixSparsityRef,
-    MatrixHost, MatrixRef, MatrixView, MatrixViewMut,
+    MatrixHost, MatrixRef,
 };
 
 pub use scalar::{scale, FaerScalar, IndexType, NalgebraScalar, Scalar, Scale};
@@ -105,7 +104,7 @@ pub use context::cuda::CudaContext;
 #[cfg(feature = "cuda")]
 pub use linear_solver::cuda::lu::CudaLU;
 #[cfg(feature = "cuda")]
-pub use matrix::cuda::{CudaMat, CudaMatMut, CudaMatRef};
+pub use matrix::cuda::CudaMat;
 #[cfg(feature = "cuda")]
 pub use scalar::cuda::{CudaType, ScalarCuda};
 #[cfg(feature = "cuda")]

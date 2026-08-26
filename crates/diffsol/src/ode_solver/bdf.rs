@@ -3,7 +3,7 @@ use std::cell::Ref;
 
 use crate::{
     error::{DiffsolError, OdeSolverError},
-    AugmentedOdeEquationsImplicit, Context, Convergence, DefaultDenseMatrix, LinearSolver,
+    AugmentedOdeEquationsImplicit, Convergence, DefaultDenseMatrix, LinearSolver,
     NewtonNonlinearSolver, NoAug, NoLineSearch, StateRef, StateRefMut,
 };
 
@@ -12,14 +12,14 @@ use num_traits::{abs, FromPrimitive, One, Signed, ToPrimitive, Zero};
 use crate::ode_solver_error;
 use crate::{
     matrix::MatrixRef, nonlinear_solver::root::RootFinder, op::bdf::BdfCallable, scalar::scale,
-    AugmentedOdeEquations, BdfState, DenseMatrix, JacobianUpdate, MatrixViewMut, NonLinearOp,
-    NonLinearSolver, OdeEquationsImplicit, OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens,
-    OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, Scalar,
-    SensEquations, Vector, VectorRef, VectorView,
+    AugmentedOdeEquations, BdfState, DenseMatrix, JacobianUpdate, NonLinearOp, NonLinearSolver,
+    OdeEquationsImplicit, OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeSolverMethod,
+    OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, Scalar, SensEquations, Vector,
+    VectorRef, VectorView,
 };
 
 use super::adjoint::AdjointOdeSolverMethod;
-use super::bdf_state::MAX_ORDER;
+use super::bdf_state::{SmallMat, SmallVec, MAX_ORDER, SMALL_MAT_LEN, SMALL_VEC_LEN};
 use super::config::BdfConfig;
 use super::jacobian_update::SolverState;
 use super::method::AugmentedOdeSolverMethod;
@@ -130,13 +130,16 @@ pub struct Bdf<
     s_op: Option<BdfCallable<AugmentedEqn>>,
     s_deltas: Vec<Eqn::V>,
     sg_deltas: Vec<Eqn::V>,
-    diff_tmp: M,
-    gdiff_tmp: M,
-    sgdiff_tmp: M,
-    u: M,
-    alpha: Vec<Eqn::T>,
-    gamma: Vec<Eqn::T>,
-    error_const2: Vec<Eqn::T>,
+    /// The U matrix of section 3.2 of [1], `(order+1) x (order+1)` column-major on the host.
+    /// Rebuilt only when the order changes.
+    u: SmallMat<Eqn::T>,
+    /// Scratch for the per-step R and R*U blocks (see `_update_step_size`).
+    r_tmp: SmallMat<Eqn::T>,
+    ru_tmp: SmallMat<Eqn::T>,
+    alpha: SmallVec<Eqn::T>,
+    /// The `gamma` coefficients of section 2 of [1].
+    gamma: SmallVec<Eqn::T>,
+    error_const2: SmallVec<Eqn::T>,
     statistics: OdeSolverStatistics,
     state: BdfState<Eqn::V, M>,
     tstop: Option<Eqn::T>,
@@ -185,13 +188,12 @@ where
             s_predict: self.s_predict.clone(),
             s_deltas: self.s_deltas.clone(),
             sg_deltas: self.sg_deltas.clone(),
-            diff_tmp: self.diff_tmp.clone(),
-            gdiff_tmp: self.gdiff_tmp.clone(),
-            sgdiff_tmp: self.sgdiff_tmp.clone(),
-            u: self.u.clone(),
-            alpha: self.alpha.clone(),
-            gamma: self.gamma.clone(),
-            error_const2: self.error_const2.clone(),
+            r_tmp: self.r_tmp,
+            ru_tmp: self.ru_tmp,
+            u: self.u,
+            alpha: self.alpha,
+            gamma: self.gamma,
+            error_const2: self.error_const2,
             statistics: OdeSolverStatistics::default(),
             state: self.state.clone(),
             tstop: self.tstop,
@@ -258,21 +260,20 @@ where
             <Eqn::T as FromPrimitive>::from_f64(-0.0415).unwrap(),
             Eqn::T::zero(),
         ];
-        let mut alpha = vec![Eqn::T::zero()];
-        let mut gamma = vec![Eqn::T::zero()];
-        let mut error_const2 = vec![Eqn::T::one()];
 
-        let max_order: usize = BdfState::<Eqn::V, M>::MAX_ORDER;
+        let mut alpha = [Eqn::T::zero(); SMALL_VEC_LEN];
+        let mut gamma = [Eqn::T::zero(); SMALL_VEC_LEN];
+        let mut error_const2 = [Eqn::T::one(); SMALL_VEC_LEN];
 
         #[allow(clippy::needless_range_loop)]
-        for i in 1..=max_order {
+        for i in 1..=MAX_ORDER {
             let i_t = <Eqn::T as FromPrimitive>::from_f64(i as f64).unwrap();
             let one_over_i = Eqn::T::one() / i_t;
             let one_over_i_plus_one = Eqn::T::one() / (i_t + Eqn::T::one());
-            gamma.push(gamma[i - 1] + one_over_i);
-            alpha.push(Eqn::T::one() / ((Eqn::T::one() - kappa[i]) * gamma[i]));
+            gamma[i] = gamma[i - 1] + one_over_i;
+            alpha[i] = Eqn::T::one() / ((Eqn::T::one() - kappa[i]) * gamma[i]);
             let error_const2_i = kappa[i] * gamma[i] + one_over_i_plus_one;
-            error_const2.push(error_const2_i * error_const2_i);
+            error_const2[i] = error_const2_i * error_const2_i;
         }
 
         state.check_consistent_with_problem(problem)?;
@@ -311,7 +312,7 @@ where
 
         // (re)allocate internal state
         let nstates = problem.eqn.rhs().nstates();
-        let diff_tmp = M::zeros(nstates, BdfState::<Eqn::V, M>::MAX_ORDER + 3, ctx.clone());
+
         let y_delta = <Eqn::V as Vector>::zeros(nstates, ctx.clone());
         let y_predict = <Eqn::V as Vector>::zeros(nstates, ctx.clone());
 
@@ -321,10 +322,15 @@ where
             0
         };
         let g_delta = <Eqn::V as Vector>::zeros(nout, ctx.clone());
-        let gdiff_tmp = M::zeros(nout, BdfState::<Eqn::V, M>::MAX_ORDER + 3, ctx.clone());
 
         // init U matrix
-        let u = Self::_compute_r(state.order, Eqn::T::one(), ctx.clone());
+        // R, U and R*U are at most 6x6 and are only ever consumed by `mul_cols_by`, which
+        // takes a host slice, so they live on the host and are sized once for the maximum
+        // order. Each is used as its leading `(order+1)^2` entries.
+        let mut u = [Eqn::T::zero(); SMALL_MAT_LEN];
+        Self::_compute_r(state.order, Eqn::T::one(), &mut u);
+        let r_tmp = [Eqn::T::zero(); SMALL_MAT_LEN];
+        let ru_tmp = r_tmp;
         let is_state_modified = false;
 
         Ok(Self {
@@ -334,9 +340,8 @@ where
             ode_problem: problem,
             nonlinear_solver,
             n_equal_steps: 0,
-            diff_tmp,
-            gdiff_tmp,
-            sgdiff_tmp: M::zeros(0, 0, ctx.clone()),
+            r_tmp,
+            ru_tmp,
             y_delta,
             y_predict,
             t_predict: Eqn::T::zero(),
@@ -417,11 +422,6 @@ where
         ret.s_predict = <Eqn::V as Vector>::zeros(nstates, ctx.clone());
         if let Some(out) = ret.s_op.as_ref().unwrap().eqn().out() {
             ret.sg_deltas = vec![<Eqn::V as Vector>::zeros(out.nout(), ctx.clone()); naug];
-            ret.sgdiff_tmp = M::zeros(
-                out.nout(),
-                BdfState::<Eqn::V, M>::MAX_ORDER + 3,
-                ctx.clone(),
-            );
         }
         Ok(ret)
     }
@@ -430,36 +430,51 @@ where
         &self.statistics
     }
 
-    fn _compute_r(order: usize, factor: Eqn::T, ctx: M::C) -> M {
-        //computes the R matrix with entries
-        //given by the first equation on page 8 of [1]
-        //
-        //This is used to update the differences matrix when step size h is varied
-        //according to factor = h_{n+1} / h_n
-        //
-        //Note that the U matrix also defined in the same section can be also be
-        //found using factor = 1, which corresponds to R with a constant step size
+    /// Writes the `(order+1) x (order+1)` R matrix into the leading entries of `r`,
+    /// column-major, and returns that sub-slice.
+    ///
+    /// Entries are given by the first equation on page 8 of [1]. This is used to update the
+    /// differences matrix when step size h is varied according to `factor = h_{n+1} / h_n`.
+    ///
+    /// Note that the U matrix also defined in the same section can also be found using
+    /// `factor = 1`, which corresponds to R with a constant step size.
+    fn _compute_r(order: usize, factor: Eqn::T, r: &mut [Eqn::T]) -> &[Eqn::T] {
         let ncols = order + 1;
         let nrows = order + 1;
-        let solver_ctx = ctx.clone_with_nbatch(1).unwrap();
-        let mut r = vec![M::T::zero(); ncols * nrows];
+        let r = &mut r[..ncols * nrows];
+        r.fill(Eqn::T::zero());
 
         // r[0, 0:order] = 1
         for j in 0..ncols {
-            r[j * nrows] = M::T::one();
+            r[j * nrows] = Eqn::T::one();
         }
 
         // r[i, j] = r[i-1, j] * (j - 1 - factor * i) / j
         for j in 1..ncols {
-            let j_t = <M::T as FromPrimitive>::from_f64(j as f64).unwrap();
+            let j_t = <Eqn::T as FromPrimitive>::from_f64(j as f64).unwrap();
             for i in 1..nrows {
-                let i_t = <M::T as FromPrimitive>::from_f64(i as f64).unwrap();
+                let i_t = <Eqn::T as FromPrimitive>::from_f64(i as f64).unwrap();
                 let idx_ij = j * nrows + i;
-                r[idx_ij] = r[idx_ij - 1] * (i_t - M::T::one() - factor * j_t) / i_t;
+                r[idx_ij] = r[idx_ij - 1] * (i_t - Eqn::T::one() - factor * j_t) / i_t;
             }
         }
+        r
+    }
 
-        M::from_vec(order + 1, order + 1, r, solver_ctx)
+    /// `out = a * b` for two `k x k` column-major host blocks.
+    ///
+    /// The summation order matches column-major `gemm` (accumulate over `l` for each output
+    /// entry), so the result is bit-identical to the `DenseMatrix::gemm` call this replaced.
+    fn _small_mat_mul(k: usize, a: &[Eqn::T], b: &[Eqn::T], out: &mut [Eqn::T]) {
+        for j in 0..k {
+            for i in 0..k {
+                let mut acc = Eqn::T::zero();
+                for l in 0..k {
+                    acc += a[l * k + i] * b[j * k + l];
+                }
+                out[j * k + i] = acc;
+            }
+        }
     }
 
     fn _jacobian_updates(&mut self, c: Eqn::T, state: SolverState) {
@@ -517,31 +532,23 @@ where
 
         // update D using equations in section 3.2 of [1]
         let order = self.state.order;
-        let r = Self::_compute_r(order, factor, self.problem().eqn.context().clone());
-        let ru = r.mat_mul(&self.u);
+        let k = order + 1;
+        let r = Self::_compute_r(order, factor, &mut self.r_tmp);
+        Self::_small_mat_mul(k, r, &self.u[..k * k], &mut self.ru_tmp);
+        let ru = &self.ru_tmp[..k * k];
         {
             if self.op.is_some() {
-                Self::_update_diff_for_step_size(
-                    &ru,
-                    &mut self.state.diff,
-                    &mut self.diff_tmp,
-                    order,
-                );
+                Self::_update_diff_for_step_size(ru, &mut self.state.diff, order);
                 if self.ode_problem.integrate_out {
-                    Self::_update_diff_for_step_size(
-                        &ru,
-                        &mut self.state.gdiff,
-                        &mut self.gdiff_tmp,
-                        order,
-                    );
+                    Self::_update_diff_for_step_size(ru, &mut self.state.gdiff, order);
                 }
             }
             for diff in self.state.sdiff.iter_mut() {
-                Self::_update_diff_for_step_size(&ru, diff, &mut self.diff_tmp, order);
+                Self::_update_diff_for_step_size(ru, diff, order);
             }
 
             for diff in self.state.sgdiff.iter_mut() {
-                Self::_update_diff_for_step_size(&ru, diff, &mut self.sgdiff_tmp, order);
+                Self::_update_diff_for_step_size(ru, diff, order);
             }
         }
 
@@ -565,15 +572,9 @@ where
         Ok(new_h)
     }
 
-    fn _update_diff_for_step_size(ru: &M, diff: &mut M, diff_tmp: &mut M, order: usize) {
-        // D[0:order+1] = R * U * D[0:order+1]
-        {
-            let d_zero_order = diff.columns(0, order + 1);
-            let mut d_zero_order_tmp = diff_tmp.columns_mut(0, order + 1);
-            d_zero_order_tmp.gemm_vo(Eqn::T::one(), &d_zero_order, ru, Eqn::T::zero());
-            // diff_sub = diff * RU
-        }
-        std::mem::swap(diff, diff_tmp);
+    // D[0:order+1] = D[0:order+1] * R * U
+    fn _update_diff_for_step_size(ru: &[Eqn::T], diff: &mut M, order: usize) {
+        diff.mul_cols_by(order + 1, ru);
     }
 
     fn calculate_output_delta(&mut self) {
@@ -584,7 +585,7 @@ where
         self.op.as_ref().unwrap().integrate_out(
             &state.dg,
             &state.gdiff,
-            self.gamma.as_slice(),
+            &self.gamma[1..],
             self.alpha.as_slice(),
             state.order,
             &mut self.g_delta,
@@ -602,7 +603,7 @@ where
         s_op.integrate_out(
             &state.dsg[i],
             &state.sgdiff[i],
-            self.gamma.as_slice(),
+            &self.gamma[1..],
             self.alpha.as_slice(),
             state.order,
             &mut self.sg_deltas[i],
@@ -658,8 +659,21 @@ where
     }
 
     // predict forward to new step (eq 2 in [1])
+    //
+    // The weights are all ones, so they are a constant. Rust has no generic `static` — `T::one()`
+    // is not a `const fn` — so the nearest equivalent is to materialise the fixed-size array
+    // here, where it is the only thing that reads it. It costs `SMALL_VEC_LEN` stack stores that
+    // the optimiser is free to fold.
     fn _predict_using_diff(y_predict: &mut Eqn::V, diff: &M, order: usize) {
-        diff.weighted_column_sum(0, order + 1, None, y_predict);
+        let ones = [Eqn::T::one(); SMALL_VEC_LEN];
+        diff.gemv_cols(
+            0,
+            order + 1,
+            Eqn::T::one(),
+            &ones,
+            Eqn::T::zero(),
+            y_predict,
+        );
     }
 
     fn _predict_forward(&mut self) {
@@ -670,7 +684,7 @@ where
         if let Some(op) = self.op.as_mut() {
             op.set_psi_and_y0(
                 &state.diff,
-                self.gamma.as_slice(),
+                &self.gamma[1..],
                 self.alpha.as_slice(),
                 state.order,
                 &self.y_predict,
@@ -748,7 +762,7 @@ where
             }
         }
 
-        self.u = Self::_compute_r(1, Eqn::T::one(), self.problem().eqn.context().clone());
+        Self::_compute_r(1, Eqn::T::one(), &mut self.u);
 
         self.is_state_modified = false;
     }
@@ -763,7 +777,7 @@ where
         order: usize,
         y: &mut Eqn::V,
     ) {
-        let mut weights = [Eqn::T::zero(); MAX_ORDER + 1];
+        let mut weights = [Eqn::T::zero(); SMALL_VEC_LEN];
         let mut time_factor = Eqn::T::one();
         weights[0] = Eqn::T::one();
         for (i, weight) in weights.iter_mut().enumerate().skip(1).take(order) {
@@ -771,7 +785,14 @@ where
             time_factor *= (t - (t1 - h * i_t)) / (h * (Eqn::T::one() + i_t));
             *weight = time_factor;
         }
-        diff.weighted_column_sum(0, order + 1, Some(&weights[..=order]), y);
+        diff.gemv_cols(
+            0,
+            order + 1,
+            Eqn::T::one(),
+            &weights[..=order],
+            Eqn::T::zero(),
+            y,
+        );
     }
 
     // Interpolate the time derivative dy/dt of the BDF polynomial at time t.
@@ -787,7 +808,7 @@ where
         dy: &mut Eqn::V,
     ) {
         // weights[i] is the weight of column i + 1; column 0 is constant in t so it drops out
-        let mut weights = [Eqn::T::zero(); MAX_ORDER + 1];
+        let mut weights = [Eqn::T::zero(); SMALL_VEC_LEN];
         let mut pi = Eqn::T::one();
         let mut d_pi = Eqn::T::zero();
         for (i, weight) in weights.iter_mut().enumerate().take(order) {
@@ -802,7 +823,14 @@ where
             *weight = d_pi;
         }
         // an order of zero leaves an empty range, which zeroes dy
-        diff.weighted_column_sum(1, order + 1, Some(&weights[..order]), dy);
+        diff.gemv_cols(
+            1,
+            order + 1,
+            Eqn::T::one(),
+            &weights[..order],
+            Eqn::T::zero(),
+            dy,
+        );
     }
 
     fn error_control(&self) -> Eqn::T {
@@ -951,7 +979,7 @@ where
                 // setup op
                 s_op.set_psi_and_y0(
                     &state.sdiff[i],
-                    self.gamma.as_slice(),
+                    &self.gamma[1..],
                     self.alpha.as_slice(),
                     order,
                     &self.s_predict,
@@ -1059,11 +1087,7 @@ where
 
         // order might have changed
         if self.state.order != old_order {
-            self.u = Self::_compute_r(
-                self.state.order,
-                Eqn::T::one(),
-                self.problem().eqn.context().clone(),
-            );
+            Self::_compute_r(self.state.order, Eqn::T::one(), &mut self.u);
         }
 
         // reinitialise jacobian updates as if a checkpoint was taken
@@ -1492,7 +1516,7 @@ where
             } else {
                 Eqn::T::INFINITY
             };
-            let error_p_norm = if order < BdfState::<Eqn::V, M>::MAX_ORDER {
+            let error_p_norm = if order < MAX_ORDER {
                 self.predict_error_control(order + 1)
             } else {
                 Eqn::T::INFINITY
@@ -1527,11 +1551,7 @@ where
                 };
                 self.state.order = new_order;
                 if max_index != 1 {
-                    self.u = Self::_compute_r(
-                        new_order,
-                        Eqn::T::one(),
-                        self.problem().eqn.context().clone(),
-                    );
+                    Self::_compute_r(new_order, Eqn::T::one(), &mut self.u);
                 }
                 new_order
             };
@@ -2322,20 +2342,20 @@ mod test {
         let mut s = problem.bdf_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 425
-        number_of_steps: 932
-        number_of_error_test_failures: 273
-        number_of_nonlinear_solver_iterations: 5827
-        number_of_nonlinear_solver_fails: 16
+        number_of_linear_solver_setups: 448
+        number_of_steps: 933
+        number_of_error_test_failures: 294
+        number_of_nonlinear_solver_iterations: 6044
+        number_of_nonlinear_solver_fails: 15
         number_of_linear_solver_setups_from_checkpoint: 1
-        number_of_linear_solver_setups_from_first_convergence_fail: 14
-        number_of_linear_solver_setups_from_second_convergence_fail: 2
-        number_of_linear_solver_setups_from_error_test_fail: 273
-        number_of_linear_solver_setups_from_step_success: 135
+        number_of_linear_solver_setups_from_first_convergence_fail: 15
+        number_of_linear_solver_setups_from_second_convergence_fail: 0
+        number_of_linear_solver_setups_from_error_test_fail: 294
+        number_of_linear_solver_setups_from_step_success: 138
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 1523
-        number_of_jac_muls: 4410
+        number_of_calls: 1580
+        number_of_jac_muls: 4568
         number_of_matrix_evals: 25
         number_of_jac_adj_muls: 0
         "###);
