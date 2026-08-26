@@ -372,7 +372,7 @@ where
 }
 
 /// 🔴 matrix_columns — Extract a matrix view over a column range per batch.
-/// Called every RK stage via diff.columns(0, i).gemv_o(...).
+/// Called every RK stage via diff.columns(0, i).gemv(...).
 fn bench_matrix_columns<M: Matrix<T = f64> + DenseMatrix + 'static>(c: &mut Criterion, label: &str)
 where
     M::C: Default + Clone,

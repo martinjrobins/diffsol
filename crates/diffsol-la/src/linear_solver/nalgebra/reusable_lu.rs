@@ -50,7 +50,7 @@ impl<T: NalgebraScalar> BatchLu<T> {
             let mut block = self.a.data.columns_mut(batch * ncols, ncols);
             for i in 0..ncols {
                 let p = block.view_range(i.., i).icamax() + i;
-                let diag = block[(p, i)];
+                let diag = block[(p, i)].clone();
                 if diag.is_zero() {
                     continue;
                 }

@@ -551,7 +551,7 @@ where
             .unwrap_or(true);
         if integrate_main_eqn {
             self.old_state.y.copy_from(&self.state.y);
-            self.diff.columns(0, i).gemv_o(
+            self.diff.columns(0, i).gemv(
                 Eqn::T::one(),
                 &self.a_rows[i],
                 Eqn::T::one(),
@@ -583,7 +583,7 @@ where
             for j in 0..self.sdiff.len() {
                 aug_eqn.set_index(j);
                 self.old_state.s[j].copy_from(&self.state.s[j]);
-                self.sdiff[j].columns(0, i).gemv_o(
+                self.sdiff[j].columns(0, i).gemv(
                     Eqn::T::one(),
                     &self.a_rows[i],
                     Eqn::T::one(),

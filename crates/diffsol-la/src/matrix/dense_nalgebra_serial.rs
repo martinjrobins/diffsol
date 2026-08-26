@@ -446,11 +446,8 @@ impl<'a, T: NalgebraScalar> MatrixView<'a> for NalgebraMatRef<'a, T> {
     fn into_owned(self) -> Self::Owned {
         into_owned_data!(self)
     }
-    fn gemv_v(&self, a: T, x: &NalgebraVecRef<'_, T>, beta: T, y: &mut NalgebraVec<T>) {
-        gemv_data!(self, a, x, beta, y, "gemv_v")
-    }
-    fn gemv_o(&self, a: T, x: &NalgebraVec<T>, beta: T, y: &mut NalgebraVec<T>) {
-        gemv_data!(self, a, x, beta, y, "gemv_o")
+    fn gemv(&self, a: T, x: &NalgebraVec<T>, beta: T, y: &mut NalgebraVec<T>) {
+        gemv_data!(self, a, x, beta, y, "gemv")
     }
 }
 impl<'a, T: NalgebraScalar> MatrixViewMut<'a> for NalgebraMatMut<'a, T> {
