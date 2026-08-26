@@ -14,6 +14,19 @@ pub struct Convergence<'a, V: Vector> {
     eta: V::T,
 }
 
+/// Computes `x.pow(1 / n)`, taking a cheap exact shortcut via sqrt/cbrt chains
+/// for the small integer `n` values that dominate in practice (Newton usually
+/// converges within a handful of iterations).
+fn root_fast<T: Scalar>(x: T, n: IndexType) -> T {
+    match n {
+        1 => x,
+        2 => x.sqrt(),
+        3 => x.cbrt(),
+        4 => x.sqrt().sqrt(),
+        _ => x.pow(T::one() / T::from_usize(n).unwrap()),
+    }
+}
+
 pub enum ConvergenceStatus {
     Converged,
     Diverged,
@@ -73,8 +86,7 @@ impl<'a, V: Vector> Convergence<'a, V> {
         );
         self.niter += 1;
         if let Some(old_norm) = self.old_norm {
-            let rate =
-                (norm / old_norm).pow(V::T::one() / (V::T::from_usize(self.niter - 1).unwrap()));
+            let rate = root_fast(norm / old_norm, self.niter - 1);
 
             // check if iteration is diverging
             if rate > V::T::from_f64(0.9).unwrap() {
