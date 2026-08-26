@@ -1,5 +1,5 @@
 use std::fmt::Debug;
-use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Mul, Sub, SubAssign};
 
 use crate::error::LaError;
 use crate::scalar::Scale;
@@ -7,7 +7,6 @@ use crate::vector::VectorHost;
 use crate::{Context, IndexType, Scalar, Vector, VectorIndex};
 
 use extract_block::combine;
-use num_traits::{One, Zero};
 use sparsity::{Dense, MatrixSparsity, MatrixSparsityRef};
 
 #[cfg(feature = "cuda")]
@@ -104,43 +103,6 @@ impl<M, Rhs> MatrixMutOpsByValue<Rhs> for M where M: MatrixCommon + AddAssign<Rh
 /// A trait allowing for references to implement matrix operations
 pub trait MatrixRef<M: MatrixCommon>: Mul<Scale<M::T>, Output = M> {}
 impl<RefT, M: MatrixCommon> MatrixRef<M> for RefT where RefT: Mul<Scale<M::T>, Output = M> {}
-
-/// A mutable view of a dense matrix, supporting in-place operations and modifications.
-///
-/// This trait represents a temporary mutable reference to a matrix's data, allowing in-place
-/// arithmetic operations (+=, -=, *=) and matrix-matrix multiplication. Mutable views can be
-/// created via the `columns_mut()` or `column_mut()` methods on a `DenseMatrix`.
-pub trait MatrixViewMut<'a>:
-    for<'b> MatrixMutOpsByValue<&'b Self>
-    + for<'b> MatrixMutOpsByValue<&'b Self::View>
-    + MulAssign<Scale<Self::T>>
-{
-    type Owned;
-    type View;
-    /// Convert this mutable view into an owned matrix, cloning the data if necessary.
-    fn into_owned(self) -> Self::Owned;
-    /// Perform matrix-matrix multiplication with owned matrices: self = alpha * a * b + beta * self
-    fn gemm_oo(&mut self, alpha: Self::T, a: &Self::Owned, b: &Self::Owned, beta: Self::T);
-    /// Perform matrix-matrix multiplication with a view and owned matrix: self = alpha * a * b + beta * self
-    fn gemm_vo(&mut self, alpha: Self::T, a: &Self::View, b: &Self::Owned, beta: Self::T);
-}
-
-/// A borrowed immutable view of a dense matrix, supporting read-only arithmetic operations.
-///
-/// This trait represents a temporary immutable reference to a matrix's data, allowing read-only
-/// operations like addition, subtraction, scalar multiplication, and matrix-vector multiplication.
-/// Matrix views can be created via the `columns()` methods on a `DenseMatrix`.
-pub trait MatrixView<'a>:
-    for<'b> MatrixOpsByValue<&'b Self::Owned, Self::Owned> + Mul<Scale<Self::T>, Output = Self::Owned>
-{
-    type Owned;
-
-    /// Convert this view into an owned matrix, cloning the data if necessary.
-    fn into_owned(self) -> Self::Owned;
-
-    /// Perform a matrix-vector multiplication with an owned vector: y = alpha * self * x + beta * y
-    fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V);
-}
 
 /// A base matrix trait supporting both sparse and dense matrices.
 ///
@@ -333,43 +295,31 @@ pub trait MatrixHost: Matrix<V: VectorHost> {}
 
 impl<T: Matrix<V: VectorHost>> MatrixHost for T {}
 
+/// Largest column range the small-coefficient kernels accept — [`DenseMatrix::mul_cols_by`] and
+/// [`DenseMatrix::gemv_cols`].
+///
+/// Both take their coefficients from the host: the serial backends stage them in a fixed stack
+/// buffer and the CUDA backend passes them to the kernel by value, so neither allocates — which
+/// needs a bound. Two things drive it: the BDF difference table is at most `MAX_ORDER + 1 = 6`
+/// columns wide, and the widest built-in Runge-Kutta tableau (`tsit45`) has 7 stages. 8 covers
+/// both.
+///
+/// Must match `MAX_SMALL_COLS` in `src/cuda_kernels/cuda_kernels_common.h`, which sizes the
+/// kernels' by-value coefficient arrays; nothing checks that across the language boundary.
+pub const MAX_SMALL_COLS: usize = 8;
+
 /// A dense column-major matrix with efficient column access operations.
 ///
 /// This trait represents matrices stored in column-major order, where accessing matrix columns
 /// is efficient. It supports:
-/// - Matrix views and mutable views
-/// - Matrix-matrix multiplication (GEMM)
-/// - Column operations (axpy, access, modification)
+/// - Column operations (access, modification, and the fused column kernels below)
 /// - Element access and modification
 /// - Matrix resizing
 ///
 /// The column-major layout makes operations on individual or ranges of columns very efficient.
 pub trait DenseMatrix:
-    Matrix
-    + for<'b> MatrixOpsByValue<&'b Self, Self>
-    + for<'b> MatrixMutOpsByValue<&'b Self>
-    + for<'a, 'b> MatrixOpsByValue<&'b Self::View<'a>, Self>
-    + for<'a, 'b> MatrixMutOpsByValue<&'b Self::View<'a>>
+    Matrix + for<'b> MatrixOpsByValue<&'b Self, Self> + for<'b> MatrixMutOpsByValue<&'b Self>
 {
-    /// A view of the dense matrix type
-    type View<'a>: MatrixView<'a, Owned = Self, T = Self::T, V = Self::V>
-    where
-        Self: 'a;
-
-    /// A mutable view of the dense matrix type
-    type ViewMut<'a>: MatrixViewMut<
-        'a,
-        Owned = Self,
-        T = Self::T,
-        V = Self::V,
-        View = Self::View<'a>,
-    >
-    where
-        Self: 'a;
-
-    /// Perform a matrix-matrix multiplication: self = alpha * a * b + beta * self
-    fn gemm(&mut self, alpha: Self::T, a: &Self, b: &Self, beta: Self::T);
-
     /// Update a table of backward differences held in columns `0..=order+2` of
     /// this matrix, given the newly computed highest-order correction `d`.
     ///
@@ -382,14 +332,54 @@ pub trait DenseMatrix:
     /// right-to-left cumulative scan).
     fn update_backward_diff(&mut self, order: IndexType, d: &Self::V);
 
-    /// Get an immutable view of columns from `start` (inclusive) to `end` (exclusive).
-    fn columns(&self, start: IndexType, end: IndexType) -> Self::View<'_>;
+    /// Right-multiply a range of columns by a small matrix, in place:
+    ///
+    /// ```text
+    /// self[:, 0..ncols] = self[:, 0..ncols] * rhs
+    /// ```
+    ///
+    /// `rhs` is an `ncols x ncols` block held column-major in a host slice of exactly
+    /// `ncols * ncols` values — it is small (the BDF step-size update uses at most `6 x 6`).
+    ///
+    /// Panics if `ncols` exceeds [`MAX_SMALL_COLS`], since the serial backends stage the old
+    /// column values in a fixed-size buffer rather than allocating.
+    fn mul_cols_by(&mut self, ncols: IndexType, rhs: &[Self::T]);
+
+    /// Matrix-vector multiply over a range of columns, with host-side coefficients:
+    ///
+    /// ```text
+    /// y = alpha * self[:, start..end] * x + beta * y
+    /// ```
+    ///
+    /// `x` is a host slice, not a vector, because `x.len()` is the *width of the column range*
+    /// rather than a dimension of the problem: every caller in the solvers passes a short
+    /// coefficient list computed from host scalars — a Runge-Kutta tableau row, the `b`/`d`
+    /// vectors, interpolation weights, BDF's psi weights. Keeping them on the host is what lets
+    /// those callers build them in a stack array instead of allocating a vector per call.
+    ///
+    /// Use [`Matrix::gemv`] instead when `x` is a genuine operand of length `ncols` — a
+    /// Jacobian- or mass-times-vector product.
+    ///
+    /// Only the leading `end - start` columns take part; the rest of the matrix is not read.
+    /// `x.len()` must be at least `end - start`; only its leading `end - start` entries are
+    /// read, as with a BLAS `gemv` given a longer vector and `incx = 1`. `beta == 0` means `y`
+    /// is not read, so it may hold uninitialised values. An empty range contributes nothing,
+    /// leaving `y = beta * y`.
+    ///
+    /// The coefficients are shared by every batch — unlike [`Matrix::gemv`], this cannot apply
+    /// a different `x` per batch. Panics if `end - start` exceeds [`MAX_SMALL_COLS`].
+    fn gemv_cols(
+        &self,
+        start: IndexType,
+        end: IndexType,
+        alpha: Self::T,
+        x: &[Self::T],
+        beta: Self::T,
+        y: &mut Self::V,
+    );
 
     /// Get an immutable vector view of column `i`.
     fn column(&self, i: IndexType) -> <Self::V as Vector>::View<'_>;
-
-    /// Get a mutable view of columns from `start` (inclusive) to `end` (exclusive).
-    fn columns_mut(&mut self, start: IndexType, end: IndexType) -> Self::ViewMut<'_>;
 
     /// Get a mutable vector view of column `i`.
     fn column_mut(&mut self, i: IndexType) -> <Self::V as Vector>::ViewMut<'_>;
@@ -403,15 +393,6 @@ pub trait DenseMatrix:
     ///
     /// For batched matrices this reads batch 0, as does `Index`/`IndexMut`.
     fn get_index(&self, i: IndexType, j: IndexType) -> Self::T;
-
-    /// Perform matrix-matrix multiplication using GEMM, allocating a new matrix for the result.
-    fn mat_mul(&self, b: &Self) -> Self {
-        let nrows = self.nrows();
-        let ncols = b.ncols();
-        let mut ret = Self::zeros(nrows, ncols, self.context().clone());
-        ret.gemm(Self::T::one(), self, b, Self::T::zero());
-        ret
-    }
 
     /// Resize the number of columns in the matrix, preserving existing data.
     ///
@@ -430,8 +411,7 @@ pub(crate) mod tests {
     use std::ops::{Add, Sub};
 
     use super::{
-        DenseMatrix, Matrix, MatrixCommon, MatrixSparsity, MatrixSparsityRef, MatrixView,
-        MatrixViewMut,
+        DenseMatrix, Matrix, MatrixCommon, MatrixSparsity, MatrixSparsityRef, MAX_SMALL_COLS,
     };
     use crate::scalar::Scale;
     use crate::{scalar::IndexType, Context, Vector, VectorIndex, VectorView, VectorViewMut};
@@ -712,6 +692,271 @@ pub(crate) mod tests {
         assert_eq!(a.get_index(1, 0), f::<M>(1030.0));
     }
 
+    pub fn test_gemv_cols<M: DenseMatrix>() {
+        // columns: [1, 10], [2, 20], [3, 30], [4, 40]
+        let a = M::from_vec(
+            2,
+            4,
+            (1..=4)
+                .flat_map(|j| [f::<M>(j as f64), f::<M>(10.0 * j as f64)])
+                .collect(),
+            Default::default(),
+        );
+        let ones = |n: usize| vec![f::<M>(1.0); n];
+        let mut y = M::V::from_vec(vec![f::<M>(-1.0), f::<M>(-1.0)], Default::default());
+
+        // unweighted sum of columns 0..3, overwriting y
+        a.gemv_cols(0, 3, f::<M>(1.0), &ones(3), f::<M>(0.0), &mut y);
+        assert_eq!(y.clone_as_vec(), vec![f::<M>(6.0), f::<M>(60.0)]);
+
+        // weighted sum of every column
+        let w4 = vec![f::<M>(1.0), f::<M>(2.0), f::<M>(3.0), f::<M>(4.0)];
+        a.gemv_cols(0, 4, f::<M>(1.0), &w4, f::<M>(0.0), &mut y);
+        assert_eq!(y.clone_as_vec(), vec![f::<M>(30.0), f::<M>(300.0)]);
+
+        // x lines up with the start of the range, not with column zero
+        let w23 = vec![f::<M>(2.0), f::<M>(3.0)];
+        a.gemv_cols(2, 4, f::<M>(1.0), &w23, f::<M>(0.0), &mut y);
+        assert_eq!(y.clone_as_vec(), vec![f::<M>(18.0), f::<M>(180.0)]);
+
+        // alpha scales the whole product
+        a.gemv_cols(2, 4, f::<M>(2.0), &w23, f::<M>(0.0), &mut y);
+        assert_eq!(y.clone_as_vec(), vec![f::<M>(36.0), f::<M>(360.0)]);
+
+        // beta = 1 accumulates onto y instead of overwriting it
+        let half = vec![f::<M>(0.5)];
+        a.gemv_cols(1, 2, f::<M>(1.0), &half, f::<M>(0.0), &mut y);
+        assert_eq!(y.clone_as_vec(), vec![f::<M>(1.0), f::<M>(10.0)]);
+        a.gemv_cols(1, 2, f::<M>(1.0), &half, f::<M>(1.0), &mut y);
+        assert_eq!(y.clone_as_vec(), vec![f::<M>(2.0), f::<M>(20.0)]);
+
+        // a general beta scales the old y before accumulating
+        a.gemv_cols(1, 2, f::<M>(1.0), &half, f::<M>(3.0), &mut y);
+        assert_eq!(y.clone_as_vec(), vec![f::<M>(7.0), f::<M>(70.0)]);
+
+        // an empty range contributes nothing, leaving y = beta * y
+        a.gemv_cols(1, 1, f::<M>(1.0), &ones(0), f::<M>(2.0), &mut y);
+        assert_eq!(y.clone_as_vec(), vec![f::<M>(14.0), f::<M>(140.0)]);
+        a.gemv_cols(1, 1, f::<M>(1.0), &ones(0), f::<M>(1.0), &mut y);
+        assert_eq!(y.clone_as_vec(), vec![f::<M>(14.0), f::<M>(140.0)]);
+        a.gemv_cols(1, 1, f::<M>(1.0), &ones(0), f::<M>(0.0), &mut y);
+        assert_eq!(y.clone_as_vec(), vec![f::<M>(0.0), f::<M>(0.0)]);
+    }
+
+    /// A column range wider than the 8-weight chunk the retired `weighted_column_sum` CUDA
+    /// kernel could take in one launch — that boundary was never covered by a test.
+    /// Entry `(i, j)` of batch `b`. `Matrix::get_index` only ever reads batch 0, and a
+    /// column view carries every batch, so this goes through the column.
+    fn mat_at<M: DenseMatrix>(m: &M, b: usize, i: usize, j: usize) -> M::T {
+        m.column(j).into_owned().clone_as_vec()[b * m.nrows() + i]
+    }
+
+    /// Every entry of batch `b`, column-major.
+    fn batch_as_vec<M: DenseMatrix>(m: &M, b: usize) -> Vec<M::T> {
+        let mut out = Vec::with_capacity(m.nrows() * m.ncols());
+        for j in 0..m.ncols() {
+            for i in 0..m.nrows() {
+                out.push(mat_at(m, b, i, j));
+            }
+        }
+        out
+    }
+
+    pub fn test_mul_cols_by<M: DenseMatrix>() {
+        // 2x4, columns [1,10], [2,20], [3,30], [4,40]
+        let mk = || {
+            M::from_vec(
+                2,
+                4,
+                (1..=4)
+                    .flat_map(|j| [f::<M>(j as f64), f::<M>(10.0 * j as f64)])
+                    .collect(),
+                Default::default(),
+            )
+        };
+        let untouched = batch_as_vec(&mk(), 0);
+
+        // identity must leave the matrix exactly as it was: the sharpest check that the
+        // in-place update never reads a value it has already overwritten
+        let mut a = mk();
+        a.mul_cols_by(2, &[f::<M>(1.0), f::<M>(0.0), f::<M>(0.0), f::<M>(1.0)]);
+        assert_eq!(batch_as_vec(&a, 0), untouched);
+
+        // an empty range is a no-op
+        let mut a = mk();
+        a.mul_cols_by(0, &[]);
+        assert_eq!(batch_as_vec(&a, 0), untouched);
+
+        // a single column is just scaled, and the rest are left alone
+        let mut a = mk();
+        a.mul_cols_by(1, &[f::<M>(3.0)]);
+        assert_eq!(
+            batch_as_vec(&a, 0),
+            vec![
+                f::<M>(3.0),
+                f::<M>(30.0),
+                f::<M>(2.0),
+                f::<M>(20.0),
+                f::<M>(3.0),
+                f::<M>(30.0),
+                f::<M>(4.0),
+                f::<M>(40.0)
+            ]
+        );
+
+        // rhs = [[1, 2], [3, 4]] column-major, applied to the first two columns only:
+        //   new[:, 0] = 1 * [1,10] + 3 * [2,20] = [7, 70]
+        //   new[:, 1] = 2 * [1,10] + 4 * [2,20] = [10, 100]
+        // columns 2 and 3 must survive untouched -- the BDF difference table keeps live data
+        // above the updated range and reads it back in `update_backward_diff`
+        let mut a = mk();
+        a.mul_cols_by(2, &[f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0)]);
+        assert_eq!(
+            batch_as_vec(&a, 0),
+            vec![
+                f::<M>(7.0),
+                f::<M>(70.0),
+                f::<M>(10.0),
+                f::<M>(100.0),
+                f::<M>(3.0),
+                f::<M>(30.0),
+                f::<M>(4.0),
+                f::<M>(40.0)
+            ]
+        );
+
+        // the full width the solvers use (MAX_ORDER + 1), via an identity
+        let ncols = 6;
+        let mut wide = M::from_vec(
+            2,
+            ncols,
+            (1..=ncols)
+                .flat_map(|j| [f::<M>(j as f64), f::<M>(10.0 * j as f64)])
+                .collect(),
+            Default::default(),
+        );
+        let wide_before = batch_as_vec(&wide, 0);
+        let mut id = vec![f::<M>(0.0); ncols * ncols];
+        for j in 0..ncols {
+            id[j * ncols + j] = f::<M>(1.0);
+        }
+        wide.mul_cols_by(ncols, &id);
+        assert_eq!(batch_as_vec(&wide, 0), wide_before);
+
+        // more rows than fit one staging tile, so the row-blocked loop runs several times
+        let nrows = 700;
+        let mut tall = M::from_vec(
+            nrows,
+            2,
+            (0..2 * nrows).map(|i| f::<M>(i as f64)).collect(),
+            Default::default(),
+        );
+        tall.mul_cols_by(2, &[f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0)]);
+        let got = batch_as_vec(&tall, 0);
+        for i in 0..nrows {
+            let (c0, c1) = (f::<M>(i as f64), f::<M>((nrows + i) as f64));
+            assert_eq!(got[i], c0 + f::<M>(3.0) * c1);
+            assert_eq!(got[nrows + i], f::<M>(2.0) * c0 + f::<M>(4.0) * c1);
+        }
+    }
+
+    /// Same product as [`test_mul_cols_by`] on 2 independent batches: `rhs` is shared by every
+    /// batch, the columns are not.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_batched_mul_cols_by<M: DenseMatrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        // batch0 columns [1,10], [2,20]; batch1 columns [3,30], [4,40]
+        let mut a = M::from_vec(
+            2,
+            2,
+            (1..=4)
+                .flat_map(|j| [f::<M>(j as f64), f::<M>(10.0 * j as f64)])
+                .collect(),
+            ctx,
+        );
+        a.mul_cols_by(2, &[f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0)]);
+        // batch0: [1,10] + 3*[2,20] = [7,70];   2*[1,10] + 4*[2,20] = [10,100]
+        assert_eq!(
+            batch_as_vec(&a, 0),
+            vec![f::<M>(7.0), f::<M>(70.0), f::<M>(10.0), f::<M>(100.0)]
+        );
+        // batch1: [3,30] + 3*[4,40] = [15,150]; 2*[3,30] + 4*[4,40] = [22,220]
+        assert_eq!(
+            batch_as_vec(&a, 1),
+            vec![f::<M>(15.0), f::<M>(150.0), f::<M>(22.0), f::<M>(220.0)]
+        );
+    }
+
+    /// The widest column range `gemv_cols` accepts, which is also the size of the by-value
+    /// coefficient array the CUDA kernel takes.
+    pub fn test_gemv_cols_many_columns<M: DenseMatrix>() {
+        let ncols = MAX_SMALL_COLS;
+        // column j is [j + 1, 10 * (j + 1)]
+        let a = M::from_vec(
+            2,
+            ncols,
+            (1..=ncols)
+                .flat_map(|j| [f::<M>(j as f64), f::<M>(10.0 * j as f64)])
+                .collect(),
+            Default::default(),
+        );
+        let x = vec![f::<M>(1.0); ncols];
+        let mut y = M::V::from_vec(vec![f::<M>(-1.0), f::<M>(-1.0)], Default::default());
+        a.gemv_cols(0, ncols, f::<M>(1.0), &x, f::<M>(0.0), &mut y);
+        // sum_{j=1}^{ncols} j
+        let total = f::<M>((ncols * (ncols + 1) / 2) as f64);
+        assert_eq!(y.clone_as_vec(), vec![total, f::<M>(10.0) * total]);
+    }
+
+    /// Same products as [`test_gemv_cols`], run on 2 independent batches: `x` is unbatched and
+    /// therefore shared by every batch, the columns are not.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_batched_gemv_cols_m<M: DenseMatrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+
+        // batch 0 columns: [1, 10], [2, 20]; batch 1 columns: [3, 30], [4, 40]
+        let a = M::from_vec(
+            2,
+            2,
+            (1..=4)
+                .flat_map(|j| [f::<M>(j as f64), f::<M>(10.0 * j as f64)])
+                .collect(),
+            ctx.clone(),
+        );
+        let mut y = M::V::from_vec(
+            vec![f::<M>(-1.0), f::<M>(-1.0), f::<M>(-1.0), f::<M>(-1.0)],
+            ctx,
+        );
+
+        let ones = vec![f::<M>(1.0), f::<M>(1.0)];
+        a.gemv_cols(0, 2, f::<M>(1.0), &ones, f::<M>(0.0), &mut y);
+        assert_eq!(
+            y.clone_as_vec(),
+            vec![f::<M>(3.0), f::<M>(30.0), f::<M>(7.0), f::<M>(70.0)]
+        );
+
+        let w23 = vec![f::<M>(2.0), f::<M>(3.0)];
+        a.gemv_cols(0, 2, f::<M>(1.0), &w23, f::<M>(0.0), &mut y);
+        assert_eq!(
+            y.clone_as_vec(),
+            vec![f::<M>(8.0), f::<M>(80.0), f::<M>(18.0), f::<M>(180.0)]
+        );
+
+        let half = vec![f::<M>(0.5)];
+        a.gemv_cols(1, 2, f::<M>(1.0), &half, f::<M>(0.0), &mut y);
+        assert_eq!(
+            y.clone_as_vec(),
+            vec![f::<M>(1.0), f::<M>(10.0), f::<M>(2.0), f::<M>(20.0)]
+        );
+
+        // beta = 1 accumulates independently in each batch
+        a.gemv_cols(1, 2, f::<M>(1.0), &half, f::<M>(1.0), &mut y);
+        assert_eq!(
+            y.clone_as_vec(),
+            vec![f::<M>(2.0), f::<M>(20.0), f::<M>(4.0), f::<M>(40.0)]
+        );
+    }
+
     pub fn test_resize_cols<M: DenseMatrix>() {
         let mut a = M::zeros(2, 2, Default::default());
         a.set_index(0, 0, M::T::one());
@@ -759,71 +1004,6 @@ pub(crate) mod tests {
         assert_eq!(a.get_index(1, 0), f::<M>(3.0));
         assert_eq!(a.get_index(0, 1), f::<M>(2.0));
         assert_eq!(a.get_index(1, 1), f::<M>(4.0));
-    }
-
-    pub fn test_gemm<M: DenseMatrix>() {
-        let a = M::from_vec(
-            2,
-            2,
-            vec![f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0)],
-            Default::default(),
-        );
-        let b = M::from_vec(
-            2,
-            2,
-            vec![f::<M>(2.0), f::<M>(1.0), f::<M>(0.0), f::<M>(3.0)],
-            Default::default(),
-        );
-        let mut c = M::zeros(2, 2, Default::default());
-        c.gemm(f::<M>(1.0), &a, &b, f::<M>(0.0));
-        assert_eq!(c.get_index(0, 0), f::<M>(4.0));
-        assert_eq!(c.get_index(1, 0), f::<M>(10.0));
-        assert_eq!(c.get_index(0, 1), f::<M>(6.0));
-        assert_eq!(c.get_index(1, 1), f::<M>(12.0));
-    }
-
-    pub fn test_mat_mul<M: DenseMatrix>() {
-        let a = M::from_vec(
-            2,
-            2,
-            vec![f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0)],
-            Default::default(),
-        );
-        let b = M::from_vec(
-            2,
-            2,
-            vec![f::<M>(2.0), f::<M>(1.0), f::<M>(0.0), f::<M>(3.0)],
-            Default::default(),
-        );
-        let c = a.mat_mul(&b);
-        assert_eq!(c.get_index(0, 0), f::<M>(4.0));
-        assert_eq!(c.get_index(1, 0), f::<M>(10.0));
-        assert_eq!(c.get_index(0, 1), f::<M>(6.0));
-        assert_eq!(c.get_index(1, 1), f::<M>(12.0));
-    }
-
-    pub fn test_columns_view<M: DenseMatrix>() {
-        let a = M::from_vec(
-            2,
-            3,
-            vec![
-                f::<M>(1.0),
-                f::<M>(4.0),
-                f::<M>(2.0),
-                f::<M>(5.0),
-                f::<M>(3.0),
-                f::<M>(6.0),
-            ],
-            Default::default(),
-        );
-        let view = a.columns(0, 2);
-        assert_eq!(view.ncols(), 2);
-        assert_eq!(view.nrows(), 2);
-        let owned = view.into_owned();
-        assert_eq!(owned.get_index(0, 0), f::<M>(1.0));
-        assert_eq!(owned.get_index(1, 0), f::<M>(4.0));
-        assert_eq!(owned.get_index(0, 1), f::<M>(2.0));
-        assert_eq!(owned.get_index(1, 1), f::<M>(5.0));
     }
 
     pub fn test_column_view<M: DenseMatrix>() {
@@ -1094,7 +1274,6 @@ pub(crate) mod tests {
     where
         M: DenseMatrix,
         for<'a> &'a M: Add<M, Output = M> + Sub<M, Output = M>,
-        for<'a> M::View<'a>: Add<M, Output = M> + Sub<M, Output = M>,
     {
         let values = vec![f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0)];
         let a = M::from_vec(
@@ -1109,18 +1288,8 @@ pub(crate) mod tests {
         assert_eq!(c.get_index(0, 0), f::<M>(9.0));
         assert_eq!(c.get_index(1, 1), f::<M>(36.0));
 
-        let b = M::from_vec(2, 2, values.clone(), Default::default());
-        let c = &a + b;
-        assert_eq!(c.get_index(0, 0), f::<M>(11.0));
-        assert_eq!(c.get_index(1, 1), f::<M>(44.0));
-
-        let b = M::from_vec(2, 2, values.clone(), Default::default());
-        let c = a.columns(0, 2) - b;
-        assert_eq!(c.get_index(0, 0), f::<M>(9.0));
-        assert_eq!(c.get_index(1, 1), f::<M>(36.0));
-
         let b = M::from_vec(2, 2, values, Default::default());
-        let c = a.columns(0, 2) + b;
+        let c = &a + b;
         assert_eq!(c.get_index(0, 0), f::<M>(11.0));
         assert_eq!(c.get_index(1, 1), f::<M>(44.0));
     }
@@ -1249,62 +1418,6 @@ pub(crate) mod tests {
         );
     }
 
-    /// A borrowed view on the left with a borrowed matrix on the right, with mismatched batch
-    /// counts in both directions: exercises `MatrixView`'s `&Owned` arithmetic under broadcast.
-    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
-    pub fn test_batched_view_add_ref_broadcast_m<M: DenseMatrix>(ctx: M::C) {
-        assert_eq!(ctx.nbatch(), 2);
-        let one_batch = vec![f::<M>(1.0), f::<M>(2.0), f::<M>(3.0), f::<M>(4.0)];
-        let two_batches = vec![
-            f::<M>(10.0),
-            f::<M>(20.0),
-            f::<M>(30.0),
-            f::<M>(40.0),
-            f::<M>(50.0),
-            f::<M>(60.0),
-            f::<M>(70.0),
-            f::<M>(80.0),
-        ];
-
-        // rhs (a borrowed &M) broadcasts over the batches of the view
-        let a = M::from_vec(2, 2, two_batches.clone(), ctx.clone());
-        let b = M::from_vec(2, 2, one_batch.clone(), M::C::default());
-        let c = a.columns(0, 2) + &b;
-        assert_eq!(c.context().nbatch(), 2);
-        assert_eq!(
-            triplet_values(&c),
-            vec![
-                f::<M>(11.0),
-                f::<M>(22.0),
-                f::<M>(33.0),
-                f::<M>(44.0),
-                f::<M>(51.0),
-                f::<M>(62.0),
-                f::<M>(73.0),
-                f::<M>(84.0),
-            ]
-        );
-
-        // the view broadcasts over the batches of the rhs
-        let a = M::from_vec(2, 2, one_batch, M::C::default());
-        let b = M::from_vec(2, 2, two_batches, ctx);
-        let c = a.columns(0, 2) + &b;
-        assert_eq!(c.context().nbatch(), 2);
-        assert_eq!(
-            triplet_values(&c),
-            vec![
-                f::<M>(11.0),
-                f::<M>(22.0),
-                f::<M>(33.0),
-                f::<M>(44.0),
-                f::<M>(51.0),
-                f::<M>(62.0),
-                f::<M>(73.0),
-                f::<M>(84.0),
-            ]
-        );
-    }
-
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_scale_add_and_assign_broadcast_m<M: Matrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
@@ -1366,297 +1479,7 @@ pub(crate) mod tests {
         assert_eq!(a.get_index(1, 1), f::<M>(4.0));
     }
 
-    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
-    pub fn test_batched_gemm<M: DenseMatrix>(ctx: M::C) {
-        assert_eq!(ctx.nbatch(), 2);
-        // batch0: A=[[1,0],[0,1]](identity), batch1: A=[[2,0],[0,2]]
-        let a = M::from_vec(
-            2,
-            2,
-            vec![
-                f::<M>(1.0),
-                f::<M>(0.0),
-                f::<M>(0.0),
-                f::<M>(1.0),
-                f::<M>(2.0),
-                f::<M>(0.0),
-                f::<M>(0.0),
-                f::<M>(2.0),
-            ],
-            ctx.clone(),
-        );
-        // batch0: B=[[3,4],[5,6]], batch1: B=[[1,1],[1,1]]
-        let b = M::from_vec(
-            2,
-            2,
-            vec![
-                f::<M>(3.0),
-                f::<M>(5.0),
-                f::<M>(4.0),
-                f::<M>(6.0),
-                f::<M>(1.0),
-                f::<M>(1.0),
-                f::<M>(1.0),
-                f::<M>(1.0),
-            ],
-            ctx.clone(),
-        );
-        let mut c = M::zeros(2, 2, ctx);
-        c.gemm(f::<M>(1.0), &a, &b, f::<M>(0.0));
-        // batch0: I*B=B=[[3,4],[5,6]], batch1: 2I*B=[[2,2],[2,2]]
-        assert_eq!(c.get_index(0, 0), f::<M>(3.0));
-        assert_eq!(c.get_index(1, 0), f::<M>(5.0));
-        assert_eq!(c.get_index(0, 1), f::<M>(4.0));
-        assert_eq!(c.get_index(1, 1), f::<M>(6.0));
-    }
-
-    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
-    pub fn test_batched_columns<M: DenseMatrix>(ctx: M::C) {
-        assert_eq!(ctx.nbatch(), 2);
-        // 2x3 matrix, nbatch=2
-        // batch0: [[1,3,5],[2,4,6]], batch1: [[7,9,11],[8,10,12]]
-        let a = M::from_vec(
-            2,
-            3,
-            vec![
-                f::<M>(1.0),
-                f::<M>(2.0),
-                f::<M>(3.0),
-                f::<M>(4.0),
-                f::<M>(5.0),
-                f::<M>(6.0),
-                f::<M>(7.0),
-                f::<M>(8.0),
-                f::<M>(9.0),
-                f::<M>(10.0),
-                f::<M>(11.0),
-                f::<M>(12.0),
-            ],
-            ctx.clone(),
-        );
-        let view = a.columns(0, 2);
-        assert_eq!(view.ncols(), 2);
-        assert_eq!(view.nrows(), 2);
-        let owned = view.into_owned();
-        assert_eq!(owned.nrows(), 2);
-        assert_eq!(owned.ncols(), 2);
-        // Verify via gemv: multiply columns(0,2) by [1,1] for each batch
-        let view2 = a.columns(0, 2);
-        let x = M::V::from_vec(
-            vec![f::<M>(1.0), f::<M>(1.0), f::<M>(1.0), f::<M>(1.0)],
-            ctx.clone(),
-        );
-        let mut y = M::V::zeros(2, ctx);
-        view2.gemv(f::<M>(1.0), &x, f::<M>(0.0), &mut y);
-        // batch0: [1,2]*1 + [3,4]*1 = [4,6], batch1: [7,8]*1 + [9,10]*1 = [16,18]
-        assert_eq!(
-            y.clone_as_vec(),
-            vec![f::<M>(4.0), f::<M>(6.0), f::<M>(16.0), f::<M>(18.0)]
-        );
-    }
-
-    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
-    pub fn test_batched_gemv_o_on_columns<M: DenseMatrix>(ctx: M::C) {
-        assert_eq!(ctx.nbatch(), 2);
-        // 2x3 diff matrix, nbatch=2
-        // batch0: [[1,2,3],[4,5,6]], batch1: [[7,8,9],[10,11,12]]
-        let diff = M::from_vec(
-            2,
-            3,
-            vec![
-                f::<M>(1.0),
-                f::<M>(4.0),
-                f::<M>(2.0),
-                f::<M>(5.0),
-                f::<M>(3.0),
-                f::<M>(6.0),
-                f::<M>(7.0),
-                f::<M>(10.0),
-                f::<M>(8.0),
-                f::<M>(11.0),
-                f::<M>(9.0),
-                f::<M>(12.0),
-            ],
-            ctx.clone(),
-        );
-        // take columns 0..2 from each batch
-        let view = diff.columns(0, 2);
-        // x has nbatch=2, length=2 (matches ncols of view)
-        // batch0: x=[1,1], batch1: x=[2,2]
-        let x = M::V::from_vec(
-            vec![f::<M>(1.0), f::<M>(1.0), f::<M>(2.0), f::<M>(2.0)],
-            ctx.clone(),
-        );
-        let mut y = M::V::zeros(2, ctx);
-        view.gemv(f::<M>(1.0), &x, f::<M>(0.0), &mut y);
-        // batch0: [[1,2],[4,5]] * [1,1] = [1+2, 4+5] = [3, 9]
-        // batch1: [[7,8],[10,11]] * [2,2] = [14+16, 20+22] = [30, 42]
-        assert_eq!(
-            y.clone_as_vec(),
-            vec![f::<M>(3.0), f::<M>(9.0), f::<M>(30.0), f::<M>(42.0)]
-        );
-    }
-
-    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
-    pub fn test_batched_gemv_o_broadcast_mat<M: DenseMatrix>(ctx3: M::C) {
-        assert_eq!(ctx3.nbatch(), 2);
-        // matrix view with nbatch=1 broadcasts to x/y with nbatch=2
-        let ctx1 = M::C::default();
-        // 2x3 matrix, nbatch=1: [[1,2,3],[4,5,6]]
-        let diff = M::from_vec(
-            2,
-            3,
-            vec![
-                f::<M>(1.0),
-                f::<M>(4.0),
-                f::<M>(2.0),
-                f::<M>(5.0),
-                f::<M>(3.0),
-                f::<M>(6.0),
-            ],
-            ctx1,
-        );
-        let view = diff.columns(0, 2);
-        // x with nbatch=2, length=2
-        // batch0: [1,1], batch1: [2,2]
-        let x = M::V::from_vec(
-            vec![f::<M>(1.0), f::<M>(1.0), f::<M>(2.0), f::<M>(2.0)],
-            ctx3.clone(),
-        );
-        let mut y = M::V::zeros(2, ctx3);
-        view.gemv(f::<M>(1.0), &x, f::<M>(0.0), &mut y);
-        // batch0: [[1,2],[4,5]] * [1,1] = [3, 9]
-        // batch1: [[1,2],[4,5]] * [2,2] = [6, 18]
-        assert_eq!(
-            y.clone_as_vec(),
-            vec![f::<M>(3.0), f::<M>(9.0), f::<M>(6.0), f::<M>(18.0)]
-        );
-    }
-
-    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
-    pub fn test_batched_gemm_vo_on_columns<M: DenseMatrix>(ctx: M::C) {
-        assert_eq!(ctx.nbatch(), 2);
-        // 2x3 diff matrix, nbatch=2
-        let diff = M::from_vec(
-            2,
-            3,
-            vec![
-                f::<M>(1.0),
-                f::<M>(4.0),
-                f::<M>(2.0),
-                f::<M>(5.0),
-                f::<M>(3.0),
-                f::<M>(6.0),
-                f::<M>(7.0),
-                f::<M>(10.0),
-                f::<M>(8.0),
-                f::<M>(11.0),
-                f::<M>(9.0),
-                f::<M>(12.0),
-            ],
-            ctx.clone(),
-        );
-        // R is 2x2 (nbatch=2): batch0=identity, batch1=2*identity
-        let r = M::from_vec(
-            2,
-            2,
-            vec![
-                f::<M>(1.0),
-                f::<M>(0.0),
-                f::<M>(0.0),
-                f::<M>(1.0),
-                f::<M>(2.0),
-                f::<M>(0.0),
-                f::<M>(0.0),
-                f::<M>(2.0),
-            ],
-            ctx.clone(),
-        );
-        let mut result = M::zeros(2, 3, ctx);
-        {
-            let d_view = diff.columns(0, 2);
-            let mut r_view = result.columns_mut(0, 2);
-            r_view.gemm_vo(f::<M>(1.0), &d_view, &r, f::<M>(0.0));
-        }
-        // batch0: [[1,2],[4,5]] * I = [[1,2],[4,5]]
-        // batch1: [[7,8],[10,11]] * 2I = [[14,16],[20,22]]
-        assert_eq!(result.get_index(0, 0), f::<M>(1.0));
-        assert_eq!(result.get_index(1, 0), f::<M>(4.0));
-        assert_eq!(result.get_index(0, 1), f::<M>(2.0));
-        assert_eq!(result.get_index(1, 1), f::<M>(5.0));
-    }
-
     // --- Broadcasting tests ---
-
-    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
-    pub fn test_batched_gemm_broadcast_b<M: DenseMatrix>(ctx: M::C) {
-        assert_eq!(ctx.nbatch(), 2);
-        // batch0: A=[[1,0],[0,1]], batch1: A=[[2,0],[0,3]]
-        let a = M::from_vec(
-            2,
-            2,
-            vec![
-                f::<M>(1.0),
-                f::<M>(0.0),
-                f::<M>(0.0),
-                f::<M>(1.0),
-                f::<M>(2.0),
-                f::<M>(0.0),
-                f::<M>(0.0),
-                f::<M>(3.0),
-            ],
-            ctx.clone(),
-        );
-        // B with nbatch=1: [[1,2],[3,4]]
-        let b = M::from_vec(
-            2,
-            2,
-            vec![f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0)],
-            Default::default(),
-        );
-        let mut c = M::zeros(2, 2, ctx);
-        c.gemm(f::<M>(1.0), &a, &b, f::<M>(0.0));
-        // batch0: I*B=[[1,2],[3,4]], batch1: diag(2,3)*B=[[2,4],[9,12]]
-        assert_eq!(c.get_index(0, 0), f::<M>(1.0));
-        assert_eq!(c.get_index(1, 0), f::<M>(3.0));
-        assert_eq!(c.get_index(0, 1), f::<M>(2.0));
-        assert_eq!(c.get_index(1, 1), f::<M>(4.0));
-    }
-
-    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
-    pub fn test_batched_gemm_broadcast_a<M: DenseMatrix>(ctx: M::C) {
-        assert_eq!(ctx.nbatch(), 2);
-        // A with nbatch=1: [[1,0],[0,2]]
-        let a = M::from_vec(
-            2,
-            2,
-            vec![f::<M>(1.0), f::<M>(0.0), f::<M>(0.0), f::<M>(2.0)],
-            Default::default(),
-        );
-        // batch0: B=[[3,4],[5,6]], batch1: B=[[1,1],[1,1]]
-        let b = M::from_vec(
-            2,
-            2,
-            vec![
-                f::<M>(3.0),
-                f::<M>(5.0),
-                f::<M>(4.0),
-                f::<M>(6.0),
-                f::<M>(1.0),
-                f::<M>(1.0),
-                f::<M>(1.0),
-                f::<M>(1.0),
-            ],
-            ctx.clone(),
-        );
-        let mut c = M::zeros(2, 2, ctx);
-        c.gemm(f::<M>(1.0), &a, &b, f::<M>(0.0));
-        // batch0: [[1,0],[0,2]]*[[3,4],[5,6]]=[[3,4],[10,12]]
-        assert_eq!(c.get_index(0, 0), f::<M>(3.0));
-        assert_eq!(c.get_index(1, 0), f::<M>(10.0));
-        assert_eq!(c.get_index(0, 1), f::<M>(4.0));
-        assert_eq!(c.get_index(1, 1), f::<M>(12.0));
-    }
 
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_gemv_o_broadcast_x<M: DenseMatrix>(ctx: M::C) {
@@ -1681,11 +1504,10 @@ pub(crate) mod tests {
             ],
             ctx.clone(),
         );
-        let view = diff.columns(0, 2);
         // x with nbatch=1, length=2 (broadcast)
-        let x = M::V::from_vec(vec![f::<M>(1.0), f::<M>(1.0)], Default::default());
+        let x = vec![f::<M>(1.0), f::<M>(1.0)];
         let mut y = M::V::zeros(2, ctx);
-        view.gemv(f::<M>(1.0), &x, f::<M>(0.0), &mut y);
+        diff.gemv_cols(0, 2, f::<M>(1.0), &x, f::<M>(0.0), &mut y);
         // batch0: [[1,2],[4,5]] * [1,1] = [3, 9]
         // batch1: [[7,8],[10,11]] * [1,1] = [15, 21]
         assert_eq!(
@@ -1694,107 +1516,7 @@ pub(crate) mod tests {
         );
     }
 
-    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
-    pub fn test_batched_gemm_vo_broadcast_b<M: DenseMatrix>(ctx: M::C) {
-        assert_eq!(ctx.nbatch(), 2);
-        // 2x3 diff matrix, nbatch=2
-        let diff = M::from_vec(
-            2,
-            3,
-            vec![
-                f::<M>(1.0),
-                f::<M>(4.0),
-                f::<M>(2.0),
-                f::<M>(5.0),
-                f::<M>(3.0),
-                f::<M>(6.0),
-                f::<M>(7.0),
-                f::<M>(10.0),
-                f::<M>(8.0),
-                f::<M>(11.0),
-                f::<M>(9.0),
-                f::<M>(12.0),
-            ],
-            ctx.clone(),
-        );
-        // R with nbatch=1: 2x2 identity
-        let r = M::from_vec(
-            2,
-            2,
-            vec![f::<M>(1.0), f::<M>(0.0), f::<M>(0.0), f::<M>(1.0)],
-            Default::default(),
-        );
-        let mut result = M::zeros(2, 3, ctx);
-        {
-            let d_view = diff.columns(0, 2);
-            let mut r_view = result.columns_mut(0, 2);
-            r_view.gemm_vo(f::<M>(1.0), &d_view, &r, f::<M>(0.0));
-        }
-        // Both batches: sub-matrix * I = sub-matrix (unchanged)
-        // batch0: [[1,2],[4,5]], batch1: [[7,8],[10,11]]
-        assert_eq!(result.get_index(0, 0), f::<M>(1.0));
-        assert_eq!(result.get_index(1, 0), f::<M>(4.0));
-        assert_eq!(result.get_index(0, 1), f::<M>(2.0));
-        assert_eq!(result.get_index(1, 1), f::<M>(5.0));
-    }
-
-    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
-    pub fn test_batched_gemm_vo_broadcast_a<M: DenseMatrix>(ctx: M::C) {
-        assert_eq!(ctx.nbatch(), 2);
-        // diff with nbatch=1: 2x3 matrix [[1,2,3],[4,5,6]]
-        let diff = M::from_vec(
-            2,
-            3,
-            vec![
-                f::<M>(1.0),
-                f::<M>(4.0),
-                f::<M>(2.0),
-                f::<M>(5.0),
-                f::<M>(3.0),
-                f::<M>(6.0),
-            ],
-            Default::default(),
-        );
-        // b with nbatch=2: batch0=[[1,0],[0,1]], batch1=[[2,0],[0,3]]
-        let b = M::from_vec(
-            2,
-            2,
-            vec![
-                f::<M>(1.0),
-                f::<M>(0.0),
-                f::<M>(0.0),
-                f::<M>(1.0),
-                f::<M>(2.0),
-                f::<M>(0.0),
-                f::<M>(0.0),
-                f::<M>(3.0),
-            ],
-            ctx.clone(),
-        );
-        let mut result = M::zeros(2, 3, ctx);
-        {
-            let d_view = diff.columns(0, 2);
-            let mut r_view = result.columns_mut(0, 2);
-            r_view.gemm_vo(f::<M>(1.0), &d_view, &b, f::<M>(0.0));
-        }
-        // batch0: [[1,2],[4,5]]*I=[[1,2],[4,5]], batch1: [[1,2],[4,5]]*[[2,0],[0,3]]=[[2,6],[8,15]]
-        assert_eq!(result.get_index(0, 0), f::<M>(1.0));
-        assert_eq!(result.get_index(1, 0), f::<M>(4.0));
-        assert_eq!(result.get_index(0, 1), f::<M>(2.0));
-        assert_eq!(result.get_index(1, 1), f::<M>(5.0));
-    }
-
     // --- Incompatible batch tests ---
-
-    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
-    pub fn test_batched_gemm_incompatible_a<M: DenseMatrix>(ctx2: M::C, ctx3: M::C) {
-        assert_eq!(ctx2.nbatch(), 2);
-        assert_eq!(ctx3.nbatch(), 3);
-        let a = M::zeros(2, 2, ctx3);
-        let b = M::zeros(2, 2, ctx2.clone());
-        let mut c = M::zeros(2, 2, ctx2);
-        c.gemm(f::<M>(1.0), &a, &b, f::<M>(0.0));
-    }
 
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_gemv_incompatible<M: DenseMatrix>(ctx2: M::C, ctx3: M::C) {
@@ -1804,16 +1526,6 @@ pub(crate) mod tests {
         let x = M::V::zeros(2, ctx3);
         let mut y = M::V::zeros(2, ctx2);
         a.gemv(f::<M>(1.0), &x, f::<M>(0.0), &mut y);
-    }
-
-    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
-    pub fn test_batched_gemm_incompatible<M: DenseMatrix>(ctx2: M::C, ctx3: M::C) {
-        assert_eq!(ctx2.nbatch(), 2);
-        assert_eq!(ctx3.nbatch(), 3);
-        let a = M::zeros(2, 2, ctx2.clone());
-        let b = M::zeros(2, 2, ctx3);
-        let mut c = M::zeros(2, 2, ctx2);
-        c.gemm(f::<M>(1.0), &a, &b, f::<M>(0.0));
     }
 
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
@@ -1982,41 +1694,10 @@ pub(crate) mod tests {
         assert_eq!(a.get_index(1, 1), f::<M>(4.0));
     }
 
-    /// A borrowed view on the left with a borrowed matrix on the right: `MatrixView` requires
-    /// this combination, but `test_add`/`test_owned_rhs_m` only ever exercise owned/owned-rhs.
-    pub fn test_view_add_ref<M: DenseMatrix>() {
-        let a = M::from_vec(
-            2,
-            2,
-            vec![f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0)],
-            Default::default(),
-        );
-        let b = M::from_vec(
-            2,
-            2,
-            vec![f::<M>(5.0), f::<M>(7.0), f::<M>(6.0), f::<M>(8.0)],
-            Default::default(),
-        );
-        let c = a.columns(0, 2) + &b;
-        assert_eq!(c.get_index(0, 0), f::<M>(6.0));
-        assert_eq!(c.get_index(1, 1), f::<M>(12.0));
-        let d = a.columns(0, 2) - &b;
-        assert_eq!(d.get_index(0, 0), f::<M>(-4.0));
-        assert_eq!(d.get_index(1, 1), f::<M>(-4.0));
-    }
-
-    /// `MatrixCommon::inner` on the backend's own view/mut-view types: `test_matrix_common_by_ref`
-    /// only reaches the generic `&M`/`&mut M` blanket impls, not `M::View`/`M::ViewMut`.
-    pub fn test_view_inner<M: DenseMatrix>() {
+    /// `MatrixCommon::inner_mut` on an owned matrix; `test_matrix_common_by_ref` only reaches
+    /// the generic `&M`/`&mut M` blanket impls.
+    pub fn test_inner_mut<M: DenseMatrix>() {
         let mut a = M::zeros(2, 2, Default::default());
-        {
-            let view = a.columns(0, 2);
-            let _ = <M::View<'_> as MatrixCommon>::inner(&view);
-        }
-        {
-            let view_mut = a.columns_mut(0, 2);
-            let _ = <M::ViewMut<'_> as MatrixCommon>::inner(&view_mut);
-        }
         let _ = a.inner_mut();
     }
 
@@ -2068,35 +1749,6 @@ pub(crate) mod tests {
         mat.set_data_with_indices(&dst_indices, &src_indices, &data);
         assert_eq!(mat.get_index(0, 0), f::<M>(5.0));
         assert_eq!(mat.get_index(1, 1), f::<M>(6.0));
-    }
-
-    pub fn test_mul_assign_scalar<M: DenseMatrix>() {
-        let mut mat = M::from_vec(
-            2,
-            2,
-            vec![f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0)],
-            Default::default(),
-        );
-        {
-            let mut view = mat.columns_mut(0, 2);
-            view *= Scale(f::<M>(2.0));
-        }
-        assert_eq!(mat.get_index(0, 0), f::<M>(2.0));
-        assert_eq!(mat.get_index(1, 1), f::<M>(8.0));
-    }
-
-    /// A full-width, non-strided view multiplied by `Scale`: `test_strided_matrix_view_mul_scalar`
-    /// only exercises the broadcast/non-contiguous branch, never the equal-column-count fast path.
-    pub fn test_view_mul_scalar<M: DenseMatrix>() {
-        let mat = M::from_vec(
-            2,
-            2,
-            vec![f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0)],
-            Default::default(),
-        );
-        let result = mat.columns(0, 2) * Scale(f::<M>(2.0));
-        assert_eq!(result.get_index(0, 0), f::<M>(2.0));
-        assert_eq!(result.get_index(1, 1), f::<M>(8.0));
     }
 
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
@@ -2354,46 +2006,6 @@ pub(crate) mod tests {
     }
 
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
-    pub fn test_batched_mat_mul<M: DenseMatrix>(ctx: M::C) {
-        assert_eq!(ctx.nbatch(), 2);
-        let a = M::from_vec(
-            2,
-            2,
-            vec![
-                f::<M>(1.0),
-                f::<M>(3.0),
-                f::<M>(2.0),
-                f::<M>(4.0),
-                f::<M>(2.0),
-                f::<M>(1.0),
-                f::<M>(0.0),
-                f::<M>(3.0),
-            ],
-            ctx.clone(),
-        );
-        let b = M::from_vec(
-            2,
-            2,
-            vec![
-                f::<M>(2.0),
-                f::<M>(1.0),
-                f::<M>(0.0),
-                f::<M>(3.0),
-                f::<M>(1.0),
-                f::<M>(0.0),
-                f::<M>(2.0),
-                f::<M>(1.0),
-            ],
-            ctx.clone(),
-        );
-        let c = a.mat_mul(&b);
-        assert_eq!(c.get_index(0, 0), f::<M>(4.0));
-        assert_eq!(c.get_index(1, 0), f::<M>(10.0));
-        assert_eq!(c.get_index(0, 1), f::<M>(6.0));
-        assert_eq!(c.get_index(1, 1), f::<M>(12.0));
-    }
-
-    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_from_diagonal_dense<M: DenseMatrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         let v = M::V::from_vec(
@@ -2409,242 +2021,6 @@ pub(crate) mod tests {
         assert_eq!(a.get_index(1, 0), f::<M>(0.0));
     }
 
-    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
-    fn make_strided_matrix<M: DenseMatrix>(nbatch: usize) -> M {
-        let ctx = M::C::default().clone_with_nbatch(nbatch).unwrap();
-        let nrows = 3;
-        let ncols = 4;
-        let mut data = Vec::with_capacity(nrows * ncols * nbatch);
-        for b in 0..nbatch {
-            for col in 0..ncols {
-                for row in 0..nrows {
-                    data.push(f::<M>(row as f64 + col as f64 * 10.0 + b as f64 * 100.0));
-                }
-            }
-        }
-        M::from_vec(nrows, ncols, data, ctx)
-    }
-
-    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
-    pub fn test_strided_matrix_view_into_owned<M: DenseMatrix>(ctx: M::C) {
-        let matrix = make_strided_matrix::<M>(ctx.nbatch());
-        let view = matrix.columns(0, 2);
-        let owned = view.into_owned();
-        assert_eq!(owned.nrows(), 3);
-        assert_eq!(owned.ncols(), 2);
-        // column 0, batch 0: [0,1,2]
-        assert_eq!(owned.get_index(0, 0), f::<M>(0.0));
-        assert_eq!(owned.get_index(1, 0), f::<M>(1.0));
-        assert_eq!(owned.get_index(2, 0), f::<M>(2.0));
-        // column 1, batch 0: [10,11,12]
-        assert_eq!(owned.get_index(0, 1), f::<M>(10.0));
-        assert_eq!(owned.get_index(1, 1), f::<M>(11.0));
-        assert_eq!(owned.get_index(2, 1), f::<M>(12.0));
-    }
-
-    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
-    pub fn test_strided_matrix_view_add_owned<M: DenseMatrix>(ctx: M::C) {
-        let matrix = make_strided_matrix::<M>(ctx.nbatch());
-        let view = matrix.columns(0, 2);
-        // owned 3x2 with nbatch=1 (broadcast) — column-major: col0=[1,2,3], col1=[4,5,6]
-        let rhs = M::from_vec(
-            3,
-            2,
-            vec![
-                f::<M>(1.0),
-                f::<M>(2.0),
-                f::<M>(3.0),
-                f::<M>(4.0),
-                f::<M>(5.0),
-                f::<M>(6.0),
-            ],
-            M::C::default(),
-        );
-        let result = view + &rhs;
-        // batch0: [0,1,2,10,11,12] + [1,2,3,4,5,6] = [1,3,5,14,16,18]
-        assert_eq!(result.get_index(0, 0), f::<M>(1.0));
-        assert_eq!(result.get_index(0, 1), f::<M>(14.0));
-    }
-
-    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
-    pub fn test_strided_matrix_view_sub_owned<M: DenseMatrix>(ctx: M::C) {
-        let matrix = make_strided_matrix::<M>(ctx.nbatch());
-        let view = matrix.columns(0, 2);
-        let rhs = M::from_vec(
-            3,
-            2,
-            vec![
-                f::<M>(0.0),
-                f::<M>(1.0),
-                f::<M>(2.0),
-                f::<M>(10.0),
-                f::<M>(11.0),
-                f::<M>(12.0),
-            ],
-            M::C::default(),
-        );
-        let result = view - &rhs;
-        // batch0: [0,1,2,10,11,12] - [0,1,2,10,11,12] = all zeros
-        assert_eq!(result.get_index(0, 0), f::<M>(0.0));
-        assert_eq!(result.get_index(0, 1), f::<M>(0.0));
-    }
-
-    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
-    pub fn test_strided_matrix_view_mul_scalar<M: DenseMatrix>(ctx: M::C) {
-        let matrix = make_strided_matrix::<M>(ctx.nbatch());
-        let view = matrix.columns(0, 2);
-        let result = view * Scale(f::<M>(2.0));
-        assert_eq!(result.get_index(0, 0), f::<M>(0.0));
-        assert_eq!(result.get_index(1, 0), f::<M>(2.0));
-        assert_eq!(result.get_index(0, 1), f::<M>(20.0));
-    }
-
-    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
-    pub fn test_strided_matrix_view_mut_add_assign_view<M: DenseMatrix>(ctx: M::C) {
-        let mut a = make_strided_matrix::<M>(ctx.nbatch());
-        let b = make_strided_matrix::<M>(ctx.nbatch());
-        {
-            let mut a_view = a.columns_mut(0, 2);
-            let b_view = b.columns(2, 4);
-            a_view += &b_view;
-        }
-        // a columns 0-1 now = original a[0..2] + b[2..4]
-        // batch0 a[0..2]: [[0,10],[1,11],[2,12]]
-        // batch0 b[2..4]: [[20,30],[21,31],[22,32]]
-        // sum: [[20,40],[22,42],[24,44]]
-        assert_eq!(a.get_index(0, 0), f::<M>(20.0));
-        assert_eq!(a.get_index(1, 0), f::<M>(22.0));
-        assert_eq!(a.get_index(0, 1), f::<M>(40.0));
-    }
-
-    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
-    pub fn test_strided_matrix_view_mut_sub_assign_view<M: DenseMatrix>(ctx: M::C) {
-        let mut a = make_strided_matrix::<M>(ctx.nbatch());
-        let b = make_strided_matrix::<M>(ctx.nbatch());
-        {
-            let mut a_view = a.columns_mut(0, 2);
-            let b_view = b.columns(0, 2);
-            a_view -= &b_view;
-        }
-        // same columns subtracted = all zero
-        assert_eq!(a.get_index(0, 0), f::<M>(0.0));
-        assert_eq!(a.get_index(1, 0), f::<M>(0.0));
-    }
-
-    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
-    pub fn test_strided_matrix_view_mut_mul_assign_scalar<M: DenseMatrix>(ctx: M::C) {
-        let mut a = make_strided_matrix::<M>(ctx.nbatch());
-        {
-            let mut a_view = a.columns_mut(0, 2);
-            a_view *= Scale(f::<M>(2.0));
-        }
-        assert_eq!(a.get_index(0, 0), f::<M>(0.0));
-        assert_eq!(a.get_index(1, 0), f::<M>(2.0));
-        assert_eq!(a.get_index(0, 1), f::<M>(20.0));
-    }
-
-    // --- View-mut tests (into_owned, gemm_oo, += / -= between two mutable views) ---
-
-    pub fn test_view_mut_into_owned<M: DenseMatrix>() {
-        let mut a = M::from_vec(
-            2,
-            3,
-            vec![
-                f::<M>(1.0),
-                f::<M>(2.0),
-                f::<M>(3.0),
-                f::<M>(4.0),
-                f::<M>(5.0),
-                f::<M>(6.0),
-            ],
-            Default::default(),
-        );
-        let owned = a.columns_mut(0, 2).into_owned();
-        assert_eq!(owned.nrows(), 2);
-        assert_eq!(owned.ncols(), 2);
-        assert_eq!(owned.get_index(0, 0), f::<M>(1.0));
-        assert_eq!(owned.get_index(1, 0), f::<M>(2.0));
-        assert_eq!(owned.get_index(0, 1), f::<M>(3.0));
-        assert_eq!(owned.get_index(1, 1), f::<M>(4.0));
-    }
-
-    pub fn test_view_mut_add_assign_view_mut<M: DenseMatrix>() {
-        let mut a = M::from_vec(
-            2,
-            2,
-            vec![f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0)],
-            Default::default(),
-        );
-        let mut b = M::from_vec(
-            2,
-            2,
-            vec![f::<M>(10.0), f::<M>(30.0), f::<M>(20.0), f::<M>(40.0)],
-            Default::default(),
-        );
-        {
-            let mut a_view = a.columns_mut(0, 2);
-            let b_view = b.columns_mut(0, 2);
-            a_view += &b_view;
-        }
-        assert_eq!(a.get_index(0, 0), f::<M>(11.0));
-        assert_eq!(a.get_index(1, 0), f::<M>(33.0));
-        assert_eq!(a.get_index(0, 1), f::<M>(22.0));
-        assert_eq!(a.get_index(1, 1), f::<M>(44.0));
-    }
-
-    pub fn test_view_mut_sub_assign_view_mut<M: DenseMatrix>() {
-        let mut a = M::from_vec(
-            2,
-            2,
-            vec![f::<M>(10.0), f::<M>(30.0), f::<M>(20.0), f::<M>(40.0)],
-            Default::default(),
-        );
-        let mut b = M::from_vec(
-            2,
-            2,
-            vec![f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0)],
-            Default::default(),
-        );
-        {
-            let mut a_view = a.columns_mut(0, 2);
-            let b_view = b.columns_mut(0, 2);
-            a_view -= &b_view;
-        }
-        assert_eq!(a.get_index(0, 0), f::<M>(9.0));
-        assert_eq!(a.get_index(1, 0), f::<M>(27.0));
-        assert_eq!(a.get_index(0, 1), f::<M>(18.0));
-        assert_eq!(a.get_index(1, 1), f::<M>(36.0));
-    }
-
-    pub fn test_gemm_oo_on_columns<M: DenseMatrix>() {
-        // a = [[1,2],[3,4]] (col-major [1,3,2,4])
-        let a = M::from_vec(
-            2,
-            2,
-            vec![f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0)],
-            Default::default(),
-        );
-        // b = identity
-        let b = M::from_vec(
-            2,
-            2,
-            vec![f::<M>(1.0), f::<M>(0.0), f::<M>(0.0), f::<M>(1.0)],
-            Default::default(),
-        );
-        let mut result = M::zeros(2, 3, Default::default());
-        {
-            let mut r_view = result.columns_mut(0, 2);
-            r_view.gemm_oo(f::<M>(1.0), &a, &b, f::<M>(0.0));
-        }
-        // result columns 0-1 = a * I = a; column 2 untouched (zero)
-        assert_eq!(result.get_index(0, 0), f::<M>(1.0));
-        assert_eq!(result.get_index(1, 0), f::<M>(3.0));
-        assert_eq!(result.get_index(0, 1), f::<M>(2.0));
-        assert_eq!(result.get_index(1, 1), f::<M>(4.0));
-        assert_eq!(result.get_index(0, 2), f::<M>(0.0));
-        assert_eq!(result.get_index(1, 2), f::<M>(0.0));
-    }
-
     pub fn test_try_from_triplets_wrong_length<M: Matrix>() {
         let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
         // one value too few: triggers the length assertion inside try_from_triplets
@@ -2653,218 +2029,6 @@ pub(crate) mod tests {
     }
 
     // --- Batched view-mut tests ---
-
-    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
-    pub fn test_strided_matrix_view_mut_into_owned<M: DenseMatrix>(ctx: M::C) {
-        let mut matrix = make_strided_matrix::<M>(ctx.nbatch());
-        let owned = matrix.columns_mut(0, 2).into_owned();
-        assert_eq!(owned.nrows(), 3);
-        assert_eq!(owned.ncols(), 2);
-        // batch 0 col0=[0,1,2], col1=[10,11,12]
-        assert_eq!(owned.get_index(0, 0), f::<M>(0.0));
-        assert_eq!(owned.get_index(1, 0), f::<M>(1.0));
-        assert_eq!(owned.get_index(2, 0), f::<M>(2.0));
-        assert_eq!(owned.get_index(0, 1), f::<M>(10.0));
-        assert_eq!(owned.get_index(1, 1), f::<M>(11.0));
-        assert_eq!(owned.get_index(2, 1), f::<M>(12.0));
-        // verify both batches via triplet_iter
-        let (_, vals) = owned.triplet_iter();
-        let vals: Vec<_> = vals.collect();
-        assert_eq!(
-            vals,
-            vec![
-                f::<M>(0.0),
-                f::<M>(1.0),
-                f::<M>(2.0),
-                f::<M>(10.0),
-                f::<M>(11.0),
-                f::<M>(12.0),
-                f::<M>(100.0),
-                f::<M>(101.0),
-                f::<M>(102.0),
-                f::<M>(110.0),
-                f::<M>(111.0),
-                f::<M>(112.0),
-            ]
-        );
-    }
-
-    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
-    pub fn test_batched_view_mut_add_assign_view_mut<M: DenseMatrix>(ctx: M::C) {
-        assert_eq!(ctx.nbatch(), 2);
-        // a 2x2 nbatch=2: batch0 [[1,2],[3,4]], batch1 [[5,6],[7,8]]
-        let mut a = M::from_vec(
-            2,
-            2,
-            vec![
-                f::<M>(1.0),
-                f::<M>(3.0),
-                f::<M>(2.0),
-                f::<M>(4.0),
-                f::<M>(5.0),
-                f::<M>(7.0),
-                f::<M>(6.0),
-                f::<M>(8.0),
-            ],
-            ctx.clone(),
-        );
-        let mut b = M::from_vec(
-            2,
-            2,
-            vec![
-                f::<M>(10.0),
-                f::<M>(30.0),
-                f::<M>(20.0),
-                f::<M>(40.0),
-                f::<M>(50.0),
-                f::<M>(70.0),
-                f::<M>(60.0),
-                f::<M>(80.0),
-            ],
-            ctx,
-        );
-        {
-            let mut a_view = a.columns_mut(0, 2);
-            let b_view = b.columns_mut(0, 2);
-            a_view += &b_view;
-        }
-        let (_, vals) = a.triplet_iter();
-        let vals: Vec<_> = vals.collect();
-        assert_eq!(
-            vals,
-            vec![
-                f::<M>(11.0),
-                f::<M>(33.0),
-                f::<M>(22.0),
-                f::<M>(44.0),
-                f::<M>(55.0),
-                f::<M>(77.0),
-                f::<M>(66.0),
-                f::<M>(88.0),
-            ]
-        );
-    }
-
-    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
-    pub fn test_batched_view_mut_sub_assign_view_mut<M: DenseMatrix>(ctx: M::C) {
-        assert_eq!(ctx.nbatch(), 2);
-        let mut a = M::from_vec(
-            2,
-            2,
-            vec![
-                f::<M>(10.0),
-                f::<M>(30.0),
-                f::<M>(20.0),
-                f::<M>(40.0),
-                f::<M>(50.0),
-                f::<M>(70.0),
-                f::<M>(60.0),
-                f::<M>(80.0),
-            ],
-            ctx.clone(),
-        );
-        let mut b = M::from_vec(
-            2,
-            2,
-            vec![
-                f::<M>(1.0),
-                f::<M>(3.0),
-                f::<M>(2.0),
-                f::<M>(4.0),
-                f::<M>(5.0),
-                f::<M>(7.0),
-                f::<M>(6.0),
-                f::<M>(8.0),
-            ],
-            ctx,
-        );
-        {
-            let mut a_view = a.columns_mut(0, 2);
-            let b_view = b.columns_mut(0, 2);
-            a_view -= &b_view;
-        }
-        let (_, vals) = a.triplet_iter();
-        let vals: Vec<_> = vals.collect();
-        assert_eq!(
-            vals,
-            vec![
-                f::<M>(9.0),
-                f::<M>(27.0),
-                f::<M>(18.0),
-                f::<M>(36.0),
-                f::<M>(45.0),
-                f::<M>(63.0),
-                f::<M>(54.0),
-                f::<M>(72.0),
-            ]
-        );
-    }
-
-    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
-    pub fn test_batched_gemm_oo_on_columns<M: DenseMatrix>(ctx: M::C) {
-        assert_eq!(ctx.nbatch(), 2);
-        // a 2x2 nbatch=2: batch0 [[1,2],[3,4]], batch1 [[5,6],[7,8]]
-        let a = M::from_vec(
-            2,
-            2,
-            vec![
-                f::<M>(1.0),
-                f::<M>(3.0),
-                f::<M>(2.0),
-                f::<M>(4.0),
-                f::<M>(5.0),
-                f::<M>(7.0),
-                f::<M>(6.0),
-                f::<M>(8.0),
-            ],
-            ctx.clone(),
-        );
-        // b 2x2 nbatch=2: batch0 identity, batch1 2*identity
-        let b = M::from_vec(
-            2,
-            2,
-            vec![
-                f::<M>(1.0),
-                f::<M>(0.0),
-                f::<M>(0.0),
-                f::<M>(1.0),
-                f::<M>(2.0),
-                f::<M>(0.0),
-                f::<M>(0.0),
-                f::<M>(2.0),
-            ],
-            ctx.clone(),
-        );
-        let mut result = M::zeros(2, 3, ctx);
-        {
-            let mut r_view = result.columns_mut(0, 2);
-            r_view.gemm_oo(f::<M>(1.0), &a, &b, f::<M>(0.0));
-        }
-        // batch0: a*I = [[1,2],[3,4]]; batch1: a*2I = [[10,12],[14,16]]; col2 = 0
-        assert_eq!(result.get_index(0, 0), f::<M>(1.0));
-        assert_eq!(result.get_index(1, 0), f::<M>(3.0));
-        assert_eq!(result.get_index(0, 1), f::<M>(2.0));
-        assert_eq!(result.get_index(1, 1), f::<M>(4.0));
-        let (_, vals) = result.triplet_iter();
-        let vals: Vec<_> = vals.collect();
-        assert_eq!(
-            vals,
-            vec![
-                f::<M>(1.0),
-                f::<M>(3.0),
-                f::<M>(2.0),
-                f::<M>(4.0),
-                f::<M>(0.0),
-                f::<M>(0.0),
-                f::<M>(10.0),
-                f::<M>(14.0),
-                f::<M>(12.0),
-                f::<M>(16.0),
-                f::<M>(0.0),
-                f::<M>(0.0),
-            ]
-        );
-    }
 }
 
 #[cfg(test)]
@@ -3010,18 +2174,6 @@ macro_rules! generate_dense_matrix_tests_nonbatched {
                 $crate::matrix::tests::test_from_diagonal_dense::<$M>();
             }
             #[test]
-            fn [<test_gemm_ $suffix>]() {
-                $crate::matrix::tests::test_gemm::<$M>();
-            }
-            #[test]
-            fn [<test_mat_mul_ $suffix>]() {
-                $crate::matrix::tests::test_mat_mul::<$M>();
-            }
-            #[test]
-            fn [<test_columns_view_ $suffix>]() {
-                $crate::matrix::tests::test_columns_view::<$M>();
-            }
-            #[test]
             fn [<test_column_view_ $suffix>]() {
                 $crate::matrix::tests::test_column_view::<$M>();
             }
@@ -3032,6 +2184,20 @@ macro_rules! generate_dense_matrix_tests_nonbatched {
             #[test]
             fn [<test_update_backward_diff_ $suffix>]() {
                 $crate::matrix::tests::test_update_backward_diff::<$M>();
+            }
+            #[test]
+            fn [<test_gemv_cols_ $suffix>]() {
+                $crate::matrix::tests::test_gemv_cols::<$M>();
+            }
+
+            #[test]
+            fn [<test_gemv_cols_many_columns_ $suffix>]() {
+                $crate::matrix::tests::test_gemv_cols_many_columns::<$M>();
+            }
+
+            #[test]
+            fn [<test_mul_cols_by_ $suffix>]() {
+                $crate::matrix::tests::test_mul_cols_by::<$M>();
             }
             #[test]
             fn [<test_resize_cols_ $suffix>]() {
@@ -3046,12 +2212,8 @@ macro_rules! generate_dense_matrix_tests_nonbatched {
                 $crate::matrix::tests::test_sub::<$M>();
             }
             #[test]
-            fn [<test_view_add_ref_ $suffix>]() {
-                $crate::matrix::tests::test_view_add_ref::<$M>();
-            }
-            #[test]
-            fn [<test_view_inner_ $suffix>]() {
-                $crate::matrix::tests::test_view_inner::<$M>();
+            fn [<test_inner_mut_ $suffix>]() {
+                $crate::matrix::tests::test_inner_mut::<$M>();
             }
             #[test]
             fn [<test_column_mut_ $suffix>]() {
@@ -3073,30 +2235,6 @@ macro_rules! generate_dense_matrix_tests_nonbatched {
             fn [<test_set_data_with_indices_ $suffix>]() {
                 $crate::matrix::tests::test_set_data_with_indices::<$M>();
             }
-            #[test]
-            fn [<test_mul_assign_scalar_ $suffix>]() {
-                $crate::matrix::tests::test_mul_assign_scalar::<$M>();
-            }
-            #[test]
-            fn [<test_view_mul_scalar_ $suffix>]() {
-                $crate::matrix::tests::test_view_mul_scalar::<$M>();
-            }
-            #[test]
-            fn [<test_view_mut_into_owned_ $suffix>]() {
-                $crate::matrix::tests::test_view_mut_into_owned::<$M>();
-            }
-            #[test]
-            fn [<test_view_mut_add_assign_view_mut_ $suffix>]() {
-                $crate::matrix::tests::test_view_mut_add_assign_view_mut::<$M>();
-            }
-            #[test]
-            fn [<test_view_mut_sub_assign_view_mut_ $suffix>]() {
-                $crate::matrix::tests::test_view_mut_sub_assign_view_mut::<$M>();
-            }
-            #[test]
-            fn [<test_gemm_oo_on_columns_ $suffix>]() {
-                $crate::matrix::tests::test_gemm_oo_on_columns::<$M>();
-            }
         }
     };
 }
@@ -3111,12 +2249,13 @@ macro_rules! generate_dense_matrix_tests_batched {
                 $crate::matrix::tests::test_batched_update_backward_diff::<$M>($ctx2);
             }
             #[test]
-            fn [<test_batched_view_add_ref_broadcast_ $suffix>]() {
-                $crate::matrix::tests::test_batched_view_add_ref_broadcast_m::<$M>($ctx2);
+            fn [<test_batched_gemv_cols_ $suffix>]() {
+                $crate::matrix::tests::test_batched_gemv_cols_m::<$M>($ctx2);
             }
+
             #[test]
-            fn [<test_batched_mat_mul_ $suffix>]() {
-                $crate::matrix::tests::test_batched_mat_mul::<$M>($ctx2);
+            fn [<test_batched_mul_cols_by_ $suffix>]() {
+                $crate::matrix::tests::test_batched_mul_cols_by::<$M>($ctx2);
             }
             #[test]
             fn [<test_batched_from_diagonal_dense_ $suffix>]() {
@@ -3127,44 +2266,8 @@ macro_rules! generate_dense_matrix_tests_batched {
                 $crate::matrix::tests::test_batched_from_vec::<$M>($ctx2);
             }
             #[test]
-            fn [<test_batched_gemm_ $suffix>]() {
-                $crate::matrix::tests::test_batched_gemm::<$M>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_columns_ $suffix>]() {
-                $crate::matrix::tests::test_batched_columns::<$M>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_gemv_o_on_columns_ $suffix>]() {
-                $crate::matrix::tests::test_batched_gemv_o_on_columns::<$M>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_gemm_vo_on_columns_ $suffix>]() {
-                $crate::matrix::tests::test_batched_gemm_vo_on_columns::<$M>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_gemm_broadcast_b_ $suffix>]() {
-                $crate::matrix::tests::test_batched_gemm_broadcast_b::<$M>($ctx2);
-            }
-            #[test]
             fn [<test_batched_gemv_o_broadcast_x_ $suffix>]() {
                 $crate::matrix::tests::test_batched_gemv_o_broadcast_x::<$M>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_gemv_o_broadcast_mat_ $suffix>]() {
-                $crate::matrix::tests::test_batched_gemv_o_broadcast_mat::<$M>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_gemm_vo_broadcast_b_ $suffix>]() {
-                $crate::matrix::tests::test_batched_gemm_vo_broadcast_b::<$M>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_gemm_broadcast_a_ $suffix>]() {
-                $crate::matrix::tests::test_batched_gemm_broadcast_a::<$M>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_gemm_vo_broadcast_a_ $suffix>]() {
-                $crate::matrix::tests::test_batched_gemm_vo_broadcast_a::<$M>($ctx2);
             }
             #[test]
             fn [<test_batched_resize_cols_ $suffix>]() {
@@ -3178,60 +2281,6 @@ macro_rules! generate_dense_matrix_tests_batched {
             #[should_panic(expected = "incompatible nbatch")]
             fn [<test_batched_gemv_incompatible_ $suffix>]() {
                 $crate::matrix::tests::test_batched_gemv_incompatible::<$M>($ctx2, $ctx1.clone_with_nbatch(3).unwrap());
-            }
-            #[test]
-            #[should_panic(expected = "incompatible nbatch")]
-            fn [<test_batched_gemm_incompatible_ $suffix>]() {
-                $crate::matrix::tests::test_batched_gemm_incompatible::<$M>($ctx2, $ctx1.clone_with_nbatch(3).unwrap());
-            }
-            #[test]
-            #[should_panic(expected = "incompatible nbatch")]
-            fn [<test_batched_gemm_incompatible_a_ $suffix>]() {
-                $crate::matrix::tests::test_batched_gemm_incompatible_a::<$M>($ctx2, $ctx1.clone_with_nbatch(3).unwrap());
-            }
-            #[test]
-            fn [<test_strided_matrix_view_into_owned_ $suffix>]() {
-                $crate::matrix::tests::test_strided_matrix_view_into_owned::<$M>($ctx2);
-            }
-            #[test]
-            fn [<test_strided_matrix_view_add_owned_ $suffix>]() {
-                $crate::matrix::tests::test_strided_matrix_view_add_owned::<$M>($ctx2);
-            }
-            #[test]
-            fn [<test_strided_matrix_view_sub_owned_ $suffix>]() {
-                $crate::matrix::tests::test_strided_matrix_view_sub_owned::<$M>($ctx2);
-            }
-            #[test]
-            fn [<test_strided_matrix_view_mul_scalar_ $suffix>]() {
-                $crate::matrix::tests::test_strided_matrix_view_mul_scalar::<$M>($ctx2);
-            }
-            #[test]
-            fn [<test_strided_matrix_view_mut_add_assign_view_ $suffix>]() {
-                $crate::matrix::tests::test_strided_matrix_view_mut_add_assign_view::<$M>($ctx2);
-            }
-            #[test]
-            fn [<test_strided_matrix_view_mut_sub_assign_view_ $suffix>]() {
-                $crate::matrix::tests::test_strided_matrix_view_mut_sub_assign_view::<$M>($ctx2);
-            }
-            #[test]
-            fn [<test_strided_matrix_view_mut_mul_assign_scalar_ $suffix>]() {
-                $crate::matrix::tests::test_strided_matrix_view_mut_mul_assign_scalar::<$M>($ctx2);
-            }
-            #[test]
-            fn [<test_strided_matrix_view_mut_into_owned_ $suffix>]() {
-                $crate::matrix::tests::test_strided_matrix_view_mut_into_owned::<$M>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_view_mut_add_assign_view_mut_ $suffix>]() {
-                $crate::matrix::tests::test_batched_view_mut_add_assign_view_mut::<$M>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_view_mut_sub_assign_view_mut_ $suffix>]() {
-                $crate::matrix::tests::test_batched_view_mut_sub_assign_view_mut::<$M>($ctx2);
-            }
-            #[test]
-            fn [<test_batched_gemm_oo_on_columns_ $suffix>]() {
-                $crate::matrix::tests::test_batched_gemm_oo_on_columns::<$M>($ctx2);
             }
         }
     };

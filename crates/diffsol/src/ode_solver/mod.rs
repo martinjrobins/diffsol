@@ -8,6 +8,7 @@ pub mod explicit_rk;
 pub mod jacobian_update;
 pub mod method;
 pub mod no_checkpointing_solver;
+pub mod pi_controller;
 pub mod problem;
 pub mod runge_kutta;
 pub mod sde;

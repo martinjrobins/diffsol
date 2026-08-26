@@ -371,20 +371,75 @@ where
     group.finish();
 }
 
-/// 🔴 matrix_columns — Extract a matrix view over a column range per batch.
-/// Called every RK stage via diff.columns(0, i).gemv(...).
-fn bench_matrix_columns<M: Matrix<T = f64> + DenseMatrix + 'static>(c: &mut Criterion, label: &str)
+/// 🔴 gemv_cols — y = alpha * diff[:, start..end] * x + beta * y, a BDF order + 1 column sum
+/// and every RK stage combination. Called twice every BDF step (predictor and psi), once per
+/// RK stage, and once per interpolation.
+fn bench_gemv_cols<M: Matrix<T = f64> + DenseMatrix + 'static>(c: &mut Criterion, label: &str)
 where
     M::C: Default + Clone,
     M::V: Vector<T = f64, C = M::C> + Clone,
 {
     let mut group = c.benchmark_group(label);
+    // a fifth-order BDF difference table: sum columns 0..=5
+    let weights = [1.0, 0.5, 0.25, 0.125, 0.0625, 0.03125];
     for &ns in MSIZES {
         group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
             let ctx = M::C::default();
-            let mat = M::zeros(ns, ns + 1, ctx);
+            let mut mat = M::zeros(ns, weights.len() + 3, ctx.clone());
+            fill_dense(&mut mat, ns);
+            let mut v = M::V::zeros(ns, ctx.clone());
             b.iter(|| {
-                black_box(mat.columns(0, 1));
+                mat.gemv_cols(0, weights.len(), 1.0, &weights, 0.0, &mut v);
+                black_box(&v);
+            });
+        });
+    }
+    group.finish();
+}
+
+/// Sizes seen by the RK stage accumulation: the hot benchmark problems are tiny
+/// (`exponential_decay` is 2 states, `robertson` 3), which `MSIZES` does not cover.
+const RK_SIZES: &[usize] = &[2, 3, 10, 100, 500];
+
+/// 🔴 stage_accumulate — `y = y0 + sum_{j<k} w_j * diff[:, j]`, the RK stage combination
+/// (`Rk::do_stage`, `SdirkCallable::set_phi`) and the BDF predictor/psi update, on the
+/// tall-thin `ns x k` shape the solvers actually use.
+///
+/// `gemv_cols` is the whole operation; `full_gemv` multiplies the whole matrix instead, as a
+/// reference point for how much of the cost is the multiply itself rather than the column
+/// range. Keep an eye on the small `ns` rows: the ODE benchmarks are 2-3 states, and that is
+/// where backend dispatch overhead dominates the arithmetic.
+fn bench_stage_accumulate<M: Matrix<T = f64> + DenseMatrix + 'static>(
+    c: &mut Criterion,
+    label: &str,
+) where
+    M::C: Default + Clone,
+    M::V: Vector<T = f64, C = M::C> + Clone,
+{
+    let mut group = c.benchmark_group(label);
+    // a mid-tableau RK stage: 6 preceding stages to combine
+    let weights = [1.0, 0.5, 0.25, 0.125, 0.0625, 0.03125];
+    let k = weights.len();
+    for &ns in RK_SIZES {
+        let ctx = M::C::default();
+        let mut mat = M::zeros(ns, k + 1, ctx.clone());
+        fill_dense(&mut mat, ns);
+        let y0 = M::V::from_element(ns, 1.0, ctx.clone());
+        let mut y = M::V::zeros(ns, ctx.clone());
+
+        group.bench_with_input(BenchmarkId::new("full_gemv", ns), &ns, |b, _| {
+            let w_full = M::V::from_vec(vec![1.0; k + 1], ctx.clone());
+            b.iter(|| {
+                y.copy_from(&y0);
+                mat.gemv(1.0, &w_full, 1.0, &mut y);
+                black_box(&y);
+            });
+        });
+        group.bench_with_input(BenchmarkId::new("gemv_cols", ns), &ns, |b, _| {
+            b.iter(|| {
+                y.copy_from(&y0);
+                mat.gemv_cols(0, k, 1.0, &weights, 1.0, &mut y);
+                black_box(&y);
             });
         });
     }
@@ -820,7 +875,8 @@ macro_rules! bench_matrix_backend {
 macro_rules! bench_dense_matrix_backend {
     ($c:expr, $label:expr, $M:ty) => {
         bench_matrix_column::<$M>($c, concat!("matrix_column/", $label));
-        bench_matrix_columns::<$M>($c, concat!("matrix_columns/", $label));
+        bench_gemv_cols::<$M>($c, concat!("gemv_cols/", $label));
+        bench_stage_accumulate::<$M>($c, concat!("stage_accumulate/", $label));
     };
 }
 

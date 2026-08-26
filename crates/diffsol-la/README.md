@@ -10,7 +10,7 @@ directly. Use `diffsol-la` when you want to build on the linear algebra layer it
 ## Traits
 
 - **Vectors**: `Vector`, `VectorView`, `VectorViewMut`, `VectorIndex`, `VectorHost`.
-- **Matrices**: `Matrix`, `DenseMatrix`, `MatrixView`, `MatrixViewMut`, and sparsity handling.
+- **Matrices**: `Matrix`, `DenseMatrix`, and sparsity handling.
 - **Linear operators and solvers**: the `LinearOp` trait describing a linear
   operator `A`, and the `LinearSolver` trait for solving `Ax = b`.
 - **Backends**: `NalgebraLU`, `FaerLU`, `FaerSparseLU`, `KLU` (suitesparse), and `CudaLU`.

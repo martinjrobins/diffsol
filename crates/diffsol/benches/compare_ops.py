@@ -232,7 +232,7 @@ def main():
         "axpy": 1, "copy_from": 2, "sub_assign": 3, "add_assign": 4,
         "squared_norm": 5, "axpy_v": 6, "copy_from_view": 7,
         "add_ref_ref": 8, "sub_ref_ref": 9, "gemv": 10,
-        "matrix_column": 11, "matrix_columns": 12,
+        "matrix_column": 11, "gemv_cols": 12, "stage_accumulate": 12,
         "fill": 13, "scalar_mul_assign": 14, "scalar_mul": 15,
         "scalar_div": 16, "component_mul_assign": 17, "component_div_assign": 18,
         "norm_l2": 19, "set_column": 20, "scale_add_and_assign": 21,

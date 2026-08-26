@@ -3,7 +3,7 @@ use cudarc::{
     cublas::{sys::cublasOperation_t, CudaBlas},
     driver::{CudaSlice, CudaView, CudaViewMut, DevicePtr, DevicePtrMut, PushKernelArg},
 };
-use std::ffi::{c_int, c_longlong};
+use std::ffi::c_int;
 use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
 
 use crate::{
@@ -14,7 +14,7 @@ use crate::{
 
 use super::{
     sparsity::{Dense, DenseRef},
-    DenseMatrix, Matrix, MatrixView, MatrixViewMut,
+    DenseMatrix, Matrix,
 };
 
 /// Dense matrix stored in GPU memory via [`CudaSlice`].
@@ -34,32 +34,6 @@ pub struct CudaMat<T: ScalarCuda> {
     pub(crate) context: CudaContext,
     nrows: IndexType,
     ncols: IndexType,
-}
-
-/// Immutable reference to a [`CudaMat`], possibly with a strided layout.
-///
-/// When the view spans a subset of columns, `batch_stride` records the
-/// parent matrix's total elements per batch (`nrows * ncols`) so that
-/// CUDA kernels can correctly compute per-batch offsets.
-#[derive(Debug)]
-pub struct CudaMatRef<'a, T: ScalarCuda> {
-    pub(crate) data: CudaView<'a, T>,
-    pub(crate) context: CudaContext,
-    nrows: IndexType,
-    ncols: IndexType,
-    batch_stride: IndexType,
-}
-
-/// Mutable reference to a [`CudaMat`], possibly with a strided layout.
-///
-/// See [`CudaMatRef`] for the layout description.
-#[derive(Debug)]
-pub struct CudaMatMut<'a, T: ScalarCuda> {
-    pub(crate) data: CudaViewMut<'a, T>,
-    pub(crate) context: CudaContext,
-    nrows: IndexType,
-    ncols: IndexType,
-    batch_stride: IndexType,
 }
 
 impl CudaContext {
@@ -185,34 +159,6 @@ macro_rules! impl_matrix_common {
     };
 }
 
-macro_rules! impl_matrix_common_ref {
-    ($mat:ty, $vec:ty, $con:ty, $in:ty) => {
-        impl<'a, T: ScalarCuda> MatrixCommon for $mat {
-            type T = T;
-            type V = $vec;
-            type C = $con;
-            type Inner = $in;
-
-            fn nrows(&self) -> IndexType {
-                self.nrows
-            }
-            fn ncols(&self) -> IndexType {
-                self.ncols
-            }
-            fn inner(&self) -> &Self::Inner {
-                &self.data
-            }
-        }
-    };
-}
-
-impl_matrix_common_ref!(
-    CudaMatMut<'a, T>,
-    CudaVec<T>,
-    CudaContext,
-    CudaViewMut<'a, T>
-);
-impl_matrix_common_ref!(CudaMatRef<'a, T>, CudaVec<T>, CudaContext, CudaView<'a, T>);
 impl_matrix_common!(CudaMat<T>, CudaVec<T>, CudaContext, CudaSlice<T>);
 
 macro_rules! impl_mul_scalar {
@@ -273,35 +219,8 @@ macro_rules! impl_mul_scalar_alloc {
     };
 }
 
-impl_mul_scalar_alloc!(CudaMatRef<'_, T>, CudaMat<T>, T);
 impl_mul_scalar!(CudaMat<T>, CudaMat<T>);
 impl_mul_scalar_alloc!(&CudaMat<T>, CudaMat<T>, T);
-
-macro_rules! impl_mul_assign_scalar {
-    ($col_type:ty, $scalar:ty) => {
-        impl<'a, T: ScalarCuda> MulAssign<Scale<T>> for $col_type {
-            fn mul_assign(&mut self, rhs: Scale<T>) {
-                let f = self.context.function::<T>("vec_mul_assign_scalar");
-                let nbatch = self.context.nbatch();
-                let nstates = (self.nrows() * self.ncols()) as u32;
-                let nbatch_u32 = nbatch as u32;
-                let stride = nstates as i32;
-                let mut build = self.context.stream.launch_builder(&f);
-                let scalar = rhs.value();
-                build
-                    .arg(&mut self.data)
-                    .arg(&scalar)
-                    .arg(&nstates)
-                    .arg(&nbatch_u32)
-                    .arg(&stride);
-                let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
-                unsafe { build.launch(config) }.expect("Failed to launch kernel");
-            }
-        }
-    };
-}
-
-impl_mul_assign_scalar!(CudaMatMut<'_, T>, T);
 
 macro_rules! impl_sub_assign {
     ($lhs:ty, $rhs:ty) => {
@@ -357,113 +276,9 @@ macro_rules! impl_add_assign {
     };
 }
 
-macro_rules! impl_sub_assign_mut {
-    ($lhs:ty, $rhs:ty) => {
-        impl<T: ScalarCuda> SubAssign<$rhs> for $lhs {
-            fn sub_assign(&mut self, rhs: $rhs) {
-                let f = self.context.function::<T>("vec_sub_assign");
-                let nbatch = self.context.nbatch();
-                let nstates = (self.nrows() * self.ncols()) as u32;
-                let nbatch_u32 = nbatch as u32;
-                let self_stride = nstates as i32;
-                let rhs_nbatch = rhs.context.nbatch() as i32;
-                let rhs_nstates = (rhs.nrows() * rhs.ncols()) as u32;
-                let rhs_stride = rhs_nstates as i32;
-                let mut build = self.context.stream.launch_builder(&f);
-                let rhs_data = rhs.data.as_view();
-                build
-                    .arg(&mut self.data)
-                    .arg(&rhs_data)
-                    .arg(&nstates)
-                    .arg(&self_stride)
-                    .arg(&rhs_stride)
-                    .arg(&rhs_nbatch);
-                let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
-                unsafe { build.launch(config) }.expect("Failed to launch kernel");
-            }
-        }
-    };
-}
-
-macro_rules! impl_add_assign_mut {
-    ($lhs:ty, $rhs:ty) => {
-        impl<T: ScalarCuda> AddAssign<$rhs> for $lhs {
-            fn add_assign(&mut self, rhs: $rhs) {
-                let f = self.context.function::<T>("vec_add_assign");
-                let nbatch = self.context.nbatch();
-                let nstates = (self.nrows() * self.ncols()) as u32;
-                let nbatch_u32 = nbatch as u32;
-                let self_stride = nstates as i32;
-                let rhs_nbatch = rhs.context.nbatch() as i32;
-                let rhs_nstates = (rhs.nrows() * rhs.ncols()) as u32;
-                let rhs_stride = rhs_nstates as i32;
-                let mut build = self.context.stream.launch_builder(&f);
-                let rhs_data = rhs.data.as_view();
-                build
-                    .arg(&mut self.data)
-                    .arg(&rhs_data)
-                    .arg(&nstates)
-                    .arg(&self_stride)
-                    .arg(&rhs_stride)
-                    .arg(&rhs_nbatch);
-                let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
-                unsafe { build.launch(config) }.expect("Failed to launch kernel");
-            }
-        }
-    };
-}
-
 impl_add_assign!(CudaMat<T>, &CudaMat<T>);
-impl_add_assign!(CudaMat<T>, &CudaMatRef<'_, T>);
-impl_add_assign!(CudaMatMut<'_, T>, &CudaMatRef<'_, T>);
-impl_add_assign_mut!(CudaMatMut<'_, T>, &CudaMatMut<'_, T>);
 
 impl_sub_assign!(CudaMat<T>, &CudaMat<T>);
-impl_sub_assign!(CudaMat<T>, &CudaMatRef<'_, T>);
-impl_sub_assign!(CudaMatMut<'_, T>, &CudaMatRef<'_, T>);
-impl_sub_assign_mut!(CudaMatMut<'_, T>, &CudaMatMut<'_, T>);
-
-macro_rules! impl_sub_both_ref {
-    ($lhs:ty, $rhs:ty, $out:ty) => {
-        impl<T: ScalarCuda> Sub<$rhs> for $lhs {
-            type Output = $out;
-            fn sub(self, rhs: $rhs) -> Self::Output {
-                let nbatch = self.context.nbatch();
-                let rhs_nbatch = rhs.context.nbatch();
-                let max_nbatch = nbatch.max(rhs_nbatch);
-                let nstates = (self.nrows() * self.ncols()) as u32;
-                let nbatch_u32 = max_nbatch as u32;
-                let self_stride = self.batch_stride as i32;
-                let self_nbatch_i32 = nbatch as i32;
-                let rhs_nbatch_i32 = rhs_nbatch as i32;
-                let rhs_stride = (rhs.nrows() * rhs.ncols()) as i32;
-                let mut ret = Self::Output::zeros(
-                    self.nrows(),
-                    self.ncols(),
-                    self.context.clone_with_nbatch(max_nbatch).unwrap(),
-                );
-                let ret_nbatch = max_nbatch as i32;
-                let ret_stride = (ret.nrows() * ret.ncols()) as i32;
-                let f = self.context.function::<T>("vec_sub");
-                let mut build = self.context.stream.launch_builder(&f);
-                build
-                    .arg(&self.data)
-                    .arg(&rhs.data)
-                    .arg(&mut ret.data)
-                    .arg(&nstates)
-                    .arg(&self_stride)
-                    .arg(&self_nbatch_i32)
-                    .arg(&rhs_stride)
-                    .arg(&rhs_nbatch_i32)
-                    .arg(&ret_stride)
-                    .arg(&ret_nbatch);
-                let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
-                unsafe { build.launch(config) }.expect("Failed to launch kernel");
-                ret
-            }
-        }
-    };
-}
 
 macro_rules! impl_sub_lhs {
     ($lhs:ty, $rhs:ty, $out:ty) => {
@@ -524,50 +339,6 @@ macro_rules! impl_sub_lhs {
 }
 
 impl_sub_lhs!(CudaMat<T>, &CudaMat<T>, CudaMat<T>);
-impl_sub_lhs!(CudaMat<T>, &CudaMatRef<'_, T>, CudaMat<T>);
-impl_sub_both_ref!(CudaMatRef<'_, T>, &CudaMat<T>, CudaMat<T>);
-
-macro_rules! impl_add_both_ref {
-    ($lhs:ty, $rhs:ty, $out:ty) => {
-        impl<T: ScalarCuda> Add<$rhs> for $lhs {
-            type Output = $out;
-            fn add(self, rhs: $rhs) -> Self::Output {
-                let nbatch = self.context.nbatch();
-                let rhs_nbatch = rhs.context.nbatch();
-                let max_nbatch = nbatch.max(rhs_nbatch);
-                let nstates = (self.nrows() * self.ncols()) as u32;
-                let nbatch_u32 = max_nbatch as u32;
-                let self_stride = self.batch_stride as i32;
-                let self_nbatch_i32 = nbatch as i32;
-                let rhs_nbatch_i32 = rhs_nbatch as i32;
-                let rhs_stride = (rhs.nrows() * rhs.ncols()) as i32;
-                let mut ret = Self::Output::zeros(
-                    self.nrows(),
-                    self.ncols(),
-                    self.context.clone_with_nbatch(max_nbatch).unwrap(),
-                );
-                let ret_nbatch = max_nbatch as i32;
-                let ret_stride = (ret.nrows() * ret.ncols()) as i32;
-                let f = self.context.function::<T>("vec_add");
-                let mut build = self.context.stream.launch_builder(&f);
-                build
-                    .arg(&self.data)
-                    .arg(&rhs.data)
-                    .arg(&mut ret.data)
-                    .arg(&nstates)
-                    .arg(&self_stride)
-                    .arg(&self_nbatch_i32)
-                    .arg(&rhs_stride)
-                    .arg(&rhs_nbatch_i32)
-                    .arg(&ret_stride)
-                    .arg(&ret_nbatch);
-                let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
-                unsafe { build.launch(config) }.expect("Failed to launch kernel");
-                ret
-            }
-        }
-    };
-}
 
 macro_rules! impl_add_lhs {
     ($lhs:ty, $rhs:ty, $out:ty) => {
@@ -628,243 +399,37 @@ macro_rules! impl_add_lhs {
 }
 
 impl_add_lhs!(CudaMat<T>, &CudaMat<T>, CudaMat<T>);
-impl_add_lhs!(CudaMat<T>, &CudaMatRef<'_, T>, CudaMat<T>);
-impl_add_both_ref!(CudaMatRef<'_, T>, &CudaMat<T>, CudaMat<T>);
 
-impl<'a, T: ScalarCuda> MatrixView<'a> for CudaMatRef<'a, T> {
-    type Owned = CudaMat<T>;
-
-    fn into_owned(self) -> Self::Owned {
-        let nrows = self.nrows;
-        let ncols = self.ncols;
-        let nbatch = self.context.nbatch();
-        let total = nrows * ncols * nbatch;
-        let mut data = unsafe { self.context.stream.alloc(total) }
-            .expect("Failed to allocate memory for CudaVec");
-        let nstates = (nrows * ncols) as u32;
-        let nbatch_u32 = nbatch as u32;
-        let f = self.context.function::<T>("vec_copy");
-        let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
-        let mut build = self.context.stream.launch_builder(&f);
-        let src_stride = self.batch_stride as i32;
-        let dst_stride = (nrows * ncols) as i32;
-        let nbatch_i32 = nbatch as i32;
-        build
-            .arg(&mut data)
-            .arg(&self.data)
-            .arg(&nstates)
-            .arg(&dst_stride)
-            .arg(&src_stride)
-            .arg(&nbatch_i32);
-        unsafe { build.launch(config) }.expect("Failed to launch kernel");
-        CudaMat {
-            data,
-            context: self.context.clone(),
-            nrows,
-            ncols,
-        }
-    }
-
-    fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
-        let nbatch = self.context.nbatch();
-        let x_nbatch = x.context.nbatch();
-        self.context.assert_compatible_nbatch(x_nbatch, "gemv");
-        let effective_nbatch = nbatch.max(x_nbatch);
-        for b in 0..effective_nbatch {
-            let self_b = if nbatch == 1 { 0 } else { b };
-            let x_b = if x_nbatch == 1 { 0 } else { b };
-            let x_nstates = self.ncols;
-            let a_start = self_b * self.batch_stride;
-            let x_start = x_b * x_nstates;
-            let y_start = b * self.nrows;
-            let a_slice = self.data.slice(a_start..a_start + self.nrows * self.ncols);
-            let x_slice = x.data.slice(x_start..x_start + self.ncols);
-            let mut y_slice = y.data.slice_mut(y_start..y_start + self.nrows);
-            self.context.gemv(
-                self.nrows,
-                self.ncols,
-                alpha,
-                beta,
-                &a_slice,
-                &x_slice,
-                &mut y_slice,
-            );
-        }
-    }
+/// Kernel-argument counterpart of `struct GemvColsWeights_f64`, passed by value so the small
+/// host-computed coefficient list reaches the device without a copy per call. cuBLAS cannot
+/// serve a host-side `x` at all — its vector arguments must be device pointers.
+///
+/// The array length must match `MAX_SMALL_COLS` in `cuda_kernels/cuda_kernels_common.h`; nothing checks
+/// that across the language boundary, so the two are kept in step by convention (as
+/// `MulColsByRhs` and `mul_cols_by.cu` already are).
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct GemvColsWeights<T: ScalarCuda> {
+    w: [T; crate::matrix::MAX_SMALL_COLS],
 }
 
-impl<'a, T: ScalarCuda> MatrixViewMut<'a> for CudaMatMut<'a, T> {
-    type Owned = CudaMat<T>;
-    type View = CudaMatRef<'a, T>;
+// SAFETY: `repr(C)` holding only `T: ScalarCuda` values, which are themselves `DeviceRepr`, so
+// the layout matches the kernel's struct parameter.
+unsafe impl<T: ScalarCuda> cudarc::driver::DeviceRepr for GemvColsWeights<T> {}
 
-    fn into_owned(self) -> Self::Owned {
-        let total = self.nrows * self.ncols * self.context.nbatch();
-        let mut data = unsafe { self.context.stream.alloc(total) }
-            .expect("Failed to allocate memory for CudaVec");
-        let nrows = self.nrows;
-        let ncols = self.ncols;
-        let nbatch = self.context.nbatch();
-        let nstates = (nrows * ncols) as u32;
-        let nbatch_u32 = nbatch as u32;
-        let f = self.context.function::<T>("vec_copy");
-        let config = self.context.launch_config_2d(nstates, nbatch_u32, &f);
-        let mut build = self.context.stream.launch_builder(&f);
-        let src_stride = self.batch_stride as i32;
-        let dst_stride = (nrows * ncols) as i32;
-        let nbatch_i32 = nbatch as i32;
-        let src_data = self.data.slice(..);
-        build
-            .arg(&mut data)
-            .arg(&src_data)
-            .arg(&nstates)
-            .arg(&dst_stride)
-            .arg(&src_stride)
-            .arg(&nbatch_i32);
-        unsafe { build.launch(config) }.expect("Failed to launch kernel");
-        CudaMat {
-            data,
-            context: self.context.clone(),
-            nrows,
-            ncols,
-        }
-    }
-
-    fn gemm_oo(&mut self, alpha: Self::T, a: &Self::Owned, b: &Self::Owned, beta: Self::T) {
-        let nbatch = self.context.nbatch();
-        let a_nbatch = a.context.nbatch();
-        let b_nbatch = b.context.nbatch();
-        let self_nrows = self.nrows;
-        let _self_ncols = self.ncols;
-        let self_batch_stride = self.batch_stride;
-        self.context.assert_compatible_nbatch(a_nbatch, "gemm_oo_a");
-        self.context.assert_compatible_nbatch(b_nbatch, "gemm_oo_b");
-        let effective_nbatch = nbatch.max(a_nbatch).max(b_nbatch) as c_int;
-        let blas = CudaBlas::new(self.context.stream.clone()).expect("Failed to create CudaBlas");
-
-        let nrows_a = a.nrows as c_int;
-        let ncols_a = a.ncols as c_int;
-        let nrows_b = b.nrows as c_int;
-        let ncols_b = b.ncols as c_int;
-        let nrows_c = self_nrows as c_int;
-
-        let stride_a: c_longlong = if a_nbatch == 1 {
-            0
-        } else {
-            (a.nrows * a.ncols) as c_longlong
-        };
-        let stride_b: c_longlong = if b_nbatch == 1 {
-            0
-        } else {
-            (b.nrows * b.ncols) as c_longlong
-        };
-        let stride_c: c_longlong = if nbatch == 1 {
-            0
-        } else {
-            self_batch_stride as c_longlong
-        };
-
-        let (a_ptr, _) = a.data.device_ptr(&self.context.stream);
-        let (b_ptr, _) = b.data.device_ptr(&self.context.stream);
-        let (c_ptr, _) = self.data.device_ptr_mut(&self.context.stream);
-
-        let alpha_f64 = alpha.as_f64();
-        let beta_f64 = beta.as_f64();
-        unsafe {
-            cublas::cublasDgemmStridedBatched(
-                *blas.handle(),
-                cublasOperation_t::CUBLAS_OP_N,
-                cublasOperation_t::CUBLAS_OP_N,
-                nrows_a,
-                ncols_b,
-                ncols_a,
-                &alpha_f64 as *const f64,
-                a_ptr as *const f64,
-                nrows_a,
-                stride_a,
-                b_ptr as *const f64,
-                nrows_b,
-                stride_b,
-                &beta_f64 as *const f64,
-                c_ptr as *mut f64,
-                nrows_c,
-                stride_c,
-                effective_nbatch,
-            )
-        }
-        .result()
-        .expect("Failed to launch gemm");
-    }
-    fn gemm_vo(&mut self, alpha: Self::T, a: &Self::View, b: &Self::Owned, beta: Self::T) {
-        let nbatch = self.context.nbatch();
-        let a_nbatch = a.context.nbatch();
-        let b_nbatch = b.context.nbatch();
-        let self_nrows = self.nrows;
-        let _self_ncols = self.ncols;
-        let self_batch_stride = self.batch_stride;
-        self.context.assert_compatible_nbatch(a_nbatch, "gemm_vo_a");
-        self.context.assert_compatible_nbatch(b_nbatch, "gemm_vo_b");
-        let effective_nbatch = nbatch.max(a_nbatch).max(b_nbatch) as c_int;
-        let blas = CudaBlas::new(self.context.stream.clone()).expect("Failed to create CudaBlas");
-
-        let nrows_a = a.nrows as c_int;
-        let ncols_a = a.ncols as c_int;
-        let nrows_b = b.nrows as c_int;
-        let ncols_b = b.ncols as c_int;
-        let nrows_c = self_nrows as c_int;
-
-        let stride_a: c_longlong = if a_nbatch == 1 {
-            0
-        } else {
-            a.batch_stride as c_longlong
-        };
-        let stride_b: c_longlong = if b_nbatch == 1 {
-            0
-        } else {
-            (b.nrows * b.ncols) as c_longlong
-        };
-        let stride_c: c_longlong = if nbatch == 1 {
-            0
-        } else {
-            self_batch_stride as c_longlong
-        };
-
-        let (a_ptr, _) = a.data.device_ptr(&self.context.stream);
-        let (b_ptr, _) = b.data.device_ptr(&self.context.stream);
-        let (c_ptr, _) = self.data.device_ptr_mut(&self.context.stream);
-
-        let alpha_f64 = alpha.as_f64();
-        let beta_f64 = beta.as_f64();
-        unsafe {
-            cublas::cublasDgemmStridedBatched(
-                *blas.handle(),
-                cublasOperation_t::CUBLAS_OP_N,
-                cublasOperation_t::CUBLAS_OP_N,
-                nrows_a,
-                ncols_b,
-                ncols_a,
-                &alpha_f64 as *const f64,
-                a_ptr as *const f64,
-                nrows_a,
-                stride_a,
-                b_ptr as *const f64,
-                nrows_b,
-                stride_b,
-                &beta_f64 as *const f64,
-                c_ptr as *mut f64,
-                nrows_c,
-                stride_c,
-                effective_nbatch,
-            )
-        }
-        .result()
-        .expect("Failed to launch gemm");
-    }
+/// Kernel-argument counterpart of `struct MulColsByRhs_f64`, passed by value so the small
+/// host-computed coefficient block reaches the device without a copy per call.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct MulColsByRhs<T: ScalarCuda> {
+    m: [T; crate::matrix::MAX_SMALL_COLS * crate::matrix::MAX_SMALL_COLS],
 }
+
+// SAFETY: `MulColsByRhs` is `repr(C)` and holds only `T: ScalarCuda` values, which are
+// themselves `DeviceRepr`, so its layout matches the kernel's struct parameter.
+unsafe impl<T: ScalarCuda> cudarc::driver::DeviceRepr for MulColsByRhs<T> {}
 
 impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
-    type View<'a> = CudaMatRef<'a, T>;
-    type ViewMut<'a> = CudaMatMut<'a, T>;
-
     fn resize_cols(&mut self, new_ncols: IndexType) {
         let nbatch = self.context.nbatch();
         if new_ncols == self.ncols {
@@ -933,70 +498,6 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
         self.get_index(i, j)
     }
 
-    fn gemm(&mut self, alpha: Self::T, a: &Self, b: &Self, beta: Self::T) {
-        let nbatch = self.context.nbatch();
-        let a_nbatch = a.context.nbatch();
-        let b_nbatch = b.context.nbatch();
-        let self_nrows = self.nrows;
-        let self_ncols = self.ncols;
-        self.context.assert_compatible_nbatch(a_nbatch, "gemm_a");
-        self.context.assert_compatible_nbatch(b_nbatch, "gemm_b");
-        let effective_nbatch = nbatch.max(a_nbatch).max(b_nbatch) as c_int;
-        let blas = CudaBlas::new(self.context.stream.clone()).expect("Failed to create CudaBlas");
-
-        let nrows_a = a.nrows as c_int;
-        let ncols_a = a.ncols as c_int;
-        let nrows_b = b.nrows as c_int;
-        let ncols_b = b.ncols as c_int;
-        let nrows_c = self_nrows as c_int;
-
-        let stride_a: c_longlong = if a_nbatch == 1 {
-            0
-        } else {
-            (a.nrows * a.ncols) as c_longlong
-        };
-        let stride_b: c_longlong = if b_nbatch == 1 {
-            0
-        } else {
-            (b.nrows * b.ncols) as c_longlong
-        };
-        let stride_c: c_longlong = if nbatch == 1 {
-            0
-        } else {
-            (self_nrows * self_ncols) as c_longlong
-        };
-
-        let (a_ptr, _) = a.data.device_ptr(&self.context.stream);
-        let (b_ptr, _) = b.data.device_ptr(&self.context.stream);
-        let (c_ptr, _) = self.data.device_ptr_mut(&self.context.stream);
-
-        let alpha_f64 = alpha.as_f64();
-        let beta_f64 = beta.as_f64();
-        unsafe {
-            cublas::cublasDgemmStridedBatched(
-                *blas.handle(),
-                cublasOperation_t::CUBLAS_OP_N,
-                cublasOperation_t::CUBLAS_OP_N,
-                nrows_a,
-                ncols_b,
-                ncols_a,
-                &alpha_f64 as *const f64,
-                a_ptr as *const f64,
-                nrows_a,
-                stride_a,
-                b_ptr as *const f64,
-                nrows_b,
-                stride_b,
-                &beta_f64 as *const f64,
-                c_ptr as *mut f64,
-                nrows_c,
-                stride_c,
-                effective_nbatch,
-            )
-        }
-        .result()
-        .expect("Failed to launch gemm");
-    }
     fn column_mut(&mut self, i: usize) -> <Self::V as Vector>::ViewMut<'_> {
         let nrows = self.nrows();
         let context = self.context.clone();
@@ -1005,26 +506,6 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
             context,
             nstates: nrows,
             col_offset: i * nrows,
-        }
-    }
-
-    fn columns_mut(&mut self, start: usize, end: usize) -> Self::ViewMut<'_> {
-        assert!(start < end, "Start index must be less than end index");
-        assert!(end <= self.ncols(), "End index out of bounds");
-        assert!(start < self.ncols(), "Start index out of bounds");
-        let nbatch = self.context.nbatch();
-        let nrows = self.nrows();
-        let ncols = self.ncols();
-        let num_cols = end - start;
-        let start_i = start * nrows;
-        let end_i = (nbatch - 1) * nrows * ncols + end * nrows;
-        let data = self.data.slice_mut(start_i..end_i);
-        CudaMatMut {
-            data,
-            context: self.context.clone(),
-            nrows,
-            ncols: num_cols,
-            batch_stride: nrows * ncols,
         }
     }
 
@@ -1041,24 +522,45 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
             col_offset: i * nrows,
         }
     }
-    fn columns(&self, start: usize, end: usize) -> Self::View<'_> {
-        assert!(start < end, "Start index must be less than end index");
-        assert!(end <= self.ncols(), "End index out of bounds");
-        assert!(start < self.ncols(), "Start index out of bounds");
-        let nbatch = self.context.nbatch();
-        let nrows = self.nrows();
-        let _ncols = self.ncols();
-        let num_cols = end - start;
-        let start_i = start * nrows;
-        let end_i = (nbatch - 1) * nrows * _ncols + end * nrows;
-        let data = self.data.slice(start_i..end_i);
-        CudaMatRef {
-            data,
-            context: self.context.clone(),
-            nrows,
-            ncols: num_cols,
-            batch_stride: nrows * _ncols,
+
+    fn mul_cols_by(&mut self, ncols: IndexType, rhs: &[T]) {
+        assert!(
+            ncols <= self.ncols(),
+            "mul_cols_by: column range out of bounds"
+        );
+        assert_eq!(
+            rhs.len(),
+            ncols * ncols,
+            "mul_cols_by: rhs must hold ncols * ncols values"
+        );
+        if ncols == 0 {
+            return;
         }
+        assert!(
+            ncols <= crate::matrix::MAX_SMALL_COLS,
+            "mul_cols_by: ncols exceeds MAX_SMALL_COLS"
+        );
+        let nrows = self.nrows();
+        let nbatch = self.context.nbatch();
+        let f = self.context.function::<T>("mul_cols_by");
+        let config = self
+            .context
+            .launch_config_2d(nrows as u32, nbatch as u32, &f);
+        let mut kernel_rhs = MulColsByRhs {
+            m: [T::zero(); crate::matrix::MAX_SMALL_COLS * crate::matrix::MAX_SMALL_COLS],
+        };
+        kernel_rhs.m[..rhs.len()].copy_from_slice(rhs);
+        let ncols_i32 = ncols as i32;
+        let nrows_i32 = nrows as i32;
+        let mat_stride = (nrows * self.ncols) as i32;
+        let mut build = self.context.stream.launch_builder(&f);
+        build
+            .arg(&mut self.data)
+            .arg(&kernel_rhs)
+            .arg(&ncols_i32)
+            .arg(&nrows_i32)
+            .arg(&mat_stride);
+        unsafe { build.launch(config) }.expect("Failed to launch kernel");
     }
 
     fn update_backward_diff(&mut self, order: IndexType, d: &Self::V) {
@@ -1088,6 +590,69 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
             .arg(&diff_stride)
             .arg(&d_stride)
             .arg(&d_nbatch_i32);
+        unsafe { build.launch(config) }.expect("Failed to launch kernel");
+    }
+
+    fn gemv_cols(
+        &self,
+        start: IndexType,
+        end: IndexType,
+        alpha: T,
+        x: &[T],
+        beta: T,
+        y: &mut Self::V,
+    ) {
+        assert!(start <= end, "gemv_cols: column range start > end");
+        assert!(end <= self.ncols, "gemv_cols: column range out of bounds");
+        let nc = end - start;
+        assert!(
+            nc <= crate::matrix::MAX_SMALL_COLS,
+            "gemv_cols: column range exceeds MAX_SMALL_COLS"
+        );
+        assert!(
+            x.len() >= nc,
+            "gemv_cols: x must hold at least end - start values"
+        );
+        self.context
+            .assert_compatible_nbatch(y.context.nbatch(), "gemv_cols");
+        // an empty column range contributes nothing, leaving y = beta * y
+        if nc == 0 {
+            if beta.is_zero() {
+                y.fill(T::zero());
+            } else if !beta.is_one() {
+                y.mul_assign(Scale(beta));
+            }
+            return;
+        }
+        let nrows = self.nrows();
+        let y_nbatch = y.context.nbatch();
+        let f = self.context.function::<T>("gemv_cols");
+        let config = self
+            .context
+            .launch_config_2d(nrows as u32, y_nbatch as u32, &f);
+        let mut weights = GemvColsWeights {
+            w: [T::zero(); crate::matrix::MAX_SMALL_COLS],
+        };
+        weights.w[..nc].copy_from_slice(&x[..nc]);
+        let nc_i32 = nc as i32;
+        let start_i32 = start as i32;
+        let nrows_i32 = nrows as i32;
+        let y_stride = (y.data.len() / y_nbatch) as i32;
+        let mat_stride = (nrows * self.ncols) as i32;
+        let mat_nbatch_i32 = self.context.nbatch() as i32;
+        let mut build = self.context.stream.launch_builder(&f);
+        build
+            .arg(&mut y.data)
+            .arg(&self.data)
+            .arg(&weights)
+            .arg(&nc_i32)
+            .arg(&alpha)
+            .arg(&beta)
+            .arg(&start_i32)
+            .arg(&nrows_i32)
+            .arg(&y_stride)
+            .arg(&mat_stride)
+            .arg(&mat_nbatch_i32);
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
     }
 }

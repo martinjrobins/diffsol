@@ -114,7 +114,7 @@ where
     pub fn new(
         problem: &'a OdeSolverProblem<Eqn>,
         state: RkState<Eqn::V>,
-        tableau: Tableau<M>,
+        tableau: Tableau<Eqn::T>,
     ) -> Result<Self, DiffsolError> {
         Rk::<Eqn, M>::check_explicit_rk(problem, &tableau)?;
         Ok(Self {
@@ -127,7 +127,7 @@ where
     pub fn new_augmented(
         problem: &'a OdeSolverProblem<Eqn>,
         state: RkState<Eqn::V>,
-        tableau: Tableau<M>,
+        tableau: Tableau<Eqn::T>,
         augmented_eqn: AugmentedEqn,
     ) -> Result<Self, DiffsolError> {
         Rk::<Eqn, M>::check_explicit_rk(problem, &tableau)?;

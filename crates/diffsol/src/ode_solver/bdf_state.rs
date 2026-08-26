@@ -36,13 +36,18 @@ where
     pub(crate) sgdiff_initialised: bool,
 }
 
+/// Highest BDF order.
+///
+/// Free-standing rather than an associated const of [`BdfState`]: an associated const of a
+/// generic type cannot size an array, and referring to one means spelling out the generic
+/// parameters at every use.
+pub(crate) const MAX_ORDER: IndexType = 5;
+
 impl<V, M> BdfState<V, M>
 where
     V: Vector + DefaultDenseMatrix,
     M: DenseMatrix<T = V::T, V = V, C = V::C>,
 {
-    pub(crate) const MAX_ORDER: IndexType = 5;
-
     pub(crate) fn new_empty(ctx: V::C) -> Self {
         let default_v = V::zeros(0, ctx.clone());
         let default_m = M::zeros(0, 0, ctx.clone());
@@ -185,11 +190,11 @@ where
         } = state;
         let nstates = y.len();
         let ctx = y.context();
-        let diff = M::zeros(nstates, Self::MAX_ORDER + 3, ctx.clone());
-        let sdiff = vec![M::zeros(nstates, Self::MAX_ORDER + 3, ctx.clone()); s.len()];
-        let gdiff = M::zeros(g.len(), Self::MAX_ORDER + 3, ctx.clone());
+        let diff = M::zeros(nstates, MAX_ORDER + 3, ctx.clone());
+        let sdiff = vec![M::zeros(nstates, MAX_ORDER + 3, ctx.clone()); s.len()];
+        let gdiff = M::zeros(g.len(), MAX_ORDER + 3, ctx.clone());
         let sgdiff = if !sg.is_empty() {
-            vec![M::zeros(sg[0].len(), Self::MAX_ORDER + 3, ctx.clone()); sg.len()]
+            vec![M::zeros(sg[0].len(), MAX_ORDER + 3, ctx.clone()); sg.len()]
         } else {
             Vec::new()
         };

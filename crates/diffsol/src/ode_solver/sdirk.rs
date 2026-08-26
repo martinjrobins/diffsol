@@ -153,13 +153,13 @@ where
     AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn>,
 {
     fn gamma(&self) -> Eqn::T {
-        self.rk.tableau().a().get_index(1, 1)
+        self.rk.tableau().a(1, 1)
     }
 
     pub fn new(
         problem: &'a OdeSolverProblem<Eqn>,
         state: RkState<Eqn::V>,
-        tableau: Tableau<M>,
+        tableau: Tableau<Eqn::T>,
         linear_solver: LS,
     ) -> Result<Self, DiffsolError> {
         Rk::<Eqn, M>::check_sdirk_rk(&tableau)?;
@@ -199,7 +199,7 @@ where
         );
         convergence.set_max_iter(config.maximum_newton_iterations);
 
-        let gamma = rk.tableau().a().get_index(1, 1);
+        let gamma = rk.tableau().a(1, 1);
         let op = if integrate_main_eqn {
             let callable = SdirkCallable::new(&problem.eqn, gamma);
             callable.set_h(state.h);
@@ -222,7 +222,7 @@ where
     pub fn new_augmented(
         problem: &'a OdeSolverProblem<Eqn>,
         state: RkState<Eqn::V>,
-        tableau: Tableau<M>,
+        tableau: Tableau<Eqn::T>,
         linear_solver: LS,
         augmented_eqn: AugmentedEqn,
     ) -> Result<Self, DiffsolError> {

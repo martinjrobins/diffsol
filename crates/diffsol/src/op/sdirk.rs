@@ -1,5 +1,5 @@
 use crate::{
-    matrix::MatrixView, scale, LinearOp, Matrix, MatrixSparsity, NonLinearOpJacobian, OdeEquations,
+    scale, DenseMatrix, LinearOp, Matrix, MatrixSparsity, NonLinearOpJacobian, OdeEquations,
     OdeEquationsImplicit, Vector,
 };
 use log::{debug, trace};
@@ -171,16 +171,22 @@ impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
         let mut phi_ref = self.phi.borrow_mut();
         phi_ref.fill(Eqn::T::zero());
     }
-    pub fn set_phi<'a, M: MatrixView<'a, T = Eqn::T, V = Eqn::V>>(
+    /// `phi = y0 + h * diff[:, 0..ncols] * a`, the already-known part of the stage equation.
+    ///
+    /// Takes the difference matrix and a column count rather than a `columns(0, ncols)` view:
+    /// building the view is a measurable share of the cost at the small state counts these
+    /// solvers are fastest on.
+    pub fn set_phi<M: DenseMatrix<T = Eqn::T, V = Eqn::V>>(
         &self,
         h: Eqn::T,
         diff: &M,
+        ncols: usize,
         y0: &Eqn::V,
-        a: &Eqn::V,
+        a: &[Eqn::T],
     ) {
         let mut phi = self.phi.borrow_mut();
         phi.copy_from(y0);
-        diff.gemv(h, a, Eqn::T::one(), &mut phi);
+        diff.gemv_cols(0, ncols, h, a, Eqn::T::one(), &mut phi);
     }
 
     // tmp = phi + c * x
