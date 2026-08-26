@@ -6,6 +6,12 @@ use crate::{
 };
 
 /// A [LinearSolver] that uses the LU decomposition in the [`nalgebra` library](https://nalgebra.org/) to solve the linear system.
+///
+/// Exported as [NalgebraNativeLU](crate::NalgebraNativeLU): re-allocates its factorization
+/// (a matrix clone plus a fresh permutation sequence) on every
+/// [`set_linearisation`](LinearSolver::set_linearisation) call, unlike the default
+/// [NalgebraLU](crate::NalgebraLU), which reuses its workspace in place. Kept around for
+/// comparison/benchmarking.
 #[derive(Clone)]
 pub struct LU<T>
 where

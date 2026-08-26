@@ -2,7 +2,7 @@ use crate::{Matrix, NonLinearOpJacobian};
 use diffsol_la::LinearSolver as LaLinearSolver;
 use num_traits::Zero;
 
-pub use diffsol_la::{FaerLU, FaerSparseLU, NalgebraLU};
+pub use diffsol_la::{FaerLU, FaerSparseLU, NalgebraLU, NalgebraNativeLU};
 
 #[cfg(feature = "suitesparse")]
 pub use diffsol_la::KLU;
@@ -140,7 +140,7 @@ pub mod tests {
     use num_traits::{FromPrimitive, One, Zero};
 
     use super::LinearSolveSolution;
-    use super::{FaerLU, NalgebraLU};
+    use super::{FaerLU, NalgebraLU, NalgebraNativeLU};
 
     #[allow(clippy::type_complexity)]
     pub fn linear_problem<M: Matrix + 'static>() -> (
@@ -264,6 +264,15 @@ pub mod tests {
         let p = NalgebraVec::zeros(0, *op.context());
         let op = ParameterisedOp::new(&op, &p);
         let s = NalgebraLU::default();
+        test_linear_solver(s, op, rtol, &atol, solns);
+    }
+
+    #[test]
+    fn test_lu_nalgebra_native() {
+        let (op, rtol, atol, solns) = linear_problem::<NalgebraMat<f64>>();
+        let p = NalgebraVec::zeros(0, *op.context());
+        let op = ParameterisedOp::new(&op, &p);
+        let s = NalgebraNativeLU::default();
         test_linear_solver(s, op, rtol, &atol, solns);
     }
 

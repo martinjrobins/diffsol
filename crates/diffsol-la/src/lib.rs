@@ -75,7 +75,7 @@ pub use context::{faer::FaerContext, nalgebra::NalgebraContext, Context};
 
 pub use linear_op::LinearOp;
 pub use linear_solver::LinearSolver;
-pub use linear_solver::{faer::sparse_lu::FaerSparseLU, FaerLU, NalgebraLU};
+pub use linear_solver::{faer::sparse_lu::FaerSparseLU, FaerLU, NalgebraLU, NalgebraNativeLU};
 
 #[cfg(feature = "suitesparse")]
 pub use linear_solver::suitesparse::klu::KLU;
