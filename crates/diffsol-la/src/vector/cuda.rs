@@ -164,10 +164,6 @@ pub struct CudaVecMut<'a, T: ScalarCuda> {
     pub(crate) col_offset: IndexType,
 }
 
-impl<T: ScalarCuda> DefaultDenseMatrix for CudaVec<T> {
-    type M = CudaMat<T>;
-}
-
 impl<T: ScalarCuda> CudaVec<T> {
     pub(crate) fn stride(&self) -> IndexType {
         self.len()
@@ -236,6 +232,10 @@ impl<'a, T: ScalarCuda> CudaVecMut<'a, T> {
     }
 }
 
+impl<T: ScalarCuda> DefaultDenseMatrix for CudaVec<T> {
+    type M = CudaMat<T>;
+}
+
 macro_rules! impl_vector_common {
     ($vec:ty, $con:ty, $in:ty) => {
         impl<T: ScalarCuda> VectorCommon for $vec {
@@ -264,178 +264,13 @@ impl_vector_common!(CudaVec<T>, CudaContext, CudaSlice<T>);
 impl_vector_common_ref!(CudaVecRef<'a, T>, CudaContext, CudaView<'a, T>);
 impl_vector_common_ref!(CudaVecMut<'a, T>, CudaContext, CudaViewMut<'a, T>);
 
-macro_rules! impl_mul_scalar {
-    ([$($g:tt)*], $lhs:ty, $out:ty) => {
-        impl<$($g)*> Mul<Scale<T>> for $lhs {
-            type Output = $out;
-            fn mul(mut self, rhs: Scale<T>) -> Self::Output {
-                let ctx = self.context.clone();
-                let f = ctx.function::<T>("vec_mul_assign_scalar");
-                let nbatch = ctx.nbatch();
-                let nstates = self.len() as u32;
-                if nstates == 0 {
-                    return self;
-                }
-                let nbatch_u32 = nbatch as u32;
-                let stride_i32 = self.stride() as i32;
-                let scalar = rhs.value();
-                {
-                    let mut build = ctx.stream.launch_builder(&f);
-                    let mut data = self.kview_mut();
-                    build
-                        .arg(&mut data)
-                        .arg(&scalar)
-                        .arg(&nstates)
-                        .arg(&nbatch_u32)
-                        .arg(&stride_i32);
-                    let config = ctx.launch_config_2d(nstates, nbatch_u32, &f);
-                    unsafe { build.launch(config) }.expect("Failed to launch kernel");
-                }
-                self
-            }
-        }
-    };
-}
-
-macro_rules! impl_mul_scalar_alloc {
-    ([$($g:tt)*], $lhs:ty, $out:ty) => {
-        impl<$($g)*> Mul<Scale<T>> for $lhs {
-            type Output = $out;
-            fn mul(self, rhs: Scale<T>) -> Self::Output {
-                let ctx = self.context.clone();
-                let nbatch = ctx.nbatch();
-                let nstates = self.len();
-                let mut ret = Self::Output::zeros(nstates, ctx.clone());
-                let f = ctx.function::<T>("vec_mul_scalar");
-                let nstates_u32 = nstates as u32;
-                if nstates_u32 == 0 {
-                    return ret;
-                }
-                let nbatch_u32 = nbatch as u32;
-                let src_stride = self.stride() as i32;
-                let src_nbatch = nbatch as i32;
-                let ret_stride = nstates as i32;
-                let scalar = rhs.value();
-                {
-                    let mut build = ctx.stream.launch_builder(&f);
-                    let data = self.kview();
-                    build
-                        .arg(&data)
-                        .arg(&scalar)
-                        .arg(&mut ret.data)
-                        .arg(&nstates_u32)
-                        .arg(&ret_stride)
-                        .arg(&src_stride)
-                        .arg(&src_nbatch);
-                    let config = ctx.launch_config_2d(nstates_u32, nbatch_u32, &f);
-                    unsafe { build.launch(config) }.expect("Failed to launch kernel");
-                }
-                ret
-            }
-        }
-    };
-}
-
-macro_rules! impl_div_scalar {
-    ([$($g:tt)*], $lhs:ty, $out:ty) => {
-        impl<$($g)*> Div<Scale<T>> for $lhs {
-            type Output = $out;
-            fn div(self, rhs: Scale<T>) -> Self::Output {
-                let inv_rhs: T = T::one() / rhs.value();
-                self.mul(Scale(inv_rhs))
-            }
-        }
-    };
-}
-
-macro_rules! impl_mul_assign_scalar {
-    ([$($g:tt)*], $col_type:ty) => {
-        impl<$($g)*> MulAssign<Scale<T>> for $col_type {
-            fn mul_assign(&mut self, rhs: Scale<T>) {
-                let ctx = self.context.clone();
-                let f = ctx.function::<T>("vec_mul_assign_scalar");
-                let nbatch = ctx.nbatch();
-                let nstates = self.len() as u32;
-                if nstates == 0 {
-                    return;
-                }
-                let nbatch_u32 = nbatch as u32;
-                let stride_i32 = self.stride() as i32;
-                let scalar = rhs.value();
-                let mut build = ctx.stream.launch_builder(&f);
-                let mut data = self.kview_mut();
-                build
-                    .arg(&mut data)
-                    .arg(&scalar)
-                    .arg(&nstates)
-                    .arg(&nbatch_u32)
-                    .arg(&stride_i32);
-                let config = ctx.launch_config_2d(nstates, nbatch_u32, &f);
-                unsafe { build.launch(config) }.expect("Failed to launch kernel");
-            }
-        }
-    };
-}
-
-impl_mul_scalar!([T: ScalarCuda], CudaVec<T>, CudaVec<T>);
-impl_mul_scalar_alloc!([T: ScalarCuda], &CudaVec<T>, CudaVec<T>);
-impl_div_scalar!([T: ScalarCuda], CudaVec<T>, CudaVec<T>);
-impl_mul_assign_scalar!([T: ScalarCuda], CudaVec<T>);
-
-impl_mul_scalar_alloc!(['a, T: ScalarCuda], CudaVecRef<'a, T>, CudaVec<T>);
-impl_mul_assign_scalar!(['a, T: ScalarCuda], CudaVecMut<'a, T>);
-impl_mul_scalar_alloc!(['a, T: ScalarCuda], CudaVecMut<'a, T>, CudaVec<T>);
-
 // ============================================================
 // Kernel launch helpers -- the only places kernel launch code for add/sub operations exists --
 // followed by the macros that fan them out over the operand flavours.
 // ============================================================
 
-/// In-place assign: `lhs -= rhs` or `lhs += rhs`.
-macro_rules! impl_assign {
-    ([$($g:tt)*], $Op:ident, $method:ident, $kernel:expr, $label:expr,
-     $Lhs:ty, $RhsRef:ty, $RhsOwned:ty
-    ) => {
-        impl<$($g)*> $Op<$RhsOwned> for $Lhs {
-            fn $method(&mut self, rhs: $RhsOwned) {
-                self.$method(&rhs);
-            }
-        }
-        impl<$($g)*> $Op<$RhsRef> for $Lhs {
-            fn $method(&mut self, rhs: $RhsRef) {
-                let ctx = self.context.clone();
-                let self_nbatch = ctx.nbatch();
-                let other_nbatch = rhs.context.nbatch();
-                ctx.assert_broadcastable_into(other_nbatch, $label);
-                let nstates = self.len();
-                if nstates == 0 {
-                    return;
-                }
-                let f = ctx.function::<T>($kernel);
-                let n_u32 = nstates as u32;
-                let nb_u32 = self_nbatch as u32;
-                let self_stride = self.stride() as i32;
-                let rhs_stride = rhs.stride() as i32;
-                let other_nbatch_i32 = other_nbatch as i32;
-                let config = ctx.launch_config_2d(n_u32, nb_u32, &f);
-                let mut build = ctx.stream.launch_builder(&f);
-                let mut self_data = self.kview_mut();
-                let rhs_data = rhs.kview();
-                build
-                    .arg(&mut self_data)
-                    .arg(&rhs_data)
-                    .arg(&n_u32)
-                    .arg(&self_stride)
-                    .arg(&rhs_stride)
-                    .arg(&other_nbatch_i32);
-                unsafe { build.launch(config) }.expect(concat!("Failed to launch ", $kernel));
-            }
-        }
-    };
-}
-
 /// Allocating binary op: `lhs - rhs -> CudaVec` or `lhs + rhs -> CudaVec`.
-macro_rules! impl_binary {
+macro_rules! impl_binary_ref_ref {
     ([$($g:tt)*], $Op:ident, $method:ident, $kernel:expr, $label:expr,
      $Lhs:ty, $Rhs:ty
     ) => {
@@ -487,75 +322,139 @@ macro_rules! impl_binary {
     };
 }
 
-/// The canonical `&lhs op &rhs` impls -- one kernel launch each, for every borrowed
-/// combination of an owned vector and a view.
-macro_rules! impl_binary_canonical {
-    ($Op:ident, $method:ident, $kernel:expr, $label:expr) => {
-        impl_binary!([T: ScalarCuda], $Op, $method, $kernel, $label, &CudaVec<T>, &CudaVec<T>);
-        impl_binary!(
-            ['a, T: ScalarCuda], $Op, $method, $kernel, $label,
-            &CudaVec<T>, &CudaVecRef<'a, T>
-        );
-        impl_binary!(
-            ['a, T: ScalarCuda], $Op, $method, $kernel, $label,
-            &CudaVecRef<'a, T>, &CudaVec<T>
-        );
-        impl_binary!(
-            ['a, 'b, T: ScalarCuda], $Op, $method, $kernel, $label,
-            &CudaVecRef<'a, T>, &CudaVecRef<'b, T>
-        );
-    };
-}
-
-/// The remaining operand flavours of `+` and `-`.  Each one either delegates to the in-place
-/// op (when an operand is owned, and so is the destination) or normalises its borrows and
-/// delegates to the canonical `&lhs op &rhs` impls generated by [`impl_binary`]; `$body` says
-/// which, in terms of the bound operands.
-macro_rules! impl_binary_forms {
-    ([$($g:tt)*], $Op:ident, $method:ident, $Lhs:ty, $Rhs:ty, |$s:ident, $r:ident| $body:expr) => {
-        impl<$($g)*> $Op<$Rhs> for $Lhs {
-            type Output = CudaVec<T>;
-            #[allow(unused_mut)]
-            fn $method(self, rhs: $Rhs) -> CudaVec<T> {
-                let (mut $s, mut $r) = (self, rhs);
-                $body
+/// In-place assign: `lhs -= rhs` or `lhs += rhs`.
+macro_rules! impl_assign {
+    ([$($g:tt)*], $Op:ident, $method:ident, $kernel:expr, $label:expr,
+     $Lhs:ty, $RhsRef:ty, $RhsOwned:ty
+    ) => {
+        impl<$($g)*> $Op<$RhsOwned> for $Lhs {
+            fn $method(&mut self, rhs: $RhsOwned) {
+                self.$method(&rhs);
+            }
+        }
+        impl<$($g)*> $Op<$RhsRef> for $Lhs {
+            fn $method(&mut self, rhs: $RhsRef) {
+                let ctx = self.context.clone();
+                let self_nbatch = ctx.nbatch();
+                let other_nbatch = rhs.context.nbatch();
+                ctx.assert_broadcastable_into(other_nbatch, $label);
+                let nstates = self.len();
+                if nstates == 0 {
+                    return;
+                }
+                let f = ctx.function::<T>($kernel);
+                let n_u32 = nstates as u32;
+                let nb_u32 = self_nbatch as u32;
+                let self_stride = self.stride() as i32;
+                let rhs_stride = rhs.stride() as i32;
+                let other_nbatch_i32 = other_nbatch as i32;
+                let config = ctx.launch_config_2d(n_u32, nb_u32, &f);
+                let mut build = ctx.stream.launch_builder(&f);
+                let mut self_data = self.kview_mut();
+                let rhs_data = rhs.kview();
+                build
+                    .arg(&mut self_data)
+                    .arg(&rhs_data)
+                    .arg(&n_u32)
+                    .arg(&self_stride)
+                    .arg(&rhs_stride)
+                    .arg(&other_nbatch_i32);
+                unsafe { build.launch(config) }.expect(concat!("Failed to launch ", $kernel));
             }
         }
     };
 }
 
-/// An owned left-hand side is the destination, so every rhs flavour just delegates to the
-/// in-place op -- [`impl_assign`] covers all four.
+/// `self` is the owned operand, so it is the destination -- which makes the in-place op the
+/// whole implementation, broadcast check included.
 macro_rules! impl_binary_owned_lhs {
-    ($Op:ident, $method:ident, $assign:ident) => {
-        impl_binary_forms!([T: ScalarCuda], $Op, $method, CudaVec<T>, CudaVec<T>,
-            |s, r| { s.$assign(r); s });
-        impl_binary_forms!([T: ScalarCuda], $Op, $method, CudaVec<T>, &CudaVec<T>,
-            |s, r| { s.$assign(r); s });
-        impl_binary_forms!(['a, T: ScalarCuda], $Op, $method, CudaVec<T>, CudaVecRef<'a, T>,
-            |s, r| { s.$assign(r); s });
-        impl_binary_forms!(['a, T: ScalarCuda], $Op, $method, CudaVec<T>, &CudaVecRef<'a, T>,
-            |s, r| { s.$assign(r); s });
+    ($Op:ident, $method:ident, $AssignOp:ident, $assign:ident, $Rhs:ty) => {
+        impl<'a, T: ScalarCuda> $Op<$Rhs> for CudaVec<T> {
+            type Output = CudaVec<T>;
+
+            fn $method(mut self, rhs: $Rhs) -> Self::Output {
+                $AssignOp::$assign(&mut self, rhs);
+                self
+            }
+        }
     };
 }
 
-/// Neither operand is owned, so these only normalise their borrows and hand off to
-/// [`impl_binary_canonical`].
-macro_rules! impl_binary_borrowed {
-    ($Op:ident, $method:ident) => {
-        impl_binary_forms!(['a, T: ScalarCuda], $Op, $method, &CudaVec<T>, CudaVecRef<'a, T>,
-            |s, r| $Op::$method(s, &r));
-        impl_binary_forms!(['a, 'b, T: ScalarCuda], $Op, $method,
-            CudaVecRef<'a, T>, CudaVecRef<'b, T>, |s, r| $Op::$method(&s, &r));
-        impl_binary_forms!(['a, T: ScalarCuda], $Op, $method, CudaVecRef<'a, T>, &CudaVec<T>,
-            |s, r| $Op::$method(&s, r));
-        impl_binary_forms!(['a, 'b, T: ScalarCuda], $Op, $method,
-            CudaVecRef<'a, T>, &CudaVecRef<'b, T>, |s, r| $Op::$method(&s, r));
+/// `rhs` is the owned operand, so it is the destination.
+///
+/// A commutative op is just the in-place op with the operands swapped.  A non-commutative one
+/// cannot be: `rhs -= lhs` computes `rhs - lhs`, and there is no reverse-subtract kernel, so
+/// the left-hand side is broadcast into a result at the right-hand side's batch count and the
+/// operator applied in place.
+macro_rules! impl_binary_owned_rhs {
+    (commutes, $Op:ident, $method:ident, $AssignOp:ident, $assign:ident, $Lhs:ty, $copy:ident) => {
+        impl<'a, T: ScalarCuda> $Op<CudaVec<T>> for $Lhs {
+            type Output = CudaVec<T>;
+
+            fn $method(self, mut rhs: CudaVec<T>) -> Self::Output {
+                $AssignOp::$assign(&mut rhs, self);
+                rhs
+            }
+        }
+    };
+    (noncommutes, $Op:ident, $method:ident, $AssignOp:ident, $assign:ident, $Lhs:ty,
+     $copy:ident) => {
+        impl<'a, T: ScalarCuda> $Op<CudaVec<T>> for $Lhs {
+            type Output = CudaVec<T>;
+
+            fn $method(self, rhs: CudaVec<T>) -> Self::Output {
+                let mut out = CudaVec::zeros(self.len(), rhs.context.clone());
+                out.$copy(&self);
+                $AssignOp::$assign(&mut out, &rhs);
+                out
+            }
+        }
+    };
+}
+
+/// Every operand flavour of one operator: the owned-lhs forms, the owned-rhs forms, and the
+/// borrowed combinations that launch a kernel.
+macro_rules! impl_binary_set {
+    ($Op:ident, $method:ident, $AssignOp:ident, $assign:ident, $commutes:ident,
+     $kernel:expr, $label:expr) => {
+        impl_binary_owned_lhs!($Op, $method, $AssignOp, $assign, CudaVec<T>);
+        impl_binary_owned_lhs!($Op, $method, $AssignOp, $assign, &CudaVec<T>);
+        impl_binary_owned_lhs!($Op, $method, $AssignOp, $assign, CudaVecRef<'a, T>);
+        impl_binary_owned_lhs!($Op, $method, $AssignOp, $assign, &CudaVecRef<'a, T>);
+        impl_binary_owned_rhs!(
+            $commutes, $Op, $method, $AssignOp, $assign, CudaVecRef<'a, T>, copy_from_view
+        );
+        impl_binary_owned_rhs!(
+            $commutes, $Op, $method, $AssignOp, $assign, &CudaVec<T>, copy_from
+        );
+        impl_binary_ref_ref!(
+            ['a, T: ScalarCuda], $Op, $method, $kernel, $label,
+            CudaVecRef<'a, T>, &CudaVec<T>
+        );
+        impl_binary_ref_ref!(
+            ['a, 'b, T: ScalarCuda], $Op, $method, $kernel, $label,
+            CudaVecRef<'a, T>, CudaVecRef<'b, T>
+        );
+        impl_binary_ref_ref!(
+            ['a, 'b, T: ScalarCuda], $Op, $method, $kernel, $label,
+            CudaVecRef<'a, T>, &CudaVecRef<'b, T>
+        );
+        impl_binary_ref_ref!(
+            [T: ScalarCuda], $Op, $method, $kernel, $label, &CudaVec<T>, &CudaVec<T>
+        );
+        impl_binary_ref_ref!(
+            ['a, T: ScalarCuda], $Op, $method, $kernel, $label,
+            &CudaVec<T>, CudaVecRef<'a, T>
+        );
+        impl_binary_ref_ref!(
+            ['a, T: ScalarCuda], $Op, $method, $kernel, $label,
+            &CudaVec<T>, &CudaVecRef<'a, T>
+        );
     };
 }
 
 /// Both destinations (an owned vector and a mutable view) against both source flavours.
-macro_rules! impl_assign_all {
+macro_rules! impl_assign_set {
     ($Op:ident, $method:ident, $kernel:expr, $label:expr) => {
         impl_assign!(
             [T: ScalarCuda], $Op, $method, $kernel, $label,
@@ -576,49 +475,133 @@ macro_rules! impl_assign_all {
     };
 }
 
-impl_assign_all!(SubAssign, sub_assign, "vec_sub_assign", "sub_assign");
-impl_assign_all!(AddAssign, add_assign, "vec_add_assign", "add_assign");
+impl_binary_set!(Add, add, AddAssign, add_assign, commutes, "vec_add", "add");
+impl_binary_set!(
+    Sub,
+    sub,
+    SubAssign,
+    sub_assign,
+    noncommutes,
+    "vec_sub",
+    "sub"
+);
+impl_assign_set!(AddAssign, add_assign, "vec_add_assign", "add_assign");
+impl_assign_set!(SubAssign, sub_assign, "vec_sub_assign", "sub_assign");
 
 // ============================================================
-// Sub operations: a - b -> CudaVec (new owned)
+// Scalar multiply / divide
 // ============================================================
 
-impl_binary_canonical!(Sub, sub, "vec_sub", "sub");
+impl<T: ScalarCuda> Mul<Scale<T>> for CudaVec<T> {
+    type Output = CudaVec<T>;
+    fn mul(mut self, rhs: Scale<T>) -> Self::Output {
+        let ctx = self.context.clone();
+        let f = ctx.function::<T>("vec_mul_assign_scalar");
+        let nbatch = ctx.nbatch();
+        let nstates = self.len() as u32;
+        if nstates == 0 {
+            return self;
+        }
+        let nbatch_u32 = nbatch as u32;
+        let stride_i32 = self.stride() as i32;
+        let scalar = rhs.value();
+        {
+            let mut build = ctx.stream.launch_builder(&f);
+            let mut data = self.kview_mut();
+            build
+                .arg(&mut data)
+                .arg(&scalar)
+                .arg(&nstates)
+                .arg(&nbatch_u32)
+                .arg(&stride_i32);
+            let config = ctx.launch_config_2d(nstates, nbatch_u32, &f);
+            unsafe { build.launch(config) }.expect("Failed to launch kernel");
+        }
+        self
+    }
+}
 
-impl_binary_owned_lhs!(Sub, sub, sub_assign);
-impl_binary_borrowed!(Sub, sub);
+macro_rules! impl_mul_scalar_alloc {
+    ([$($g:tt)*], $lhs:ty, $out:ty) => {
+        impl<$($g)*> Mul<Scale<T>> for $lhs {
+            type Output = $out;
+            fn mul(self, rhs: Scale<T>) -> Self::Output {
+                let ctx = self.context.clone();
+                let nbatch = ctx.nbatch();
+                let nstates = self.len();
+                let mut ret = Self::Output::zeros(nstates, ctx.clone());
+                let f = ctx.function::<T>("vec_mul_scalar");
+                let nstates_u32 = nstates as u32;
+                if nstates_u32 == 0 {
+                    return ret;
+                }
+                let nbatch_u32 = nbatch as u32;
+                let src_stride = self.stride() as i32;
+                let src_nbatch = nbatch as i32;
+                let ret_stride = nstates as i32;
+                let scalar = rhs.value();
+                {
+                    let mut build = ctx.stream.launch_builder(&f);
+                    let data = self.kview();
+                    build
+                        .arg(&data)
+                        .arg(&scalar)
+                        .arg(&mut ret.data)
+                        .arg(&nstates_u32)
+                        .arg(&ret_stride)
+                        .arg(&src_stride)
+                        .arg(&src_nbatch);
+                    let config = ctx.launch_config_2d(nstates_u32, nbatch_u32, &f);
+                    unsafe { build.launch(config) }.expect("Failed to launch kernel");
+                }
+                ret
+            }
+        }
+    };
+}
 
-// only the right-hand side is owned, so it governs -- but subtraction does not commute and
-// there is no reverse-subtract kernel, so broadcast the left-hand side into a result at its
-// batch count and subtract in place
-impl_binary_forms!([T: ScalarCuda], Sub, sub, &CudaVec<T>, CudaVec<T>, |s, r| {
-    let mut out = CudaVec::zeros(s.len(), r.context.clone());
-    out.copy_from(s);
-    out.sub_assign(&r);
-    out
-});
-impl_binary_forms!(['a, T: ScalarCuda], Sub, sub, CudaVecRef<'a, T>, CudaVec<T>, |s, r| {
-    let mut out = CudaVec::zeros(s.len(), r.context.clone());
-    out.copy_from_view(&s);
-    out.sub_assign(&r);
-    out
-});
+impl_mul_scalar_alloc!([T: ScalarCuda], &CudaVec<T>, CudaVec<T>);
+impl_mul_scalar_alloc!(['a, T: ScalarCuda], CudaVecRef<'a, T>, CudaVec<T>);
+impl_mul_scalar_alloc!(['a, T: ScalarCuda], CudaVecMut<'a, T>, CudaVec<T>);
+impl<T: ScalarCuda> Div<Scale<T>> for CudaVec<T> {
+    type Output = CudaVec<T>;
+    fn div(self, rhs: Scale<T>) -> Self::Output {
+        let inv_rhs: T = T::one() / rhs.value();
+        self.mul(Scale(inv_rhs))
+    }
+}
 
-// ============================================================
-// Add operations: a + b -> CudaVec (new owned)
-// ============================================================
+macro_rules! impl_mul_assign_scalar {
+    ([$($g:tt)*], $col_type:ty) => {
+        impl<$($g)*> MulAssign<Scale<T>> for $col_type {
+            fn mul_assign(&mut self, rhs: Scale<T>) {
+                let ctx = self.context.clone();
+                let f = ctx.function::<T>("vec_mul_assign_scalar");
+                let nbatch = ctx.nbatch();
+                let nstates = self.len() as u32;
+                if nstates == 0 {
+                    return;
+                }
+                let nbatch_u32 = nbatch as u32;
+                let stride_i32 = self.stride() as i32;
+                let scalar = rhs.value();
+                let mut build = ctx.stream.launch_builder(&f);
+                let mut data = self.kview_mut();
+                build
+                    .arg(&mut data)
+                    .arg(&scalar)
+                    .arg(&nstates)
+                    .arg(&nbatch_u32)
+                    .arg(&stride_i32);
+                let config = ctx.launch_config_2d(nstates, nbatch_u32, &f);
+                unsafe { build.launch(config) }.expect("Failed to launch kernel");
+            }
+        }
+    };
+}
 
-impl_binary_canonical!(Add, add, "vec_add", "add");
-
-impl_binary_owned_lhs!(Add, add, add_assign);
-impl_binary_borrowed!(Add, add);
-
-// only the right-hand side is owned, so it governs -- and addition commutes, so it can be
-// written into in place
-impl_binary_forms!([T: ScalarCuda], Add, add, &CudaVec<T>, CudaVec<T>,
-    |s, r| { r.add_assign(s); r });
-impl_binary_forms!(['a, T: ScalarCuda], Add, add, CudaVecRef<'a, T>, CudaVec<T>,
-    |s, r| { r.add_assign(&s); r });
+impl_mul_assign_scalar!([T: ScalarCuda], CudaVec<T>);
+impl_mul_assign_scalar!(['a, T: ScalarCuda], CudaVecMut<'a, T>);
 
 impl VectorIndex for CudaIndex {
     type C = CudaContext;

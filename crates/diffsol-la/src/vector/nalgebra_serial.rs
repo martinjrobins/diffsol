@@ -7,12 +7,6 @@ use crate::{Context, IndexType, NalgebraContext, NalgebraMat, NalgebraScalar, Sc
 
 use super::{DefaultDenseMatrix, Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct NalgebraIndex {
-    pub(crate) data: DVector<IndexType>,
-    pub(crate) context: NalgebraContext,
-}
-
 /// A batched vector, stored as one column per batch.
 ///
 /// Invariant: `data.ncols() == context.nbatch()` and `data.nrows() == len()`, so
@@ -20,6 +14,12 @@ pub struct NalgebraIndex {
 #[derive(Debug, Clone, PartialEq)]
 pub struct NalgebraVec<T: NalgebraScalar> {
     pub(crate) data: DMatrix<T>,
+    pub(crate) context: NalgebraContext,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct NalgebraIndex {
+    pub(crate) data: DVector<IndexType>,
     pub(crate) context: NalgebraContext,
 }
 
@@ -37,7 +37,7 @@ pub struct NalgebraVecMut<'a, T: NalgebraScalar> {
 
 /// Column feeding batch `batch` of a `nbatch`-batch destination, broadcasting a narrower
 /// vector over contiguous groups of destination batches (see [`broadcast_batch`]).
-macro_rules! batch_method {
+macro_rules! batch_index {
     () => {
         #[inline]
         pub(crate) fn batch(&self, batch: usize, nbatch: usize) -> usize {
@@ -46,10 +46,10 @@ macro_rules! batch_method {
     };
 }
 impl<T: NalgebraScalar> NalgebraVec<T> {
-    batch_method!();
+    batch_index!();
 }
 impl<T: NalgebraScalar> NalgebraVecRef<'_, T> {
-    batch_method!();
+    batch_index!();
 }
 
 impl<T: NalgebraScalar> From<DVector<T>> for NalgebraVec<T> {
@@ -65,7 +65,7 @@ impl<T: NalgebraScalar> DefaultDenseMatrix for NalgebraVec<T> {
     type M = NalgebraMat<T>;
 }
 
-macro_rules! common {
+macro_rules! impl_vector_common {
     ($t:ty, $inner:ty) => {
         impl<T: NalgebraScalar> VectorCommon for $t {
             type T = T;
@@ -77,8 +77,8 @@ macro_rules! common {
         }
     };
 }
-common!(NalgebraVec<T>, DMatrix<T>);
-macro_rules! common_ref {
+impl_vector_common!(NalgebraVec<T>, DMatrix<T>);
+macro_rules! impl_vector_common_ref {
     ($t:ty, $inner:ty) => {
         impl<'a, T: NalgebraScalar> VectorCommon for $t {
             type T = T;
@@ -90,16 +90,16 @@ macro_rules! common_ref {
         }
     };
 }
-common_ref!(
+impl_vector_common_ref!(
     NalgebraVecRef<'a, T>,
     MatrixView<'a, T, Dyn, Dyn, Const<1>, Dyn>
 );
-common_ref!(
+impl_vector_common_ref!(
     NalgebraVecMut<'a, T>,
     MatrixViewMut<'a, T, Dyn, Dyn, Const<1>, Dyn>
 );
 
-macro_rules! vec_binary {
+macro_rules! impl_binary_ref_ref {
     ($trait:ident, $method:ident, $lhs:ty, $rhs:ty, $op:tt, $binary:tt) => {
         impl<T: NalgebraScalar> $trait<$rhs> for $lhs {
             type Output = NalgebraVec<T>;
@@ -130,7 +130,7 @@ macro_rules! vec_binary {
         }
     };
 }
-macro_rules! vec_assign {
+macro_rules! impl_assign {
     ($trait:ident, $method:ident, $lhs:ty, $rhs:ty, $op:tt) => {
         impl<T: NalgebraScalar> $trait<$rhs> for $lhs {
             fn $method(&mut self, rhs: $rhs) {
@@ -150,7 +150,266 @@ macro_rules! vec_assign {
     };
 }
 
-macro_rules! copy_from_data {
+/// `self` is the owned operand, so it is the destination -- which makes the in-place op the
+/// whole implementation, broadcast check included.
+macro_rules! impl_binary_owned_lhs {
+    ($trait:ident, $method:ident, $assign_trait:ident, $assign:ident, $rhs:ty) => {
+        impl<T: NalgebraScalar> $trait<$rhs> for NalgebraVec<T> {
+            type Output = NalgebraVec<T>;
+
+            fn $method(mut self, rhs: $rhs) -> Self::Output {
+                $assign_trait::$assign(&mut self, rhs);
+                self
+            }
+        }
+    };
+}
+
+/// `rhs` is the owned operand, so it is the destination.
+///
+/// A commutative op is just the in-place op with the operands swapped.  A non-commutative one
+/// cannot be: `rhs -= lhs` computes `rhs - lhs`, so it writes `combine(&mut rhs_i, lhs_i)`
+/// instead, which gets `lhs - rhs` in the same single pass.
+macro_rules! impl_binary_owned_rhs {
+    (commutes, $trait:ident, $method:ident, $assign_trait:ident, $assign:ident, $lhs:ty,
+     $op:tt, $combine:expr) => {
+        impl<T: NalgebraScalar> $trait<NalgebraVec<T>> for $lhs {
+            type Output = NalgebraVec<T>;
+
+            fn $method(self, mut rhs: NalgebraVec<T>) -> Self::Output {
+                $assign_trait::$assign(&mut rhs, self);
+                rhs
+            }
+        }
+    };
+    (noncommutes, $trait:ident, $method:ident, $assign_trait:ident, $assign:ident, $lhs:ty, $op:tt, $combine:expr) => {
+        impl<T: NalgebraScalar> $trait<NalgebraVec<T>> for $lhs {
+            type Output = NalgebraVec<T>;
+
+            fn $method(self, mut rhs: NalgebraVec<T>) -> Self::Output {
+                rhs.context
+                    .assert_broadcastable_into(self.context.nbatch(), stringify!($method));
+                if self.data.ncols() == rhs.data.ncols() {
+                    rhs.data.zip_apply(&self.data, $combine);
+                    return rhs;
+                }
+                let nb = rhs.data.ncols();
+                for b in 0..nb {
+                    let lhs = self.data.column(self.batch(b, nb));
+                    rhs.data.column_mut(b).zip_apply(&lhs, $combine);
+                }
+                rhs
+            }
+        }
+    };
+}
+
+macro_rules! impl_binary_set {
+    ($trait:ident,$method:ident,$assign_trait:ident,$assign:ident,$commutes:ident,
+     $op:tt,$binary:tt,$combine:expr) => {
+        impl_binary_owned_lhs!($trait, $method, $assign_trait, $assign, NalgebraVec<T>);
+        impl_binary_owned_lhs!($trait, $method, $assign_trait, $assign, &NalgebraVec<T>);
+        impl_binary_owned_lhs!(
+            $trait,
+            $method,
+            $assign_trait,
+            $assign,
+            NalgebraVecRef<'_, T>
+        );
+        impl_binary_owned_lhs!(
+            $trait,
+            $method,
+            $assign_trait,
+            $assign,
+            &NalgebraVecRef<'_, T>
+        );
+        impl_binary_owned_rhs!(
+            $commutes,
+            $trait,
+            $method,
+            $assign_trait,
+            $assign,
+            NalgebraVecRef<'_, T>,
+            $op,
+            $combine
+        );
+        impl_binary_owned_rhs!(
+            $commutes,
+            $trait,
+            $method,
+            $assign_trait,
+            $assign,
+            &NalgebraVec<T>,
+            $op,
+            $combine
+        );
+        impl_binary_ref_ref!(
+            $trait,
+            $method,
+            NalgebraVecRef<'_, T>,
+            &NalgebraVec<T>,
+            $op,
+            $binary
+        );
+        impl_binary_ref_ref!(
+            $trait,
+            $method,
+            NalgebraVecRef<'_, T>,
+            NalgebraVecRef<'_, T>,
+            $op,
+            $binary
+        );
+        impl_binary_ref_ref!(
+            $trait,
+            $method,
+            NalgebraVecRef<'_, T>,
+            &NalgebraVecRef<'_, T>,
+            $op,
+            $binary
+        );
+        impl_binary_ref_ref!(
+            $trait,
+            $method,
+            &NalgebraVec<T>,
+            &NalgebraVec<T>,
+            $op,
+            $binary
+        );
+        impl_binary_ref_ref!(
+            $trait,
+            $method,
+            &NalgebraVec<T>,
+            NalgebraVecRef<'_, T>,
+            $op,
+            $binary
+        );
+        impl_binary_ref_ref!(
+            $trait,
+            $method,
+            &NalgebraVec<T>,
+            &NalgebraVecRef<'_, T>,
+            $op,
+            $binary
+        );
+    };
+}
+macro_rules! impl_assign_set {
+    ($trait:ident,$method:ident,$op:tt) => {
+        impl_assign!($trait, $method, NalgebraVec<T>, NalgebraVec<T>, $op);
+        impl_assign!($trait, $method, NalgebraVec<T>, &NalgebraVec<T>, $op);
+        impl_assign!($trait, $method, NalgebraVec<T>, NalgebraVecRef<'_, T>, $op);
+        impl_assign!($trait, $method, NalgebraVec<T>, &NalgebraVecRef<'_, T>, $op);
+        impl_assign!($trait, $method, NalgebraVecMut<'_, T>, NalgebraVec<T>, $op);
+        impl_assign!($trait, $method, NalgebraVecMut<'_, T>, &NalgebraVec<T>, $op);
+        impl_assign!(
+            $trait,
+            $method,
+            NalgebraVecMut<'_, T>,
+            NalgebraVecRef<'_, T>,
+            $op
+        );
+        impl_assign!(
+            $trait,
+            $method,
+            NalgebraVecMut<'_, T>,
+            &NalgebraVecRef<'_, T>,
+            $op
+        );
+    };
+}
+impl_binary_set!(Add, add, AddAssign, add_assign, commutes, +=, +, |rhs, lhs| *rhs += lhs);
+impl_binary_set!(Sub, sub, SubAssign, sub_assign, noncommutes, -=, -, |rhs, lhs| *rhs = lhs - *rhs);
+impl_assign_set!(AddAssign, add_assign, +=);
+impl_assign_set!(SubAssign, sub_assign, -=);
+
+impl<T: NalgebraScalar> Mul<Scale<T>> for NalgebraVec<T> {
+    type Output = Self;
+    fn mul(mut self, rhs: Scale<T>) -> Self {
+        self.data *= rhs.value();
+        self
+    }
+}
+macro_rules! impl_mul_scalar_alloc {
+    ($t:ty) => {
+        impl<T: NalgebraScalar> Mul<Scale<T>> for $t {
+            type Output = NalgebraVec<T>;
+            fn mul(self, rhs: Scale<T>) -> Self::Output {
+                NalgebraVec {
+                    data: self.data.clone_owned() * rhs.value(),
+                    context: self.context,
+                }
+            }
+        }
+    };
+}
+impl_mul_scalar_alloc!(&NalgebraVec<T>);
+impl_mul_scalar_alloc!(NalgebraVecRef<'_, T>);
+impl_mul_scalar_alloc!(NalgebraVecMut<'_, T>);
+impl<T: NalgebraScalar> Div<Scale<T>> for NalgebraVec<T> {
+    type Output = Self;
+    fn div(self, rhs: Scale<T>) -> Self {
+        Self {
+            data: self.data * (T::one() / rhs.value()),
+            context: self.context,
+        }
+    }
+}
+macro_rules! impl_mul_assign_scalar {
+    ($t:ty) => {
+        impl<T: NalgebraScalar> MulAssign<Scale<T>> for $t {
+            fn mul_assign(&mut self, rhs: Scale<T>) {
+                self.data *= rhs.value();
+            }
+        }
+    };
+}
+impl_mul_assign_scalar!(NalgebraVec<T>);
+impl_mul_assign_scalar!(NalgebraVecMut<'_, T>);
+macro_rules! impl_index {
+    ($t:ty) => {
+        impl<T: NalgebraScalar> Index<IndexType> for $t {
+            type Output = T;
+            fn index(&self, i: IndexType) -> &T {
+                &self.data[(i, 0)]
+            }
+        }
+    };
+}
+impl_index!(NalgebraVec<T>);
+impl_index!(NalgebraVecRef<'_, T>);
+impl<T: NalgebraScalar> IndexMut<IndexType> for NalgebraVec<T> {
+    fn index_mut(&mut self, i: IndexType) -> &mut T {
+        &mut self.data[(i, 0)]
+    }
+}
+
+impl VectorIndex for NalgebraIndex {
+    type C = NalgebraContext;
+    fn zeros(len: IndexType, ctx: Self::C) -> Self {
+        Self {
+            data: DVector::zeros(len),
+            context: ctx,
+        }
+    }
+    fn len(&self) -> IndexType {
+        self.data.len()
+    }
+    fn from_vec(v: Vec<IndexType>, ctx: Self::C) -> Self {
+        Self {
+            data: DVector::from_vec(v),
+            context: ctx,
+        }
+    }
+    fn clone_as_vec(&self) -> Vec<IndexType> {
+        self.data.iter().copied().collect()
+    }
+    fn context(&self) -> &Self::C {
+        &self.context
+    }
+}
+
+// Shared bodies for the `Vector` methods below, in the owned and view flavours.
+macro_rules! copy_from_body {
     ($self:ident, $other:ident, $method:literal) => {
         $self
             .context
@@ -185,7 +444,7 @@ macro_rules! copy_from_data {
 /// `self_b = alpha_b * x_b + beta * self_b` for every batch of `self`, broadcasting a
 /// single-batch `x`.  Shared by the owned vector and its mutable view, with `x` either an
 /// owned vector or a view, and `alpha` either one scalar or one value per batch.
-macro_rules! axpy_data {
+macro_rules! axpy_body {
     ($self:ident, $x:ident, $beta:expr, $op:literal, |$batch:ident| $alpha:expr) => {{
         $self
             .context
@@ -216,7 +475,7 @@ macro_rules! axpy_data {
 }
 
 /// Weighted error norm of every batch, reduced by taking the maximum.
-macro_rules! squared_norm_data {
+macro_rules! squared_norm_body {
     ($self:ident, $y:ident, $atol:ident, $rtol:ident) => {{
         let nrows = $self.data.nrows();
         assert!(
@@ -263,314 +522,6 @@ macro_rules! squared_norm_data {
     }};
 }
 
-/// `rhs` is the owned operand, so it is the destination.
-///
-/// A commutative op is just the in-place op with the operands swapped.  A non-commutative one
-/// cannot be: `rhs -= lhs` computes `rhs - lhs`, so it writes `combine(&mut rhs_i, lhs_i)`
-/// instead, which gets `lhs - rhs` in the same single pass.
-macro_rules! vec_binary_owned_rhs {
-    (commutes, $trait:ident, $method:ident, $assign_trait:ident, $assign:ident, $lhs:ty,
-     $op:tt, $combine:expr) => {
-        impl<T: NalgebraScalar> $trait<NalgebraVec<T>> for $lhs {
-            type Output = NalgebraVec<T>;
-
-            fn $method(self, mut rhs: NalgebraVec<T>) -> Self::Output {
-                $assign_trait::$assign(&mut rhs, self);
-                rhs
-            }
-        }
-    };
-    (noncommutes, $trait:ident, $method:ident, $assign_trait:ident, $assign:ident, $lhs:ty, $op:tt, $combine:expr) => {
-        impl<T: NalgebraScalar> $trait<NalgebraVec<T>> for $lhs {
-            type Output = NalgebraVec<T>;
-
-            fn $method(self, mut rhs: NalgebraVec<T>) -> Self::Output {
-                rhs.context
-                    .assert_broadcastable_into(self.context.nbatch(), stringify!($method));
-                if self.data.ncols() == rhs.data.ncols() {
-                    rhs.data.zip_apply(&self.data, $combine);
-                    return rhs;
-                }
-                let nb = rhs.data.ncols();
-                for b in 0..nb {
-                    let lhs = self.data.column(self.batch(b, nb));
-                    rhs.data.column_mut(b).zip_apply(&lhs, $combine);
-                }
-                rhs
-            }
-        }
-    };
-}
-
-/// `self` is the owned operand, so it is the destination -- which makes the in-place op the
-/// whole implementation, broadcast check included.
-macro_rules! vec_binary_owned_lhs {
-    ($trait:ident, $method:ident, $assign_trait:ident, $assign:ident, $rhs:ty) => {
-        impl<T: NalgebraScalar> $trait<$rhs> for NalgebraVec<T> {
-            type Output = NalgebraVec<T>;
-
-            fn $method(mut self, rhs: $rhs) -> Self::Output {
-                $assign_trait::$assign(&mut self, rhs);
-                self
-            }
-        }
-    };
-}
-
-macro_rules! binary_set {
-    ($trait:ident,$method:ident,$assign_trait:ident,$assign:ident,$commutes:ident,
-     $op:tt,$binary:tt,$combine:expr) => {
-        vec_binary_owned_lhs!($trait, $method, $assign_trait, $assign, NalgebraVec<T>);
-        vec_binary_owned_lhs!($trait, $method, $assign_trait, $assign, &NalgebraVec<T>);
-        vec_binary_owned_lhs!(
-            $trait,
-            $method,
-            $assign_trait,
-            $assign,
-            NalgebraVecRef<'_, T>
-        );
-        vec_binary_owned_lhs!(
-            $trait,
-            $method,
-            $assign_trait,
-            $assign,
-            &NalgebraVecRef<'_, T>
-        );
-        vec_binary_owned_rhs!(
-            $commutes,
-            $trait,
-            $method,
-            $assign_trait,
-            $assign,
-            NalgebraVecRef<'_, T>,
-            $op,
-            $combine
-        );
-        vec_binary_owned_rhs!(
-            $commutes,
-            $trait,
-            $method,
-            $assign_trait,
-            $assign,
-            &NalgebraVec<T>,
-            $op,
-            $combine
-        );
-        vec_binary!(
-            $trait,
-            $method,
-            NalgebraVecRef<'_, T>,
-            &NalgebraVec<T>,
-            $op,
-            $binary
-        );
-        vec_binary!(
-            $trait,
-            $method,
-            NalgebraVecRef<'_, T>,
-            NalgebraVecRef<'_, T>,
-            $op,
-            $binary
-        );
-        vec_binary!(
-            $trait,
-            $method,
-            NalgebraVecRef<'_, T>,
-            &NalgebraVecRef<'_, T>,
-            $op,
-            $binary
-        );
-        vec_binary!(
-            $trait,
-            $method,
-            &NalgebraVec<T>,
-            &NalgebraVec<T>,
-            $op,
-            $binary
-        );
-        vec_binary!(
-            $trait,
-            $method,
-            &NalgebraVec<T>,
-            NalgebraVecRef<'_, T>,
-            $op,
-            $binary
-        );
-        vec_binary!(
-            $trait,
-            $method,
-            &NalgebraVec<T>,
-            &NalgebraVecRef<'_, T>,
-            $op,
-            $binary
-        );
-    };
-}
-binary_set!(Add, add, AddAssign, add_assign, commutes, +=, +, |rhs, lhs| *rhs += lhs);
-binary_set!(Sub, sub, SubAssign, sub_assign, noncommutes, -=, -, |rhs, lhs| *rhs = lhs - *rhs);
-macro_rules! assign_set {
-    ($trait:ident,$method:ident,$op:tt) => {
-        vec_assign!($trait, $method, NalgebraVec<T>, NalgebraVec<T>, $op);
-        vec_assign!($trait, $method, NalgebraVec<T>, &NalgebraVec<T>, $op);
-        vec_assign!($trait, $method, NalgebraVec<T>, NalgebraVecRef<'_, T>, $op);
-        vec_assign!($trait, $method, NalgebraVec<T>, &NalgebraVecRef<'_, T>, $op);
-        vec_assign!($trait, $method, NalgebraVecMut<'_, T>, NalgebraVec<T>, $op);
-        vec_assign!($trait, $method, NalgebraVecMut<'_, T>, &NalgebraVec<T>, $op);
-        vec_assign!(
-            $trait,
-            $method,
-            NalgebraVecMut<'_, T>,
-            NalgebraVecRef<'_, T>,
-            $op
-        );
-        vec_assign!(
-            $trait,
-            $method,
-            NalgebraVecMut<'_, T>,
-            &NalgebraVecRef<'_, T>,
-            $op
-        );
-    };
-}
-assign_set!(AddAssign, add_assign, +=);
-assign_set!(SubAssign, sub_assign, -=);
-
-impl<T: NalgebraScalar> Mul<Scale<T>> for NalgebraVec<T> {
-    type Output = Self;
-    fn mul(mut self, rhs: Scale<T>) -> Self {
-        self.data *= rhs.value();
-        self
-    }
-}
-macro_rules! scale_ref {
-    ($t:ty) => {
-        impl<T: NalgebraScalar> Mul<Scale<T>> for $t {
-            type Output = NalgebraVec<T>;
-            fn mul(self, rhs: Scale<T>) -> Self::Output {
-                NalgebraVec {
-                    data: self.data.clone_owned() * rhs.value(),
-                    context: self.context,
-                }
-            }
-        }
-    };
-}
-scale_ref!(&NalgebraVec<T>);
-scale_ref!(NalgebraVecRef<'_, T>);
-impl<T: NalgebraScalar> Mul<Scale<T>> for NalgebraVecMut<'_, T> {
-    type Output = NalgebraVec<T>;
-    fn mul(self, rhs: Scale<T>) -> Self::Output {
-        NalgebraVec {
-            data: self.data.into_owned() * rhs.value(),
-            context: self.context,
-        }
-    }
-}
-impl<T: NalgebraScalar> Div<Scale<T>> for NalgebraVec<T> {
-    type Output = Self;
-    fn div(self, rhs: Scale<T>) -> Self {
-        Self {
-            data: self.data * (T::one() / rhs.value()),
-            context: self.context,
-        }
-    }
-}
-impl<T: NalgebraScalar> MulAssign<Scale<T>> for NalgebraVec<T> {
-    fn mul_assign(&mut self, rhs: Scale<T>) {
-        self.data *= rhs.value();
-    }
-}
-impl<T: NalgebraScalar> MulAssign<Scale<T>> for NalgebraVecMut<'_, T> {
-    fn mul_assign(&mut self, rhs: Scale<T>) {
-        self.data *= rhs.value();
-    }
-}
-macro_rules! index {
-    ($t:ty) => {
-        impl<T: NalgebraScalar> Index<IndexType> for $t {
-            type Output = T;
-            fn index(&self, i: IndexType) -> &T {
-                &self.data[(i, 0)]
-            }
-        }
-    };
-}
-index!(NalgebraVec<T>);
-index!(NalgebraVecRef<'_, T>);
-impl<T: NalgebraScalar> IndexMut<IndexType> for NalgebraVec<T> {
-    fn index_mut(&mut self, i: IndexType) -> &mut T {
-        &mut self.data[(i, 0)]
-    }
-}
-
-impl VectorIndex for NalgebraIndex {
-    type C = NalgebraContext;
-    fn zeros(len: IndexType, ctx: Self::C) -> Self {
-        Self {
-            data: DVector::zeros(len),
-            context: ctx,
-        }
-    }
-    fn len(&self) -> IndexType {
-        self.data.len()
-    }
-    fn from_vec(v: Vec<IndexType>, ctx: Self::C) -> Self {
-        Self {
-            data: DVector::from_vec(v),
-            context: ctx,
-        }
-    }
-    fn clone_as_vec(&self) -> Vec<IndexType> {
-        self.data.iter().copied().collect()
-    }
-    fn context(&self) -> &Self::C {
-        &self.context
-    }
-}
-
-impl<'a, T: NalgebraScalar> VectorView<'a> for NalgebraVecRef<'a, T> {
-    type Owned = NalgebraVec<T>;
-    fn get_index(&self, i: IndexType) -> T {
-        assert_eq!(self.context.nbatch(), 1, "get_index requires nbatch == 1");
-        self.data[(i, 0)]
-    }
-    fn into_owned(self) -> Self::Owned {
-        NalgebraVec {
-            data: self.data.into_owned(),
-            context: self.context,
-        }
-    }
-    fn squared_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: T) -> T {
-        squared_norm_data!(self, y, atol, rtol)
-    }
-}
-impl<'a, T: NalgebraScalar> VectorViewMut<'a> for NalgebraVecMut<'a, T> {
-    type Owned = NalgebraVec<T>;
-    type View = NalgebraVecRef<'a, T>;
-    type Index = NalgebraIndex;
-    fn copy_from(&mut self, o: &Self::Owned) {
-        copy_from_data!(self, o, "copy_from");
-    }
-    fn copy_from_view(&mut self, o: &Self::View) {
-        copy_from_data!(self, o, "copy_from_view");
-    }
-    fn set_index(&mut self, i: IndexType, v: T) {
-        self.data.row_mut(i).fill(v);
-    }
-    fn axpy(&mut self, a: T, x: &Self::Owned, beta: T) {
-        axpy_data!(self, x, beta, "axpy", |_batch| a)
-    }
-}
-impl<T: NalgebraScalar> VectorHost for NalgebraVec<T> {
-    fn as_slice(&self) -> &[T] {
-        assert_eq!(self.context.nbatch(), 1);
-        self.data.as_slice()
-    }
-    fn as_mut_slice(&mut self) -> &mut [T] {
-        assert_eq!(self.context.nbatch(), 1);
-        self.data.as_mut_slice()
-    }
-}
 impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
     type View<'a> = NalgebraVecRef<'a, T>;
     type ViewMut<'a> = NalgebraVecMut<'a, T>;
@@ -609,7 +560,7 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
         self.data.row_mut(i).fill(v);
     }
     fn squared_norm(&self, y: &Self, atol: &Self, rtol: T) -> T {
-        squared_norm_data!(self, y, atol, rtol)
+        squared_norm_body!(self, y, atol, rtol)
     }
     fn as_view(&self) -> Self::View<'_> {
         NalgebraVecRef {
@@ -636,13 +587,13 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
         }
     }
     fn copy_from(&mut self, o: &Self) {
-        copy_from_data!(self, o, "copy_from");
+        copy_from_body!(self, o, "copy_from");
     }
     fn fill(&mut self, v: T) {
         self.data.fill(v)
     }
     fn copy_from_view(&mut self, o: &Self::View<'_>) {
-        copy_from_data!(self, o, "copy_from_view");
+        copy_from_body!(self, o, "copy_from_view");
     }
     fn from_element(n: usize, v: T, ctx: Self::C) -> Self {
         Self {
@@ -673,10 +624,10 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
         }
     }
     fn axpy(&mut self, a: T, x: &Self, beta: T) {
-        axpy_data!(self, x, beta, "axpy", |_batch| a)
+        axpy_body!(self, x, beta, "axpy", |_batch| a)
     }
     fn axpy_v(&mut self, a: T, x: &Self::View<'_>, beta: T) {
-        axpy_data!(self, x, beta, "axpy_v", |_batch| a)
+        axpy_body!(self, x, beta, "axpy_v", |_batch| a)
     }
     fn batched_axpy(&mut self, a: &[T], x: &Self, beta: T) {
         assert_eq!(
@@ -684,7 +635,7 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
             self.context.nbatch(),
             "alpha.len() must equal nbatch"
         );
-        axpy_data!(self, x, beta, "batched_axpy", |batch| a[batch])
+        axpy_body!(self, x, beta, "batched_axpy", |batch| a[batch])
     }
     fn component_div_assign(&mut self, o: &Self) {
         self.context
@@ -818,6 +769,49 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
     }
 }
 
+impl<'a, T: NalgebraScalar> VectorView<'a> for NalgebraVecRef<'a, T> {
+    type Owned = NalgebraVec<T>;
+    fn get_index(&self, i: IndexType) -> T {
+        assert_eq!(self.context.nbatch(), 1, "get_index requires nbatch == 1");
+        self.data[(i, 0)]
+    }
+    fn into_owned(self) -> Self::Owned {
+        NalgebraVec {
+            data: self.data.into_owned(),
+            context: self.context,
+        }
+    }
+    fn squared_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: T) -> T {
+        squared_norm_body!(self, y, atol, rtol)
+    }
+}
+impl<'a, T: NalgebraScalar> VectorViewMut<'a> for NalgebraVecMut<'a, T> {
+    type Owned = NalgebraVec<T>;
+    type View = NalgebraVecRef<'a, T>;
+    type Index = NalgebraIndex;
+    fn copy_from(&mut self, o: &Self::Owned) {
+        copy_from_body!(self, o, "copy_from");
+    }
+    fn copy_from_view(&mut self, o: &Self::View) {
+        copy_from_body!(self, o, "copy_from_view");
+    }
+    fn set_index(&mut self, i: IndexType, v: T) {
+        self.data.row_mut(i).fill(v);
+    }
+    fn axpy(&mut self, a: T, x: &Self::Owned, beta: T) {
+        axpy_body!(self, x, beta, "axpy", |_batch| a)
+    }
+}
+impl<T: NalgebraScalar> VectorHost for NalgebraVec<T> {
+    fn as_slice(&self) -> &[T] {
+        assert_eq!(self.context.nbatch(), 1);
+        self.data.as_slice()
+    }
+    fn as_mut_slice(&mut self) -> &mut [T] {
+        assert_eq!(self.context.nbatch(), 1);
+        self.data.as_mut_slice()
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
