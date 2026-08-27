@@ -797,6 +797,11 @@ macro_rules! generate_vector_tests_batched {
             }
             #[test]
             #[should_panic(expected = "incompatible nbatch")]
+            fn [<test_narrow_dest_copy_from_indices_ $suffix>]() {
+                $crate::vector::tests::test_narrow_dest_copy_from_indices::<$V>($ctx2);
+            }
+            #[test]
+            #[should_panic(expected = "incompatible nbatch")]
             fn [<test_narrow_dest_scatter_ $suffix>]() {
                 $crate::vector::tests::test_narrow_dest_scatter::<$V>($ctx2);
             }
@@ -804,6 +809,11 @@ macro_rules! generate_vector_tests_batched {
             #[should_panic(expected = "incompatible nbatch")]
             fn [<test_narrow_dest_squared_norm_ $suffix>]() {
                 $crate::vector::tests::test_narrow_dest_squared_norm::<$V>($ctx2);
+            }
+            #[test]
+            #[should_panic(expected = "incompatible nbatch")]
+            fn [<test_unbatched_dest_squared_norm_ $suffix>]() {
+                $crate::vector::tests::test_unbatched_dest_squared_norm::<$V>($ctx2);
             }
 
             // --- Grouped broadcast tests (B -> B * P, using $ctx2 widened to 4) ---
@@ -2085,6 +2095,15 @@ pub(crate) mod tests {
         a.gather(&o, &idx);
     }
 
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_narrow_dest_copy_from_indices<V: Vector>(ctx2: V::C) {
+        let wide = ctx4::<V>(&ctx2);
+        let idx = V::Index::from_vec(vec![1, 0], Default::default());
+        let o = V::zeros(2, wide);
+        let mut a = V::zeros(2, ctx2);
+        a.copy_from_indices(&o, &idx);
+    }
+
     /// `scatter` writes into its argument, so the narrow operand is the one being written.
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_narrow_dest_scatter<V: Vector>(ctx2: V::C) {
@@ -2093,6 +2112,16 @@ pub(crate) mod tests {
         let source = V::zeros(2, wide);
         let mut dest = V::zeros(2, ctx2);
         source.scatter(&idx, &mut dest);
+    }
+
+    /// An unbatched `self` takes a fast path, which must still enforce the broadcast rule.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_unbatched_dest_squared_norm<V: Vector>(ctx2: V::C) {
+        let ctx1 = ctx2.clone_with_nbatch(1).unwrap();
+        let v = V::from_vec(fv::<V>(&[1.0, 1.0]), ctx1.clone());
+        let y = V::zeros(2, ctx2);
+        let atol = V::from_element(2, f::<V>(1.0), ctx1);
+        v.squared_norm(&y, &atol, f::<V>(1.0));
     }
 
     /// The reduction runs over `self`'s batches, so a wider `y`/`atol` is the same case.

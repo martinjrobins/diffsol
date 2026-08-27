@@ -227,6 +227,9 @@ macro_rules! impl_sub_assign {
     ($lhs:ty, $rhs:ty) => {
         impl<T: ScalarCuda> SubAssign<$rhs> for $lhs {
             fn sub_assign(&mut self, rhs: $rhs) {
+                // `self` is the destination, so `rhs` broadcasts into it
+                self.context
+                    .assert_broadcastable_into(rhs.context.nbatch(), "sub_assign");
                 let f = self.context.function::<T>("vec_sub_assign");
                 let nbatch = self.context.nbatch();
                 let nstates = (self.nrows() * self.ncols()) as u32;
@@ -254,6 +257,9 @@ macro_rules! impl_add_assign {
     ($lhs:ty, $rhs:ty) => {
         impl<T: ScalarCuda> AddAssign<$rhs> for $lhs {
             fn add_assign(&mut self, rhs: $rhs) {
+                // `self` is the destination, so `rhs` broadcasts into it
+                self.context
+                    .assert_broadcastable_into(rhs.context.nbatch(), "add_assign");
                 let f = self.context.function::<T>("vec_add_assign");
                 let nbatch = self.context.nbatch();
                 let nstates = (self.nrows() * self.ncols()) as u32;
@@ -624,6 +630,8 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
     fn gather(&mut self, other: &Self, indices: &<Self::V as Vector>::Index) {
         let nbatch = self.context.nbatch();
         let other_nbatch = other.context.nbatch();
+        self.context
+            .assert_broadcastable_into(other_nbatch, "gather");
         let self_nrows = self.nrows;
         let self_ncols = self.ncols;
         let other_nrows = other.nrows;
@@ -665,6 +673,8 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
         );
         let nbatch = self.context.nbatch();
         let data_nbatch = data.context.nbatch();
+        self.context
+            .assert_broadcastable_into(data_nbatch, "set_data_with_indices");
         let f = self.context.function::<T>("mat_set_data_with_indices");
         let n = dst_indices.len() as u32;
         if n == 0 {

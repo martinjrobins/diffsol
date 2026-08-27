@@ -500,18 +500,17 @@ macro_rules! squared_norm_body {
         };
         // the reduction runs over `self`'s batches and broadcasts `y` and `atol` over them
         let nb = $self.data.ncols();
-        // the unbatched case keeps constant column indices, which codegens better than the
-        // loop variable below (and folds away the broadcast arithmetic).  Checking the other
-        // two operands here as well costs ~0.9ns of a 5.3ns call, so it stays a single test.
-        if nb == 1 {
-            return batch_norm(0, 0, 0);
-        }
         $self
             .context
             .assert_broadcastable_into($y.context.nbatch(), "squared_norm");
         $self
             .context
             .assert_broadcastable_into($atol.context.nbatch(), "squared_norm");
+        // the unbatched case keeps constant column indices, which codegens better than the
+        // loop variable below (and folds away the broadcast arithmetic)
+        if nb == 1 {
+            return batch_norm(0, 0, 0);
+        }
         cold_call(|| {
             let mut max_norm = T::zero();
             for b in 0..nb {

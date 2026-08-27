@@ -1746,6 +1746,38 @@ pub(crate) mod tests {
     }
 
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_narrow_dest_gather_m<M: Matrix>(ctx2: M::C) {
+        let wide = ctx4::<M>(&ctx2);
+        let indices = vec![(0, 0), (1, 1)];
+        let values = (1..=8).map(|i| f::<M>(i as f64)).collect::<Vec<_>>();
+        let src = M::try_from_triplets(2, 2, indices.clone(), values, wide).unwrap();
+        let zeros = (0..4).map(|_| f::<M>(0.0)).collect::<Vec<_>>();
+        let mut dst = M::try_from_triplets(2, 2, indices, zeros, ctx2).unwrap();
+        let gather_indices = <M::V as Vector>::Index::from_vec(vec![0, 1], Default::default());
+        dst.gather(&src, &gather_indices);
+    }
+
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_narrow_dest_set_data_with_indices_m<M: Matrix>(ctx2: M::C) {
+        let wide = ctx4::<M>(&ctx2);
+        let indices = vec![(0, 0), (1, 1)];
+        let zeros = (0..4).map(|_| f::<M>(0.0)).collect::<Vec<_>>();
+        let mut mat = M::try_from_triplets(2, 2, indices, zeros, ctx2).unwrap();
+        let dst_indices = <M::V as Vector>::Index::from_vec(vec![0, 1], Default::default());
+        let src_indices = <M::V as Vector>::Index::from_vec(vec![0, 1], Default::default());
+        let data = M::V::from_vec((1..=8).map(|i| f::<M>(i as f64)).collect(), wide);
+        mat.set_data_with_indices(&dst_indices, &src_indices, &data);
+    }
+
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_narrow_dest_add_assign_m<M: DenseMatrix>(ctx2: M::C) {
+        let wide = ctx4::<M>(&ctx2);
+        let src = M::from_vec(2, 2, (0..16).map(|_| f::<M>(1.0)).collect(), wide);
+        let mut dst = M::zeros(2, 2, ctx2);
+        dst += &src;
+    }
+
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_narrow_dest_gemv_cols_m<M: DenseMatrix>(ctx2: M::C) {
         let wide = ctx4::<M>(&ctx2);
         let a = M::from_vec(2, 2, (0..16).map(|_| f::<M>(1.0)).collect(), wide);
@@ -2542,6 +2574,16 @@ macro_rules! generate_matrix_tests_batched {
             fn [<test_narrow_dest_scale_add_ $suffix>]() {
                 $crate::matrix::tests::test_narrow_dest_scale_add_m::<$M>($ctx2);
             }
+            #[test]
+            #[should_panic(expected = "incompatible nbatch")]
+            fn [<test_narrow_dest_gather_ $suffix>]() {
+                $crate::matrix::tests::test_narrow_dest_gather_m::<$M>($ctx2);
+            }
+            #[test]
+            #[should_panic(expected = "incompatible nbatch")]
+            fn [<test_narrow_dest_set_data_with_indices_ $suffix>]() {
+                $crate::matrix::tests::test_narrow_dest_set_data_with_indices_m::<$M>($ctx2);
+            }
 
             // --- Grouped broadcast tests (B -> B * P, using $ctx2 widened to 4) ---
             #[test]
@@ -2692,6 +2734,11 @@ macro_rules! generate_dense_matrix_tests_batched {
             #[should_panic(expected = "incompatible nbatch")]
             fn [<test_narrow_dest_gemv_cols_ $suffix>]() {
                 $crate::matrix::tests::test_narrow_dest_gemv_cols_m::<$M>($ctx2);
+            }
+            #[test]
+            #[should_panic(expected = "incompatible nbatch")]
+            fn [<test_narrow_dest_add_assign_ $suffix>]() {
+                $crate::matrix::tests::test_narrow_dest_add_assign_m::<$M>($ctx2);
             }
             #[test]
             fn [<test_grouped_gemv_cols_ $suffix>]() {

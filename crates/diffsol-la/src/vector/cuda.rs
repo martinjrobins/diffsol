@@ -383,11 +383,12 @@ macro_rules! impl_binary_owned_lhs {
 /// `rhs` is the owned operand, so it is the destination.
 ///
 /// A commutative op is just the in-place op with the operands swapped.  A non-commutative one
-/// cannot be: `rhs -= lhs` computes `rhs - lhs`, and there is no reverse-subtract kernel, so
-/// the left-hand side is broadcast into a result at the right-hand side's batch count and the
-/// operator applied in place.
+/// cannot be -- `rhs -= lhs` computes `rhs - lhs` -- so it launches the reversed assign kernel
+/// (`dest = src - dest`) instead, still writing into `rhs` in a single launch.  `$rev_kernel`
+/// is that kernel and is unused by the commutative arm.
 macro_rules! impl_binary_owned_rhs {
-    (commutes, $Op:ident, $method:ident, $AssignOp:ident, $assign:ident, $Lhs:ty, $copy:ident) => {
+    (commutes, $Op:ident, $method:ident, $AssignOp:ident, $assign:ident, $Lhs:ty,
+     $rev_kernel:expr, $label:expr) => {
         impl<'a, T: ScalarCuda> $Op<CudaVec<T>> for $Lhs {
             type Output = CudaVec<T>;
 
@@ -398,15 +399,41 @@ macro_rules! impl_binary_owned_rhs {
         }
     };
     (noncommutes, $Op:ident, $method:ident, $AssignOp:ident, $assign:ident, $Lhs:ty,
-     $copy:ident) => {
+     $rev_kernel:expr, $label:expr) => {
         impl<'a, T: ScalarCuda> $Op<CudaVec<T>> for $Lhs {
             type Output = CudaVec<T>;
 
-            fn $method(self, rhs: CudaVec<T>) -> Self::Output {
-                let mut out = CudaVec::zeros(self.len(), rhs.context.clone());
-                out.$copy(&self);
-                $AssignOp::$assign(&mut out, &rhs);
-                out
+            fn $method(self, mut rhs: CudaVec<T>) -> Self::Output {
+                let ctx = rhs.context.clone();
+                let dest_nbatch = ctx.nbatch();
+                let lhs_nbatch = self.context.nbatch();
+                ctx.assert_broadcastable_into(lhs_nbatch, $label);
+                let nstates = self.len();
+                if nstates == 0 {
+                    return rhs;
+                }
+                let f = ctx.function::<T>($rev_kernel);
+                let n_u32 = nstates as u32;
+                let nb_u32 = dest_nbatch as u32;
+                let dest_stride = rhs.stride() as i32;
+                let lhs_stride = self.stride() as i32;
+                let lhs_nbatch_i32 = lhs_nbatch as i32;
+                let config = ctx.launch_config_2d(n_u32, nb_u32, &f);
+                {
+                    let mut build = ctx.stream.launch_builder(&f);
+                    let mut dest_data = rhs.kview_mut();
+                    let lhs_data = self.kview();
+                    build
+                        .arg(&mut dest_data)
+                        .arg(&lhs_data)
+                        .arg(&n_u32)
+                        .arg(&dest_stride)
+                        .arg(&lhs_stride)
+                        .arg(&lhs_nbatch_i32);
+                    unsafe { build.launch(config) }
+                        .expect(concat!("Failed to launch ", $rev_kernel));
+                }
+                rhs
             }
         }
     };
@@ -416,16 +443,16 @@ macro_rules! impl_binary_owned_rhs {
 /// borrowed combinations that launch a kernel.
 macro_rules! impl_binary_set {
     ($Op:ident, $method:ident, $AssignOp:ident, $assign:ident, $commutes:ident,
-     $kernel:expr, $label:expr) => {
+     $kernel:expr, $rev_kernel:expr, $label:expr) => {
         impl_binary_owned_lhs!($Op, $method, $AssignOp, $assign, CudaVec<T>);
         impl_binary_owned_lhs!($Op, $method, $AssignOp, $assign, &CudaVec<T>);
         impl_binary_owned_lhs!($Op, $method, $AssignOp, $assign, CudaVecRef<'a, T>);
         impl_binary_owned_lhs!($Op, $method, $AssignOp, $assign, &CudaVecRef<'a, T>);
         impl_binary_owned_rhs!(
-            $commutes, $Op, $method, $AssignOp, $assign, CudaVecRef<'a, T>, copy_from_view
+            $commutes, $Op, $method, $AssignOp, $assign, CudaVecRef<'a, T>, $rev_kernel, $label
         );
         impl_binary_owned_rhs!(
-            $commutes, $Op, $method, $AssignOp, $assign, &CudaVec<T>, copy_from
+            $commutes, $Op, $method, $AssignOp, $assign, &CudaVec<T>, $rev_kernel, $label
         );
         impl_binary_ref_ref!(
             ['a, T: ScalarCuda], $Op, $method, $kernel, $label,
@@ -475,7 +502,16 @@ macro_rules! impl_assign_set {
     };
 }
 
-impl_binary_set!(Add, add, AddAssign, add_assign, commutes, "vec_add", "add");
+impl_binary_set!(
+    Add,
+    add,
+    AddAssign,
+    add_assign,
+    commutes,
+    "vec_add",
+    "vec_add_assign",
+    "add"
+);
 impl_binary_set!(
     Sub,
     sub,
@@ -483,6 +519,7 @@ impl_binary_set!(
     sub_assign,
     noncommutes,
     "vec_sub",
+    "vec_sub_assign_rev",
     "sub"
 );
 impl_assign_set!(AddAssign, add_assign, "vec_add_assign", "add_assign");
@@ -1108,6 +1145,8 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
     fn copy_from_indices(&mut self, other: &Self, indices: &Self::Index) {
         let self_nbatch = self.context.nbatch();
         let other_nbatch = other.context.nbatch();
+        self.context
+            .assert_broadcastable_into(other_nbatch, "copy_from_indices");
         let nindices_u32 = indices.len() as u32;
         if nindices_u32 == 0 {
             return;

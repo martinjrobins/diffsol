@@ -375,4 +375,4 @@ mod tests {
 //CUDA_CHECK(cudaDeviceReset());
 //
 //return EXIT_SUCCESS;
-//
+//}
