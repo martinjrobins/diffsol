@@ -9,18 +9,16 @@ pub mod nalgebra;
 #[cfg(feature = "faer")]
 pub mod faer;
 
-/// The divisibility half of the broadcast-into rule, along with the panic it raises.  Kept out
-/// of line so that [`Context::assert_broadcastable_into`] inlines as two comparisons and
-/// nothing else -- neither the division nor the panic's formatting.
+/// The panic raised when the broadcast-into rule is violated.  Kept out of line so that
+/// [`Context::assert_broadcastable_into`] inlines as the comparisons and the division and
+/// nothing else -- in particular not the panic's formatting.
 #[cold]
 #[inline(never)]
-fn assert_divides_nbatch(src_nbatch: usize, dest_nbatch: usize, op: &str) {
-    if src_nbatch == 0 || !dest_nbatch.is_multiple_of(src_nbatch) {
-        panic!(
-            "incompatible nbatch in {}: lhs={}, rhs={}",
-            op, dest_nbatch, src_nbatch
-        );
-    }
+fn panic_incompatible_nbatch(src_nbatch: usize, dest_nbatch: usize, op: &str) -> ! {
+    panic!(
+        "incompatible nbatch in {}: lhs={}, rhs={}",
+        op, dest_nbatch, src_nbatch
+    );
 }
 
 /// Source batch feeding destination batch `dest` of `dest_nbatch`, for an operand holding
@@ -96,7 +94,10 @@ pub trait Context: Clone + Default {
         if src_nbatch == nbatch || src_nbatch == 1 {
             return;
         }
-        assert_divides_nbatch(src_nbatch, nbatch, op);
+        // grouped broadcast: the division stays inline, only the panic is out of line
+        if src_nbatch == 0 || !nbatch.is_multiple_of(src_nbatch) {
+            panic_incompatible_nbatch(src_nbatch, nbatch, op);
+        }
     }
     fn vector_from_element<V: Vector<C = Self>>(&self, len: usize, value: V::T) -> V {
         V::from_element(len, value, self.clone())
