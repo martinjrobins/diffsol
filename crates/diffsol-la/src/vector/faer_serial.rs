@@ -39,18 +39,11 @@ pub struct FaerVecMut<'a, T: FaerScalar> {
     pub(crate) context: FaerContext,
 }
 
-/// Column feeding batch `batch` of a `nbatch`-batch destination, broadcasting a narrower
-/// vector over contiguous groups of destination batches (see [`broadcast_batch`]).
-macro_rules! batch_index {
-    () => {
-        #[inline]
-        pub(crate) fn batch(&self, batch: usize, nbatch: usize) -> usize {
-            broadcast_batch(batch, self.data.ncols(), nbatch)
-        }
-    };
-}
 impl<T: FaerScalar> FaerVec<T> {
-    batch_index!();
+    #[inline]
+    pub(crate) fn batch(&self, batch: usize, nbatch: usize) -> usize {
+        broadcast_batch(batch, self.data.ncols(), nbatch)
+    }
 
     pub fn check_for_nan(&self, label: &str) -> bool {
         for b in 0..self.data.ncols() {
@@ -66,7 +59,10 @@ impl<T: FaerScalar> FaerVec<T> {
     }
 }
 impl<T: FaerScalar> FaerVecRef<'_, T> {
-    batch_index!();
+    #[inline]
+    pub(crate) fn batch(&self, batch: usize, nbatch: usize) -> usize {
+        broadcast_batch(batch, self.data.ncols(), nbatch)
+    }
 }
 
 impl<T: FaerScalar> From<Col<T>> for FaerVec<T> {
@@ -341,12 +337,6 @@ macro_rules! impl_mul_scalar_alloc {
         impl<T: FaerScalar> Mul<Scale<T>> for $t {
             type Output = FaerVec<T>;
             fn mul(self, rhs: Scale<T>) -> Self::Output {
-                // ponytail: a scaled copy of an unbatched vector is ~1.5x the old
-                // `Col`-of-batches cost (lin_alg_ops scalar_mul/faer).  faer's 2-D
-                // iteration machinery looks like the floor: an unbatched fast path over
-                // the single column measured no better with `Mat::zeros` + `zip!` and
-                // ~1.8x worse with `Mat::from_fn`.  Revisit if faer grows a way to fill a
-                // fresh `Mat` in one vectorised pass.
                 FaerVec {
                     data: self.data.rb() * faer::Scale(rhs.value()),
                     context: self.context,

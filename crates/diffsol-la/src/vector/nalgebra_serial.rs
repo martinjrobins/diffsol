@@ -35,21 +35,17 @@ pub struct NalgebraVecMut<'a, T: NalgebraScalar> {
     pub(crate) context: NalgebraContext,
 }
 
-/// Column feeding batch `batch` of a `nbatch`-batch destination, broadcasting a narrower
-/// vector over contiguous groups of destination batches (see [`broadcast_batch`]).
-macro_rules! batch_index {
-    () => {
-        #[inline]
-        pub(crate) fn batch(&self, batch: usize, nbatch: usize) -> usize {
-            broadcast_batch(batch, self.data.ncols(), nbatch)
-        }
-    };
-}
 impl<T: NalgebraScalar> NalgebraVec<T> {
-    batch_index!();
+    #[inline]
+    pub(crate) fn batch(&self, batch: usize, nbatch: usize) -> usize {
+        broadcast_batch(batch, self.data.ncols(), nbatch)
+    }
 }
 impl<T: NalgebraScalar> NalgebraVecRef<'_, T> {
-    batch_index!();
+    #[inline]
+    pub(crate) fn batch(&self, batch: usize, nbatch: usize) -> usize {
+        broadcast_batch(batch, self.data.ncols(), nbatch)
+    }
 }
 
 impl<T: NalgebraScalar> From<DVector<T>> for NalgebraVec<T> {
