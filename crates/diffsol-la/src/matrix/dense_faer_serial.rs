@@ -2,6 +2,7 @@ use std::ops::{Add, AddAssign, Index, IndexMut, Mul, Sub, SubAssign};
 
 use super::default_solver::DefaultSolver;
 use super::sparsity::{Dense, DenseRef};
+use crate::context::broadcast_batch;
 use crate::error::LaError;
 use crate::{scalar::Scale, Context, FaerScalar, Vector};
 use crate::{
@@ -27,8 +28,15 @@ impl<T: FaerScalar> FaerMat<T> {
     fn logical_ncols(&self) -> usize {
         self.data.ncols() / self.context.nbatch()
     }
+    /// Physical column of logical column `j` in this matrix's own batch `b`.
     fn col(&self, b: usize, j: usize) -> usize {
-        (b % self.context.nbatch()) * self.logical_ncols() + j
+        debug_assert!(b < self.context.nbatch(), "batch out of bounds");
+        b * self.logical_ncols() + j
+    }
+    /// Physical column feeding batch `b` of a `nbatch`-batch destination, broadcasting this
+    /// matrix over contiguous groups of destination batches (see [`broadcast_batch`]).
+    fn col_bcast(&self, b: usize, j: usize, nbatch: usize) -> usize {
+        self.col(broadcast_batch(b, self.context.nbatch(), nbatch), j)
     }
 }
 /// Scalars of staging buffer `mul_cols_by` uses per row tile. The tile is
@@ -67,10 +75,11 @@ macro_rules! binary_owned_lhs {
                     .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($fn));
                 let nc = self.ncols();
                 if self.context.nbatch() >= rhs.context.nbatch() {
-                    for b in 0..self.context.nbatch() {
+                    let nb = self.context.nbatch();
+                    for b in 0..nb {
                         let c = self.col(b, 0);
                         let mut columns = self.data.rb_mut().subcols_mut(c, nc);
-                        columns $op rhs.data.rb().subcols(rhs.col(b, 0), nc);
+                        columns $op rhs.data.rb().subcols(rhs.col_bcast(b, 0, nb), nc);
                     }
                     return self;
                 }
@@ -79,7 +88,7 @@ macro_rules! binary_owned_lhs {
                 let mut data = Mat::zeros(self.nrows(), nc * nb);
                 for b in 0..nb {
                     let mut columns = data.rb_mut().subcols_mut(b * nc, nc);
-                    columns.copy_from(self.data.rb().subcols(self.col(b, 0), nc));
+                    columns.copy_from(self.data.rb().subcols(self.col_bcast(b, 0, nb), nc));
                     columns $op rhs.data.rb().subcols(rhs.col(b, 0), nc);
                 }
                 FaerMat {
@@ -105,10 +114,11 @@ macro_rules! binary_owned_rhs {
                     .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($fn));
                 let nc = self.ncols();
                 if rhs.context.nbatch() >= self.context.nbatch() {
-                    for b in 0..rhs.context.nbatch() {
+                    let nb = rhs.context.nbatch();
+                    for b in 0..nb {
                         let c = rhs.col(b, 0);
                         let columns = rhs.data.rb_mut().subcols_mut(c, nc);
-                        zip!(columns, self.data.rb().subcols(self.col(b, 0), nc))
+                        zip!(columns, self.data.rb().subcols(self.col_bcast(b, 0, nb), nc))
                             .for_each(|unzip!(r, l)| $combine(r, *l));
                     }
                     return rhs;
@@ -119,7 +129,7 @@ macro_rules! binary_owned_rhs {
                 for b in 0..nb {
                     let mut columns = data.rb_mut().subcols_mut(b * nc, nc);
                     columns.copy_from(self.data.rb().subcols(self.col(b, 0), nc));
-                    columns $op rhs.data.rb().subcols(rhs.col(b, 0), nc);
+                    columns $op rhs.data.rb().subcols(rhs.col_bcast(b, 0, nb), nc);
                 }
                 FaerMat {
                     data,
@@ -149,7 +159,7 @@ macro_rules! assign {
                 for b in 0..nb {
                     let c = self.col(b, 0);
                     let mut columns = self.data.rb_mut().subcols_mut(c, nc);
-                    columns $op rhs.data.rb().subcols(rhs.col(b, 0), nc);
+                    columns $op rhs.data.rb().subcols(rhs.col_bcast(b, 0, nb), nc);
                 }
             }
         }
@@ -169,23 +179,12 @@ macro_rules! scale_ref {
         impl<T: FaerScalar> Mul<Scale<T>> for $t {
             type Output = FaerMat<T>;
             fn mul(self, r: Scale<T>) -> Self::Output {
-                if self.data.ncols() == self.ncols() * self.context.nbatch() {
-                    return FaerMat {
-                        data: self.data.rb() * faer::Scale(r.value()),
-                        context: self.context,
-                    };
+                // every batch is scaled by the same factor, and the batches tile the columns,
+                // so this is one whole-matrix multiply whatever the batch count
+                FaerMat {
+                    data: self.data.rb() * faer::Scale(r.value()),
+                    context: self.context,
                 }
-                let mut out = FaerMat::zeros(self.nrows(), self.ncols(), self.context);
-                let nc = out.ncols();
-                for b in 0..out.context.nbatch() {
-                    let c = out.col(b, 0);
-                    out.data
-                        .rb_mut()
-                        .subcols_mut(c, nc)
-                        .copy_from(self.data.rb().subcols(self.col(b, 0), nc));
-                }
-                out.data *= faer::Scale(r.value());
-                out
             }
         }
     };
@@ -217,8 +216,12 @@ macro_rules! gemv_data {
             .assert_compatible_nbatch($self.context.nbatch(), $op);
         $y.context
             .assert_compatible_nbatch($x.context.nbatch(), $op);
+        $self
+            .context
+            .assert_compatible_nbatch($x.context.nbatch(), $op);
         let nc = $self.ncols();
-        for b in 0..$y.data.ncols() {
+        let nb = $y.data.ncols();
+        for b in 0..nb {
             let mut column = $y.data.rb_mut().col_mut(b);
             let accum = if $beta.is_zero() {
                 Accum::Replace
@@ -231,8 +234,8 @@ macro_rules! gemv_data {
             matmul(
                 column,
                 accum,
-                $self.data.rb().subcols($self.col(b, 0), nc),
-                $x.data.rb().col($x.batch(b)),
+                $self.data.rb().subcols($self.col_bcast(b, 0, nb), nc),
+                $x.data.rb().col($x.batch(b, nb)),
                 $a,
                 get_global_parallelism(),
             );
@@ -267,7 +270,8 @@ macro_rules! gemv_cols_data {
             }
         } else {
             let x = faer::ColRef::from_slice(&$x[..nc]);
-            for b in 0..$y.data.ncols() {
+            let nb = $y.data.ncols();
+            for b in 0..nb {
                 let mut column = $y.data.rb_mut().col_mut(b);
                 let accum = if $beta.is_zero() {
                     Accum::Replace
@@ -280,7 +284,7 @@ macro_rules! gemv_cols_data {
                 matmul(
                     column,
                     accum,
-                    $self.data.rb().subcols($self.col(b, start), nc),
+                    $self.data.rb().subcols($self.col_bcast(b, start, nb), nc),
                     x,
                     $a,
                     get_global_parallelism(),
@@ -303,24 +307,30 @@ impl<T: FaerScalar> Matrix for FaerMat<T> {
         &mut self.data
     }
     fn set_data_with_indices(&mut self, dst: &FaerVecIndex, src: &FaerVecIndex, data: &FaerVec<T>) {
+        self.context
+            .assert_compatible_nbatch(data.context.nbatch(), "set_data_with_indices");
+        let nb = self.context.nbatch();
         for (d, s) in dst.data.iter().zip(src.data.iter()) {
             let i = d % self.nrows();
             let j = d / self.nrows();
-            for b in 0..self.context.nbatch() {
+            for b in 0..nb {
                 let c = self.col(b, j);
-                self.data[(i, c)] = data.data[(*s, data.batch(b))]
+                self.data[(i, c)] = data.data[(*s, data.batch(b, nb))]
             }
         }
     }
     fn gather(&mut self, o: &Self, idx: &FaerVecIndex) {
-        for b in 0..self.context.nbatch() {
+        self.context
+            .assert_compatible_nbatch(o.context.nbatch(), "gather");
+        let nb = self.context.nbatch();
+        for b in 0..nb {
             for (d, s) in idx.data.iter().enumerate() {
                 let i = d % self.nrows();
                 let j = d / self.nrows();
                 let oi = s % o.nrows();
                 let oj = s / o.nrows();
                 let c = self.col(b, j);
-                self.data[(i, c)] = o.data[(oi, o.col(b, oj))]
+                self.data[(i, c)] = o.data[(oi, o.col_bcast(b, oj, nb))]
             }
         }
     }
@@ -341,10 +351,11 @@ impl<T: FaerScalar> Matrix for FaerMat<T> {
     fn add_column_to_vector(&self, j: usize, v: &mut FaerVec<T>) {
         v.context
             .assert_compatible_nbatch(self.context.nbatch(), "add_column_to_vector");
-        for b in 0..v.context.nbatch() {
+        let nb = v.context.nbatch();
+        for b in 0..nb {
             zip!(
                 v.data.rb_mut().col_mut(b),
-                self.data.rb().col(self.col(b, j))
+                self.data.rb().col(self.col_bcast(b, j, nb))
             )
             .for_each(|unzip!(v, column)| *v += *column);
         }
@@ -414,23 +425,25 @@ impl<T: FaerScalar> Matrix for FaerMat<T> {
             return;
         }
         let nc = self.ncols();
-        for b in 0..self.context.nbatch() {
+        let nb = self.context.nbatch();
+        for b in 0..nb {
             let c = self.col(b, 0);
             self.data
                 .rb_mut()
                 .subcols_mut(c, nc)
-                .copy_from(o.data.rb().subcols(o.col(b, 0), nc));
+                .copy_from(o.data.rb().subcols(o.col_bcast(b, 0, nb), nc));
         }
     }
     fn set_column(&mut self, j: usize, v: &FaerVec<T>) {
         self.context
             .assert_compatible_nbatch(v.context.nbatch(), "set_column");
-        for b in 0..self.context.nbatch() {
+        let nb = self.context.nbatch();
+        for b in 0..nb {
             let c = self.col(b, j);
             self.data
                 .rb_mut()
                 .col_mut(c)
-                .copy_from(v.data.rb().col(v.batch(b)));
+                .copy_from(v.data.rb().col(v.batch(b, nb)));
         }
     }
     fn scale_add_and_assign(&mut self, x: &Self, b: T, y: &Self) {
@@ -439,12 +452,13 @@ impl<T: FaerScalar> Matrix for FaerMat<T> {
         self.context
             .assert_compatible_nbatch(y.context.nbatch(), "scale_add_and_assign");
         let nc = self.ncols();
-        for batch in 0..self.context.nbatch() {
+        let nb = self.context.nbatch();
+        for batch in 0..nb {
             let c = self.col(batch, 0);
             zip!(
                 self.data.rb_mut().subcols_mut(c, nc),
-                x.data.rb().subcols(x.col(batch, 0), nc),
-                y.data.rb().subcols(y.col(batch, 0), nc)
+                x.data.rb().subcols(x.col_bcast(batch, 0, nb), nc),
+                y.data.rb().subcols(y.col_bcast(batch, 0, nb), nc)
             )
             .for_each(|unzip!(s, x, y)| *s = *x + b * *y);
         }
@@ -608,9 +622,10 @@ impl<T: FaerScalar> DenseMatrix for FaerMat<T> {
         assert!(order + 2 < self.logical_ncols(), "order out of bounds");
         self.context
             .assert_compatible_nbatch(d.context.nbatch(), "update_backward_diff");
-        for b in 0..self.context.nbatch() {
+        let nb = self.context.nbatch();
+        for b in 0..nb {
             let base = self.col(b, 0);
-            let d_col = d.batch(b);
+            let d_col = d.batch(b, nb);
             // diff[:, order+2] = d - diff[:, order+1]
             {
                 let src = base + order + 1;

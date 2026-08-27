@@ -29,8 +29,8 @@ void vec_root_finding_f64(const double* __restrict__ g0,
     int local_index = -1;
 
     for (int i = idx; i < nstates; i += blockDim.x * gridDim.x) {
-        int g0i = (b % g0_nbatch) * g0_stride + i;
-        int g1i = (b % g1_nbatch) * g1_stride + i;
+        int g0i = broadcast_batch(b, g0_nbatch) * g0_stride + i;
+        int g1i = broadcast_batch(b, g1_nbatch) * g1_stride + i;
         double v0 = g0[g0i];
         double v1 = g1[g1i];
 

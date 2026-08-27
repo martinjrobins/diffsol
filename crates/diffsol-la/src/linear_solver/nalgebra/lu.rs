@@ -1,5 +1,6 @@
 use nalgebra::Dyn;
 
+use crate::context::broadcast_batch;
 use crate::{
     error::LaError, linear_solver_error, matrix::dense_nalgebra_serial::NalgebraMat, Context,
     LinearOp, LinearSolver, Matrix, NalgebraContext, NalgebraScalar, NalgebraVec,
@@ -47,9 +48,10 @@ impl<T: NalgebraScalar> LinearSolver<NalgebraMat<T>> for LU<T> {
             }
             return Err(linear_solver_error!(LuSolveFailed));
         }
-        for batch in 0..state.context.nbatch() {
+        let nb = state.context.nbatch();
+        for batch in 0..nb {
             let mut state_batch = state.data.column_mut(batch);
-            if !self.lu[batch % self.lu.len()].solve_mut(&mut state_batch) {
+            if !self.lu[broadcast_batch(batch, self.lu.len(), nb)].solve_mut(&mut state_batch) {
                 return Err(linear_solver_error!(LuSolveFailed));
             }
         }
@@ -90,7 +92,10 @@ impl<T: NalgebraScalar> LinearSolver<NalgebraMat<T>> for LU<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{linear_solver::tests::diagonal_op, Vector};
+    use crate::{
+        linear_solver::tests::{diagonal_op, test_grouped_lu_solve},
+        Vector,
+    };
 
     #[test]
     fn test_lu() {
@@ -104,5 +109,9 @@ mod tests {
             &NalgebraVec::from_vec(vec![1.0, 2.0], Default::default()),
             1e-10,
         );
+    }
+    #[test]
+    fn test_grouped_lu() {
+        test_grouped_lu_solve::<NalgebraMat<f64>, LU<f64>>(NalgebraContext::with_nbatch(2));
     }
 }

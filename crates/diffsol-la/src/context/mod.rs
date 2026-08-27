@@ -25,13 +25,31 @@ fn incompatible_nbatch(lhs: usize, rhs: usize, op: &str) -> ! {
     panic!("incompatible nbatch in {}: lhs={}, rhs={}", op, lhs, rhs);
 }
 
+/// Source batch feeding destination batch `dest` of `dest_nbatch`, for an operand holding
+/// `src_nbatch` batches.
+///
+/// Broadcast is grouped: each source batch is repeated across `dest_nbatch / src_nbatch`
+/// *contiguous* destination batches, so `src_nbatch == 2` against `dest_nbatch == 4` reads
+/// batches `[0, 0, 1, 1]`.  The four cases this covers:
+/// - `src_nbatch == dest_nbatch` gives `dest`
+/// - `src_nbatch == 1` gives `0`
+/// - `src_nbatch == B`, `dest_nbatch == B * P` gives `dest / P`
+/// - `dest_nbatch < src_nbatch` gives the first batch of each group, i.e. `0` when
+///   `dest_nbatch == 1` (see [`Context::assert_compatible_nbatch`] for when that arises)
+#[inline]
+pub(crate) fn broadcast_batch(dest: usize, src_nbatch: usize, dest_nbatch: usize) -> usize {
+    dest * src_nbatch / dest_nbatch
+}
+
 pub trait Context: Clone + Default {
     /// Returns the batch count for this context.
     ///
     /// When `nbatch > 1`, vectors and matrices store data for `nbatch`
     /// independent ODE systems simultaneously.  Operations between operands
     /// with different batch counts use broadcast semantics: an operand with
-    /// `nbatch == 1` is applied to all batches of the other operand.
+    /// `nbatch == B` is applied to `B * P` batches of the other operand, repeating each
+    /// of its batches over `P` contiguous batches (`nbatch == 1` is the `B == 1` case,
+    /// applied to every batch of the other operand).
     #[inline]
     fn nbatch(&self) -> usize {
         1
@@ -45,17 +63,24 @@ pub trait Context: Clone + Default {
     fn clone_with_nbatch(&self, nbatch: usize) -> Result<Self, LaError>;
     /// Panics if the two batch counts are incompatible.
     ///
-    /// Compatibility rule: two batches are compatible if they are equal, or
-    /// if either one is `1` (broadcast).  Only panics when both are `> 1`
-    /// and differ.
+    /// Compatibility rule: two batch counts are compatible if the larger is an exact
+    /// multiple of the smaller, so the smaller operand broadcasts over exact repeat
+    /// groups.  Equal counts and `1` against `N` are the special cases of it; `2` against
+    /// `3` panics.
     ///
-    /// In-place operations write `self.nbatch()` batches: a right-hand side with
-    /// `nbatch == 1` is broadcast over all of them, and where the left-hand side has
-    /// `nbatch == 1` only batch 0 of the right-hand side is used.
+    /// In-place operations write `self.nbatch()` batches: a right-hand side with fewer
+    /// batches is broadcast over them (see [`broadcast_batch`]), and where the left-hand
+    /// side has fewer batches than the right only the first right-hand side batch of each
+    /// group is used.
     #[inline]
     fn assert_compatible_nbatch(&self, other_nbatch: usize, op: &str) {
         let self_nbatch = self.nbatch();
-        if self_nbatch != other_nbatch && self_nbatch != 1 && other_nbatch != 1 {
+        let (min, max) = if self_nbatch < other_nbatch {
+            (self_nbatch, other_nbatch)
+        } else {
+            (other_nbatch, self_nbatch)
+        };
+        if min == 0 || !max.is_multiple_of(min) {
             incompatible_nbatch(self_nbatch, other_nbatch, op);
         }
     }

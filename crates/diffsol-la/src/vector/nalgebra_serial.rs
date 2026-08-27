@@ -2,6 +2,7 @@ use std::ops::{Add, AddAssign, Div, Index, IndexMut, Mul, MulAssign, Sub, SubAss
 
 use nalgebra::{Const, DMatrix, DVector, Dyn, LpNorm, MatrixView, MatrixViewMut};
 
+use crate::context::broadcast_batch;
 use crate::{Context, IndexType, NalgebraContext, NalgebraMat, NalgebraScalar, Scale, VectorHost};
 
 use super::{DefaultDenseMatrix, Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
@@ -34,12 +35,13 @@ pub struct NalgebraVecMut<'a, T: NalgebraScalar> {
     pub(crate) context: NalgebraContext,
 }
 
-/// Column holding `batch`, broadcasting a single-batch vector over all batches.
+/// Column feeding batch `batch` of a `nbatch`-batch destination, broadcasting a narrower
+/// vector over contiguous groups of destination batches (see [`broadcast_batch`]).
 macro_rules! batch_method {
     () => {
         #[inline]
-        pub(crate) fn batch(&self, batch: usize) -> usize {
-            batch % self.data.ncols()
+        pub(crate) fn batch(&self, batch: usize, nbatch: usize) -> usize {
+            broadcast_batch(batch, self.data.ncols(), nbatch)
         }
     };
 }
@@ -115,8 +117,8 @@ macro_rules! vec_binary {
                 let mut data = DMatrix::zeros(self.data.nrows(), nb);
                 for b in 0..nb {
                     let mut column = data.column_mut(b);
-                    column.copy_from(&self.data.column(b % self.data.ncols()));
-                    column $op &rhs.data.column(b % rhs.data.ncols());
+                    column.copy_from(&self.data.column(self.batch(b, nb)));
+                    column $op &rhs.data.column(rhs.batch(b, nb));
                 }
                 NalgebraVec {
                     data,
@@ -140,9 +142,10 @@ macro_rules! vec_assign {
                     self.data $op &rhs.data;
                     return;
                 }
-                for b in 0..self.data.ncols() {
+                let nb = self.data.ncols();
+                for b in 0..nb {
                     let mut column = self.data.column_mut(b);
-                    column $op &rhs.data.column(b % rhs.data.ncols());
+                    column $op &rhs.data.column(rhs.batch(b, nb));
                 }
             }
         }
@@ -169,11 +172,12 @@ macro_rules! copy_from_data {
             $self.data.copy_from(&$other.data);
             return;
         }
-        for b in 0..$self.data.ncols() {
+        let nb = $self.data.ncols();
+        for b in 0..nb {
             $self
                 .data
                 .column_mut(b)
-                .copy_from(&$other.data.column(b % $other.data.ncols()));
+                .copy_from(&$other.data.column($other.batch(b, nb)));
         }
     };
 }
@@ -186,12 +190,13 @@ macro_rules! axpy_data {
         $self
             .context
             .assert_compatible_nbatch($x.context.nbatch(), $op);
-        for $batch in 0..$self.data.ncols() {
+        let nb = $self.data.ncols();
+        for $batch in 0..nb {
             let alpha = $alpha;
             $self
                 .data
                 .column_mut($batch)
-                .axpy(alpha, &$x.data.column($x.batch($batch)), $beta);
+                .axpy(alpha, &$x.data.column($x.batch($batch, nb)), $beta);
         }
     }};
 }
@@ -204,6 +209,8 @@ macro_rules! squared_norm_data {
             .assert_compatible_nbatch($y.context.nbatch(), "squared_norm");
         $self
             .context
+            .assert_compatible_nbatch($atol.context.nbatch(), "squared_norm");
+        $y.context
             .assert_compatible_nbatch($atol.context.nbatch(), "squared_norm");
         let nrows = $self.data.nrows();
         assert!(
@@ -226,14 +233,25 @@ macro_rules! squared_norm_data {
                 });
             norm / nstates
         };
-        // the unbatched case keeps a constant column index, which codegens better than the
-        // loop variable below (and folds away `batch`'s modulus)
-        if $self.data.ncols() == 1 {
-            return batch_norm(0, $y.batch(0), $atol.batch(0));
+        // every operand may be narrower than the widest one, so the reduction runs over the
+        // widest and broadcasts the rest
+        let nb = $self
+            .data
+            .ncols()
+            .max($y.data.ncols())
+            .max($atol.data.ncols());
+        // the unbatched case keeps constant column indices, which codegens better than the
+        // loop variable below (and folds away the broadcast arithmetic)
+        if nb == 1 {
+            return batch_norm(0, 0, 0);
         }
         let mut max_norm = T::zero();
-        for b in 0..$self.data.ncols() {
-            max_norm = max_norm.max(batch_norm(b, $y.batch(b), $atol.batch(b)));
+        for b in 0..nb {
+            max_norm = max_norm.max(batch_norm(
+                broadcast_batch(b, $self.data.ncols(), nb),
+                $y.batch(b, nb),
+                $atol.batch(b, nb),
+            ));
         }
         max_norm
     }};
@@ -254,8 +272,9 @@ macro_rules! vec_binary_owned_rhs {
                     return rhs;
                 }
                 if rhs.data.ncols() > self.data.ncols() {
-                    for b in 0..rhs.data.ncols() {
-                        let lhs = self.data.column(self.batch(b));
+                    let nb = rhs.data.ncols();
+                    for b in 0..nb {
+                        let lhs = self.data.column(self.batch(b, nb));
                         rhs.data.column_mut(b).zip_apply(&lhs, $combine);
                     }
                     return rhs;
@@ -266,7 +285,7 @@ macro_rules! vec_binary_owned_rhs {
                 for b in 0..nb {
                     let mut column = data.column_mut(b);
                     column.copy_from(&self.data.column(b));
-                    column $op &rhs.data.column(rhs.batch(b));
+                    column $op &rhs.data.column(rhs.batch(b, nb));
                 }
                 NalgebraVec {
                     data,
@@ -290,9 +309,10 @@ macro_rules! vec_binary_owned_lhs {
                     return self;
                 }
                 if self.data.ncols() > rhs.data.ncols() {
-                    for b in 0..self.data.ncols() {
+                    let nb = self.data.ncols();
+                    for b in 0..nb {
                         let mut column = self.data.column_mut(b);
-                        column $op &rhs.data.column(b % rhs.data.ncols());
+                        column $op &rhs.data.column(rhs.batch(b, nb));
                     }
                     return self;
                 }
@@ -300,7 +320,7 @@ macro_rules! vec_binary_owned_lhs {
                 let mut data = DMatrix::zeros(self.data.nrows(), nb);
                 for b in 0..nb {
                     let mut column = data.column_mut(b);
-                    column.copy_from(&self.data.column(b % self.data.ncols()));
+                    column.copy_from(&self.data.column(self.batch(b, nb)));
                     column $op &rhs.data.column(b);
                 }
                 NalgebraVec {
@@ -661,10 +681,11 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
             self.data.component_div_assign(&o.data);
             return;
         }
-        for c in 0..self.data.ncols() {
+        let nb = self.data.ncols();
+        for c in 0..nb {
             self.data
                 .column_mut(c)
-                .component_div_assign(&o.data.column(o.batch(c)));
+                .component_div_assign(&o.data.column(o.batch(c, nb)));
         }
     }
     fn component_mul_assign(&mut self, o: &Self) {
@@ -689,10 +710,11 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
             self.data.component_mul_assign(&o.data);
             return;
         }
-        for c in 0..self.data.ncols() {
+        let nb = self.data.ncols();
+        for c in 0..nb {
             self.data
                 .column_mut(c)
-                .component_mul_assign(&o.data.column(o.batch(c)));
+                .component_mul_assign(&o.data.column(o.batch(c, nb)));
         }
     }
     fn root_finding(&self, g1: &Self) -> (bool, T, i32) {
@@ -700,12 +722,13 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
             .assert_compatible_nbatch(g1.context.nbatch(), "root_finding");
         assert_eq!(self.len(), g1.len(), "Vector lengths do not match");
         let mut out = None;
-        for b in 0..self.data.ncols() {
+        let nb = self.data.ncols().max(g1.data.ncols());
+        for b in 0..nb {
             let mut found = false;
             let mut frac = T::zero();
             let mut idx = -1;
-            let g0_column = self.data.column(b);
-            let g1_column = g1.data.column(g1.batch(b));
+            let g0_column = self.data.column(broadcast_batch(b, self.data.ncols(), nb));
+            let g1_column = g1.data.column(g1.batch(b, nb));
             for (i, (&g0, &g)) in g0_column
                 .as_slice()
                 .iter()
@@ -744,9 +767,10 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
     fn copy_from_indices(&mut self, o: &Self, idx: &Self::Index) {
         self.context
             .assert_compatible_nbatch(o.context.nbatch(), "copy_from_indices");
-        for b in 0..self.data.ncols() {
+        let nb = self.data.ncols();
+        for b in 0..nb {
             for i in idx.data.iter() {
-                self.data[(*i, b)] = o.data[(*i, o.batch(b))]
+                self.data[(*i, b)] = o.data[(*i, o.batch(b, nb))]
             }
         }
     }
@@ -754,9 +778,10 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
         assert_eq!(self.len(), idx.len());
         self.context
             .assert_compatible_nbatch(o.context.nbatch(), "gather");
-        for b in 0..self.data.ncols() {
+        let nb = self.data.ncols();
+        for b in 0..nb {
             for (i, j) in idx.data.iter().enumerate() {
-                self.data[(i, b)] = o.data[(*j, o.batch(b))]
+                self.data[(i, b)] = o.data[(*j, o.batch(b, nb))]
             }
         }
     }
@@ -764,10 +789,12 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
         assert_eq!(self.len(), idx.len());
         self.context
             .assert_compatible_nbatch(o.context.nbatch(), "scatter");
-        for b in 0..self.data.ncols() {
+        let nb = self.data.ncols().max(o.data.ncols());
+        for b in 0..nb {
+            let src = broadcast_batch(b, self.data.ncols(), nb);
             for (i, j) in idx.data.iter().enumerate() {
-                let batch = o.batch(b);
-                o.data[(*j, batch)] = self.data[(i, b)]
+                let batch = o.batch(b, nb);
+                o.data[(*j, batch)] = self.data[(i, src)]
             }
         }
     }

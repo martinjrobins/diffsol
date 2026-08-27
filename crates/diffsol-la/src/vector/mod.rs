@@ -734,6 +734,53 @@ macro_rules! generate_vector_tests_batched {
                 $crate::vector::tests::test_batched_axpy_new_bad_length::<$V>($ctx2);
             }
             #[test]
+            fn [<test_batched_empty_ $suffix>]() {
+                $crate::vector::tests::test_batched_empty::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_binary_forms_broadcast_ $suffix>]() {
+                $crate::vector::tests::test_batched_binary_forms_broadcast::<$V>($ctx2);
+            }
+
+            // --- Grouped broadcast tests (B -> B * P, using $ctx2 widened to 4) ---
+            #[test]
+            fn [<test_grouped_owned_lhs_ref_rhs_ $suffix>]() {
+                $crate::vector::tests::test_grouped_owned_lhs_ref_rhs::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_grouped_axpy_ $suffix>]() {
+                $crate::vector::tests::test_grouped_axpy::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_grouped_add_assign_ $suffix>]() {
+                $crate::vector::tests::test_grouped_add_assign::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_grouped_add_ $suffix>]() {
+                $crate::vector::tests::test_grouped_add::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_grouped_copy_from_ $suffix>]() {
+                $crate::vector::tests::test_grouped_copy_from::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_grouped_component_mul_ $suffix>]() {
+                $crate::vector::tests::test_grouped_component_mul::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_grouped_squared_norm_ $suffix>]() {
+                $crate::vector::tests::test_grouped_squared_norm::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_grouped_gather_ $suffix>]() {
+                $crate::vector::tests::test_grouped_gather::<$V>($ctx2);
+            }
+            #[test]
+            #[should_panic(expected = "incompatible nbatch")]
+            fn [<test_grouped_incompatible_ $suffix>]() {
+                $crate::vector::tests::test_grouped_incompatible::<$V>($ctx3);
+            }
+            #[test]
             #[should_panic(expected = "incompatible nbatch")]
             fn [<test_batched_axpy_incompatible_ $suffix>]() {
                 $crate::vector::tests::test_batched_axpy_incompatible::<$V>($ctx2, $ctx3);
@@ -1652,6 +1699,274 @@ pub(crate) mod tests {
         let mut y = V::zeros(2, ctx);
         let x = V::zeros(2, V::C::default());
         y.batched_axpy(&[f::<V>(1.0)], &x, f::<V>(0.0));
+    }
+
+    /// Every operand flavour of `+` and `-` (owned, reference, view, view reference on
+    /// either side), in both broadcast directions.  Each flavour is a separate `impl` that
+    /// decides on its own whether it can write in place or must allocate, so they all need
+    /// exercising with mismatched batch counts.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_batched_binary_forms_broadcast<V: Vector>(ctx: V::C)
+    where
+        for<'a> &'a V: Add<V, Output = V> + Sub<V, Output = V>,
+        for<'a, 'b> &'a V: Add<&'b V, Output = V> + Sub<&'b V, Output = V>,
+        for<'a, 'b> &'a V: Add<V::View<'b>, Output = V> + Sub<V::View<'b>, Output = V>,
+        for<'a, 'b, 'c> &'a V: Add<&'b V::View<'c>, Output = V> + Sub<&'b V::View<'c>, Output = V>,
+        for<'a> V::View<'a>: Add<V, Output = V> + Sub<V, Output = V>,
+        for<'a, 'b> V::View<'a>: Add<&'b V, Output = V> + Sub<&'b V, Output = V>,
+        for<'a, 'b> V::View<'a>: Add<V::View<'b>, Output = V> + Sub<V::View<'b>, Output = V>,
+        for<'a, 'b, 'c> V::View<'a>:
+            Add<&'b V::View<'c>, Output = V> + Sub<&'b V::View<'c>, Output = V>,
+    {
+        assert_eq!(ctx.nbatch(), 2);
+        let wide = || V::from_vec(fv::<V>(&[10.0, 20.0, 30.0, 40.0]), ctx.clone());
+        let narrow = || V::from_vec(fv::<V>(&[1.0, 2.0]), V::C::default());
+        let (w, n) = (wide(), narrow());
+        // wide - narrow, narrow - wide, wide + narrow (narrow + wide is the same)
+        let ws = fv::<V>(&[9.0, 18.0, 29.0, 38.0]);
+        let ns = fv::<V>(&[-9.0, -18.0, -29.0, -38.0]);
+        let sum = fv::<V>(&[11.0, 22.0, 31.0, 42.0]);
+
+        // owned left-hand side
+        assert_eq!((wide() - narrow()).clone_as_vec(), ws);
+        assert_eq!((wide() - &narrow()).clone_as_vec(), ws);
+        assert_eq!((wide() - n.as_view()).clone_as_vec(), ws);
+        assert_eq!((wide() - &n.as_view()).clone_as_vec(), ws);
+        assert_eq!((narrow() - wide()).clone_as_vec(), ns);
+        assert_eq!((narrow() - &wide()).clone_as_vec(), ns);
+        assert_eq!((narrow() - w.as_view()).clone_as_vec(), ns);
+        assert_eq!((narrow() - &w.as_view()).clone_as_vec(), ns);
+        assert_eq!((wide() + narrow()).clone_as_vec(), sum);
+        assert_eq!((wide() + &narrow()).clone_as_vec(), sum);
+        assert_eq!((wide() + n.as_view()).clone_as_vec(), sum);
+        assert_eq!((wide() + &n.as_view()).clone_as_vec(), sum);
+        assert_eq!((narrow() + wide()).clone_as_vec(), sum);
+        assert_eq!((narrow() + &wide()).clone_as_vec(), sum);
+        assert_eq!((narrow() + w.as_view()).clone_as_vec(), sum);
+        assert_eq!((narrow() + &w.as_view()).clone_as_vec(), sum);
+
+        // reference left-hand side
+        assert_eq!((&w - narrow()).clone_as_vec(), ws);
+        assert_eq!((&w - &n).clone_as_vec(), ws);
+        assert_eq!((&w - n.as_view()).clone_as_vec(), ws);
+        assert_eq!((&w - &n.as_view()).clone_as_vec(), ws);
+        assert_eq!((&n - wide()).clone_as_vec(), ns);
+        assert_eq!((&n - &w).clone_as_vec(), ns);
+        assert_eq!((&n - w.as_view()).clone_as_vec(), ns);
+        assert_eq!((&n - &w.as_view()).clone_as_vec(), ns);
+        assert_eq!((&w + narrow()).clone_as_vec(), sum);
+        assert_eq!((&w + &n).clone_as_vec(), sum);
+        assert_eq!((&w + n.as_view()).clone_as_vec(), sum);
+        assert_eq!((&w + &n.as_view()).clone_as_vec(), sum);
+        assert_eq!((&n + wide()).clone_as_vec(), sum);
+        assert_eq!((&n + &w).clone_as_vec(), sum);
+        assert_eq!((&n + w.as_view()).clone_as_vec(), sum);
+        assert_eq!((&n + &w.as_view()).clone_as_vec(), sum);
+
+        // view left-hand side
+        assert_eq!((w.as_view() - narrow()).clone_as_vec(), ws);
+        assert_eq!((w.as_view() - &n).clone_as_vec(), ws);
+        assert_eq!((w.as_view() - n.as_view()).clone_as_vec(), ws);
+        assert_eq!((w.as_view() - &n.as_view()).clone_as_vec(), ws);
+        assert_eq!((n.as_view() - wide()).clone_as_vec(), ns);
+        assert_eq!((n.as_view() - &w).clone_as_vec(), ns);
+        assert_eq!((n.as_view() - w.as_view()).clone_as_vec(), ns);
+        assert_eq!((n.as_view() - &w.as_view()).clone_as_vec(), ns);
+        assert_eq!((w.as_view() + narrow()).clone_as_vec(), sum);
+        assert_eq!((w.as_view() + &n).clone_as_vec(), sum);
+        assert_eq!((w.as_view() + n.as_view()).clone_as_vec(), sum);
+        assert_eq!((w.as_view() + &n.as_view()).clone_as_vec(), sum);
+        assert_eq!((n.as_view() + wide()).clone_as_vec(), sum);
+        assert_eq!((n.as_view() + &w).clone_as_vec(), sum);
+        assert_eq!((n.as_view() + w.as_view()).clone_as_vec(), sum);
+        assert_eq!((n.as_view() + &w.as_view()).clone_as_vec(), sum);
+    }
+
+    /// Zero-length batched vectors: every kernel-launching op short-circuits rather than
+    /// launching an empty grid, and that guard is per-op.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_batched_empty<V: Vector>(ctx: V::C)
+    where
+        for<'a, 'b> &'a V: Add<&'b V, Output = V>,
+    {
+        assert_eq!(ctx.nbatch(), 2);
+        let empty = || V::from_vec(vec![], ctx.clone());
+        let mut a = empty();
+        let b = empty();
+        assert_eq!(a.len(), 0);
+        assert_eq!(a.total_len(), 0);
+        a += &b;
+        a -= &b;
+        a.axpy(f::<V>(2.0), &b, f::<V>(1.0));
+        a.axpy_v(f::<V>(2.0), &b.as_view(), f::<V>(1.0));
+        a.component_mul_assign(&b);
+        a.component_div_assign(&b);
+        a.batched_axpy(&[f::<V>(1.0), f::<V>(1.0)], &b, f::<V>(1.0));
+        a.copy_from(&b);
+        a.copy_from_view(&b.as_view());
+        a.fill(f::<V>(1.0));
+        a *= Scale(f::<V>(2.0));
+        let c = empty() * Scale(f::<V>(2.0));
+        let e = empty() + b.as_view();
+        let g = &empty() + &b;
+        assert!(g.clone_as_vec().is_empty());
+        let idx = V::Index::from_vec(vec![], Default::default());
+        a.gather(&b, &idx);
+        a.scatter(&idx, &mut V::from_vec(vec![], ctx.clone()));
+        a.assign_at_indices(&idx, f::<V>(1.0));
+        a.copy_from_indices(&b, &idx);
+        a.as_view_mut().copy_from_view(&b.as_view());
+        a.as_view_mut().axpy(f::<V>(1.0), &b, f::<V>(1.0));
+        assert!(a.clone_as_vec().is_empty());
+        assert!(c.clone_as_vec().is_empty());
+        assert!(e.clone_as_vec().is_empty());
+        assert_eq!(a.norm(2), f::<V>(0.0));
+        assert_eq!(a.squared_norm(&b, &empty(), f::<V>(1.0)), f::<V>(0.0));
+        assert_eq!(a.root_finding(&b), (false, f::<V>(0.0), -1));
+    }
+
+    // --- Grouped broadcast tests: `B` batches feeding `B * P` batches ---
+    //
+    // Every group holds a distinct value, so a cyclic mapping (`b % B`, source order
+    // `[0, 1, 0, 1]`) fails these — grouped broadcasting reads `[0, 0, 1, 1]`.
+
+    /// `nbatch = 2` widened to 4, so each source batch covers two contiguous destinations.
+    fn ctx4<V: Vector>(ctx2: &V::C) -> V::C {
+        assert_eq!(ctx2.nbatch(), 2);
+        ctx2.clone_with_nbatch(4).unwrap()
+    }
+
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_grouped_axpy<V: Vector>(ctx2: V::C) {
+        let wide = ctx4::<V>(&ctx2);
+        let mut y = V::from_vec(
+            fv::<V>(&[10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0]),
+            wide,
+        );
+        let x = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0]), ctx2);
+        y.axpy(f::<V>(1.0), &x, f::<V>(1.0));
+        assert_eq!(
+            y.clone_as_vec(),
+            fv::<V>(&[11.0, 22.0, 31.0, 42.0, 53.0, 64.0, 73.0, 84.0])
+        );
+    }
+
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_grouped_add_assign<V: Vector>(ctx2: V::C) {
+        let wide = ctx4::<V>(&ctx2);
+        let mut a = V::from_vec(
+            fv::<V>(&[10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0]),
+            wide,
+        );
+        let b = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0]), ctx2);
+        a += &b;
+        assert_eq!(
+            a.clone_as_vec(),
+            fv::<V>(&[11.0, 22.0, 31.0, 42.0, 53.0, 64.0, 73.0, 84.0])
+        );
+    }
+
+    /// The allocating operator, with the narrow operand on each side in turn.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_grouped_add<V: Vector>(ctx2: V::C)
+    where
+        for<'b> &'b V: Add<&'b V, Output = V>,
+    {
+        let wide = ctx4::<V>(&ctx2);
+        let a = V::from_vec(
+            fv::<V>(&[10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0]),
+            wide,
+        );
+        let b = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0]), ctx2);
+        let expected = fv::<V>(&[11.0, 22.0, 31.0, 42.0, 53.0, 64.0, 73.0, 84.0]);
+        assert_eq!((&a + &b).clone_as_vec(), expected);
+        assert_eq!((&b + &a).clone_as_vec(), expected);
+    }
+
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_grouped_copy_from<V: Vector>(ctx2: V::C) {
+        let wide = ctx4::<V>(&ctx2);
+        let mut y = V::zeros(2, wide);
+        let x = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0]), ctx2);
+        y.copy_from(&x);
+        assert_eq!(
+            y.clone_as_vec(),
+            fv::<V>(&[1.0, 2.0, 1.0, 2.0, 3.0, 4.0, 3.0, 4.0])
+        );
+    }
+
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_grouped_component_mul<V: Vector>(ctx2: V::C) {
+        let wide = ctx4::<V>(&ctx2);
+        let mut a = V::from_vec(fv::<V>(&[1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0]), wide);
+        let b = V::from_vec(fv::<V>(&[10.0, 20.0, 30.0, 40.0]), ctx2);
+        a.component_mul_assign(&b);
+        assert_eq!(
+            a.clone_as_vec(),
+            fv::<V>(&[10.0, 20.0, 20.0, 40.0, 90.0, 120.0, 120.0, 160.0])
+        );
+    }
+
+    /// The reduction runs over the widest operand, so the largest group's norm wins.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_grouped_squared_norm<V: Vector>(ctx2: V::C) {
+        let wide = ctx4::<V>(&ctx2);
+        let v = V::from_vec(
+            fv::<V>(&[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]),
+            wide.clone(),
+        );
+        // atol is 1 in the first group and 1/3 in the second, so the second group dominates
+        let y = V::zeros(2, ctx2.clone());
+        let atol = V::from_vec(fv::<V>(&[1.0, 1.0, 1.0 / 3.0, 1.0 / 3.0]), ctx2.clone());
+        let norm = v.squared_norm(&y, &atol, f::<V>(1.0));
+        assert_eq!(norm, f::<V>(9.0));
+        // and with the wide vector narrowed to the same batch count the answer is unchanged
+        let narrow = V::from_vec(fv::<V>(&[1.0, 1.0, 1.0, 1.0]), ctx2);
+        assert_eq!(narrow.squared_norm(&y, &atol, f::<V>(1.0)), f::<V>(9.0));
+    }
+
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_grouped_gather<V: Vector>(ctx2: V::C) {
+        let wide = ctx4::<V>(&ctx2);
+        let idx = V::Index::from_vec(vec![1, 0], Default::default());
+        let o = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0]), ctx2);
+        let mut a = V::zeros(2, wide);
+        a.gather(&o, &idx);
+        assert_eq!(
+            a.clone_as_vec(),
+            fv::<V>(&[2.0, 1.0, 2.0, 1.0, 4.0, 3.0, 4.0, 3.0])
+        );
+    }
+
+    /// A representative slice of the [`test_batched_binary_forms_broadcast`] forms, grouped.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_grouped_owned_lhs_ref_rhs<V: Vector>(ctx2: V::C) {
+        let ctx = ctx4::<V>(&ctx2);
+        let wide = || {
+            V::from_vec(
+                fv::<V>(&[10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0]),
+                ctx.clone(),
+            )
+        };
+        let narrow = || V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0]), ctx2.clone());
+        let wide_lhs = fv::<V>(&[9.0, 18.0, 29.0, 38.0, 47.0, 56.0, 67.0, 76.0]);
+        let narrow_lhs = fv::<V>(&[-9.0, -18.0, -29.0, -38.0, -47.0, -56.0, -67.0, -76.0]);
+        let (n, w) = (narrow(), wide());
+
+        assert_eq!((wide() - &narrow()).clone_as_vec(), wide_lhs);
+        assert_eq!((wide() - &n.as_view()).clone_as_vec(), wide_lhs);
+        assert_eq!((narrow() - &wide()).clone_as_vec(), narrow_lhs);
+        assert_eq!((narrow() - &w.as_view()).clone_as_vec(), narrow_lhs);
+    }
+
+    /// 4 is not a multiple of 3 (nor 3 of 4), so this is not an exact repeat group.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_grouped_incompatible<V: Vector>(ctx3: V::C) {
+        assert_eq!(ctx3.nbatch(), 3);
+        let wide = ctx3.clone_with_nbatch(4).unwrap();
+        let mut y = V::zeros(2, wide);
+        let x = V::zeros(2, ctx3);
+        y.axpy(f::<V>(1.0), &x, f::<V>(1.0));
     }
 
     // --- Incompatible batch tests ---

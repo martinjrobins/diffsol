@@ -20,6 +20,7 @@ use suitesparse_sys::{
 #[cfg(target_pointer_width = "64")]
 type KluIndextype = i64;
 
+use crate::context::broadcast_batch;
 use crate::{
     error::LaError, linear_solver::LinearSolver, linear_solver_error, vector::Vector, Context,
     FaerSparseMat, FaerVec, LinearOp, Matrix,
@@ -202,15 +203,13 @@ where
         let n = self.matrix.as_ref().unwrap().nrows() as KluIndextype;
         let mut klu_common = self.klu_common.borrow_mut();
         let x_nbatch = x.context().nbatch();
-        assert!(
-            x_nbatch == 1 || x_nbatch == self.klu_numeric.len(),
-            "incompatible nbatch"
-        );
+        let nlu = self.klu_numeric.len();
+        x.context().assert_compatible_nbatch(nlu, "klu_solve");
         for batch in 0..x_nbatch {
             unsafe {
                 klu_solve(
                     klu_symbolic.inner,
-                    self.klu_numeric[batch % self.klu_numeric.len()].inner,
+                    self.klu_numeric[broadcast_batch(batch, nlu, x_nbatch)].inner,
                     n,
                     1,
                     x.values_mut_ptr(batch),
@@ -248,5 +247,13 @@ mod tests {
             &FaerVec::from_vec(vec![1.0, 2.0], Default::default()),
             1e-10,
         );
+    }
+
+    #[test]
+    fn test_grouped_klu() {
+        crate::linear_solver::tests::test_grouped_lu_solve::<
+            FaerSparseMat<f64>,
+            KLU<FaerSparseMat<f64>>,
+        >(crate::FaerContext::with_nbatch(2));
     }
 }

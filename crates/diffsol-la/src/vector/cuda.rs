@@ -1104,12 +1104,16 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
     }
     fn root_finding(&self, g1: &Self) -> (bool, Self::T, i32) {
-        let nbatch = self.context.nbatch();
+        let g0_nbatch = self.context.nbatch();
         let nstates = self.len();
         if nstates == 0 {
             return (false, Self::T::zero(), -1);
         }
         let g1_nbatch = g1.context.nbatch();
+        self.context
+            .assert_compatible_nbatch(g1_nbatch, "root_finding");
+        // either operand may be narrower, so the reduction runs over the widest
+        let nbatch = g0_nbatch.max(g1_nbatch);
         let g1_nstates = g1.len();
         assert_eq!(
             nstates, g1_nstates,
@@ -1151,7 +1155,7 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
         let mut build = self.context.stream.launch_builder(&f);
 
         let g0_stride = nstates as i32;
-        let g0_nbatch_i32 = nbatch as i32;
+        let g0_nbatch_i32 = g0_nbatch as i32;
         let g1_stride = g1_nstates as i32;
         let g1_nbatch_i32 = g1_nbatch as i32;
 
@@ -1395,13 +1399,22 @@ impl<T: ScalarCuda> VectorView<'_> for CudaVecRef<'_, T> {
         }
     }
     fn squared_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: Self::T) -> Self::T {
-        let nbatch = self.context.nbatch();
+        let self_nbatch = self.context.nbatch();
         let nstates = self.nstates;
         if nstates == 0 {
             return Self::T::zero();
         }
         let atol_nbatch = atol.context.nbatch();
         let y_nbatch = y.context.nbatch();
+        self.context
+            .assert_compatible_nbatch(y_nbatch, "squared_norm");
+        self.context
+            .assert_compatible_nbatch(atol_nbatch, "squared_norm");
+        y.context
+            .assert_compatible_nbatch(atol_nbatch, "squared_norm");
+        // every operand may be narrower than the widest one, so the reduction runs over the
+        // widest and the kernel broadcasts the rest
+        let nbatch = self_nbatch.max(y_nbatch).max(atol_nbatch);
 
         let nstates_u32 = nstates as u32;
         let nbatch_u32 = nbatch as u32;
@@ -1425,7 +1438,7 @@ impl<T: ScalarCuda> VectorView<'_> for CudaVecRef<'_, T> {
 
         let self_data = self.data.slice(self.col_offset..);
         let y_stride = self.stride() as i32;
-        let y_nbatch_i32 = nbatch as i32;
+        let y_nbatch_i32 = self_nbatch as i32;
         let y0_stride = y.len() as i32;
         let y0_nbatch_i32 = y_nbatch as i32;
         let atol_stride = atol.len() as i32;

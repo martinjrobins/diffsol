@@ -408,7 +408,7 @@ pub trait DenseMatrix:
 #[cfg(test)]
 #[allow(clippy::items_after_test_module)]
 pub(crate) mod tests {
-    use std::ops::{Add, Sub};
+    use std::ops::{Add, Mul, Sub};
 
     use super::{
         DenseMatrix, Matrix, MatrixCommon, MatrixSparsity, MatrixSparsityRef, MAX_SMALL_COLS,
@@ -1449,6 +1449,286 @@ pub(crate) mod tests {
         );
     }
 
+    /// Scaling through a reference is a separate `impl` from the owned one, and it walks the
+    /// batches itself.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_batched_mul_scalar_ref_m<M>(ctx: M::C)
+    where
+        M: Matrix,
+        for<'a> &'a M: Mul<Scale<M::T>, Output = M>,
+    {
+        assert_eq!(ctx.nbatch(), 2);
+        let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
+        let values = (1..=8).map(|i| f::<M>(i as f64)).collect::<Vec<_>>();
+        let a = M::try_from_triplets(2, 2, indices, values, ctx).unwrap();
+        let result = &a * Scale(f::<M>(2.0));
+        assert_eq!(result.context().nbatch(), 2);
+        assert_eq!(
+            triplet_values(&result),
+            (1..=8).map(|i| f::<M>(2.0 * i as f64)).collect::<Vec<_>>()
+        );
+    }
+
+    /// `+=` with a narrower right-hand side: the equal-batch whole-matrix path cannot be
+    /// used, so this is the only test of the per-batch assign loop.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_batched_add_assign_broadcast_m<M: DenseMatrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let mut a = M::from_vec(
+            2,
+            2,
+            (1..=8).map(|i| f::<M>(i as f64)).collect(),
+            ctx.clone(),
+        );
+        let b = M::from_vec(
+            2,
+            2,
+            (1..=4).map(|i| f::<M>(10.0 * i as f64)).collect(),
+            M::C::default(),
+        );
+        a += &b;
+        // batch 0: 1..4 + 10..40, batch 1: 5..8 + 10..40
+        let expected = (1..=4)
+            .map(|i| f::<M>(i as f64 + 10.0 * i as f64))
+            .chain((5..=8).map(|i| f::<M>(i as f64 + 10.0 * (i - 4) as f64)))
+            .collect::<Vec<_>>();
+        assert_eq!(triplet_values(&a), expected);
+    }
+
+    /// Owned left-hand side broadcast into a fresh allocation by `+` (the `-` direction is
+    /// covered by [`test_batched_owned_lhs_broadcast_m`]).
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_batched_owned_lhs_add_broadcast_m<M>(ctx: M::C)
+    where
+        M: Matrix + for<'a> Add<&'a M, Output = M>,
+    {
+        assert_eq!(ctx.nbatch(), 2);
+        let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
+        let narrow = M::try_from_triplets(
+            2,
+            2,
+            indices.clone(),
+            (1..=4).map(|i| f::<M>(i as f64)).collect(),
+            M::C::default(),
+        )
+        .unwrap();
+        let wide = M::try_from_triplets(
+            2,
+            2,
+            indices,
+            (1..=8).map(|i| f::<M>(10.0 * i as f64)).collect(),
+            ctx,
+        )
+        .unwrap();
+        // lhs is narrower than the result, so it cannot be written into
+        let c = narrow + &wide;
+        assert_eq!(c.context().nbatch(), 2);
+        let expected = (1..=4)
+            .map(|i| f::<M>(i as f64 + 10.0 * i as f64))
+            .chain((5..=8).map(|i| f::<M>((i - 4) as f64 + 10.0 * i as f64)))
+            .collect::<Vec<_>>();
+        assert_eq!(triplet_values(&c), expected);
+    }
+
+    /// `gemv` with `beta` neither 0 nor 1, which is the only path that rescales `y` before
+    /// accumulating.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_batched_gemv_beta_m<M: Matrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        // batch 0 = I, batch 1 = 2I
+        let indices = vec![(0, 0), (1, 1)];
+        let values = vec![f::<M>(1.0), f::<M>(1.0), f::<M>(2.0), f::<M>(2.0)];
+        let a = M::try_from_triplets(2, 2, indices, values, ctx.clone()).unwrap();
+        let x = M::V::from_vec(
+            vec![f::<M>(1.0), f::<M>(2.0), f::<M>(3.0), f::<M>(4.0)],
+            ctx.clone(),
+        );
+        let mut y = M::V::from_vec(
+            vec![f::<M>(1.0), f::<M>(1.0), f::<M>(1.0), f::<M>(1.0)],
+            ctx,
+        );
+        // y = 1 * A * x + 2 * y
+        a.gemv(f::<M>(1.0), &x, f::<M>(2.0), &mut y);
+        assert_eq!(
+            y.clone_as_vec(),
+            vec![f::<M>(3.0), f::<M>(4.0), f::<M>(8.0), f::<M>(10.0)]
+        );
+    }
+
+    // --- Grouped broadcast tests: `B` batches feeding `B * P` batches ---
+    //
+    // Each group holds a distinct value, so a cyclic mapping (source order `[0, 1, 0, 1]`)
+    // fails these — grouped broadcasting reads `[0, 0, 1, 1]`.
+
+    /// `nbatch = 2` widened to 4, so each source batch covers two contiguous destinations.
+    fn ctx4<M: Matrix>(ctx2: &M::C) -> M::C {
+        assert_eq!(ctx2.nbatch(), 2);
+        ctx2.clone_with_nbatch(4).unwrap()
+    }
+
+    /// `y` carries 4 batches while the matrix carries 2, so each factor of the matrix serves
+    /// two contiguous right-hand sides.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_grouped_gemv_m<M: Matrix>(ctx2: M::C) {
+        let wide = ctx4::<M>(&ctx2);
+        // batch 0 = I, batch 1 = 2I
+        let indices = vec![(0, 0), (1, 1)];
+        let values = vec![f::<M>(1.0), f::<M>(1.0), f::<M>(2.0), f::<M>(2.0)];
+        let a = M::try_from_triplets(2, 2, indices, values, ctx2).unwrap();
+        let x = M::V::from_vec((1..=8).map(|i| f::<M>(i as f64)).collect(), wide.clone());
+        let mut y = M::V::zeros(2, wide);
+        a.gemv(f::<M>(1.0), &x, f::<M>(0.0), &mut y);
+        assert_eq!(
+            y.clone_as_vec(),
+            vec![
+                f::<M>(1.0),
+                f::<M>(2.0),
+                f::<M>(3.0),
+                f::<M>(4.0),
+                f::<M>(10.0),
+                f::<M>(12.0),
+                f::<M>(14.0),
+                f::<M>(16.0),
+            ]
+        );
+    }
+
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_grouped_copy_from_m<M: Matrix>(ctx2: M::C) {
+        let wide = ctx4::<M>(&ctx2);
+        let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
+        let values = (1..=8).map(|i| f::<M>(i as f64)).collect::<Vec<_>>();
+        let a = M::try_from_triplets(2, 2, indices, values, ctx2).unwrap();
+        let mut b = M::zeros(2, 2, wide);
+        b.copy_from(&a);
+        let group0 = (1..=4).map(|i| f::<M>(i as f64));
+        let group1 = (5..=8).map(|i| f::<M>(i as f64));
+        let expected = group0
+            .clone()
+            .chain(group0)
+            .chain(group1.clone())
+            .chain(group1)
+            .collect::<Vec<_>>();
+        assert_eq!(triplet_values(&b), expected);
+    }
+
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_grouped_scale_add_and_assign_m<M: Matrix>(ctx2: M::C) {
+        let wide = ctx4::<M>(&ctx2);
+        let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
+        let x_vals = (1..=8).map(|i| f::<M>(i as f64)).collect::<Vec<_>>();
+        let y_vals = (1..=8).map(|i| f::<M>(10.0 * i as f64)).collect::<Vec<_>>();
+        let x = M::try_from_triplets(2, 2, indices.clone(), x_vals, ctx2.clone()).unwrap();
+        let y = M::try_from_triplets(2, 2, indices.clone(), y_vals, ctx2).unwrap();
+        // the destination needs the union sparsity in every batch (required for sparse)
+        let dst_vals = (0..16).map(|_| f::<M>(0.0)).collect::<Vec<_>>();
+        let mut result = M::try_from_triplets(2, 2, indices, dst_vals, wide).unwrap();
+        result.scale_add_and_assign(&x, f::<M>(2.0), &y);
+        // x_i + 2 * y_i = 21 * i, with each source batch covering two contiguous batches
+        let group0 = (1..=4).map(|i| f::<M>(21.0 * i as f64));
+        let group1 = (5..=8).map(|i| f::<M>(21.0 * i as f64));
+        let expected = group0
+            .clone()
+            .chain(group0)
+            .chain(group1.clone())
+            .chain(group1)
+            .collect::<Vec<_>>();
+        assert_eq!(triplet_values(&result), expected);
+    }
+
+    /// The grouped flavour of [`test_batched_add_assign_broadcast_m`].
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_grouped_add_assign_m<M: DenseMatrix>(ctx2: M::C) {
+        let wide = ctx4::<M>(&ctx2);
+        let mut a = M::from_vec(2, 2, (0..16).map(|_| f::<M>(0.0)).collect(), wide);
+        let b = M::from_vec(2, 2, (1..=8).map(|i| f::<M>(i as f64)).collect(), ctx2);
+        a += &b;
+        let group0 = (1..=4).map(|i| f::<M>(i as f64));
+        let group1 = (5..=8).map(|i| f::<M>(i as f64));
+        let expected = group0
+            .clone()
+            .chain(group0)
+            .chain(group1.clone())
+            .chain(group1)
+            .collect::<Vec<_>>();
+        assert_eq!(triplet_values(&a), expected);
+    }
+
+    /// The grouped flavour of [`test_batched_owned_lhs_add_broadcast_m`].
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_grouped_owned_lhs_add_m<M>(ctx2: M::C)
+    where
+        M: Matrix + for<'a> Add<&'a M, Output = M>,
+    {
+        let wide_ctx = ctx4::<M>(&ctx2);
+        let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
+        let narrow = M::try_from_triplets(
+            2,
+            2,
+            indices.clone(),
+            (1..=8).map(|i| f::<M>(i as f64)).collect(),
+            ctx2,
+        )
+        .unwrap();
+        let wide = M::try_from_triplets(
+            2,
+            2,
+            indices,
+            (0..16).map(|_| f::<M>(0.0)).collect(),
+            wide_ctx,
+        )
+        .unwrap();
+        let c = narrow + &wide;
+        assert_eq!(c.context().nbatch(), 4);
+        let group0 = (1..=4).map(|i| f::<M>(i as f64));
+        let group1 = (5..=8).map(|i| f::<M>(i as f64));
+        let expected = group0
+            .clone()
+            .chain(group0)
+            .chain(group1.clone())
+            .chain(group1)
+            .collect::<Vec<_>>();
+        assert_eq!(triplet_values(&c), expected);
+    }
+
+    /// `gemv_cols` shares its coefficients across batches, so only the matrix broadcasts.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_grouped_gemv_cols_m<M: DenseMatrix>(ctx2: M::C) {
+        let wide = ctx4::<M>(&ctx2);
+        // batch 0 columns: [1, 1], [0, 0]; batch 1 columns: [2, 2], [0, 0]
+        let a = M::from_vec(
+            2,
+            2,
+            vec![
+                f::<M>(1.0),
+                f::<M>(1.0),
+                f::<M>(0.0),
+                f::<M>(0.0),
+                f::<M>(2.0),
+                f::<M>(2.0),
+                f::<M>(0.0),
+                f::<M>(0.0),
+            ],
+            ctx2,
+        );
+        let mut y = M::V::zeros(2, wide);
+        let ones = vec![f::<M>(1.0), f::<M>(1.0)];
+        a.gemv_cols(0, 2, f::<M>(1.0), &ones, f::<M>(0.0), &mut y);
+        assert_eq!(
+            y.clone_as_vec(),
+            vec![
+                f::<M>(1.0),
+                f::<M>(1.0),
+                f::<M>(1.0),
+                f::<M>(1.0),
+                f::<M>(2.0),
+                f::<M>(2.0),
+                f::<M>(2.0),
+                f::<M>(2.0),
+            ]
+        );
+    }
+
     // --- Batched DenseMatrix-specific tests ---
 
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
@@ -2157,6 +2437,37 @@ macro_rules! generate_matrix_tests_batched {
             fn [<test_batched_scale_add_broadcast_ $suffix>]() {
                 $crate::matrix::tests::test_batched_scale_add_and_assign_broadcast_m::<$M>($ctx2);
             }
+
+            #[test]
+            fn [<test_batched_mul_scalar_ref_ $suffix>]() {
+                $crate::matrix::tests::test_batched_mul_scalar_ref_m::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_owned_lhs_add_broadcast_ $suffix>]() {
+                $crate::matrix::tests::test_batched_owned_lhs_add_broadcast_m::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_gemv_beta_ $suffix>]() {
+                $crate::matrix::tests::test_batched_gemv_beta_m::<$M>($ctx2);
+            }
+
+            // --- Grouped broadcast tests (B -> B * P, using $ctx2 widened to 4) ---
+            #[test]
+            fn [<test_grouped_gemv_ $suffix>]() {
+                $crate::matrix::tests::test_grouped_gemv_m::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_grouped_copy_from_ $suffix>]() {
+                $crate::matrix::tests::test_grouped_copy_from_m::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_grouped_owned_lhs_add_ $suffix>]() {
+                $crate::matrix::tests::test_grouped_owned_lhs_add_m::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_grouped_scale_add_ $suffix>]() {
+                $crate::matrix::tests::test_grouped_scale_add_and_assign_m::<$M>($ctx2);
+            }
         }
     };
 }
@@ -2276,6 +2587,18 @@ macro_rules! generate_dense_matrix_tests_batched {
             #[test]
             fn [<test_batched_combine_ $suffix>]() {
                 $crate::matrix::tests::test_batched_combine::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_add_assign_broadcast_ $suffix>]() {
+                $crate::matrix::tests::test_batched_add_assign_broadcast_m::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_grouped_add_assign_ $suffix>]() {
+                $crate::matrix::tests::test_grouped_add_assign_m::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_grouped_gemv_cols_ $suffix>]() {
+                $crate::matrix::tests::test_grouped_gemv_cols_m::<$M>($ctx2);
             }
             #[test]
             #[should_panic(expected = "incompatible nbatch")]

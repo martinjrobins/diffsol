@@ -6,6 +6,7 @@ use cudarc::{
 use std::ffi::c_int;
 use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
 
+use crate::context::broadcast_batch;
 use crate::{
     error::LaError, linear_solver::cuda::lu::CudaLU, matrix::default_solver::DefaultSolver,
     matrix_error, Context, CudaContext, CudaVec, CudaVecMut, CudaVecRef, IndexType, MatrixCommon,
@@ -836,11 +837,14 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
     fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
         let nbatch = self.context.nbatch();
         let x_nbatch = x.context.nbatch();
+        let y_nbatch = y.context.nbatch();
         self.context.assert_compatible_nbatch(x_nbatch, "gemv");
-        let effective_nbatch = nbatch.max(x_nbatch);
-        for b in 0..effective_nbatch {
-            let self_b = if nbatch == 1 { 0 } else { b };
-            let x_b = if x_nbatch == 1 { 0 } else { b };
+        y.context.assert_compatible_nbatch(nbatch, "gemv");
+        y.context.assert_compatible_nbatch(x_nbatch, "gemv");
+        // `y` is the destination, so it carries the batch count of the result
+        for b in 0..y_nbatch {
+            let self_b = broadcast_batch(b, nbatch, y_nbatch);
+            let x_b = broadcast_batch(b, x_nbatch, y_nbatch);
             let x_nstates = self.ncols;
             let self_batch_size = self.nrows * self.ncols;
             let a_start = self_b * self_batch_size;

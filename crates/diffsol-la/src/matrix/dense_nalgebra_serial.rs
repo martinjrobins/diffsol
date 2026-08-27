@@ -6,6 +6,7 @@ use nalgebra::{
 
 use super::default_solver::DefaultSolver;
 use super::sparsity::{Dense, DenseRef};
+use crate::context::broadcast_batch;
 use crate::error::LaError;
 use crate::{scalar::Scale, Context, NalgebraScalar, Vector};
 use crate::{
@@ -26,8 +27,15 @@ impl<T: NalgebraScalar> NalgebraMat<T> {
     fn logical_ncols(&self) -> usize {
         self.data.ncols() / self.context.nbatch()
     }
+    /// Physical column of logical column `j` in this matrix's own batch `b`.
     fn col(&self, b: usize, j: usize) -> usize {
-        (b % self.context.nbatch()) * self.logical_ncols() + j
+        debug_assert!(b < self.context.nbatch(), "batch out of bounds");
+        b * self.logical_ncols() + j
+    }
+    /// Physical column feeding batch `b` of a `nbatch`-batch destination, broadcasting this
+    /// matrix over contiguous groups of destination batches (see [`broadcast_batch`]).
+    fn col_bcast(&self, b: usize, j: usize, nbatch: usize) -> usize {
+        self.col(broadcast_batch(b, self.context.nbatch(), nbatch), j)
     }
 }
 /// Scalars of staging buffer `mul_cols_by` uses per row tile. The tile is
@@ -66,9 +74,10 @@ macro_rules! binary_owned_lhs {
                     .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($fn));
                 let nc = self.ncols();
                 if self.context.nbatch() >= rhs.context.nbatch() {
-                    for b in 0..self.context.nbatch() {
+                    let nb = self.context.nbatch();
+                    for b in 0..nb {
                         let mut columns = self.data.columns_mut(self.col(b, 0), nc);
-                        columns $op &rhs.data.columns(rhs.col(b, 0), nc);
+                        columns $op &rhs.data.columns(rhs.col_bcast(b, 0, nb), nc);
                     }
                     return self;
                 }
@@ -77,7 +86,7 @@ macro_rules! binary_owned_lhs {
                 let mut data = DMatrix::zeros(self.nrows(), nc * nb);
                 for b in 0..nb {
                     let mut columns = data.columns_mut(b * nc, nc);
-                    columns.copy_from(&self.data.columns(self.col(b, 0), nc));
+                    columns.copy_from(&self.data.columns(self.col_bcast(b, 0, nb), nc));
                     columns $op &rhs.data.columns(rhs.col(b, 0), nc);
                 }
                 NalgebraMat {
@@ -103,9 +112,11 @@ macro_rules! binary_owned_rhs {
                     .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($fn));
                 let nc = self.ncols();
                 if rhs.context.nbatch() >= self.context.nbatch() {
-                    for b in 0..rhs.context.nbatch() {
+                    let nb = rhs.context.nbatch();
+                    for b in 0..nb {
                         let mut columns = rhs.data.columns_mut(rhs.col(b, 0), nc);
-                        columns.zip_apply(&self.data.columns(self.col(b, 0), nc), $combine);
+                        columns
+                            .zip_apply(&self.data.columns(self.col_bcast(b, 0, nb), nc), $combine);
                     }
                     return rhs;
                 }
@@ -115,7 +126,7 @@ macro_rules! binary_owned_rhs {
                 for b in 0..nb {
                     let mut columns = data.columns_mut(b * nc, nc);
                     columns.copy_from(&self.data.columns(self.col(b, 0), nc));
-                    columns $op &rhs.data.columns(rhs.col(b, 0), nc);
+                    columns $op &rhs.data.columns(rhs.col_bcast(b, 0, nb), nc);
                 }
                 NalgebraMat {
                     data,
@@ -142,9 +153,9 @@ macro_rules! assign {
                     self.data $op &rhs.data;
                     return;
                 }
-                for b in 0..self.context.nbatch() {
+                for b in 0..nb {
                     let mut columns = self.data.columns_mut(self.col(b, 0), nc);
-                    columns $op &rhs.data.columns(rhs.col(b, 0), nc);
+                    columns $op &rhs.data.columns(rhs.col_bcast(b, 0, nb), nc);
                 }
             }
         }
@@ -164,21 +175,12 @@ macro_rules! scale_ref {
         impl<T: NalgebraScalar> Mul<Scale<T>> for $t {
             type Output = NalgebraMat<T>;
             fn mul(self, r: Scale<T>) -> Self::Output {
-                if self.data.ncols() == self.ncols() * self.context.nbatch() {
-                    return NalgebraMat {
-                        data: &self.data * r.value(),
-                        context: self.context,
-                    };
+                // every batch is scaled by the same factor, and the batches tile the columns,
+                // so this is one whole-matrix multiply whatever the batch count
+                NalgebraMat {
+                    data: &self.data * r.value(),
+                    context: self.context,
                 }
-                let mut out = NalgebraMat::zeros(self.nrows(), self.ncols(), self.context);
-                for b in 0..out.context.nbatch() {
-                    let nc = out.ncols();
-                    out.data
-                        .columns_mut(out.col(b, 0), nc)
-                        .copy_from(&self.data.columns(self.col(b, 0), nc));
-                }
-                out.data *= r.value();
-                out
             }
         }
     };
@@ -216,6 +218,9 @@ macro_rules! gemv_data {
             .assert_compatible_nbatch($self.context.nbatch(), $op);
         $y.context
             .assert_compatible_nbatch($x.context.nbatch(), $op);
+        $self
+            .context
+            .assert_compatible_nbatch($x.context.nbatch(), $op);
         let nc = $self.ncols();
         // the unbatched case keeps constant column indices, which codegens better than the
         // loop variable below
@@ -228,11 +233,12 @@ macro_rules! gemv_data {
             );
             return;
         }
-        for b in 0..$y.data.ncols() {
+        let nb = $y.data.ncols();
+        for b in 0..nb {
             $y.data.column_mut(b).gemv(
                 $a,
-                &$self.data.columns($self.col(b, 0), nc),
-                &$x.data.column($x.batch(b)),
+                &$self.data.columns($self.col_bcast(b, 0, nb), nc),
+                &$x.data.column($x.batch(b, nb)),
                 $beta,
             );
         }
@@ -261,10 +267,14 @@ macro_rules! gemv_cols_data {
                 .gemv($a, &$self.data.columns($self.col(0, start), nc), &x, $beta);
             return;
         }
-        for b in 0..$y.data.ncols() {
-            $y.data
-                .column_mut(b)
-                .gemv($a, &$self.data.columns($self.col(b, start), nc), &x, $beta);
+        let nb = $y.data.ncols();
+        for b in 0..nb {
+            $y.data.column_mut(b).gemv(
+                $a,
+                &$self.data.columns($self.col_bcast(b, start, nb), nc),
+                &x,
+                $beta,
+            );
         }
     }};
 }
@@ -287,24 +297,30 @@ impl<T: NalgebraScalar> Matrix for NalgebraMat<T> {
         src: &crate::vector::nalgebra_serial::NalgebraIndex,
         data: &NalgebraVec<T>,
     ) {
+        self.context
+            .assert_compatible_nbatch(data.context.nbatch(), "set_data_with_indices");
+        let nb = self.context.nbatch();
         for (d, s) in dst.data.iter().zip(src.data.iter()) {
             let i = d % self.nrows();
             let j = d / self.nrows();
-            for b in 0..self.context.nbatch() {
+            for b in 0..nb {
                 let c = self.col(b, j);
-                self.data[(i, c)] = data.data[(*s, data.batch(b))]
+                self.data[(i, c)] = data.data[(*s, data.batch(b, nb))]
             }
         }
     }
     fn gather(&mut self, o: &Self, idx: &crate::vector::nalgebra_serial::NalgebraIndex) {
-        for b in 0..self.context.nbatch() {
+        self.context
+            .assert_compatible_nbatch(o.context.nbatch(), "gather");
+        let nb = self.context.nbatch();
+        for b in 0..nb {
             for (d, s) in idx.data.iter().enumerate() {
                 let i = d % self.nrows();
                 let j = d / self.nrows();
                 let oi = s % o.nrows();
                 let oj = s / o.nrows();
                 let c = self.col(b, j);
-                self.data[(i, c)] = o.data[(oi, o.col(b, oj))]
+                self.data[(i, c)] = o.data[(oi, o.col_bcast(b, oj, nb))]
             }
         }
     }
@@ -336,10 +352,13 @@ impl<T: NalgebraScalar> Matrix for NalgebraMat<T> {
                 .axpy(T::one(), &self.data.column(j), T::one());
             return;
         }
-        for b in 0..v.context.nbatch() {
-            v.data
-                .column_mut(b)
-                .axpy(T::one(), &self.data.column(self.col(b, j)), T::one());
+        let nb = v.context.nbatch();
+        for b in 0..nb {
+            v.data.column_mut(b).axpy(
+                T::one(),
+                &self.data.column(self.col_bcast(b, j, nb)),
+                T::one(),
+            );
         }
     }
     fn triplet_iter(
@@ -407,11 +426,12 @@ impl<T: NalgebraScalar> Matrix for NalgebraMat<T> {
             self.data.copy_from(&o.data);
             return;
         }
-        for b in 0..self.context.nbatch() {
+        let nb = self.context.nbatch();
+        for b in 0..nb {
             let nc = self.ncols();
             self.data
                 .columns_mut(self.col(b, 0), nc)
-                .copy_from(&o.data.columns(o.col(b, 0), nc));
+                .copy_from(&o.data.columns(o.col_bcast(b, 0, nb), nc));
         }
     }
     fn set_column(&mut self, j: usize, v: &NalgebraVec<T>) {
@@ -422,10 +442,11 @@ impl<T: NalgebraScalar> Matrix for NalgebraMat<T> {
             self.data.column_mut(j).copy_from(&v.data.column(0));
             return;
         }
-        for b in 0..self.context.nbatch() {
+        let nb = self.context.nbatch();
+        for b in 0..nb {
             self.data
                 .column_mut(self.col(b, j))
-                .copy_from(&v.data.column(v.batch(b)));
+                .copy_from(&v.data.column(v.batch(b, nb)));
         }
     }
     fn scale_add_and_assign(&mut self, x: &Self, b: T, y: &Self) {
@@ -434,10 +455,11 @@ impl<T: NalgebraScalar> Matrix for NalgebraMat<T> {
         self.context
             .assert_compatible_nbatch(y.context.nbatch(), "scale_add_and_assign");
         let nc = self.ncols();
-        for batch in 0..self.context.nbatch() {
+        let nb = self.context.nbatch();
+        for batch in 0..nb {
             let mut columns = self.data.columns_mut(self.col(batch, 0), nc);
-            columns.copy_from(&x.data.columns(x.col(batch, 0), nc));
-            columns.zip_apply(&y.data.columns(y.col(batch, 0), nc), |s, y| {
+            columns.copy_from(&x.data.columns(x.col_bcast(batch, 0, nb), nc));
+            columns.zip_apply(&y.data.columns(y.col_bcast(batch, 0, nb), nc), |s, y| {
                 *s += b * y;
             });
         }
@@ -601,9 +623,10 @@ impl<T: NalgebraScalar> DenseMatrix for NalgebraMat<T> {
         assert!(order + 2 < self.logical_ncols(), "order out of bounds");
         self.context
             .assert_compatible_nbatch(d.context.nbatch(), "update_backward_diff");
-        for b in 0..self.context.nbatch() {
+        let nb = self.context.nbatch();
+        for b in 0..nb {
             let base = self.col(b, 0);
-            let d_col = d.batch(b);
+            let d_col = d.batch(b, nb);
             // diff[:, order+2] = d - diff[:, order+1]
             {
                 let (src, mut dst) = self.data.columns_range_pair_mut(

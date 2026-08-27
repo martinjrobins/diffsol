@@ -1,6 +1,7 @@
 use nalgebra::linalg::{gauss_step, gauss_step_swap};
 use nalgebra::{Dim, Dyn, Matrix as NaMatrix, StorageMut};
 
+use crate::context::broadcast_batch;
 use crate::{
     error::LaError, linear_solver_error, matrix::dense_nalgebra_serial::NalgebraMat, Context,
     LinearOp, LinearSolver, Matrix, NalgebraContext, NalgebraScalar, NalgebraVec,
@@ -114,9 +115,10 @@ impl<T: NalgebraScalar> LinearSolver<NalgebraMat<T>> for ReusableLU<T> {
             }
             return Err(linear_solver_error!(LuSolveFailed));
         }
-        for batch in 0..state.context.nbatch() {
+        let nb = state.context.nbatch();
+        for batch in 0..nb {
             let mut state_batch = state.data.column_mut(batch);
-            if !lu.solve_block(batch % lu.nbatch(), &mut state_batch) {
+            if !lu.solve_block(broadcast_batch(batch, lu.nbatch(), nb), &mut state_batch) {
                 return Err(linear_solver_error!(LuSolveFailed));
             }
         }
@@ -150,7 +152,15 @@ impl<T: NalgebraScalar> LinearSolver<NalgebraMat<T>> for ReusableLU<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{linear_solver::tests::diagonal_op, Vector};
+    use crate::{
+        linear_solver::tests::{diagonal_op, test_grouped_lu_solve},
+        Vector,
+    };
+
+    #[test]
+    fn test_grouped_lu() {
+        test_grouped_lu_solve::<NalgebraMat<f64>, ReusableLU<f64>>(NalgebraContext::with_nbatch(2));
+    }
 
     #[test]
     fn test_lu() {

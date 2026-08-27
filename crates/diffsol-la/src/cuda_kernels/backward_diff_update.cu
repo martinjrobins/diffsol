@@ -11,7 +11,7 @@ __global__ void backward_diff_update_f64(double* diff, const double* __restrict_
     if (elem >= nrows) return;
     int b = blockIdx.y;
     int diff_base = b * diff_stride + elem;
-    int d_idx = (b % d_nbatch) * d_stride + elem;
+    int d_idx = broadcast_batch(b, d_nbatch) * d_stride + elem;
 
     double carry = d[d_idx] - diff[diff_base + (order + 1) * nrows];
     diff[diff_base + (order + 2) * nrows] = carry;

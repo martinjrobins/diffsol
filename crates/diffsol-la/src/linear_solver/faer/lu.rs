@@ -1,3 +1,4 @@
+use crate::context::broadcast_batch;
 use crate::{error::LaError, linear_solver_error};
 use crate::{Context, FaerContext};
 
@@ -48,8 +49,9 @@ impl<T: FaerScalar> LinearSolver<FaerMat<T>> for LU<T> {
         x.context
             .assert_compatible_nbatch(self.lu.len(), "lu_solve");
         let nlu = self.lu.len();
-        for batch in 0..x.data.ncols() {
-            self.lu[batch % nlu].solve_in_place(x.data.rb_mut().col_mut(batch));
+        let nb = x.data.ncols();
+        for batch in 0..nb {
+            self.lu[broadcast_batch(batch, nlu, nb)].solve_in_place(x.data.rb_mut().col_mut(batch));
         }
         Ok(())
     }
@@ -68,7 +70,10 @@ impl<T: FaerScalar> LinearSolver<FaerMat<T>> for LU<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{linear_solver::tests::diagonal_op, Vector};
+    use crate::{
+        linear_solver::tests::{diagonal_op, test_grouped_lu_solve},
+        Vector,
+    };
 
     #[test]
     fn test_lu() {
@@ -82,5 +87,10 @@ mod tests {
             &FaerVec::from_vec(vec![1.0, 2.0], Default::default()),
             1e-10,
         );
+    }
+
+    #[test]
+    fn test_grouped_lu() {
+        test_grouped_lu_solve::<FaerMat<f64>, LU<f64>>(FaerContext::with_nbatch(2));
     }
 }
