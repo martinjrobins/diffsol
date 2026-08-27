@@ -57,7 +57,7 @@ impl<T: FaerScalar> LinearSolver<FaerSparseMat<T>> for FaerSparseLU<T> {
             return Err(linear_solver_error!(LuNotInitialized));
         }
         x.context
-            .assert_compatible_nbatch(self.lu.len(), "sparse_lu_solve");
+            .assert_broadcastable_into(self.lu.len(), "sparse_lu_solve");
         let nlu = self.lu.len();
         let nb = x.data.ncols();
         for batch in 0..nb {
@@ -84,7 +84,7 @@ impl<T: FaerScalar> LinearSolver<FaerSparseMat<T>> for FaerSparseLU<T> {
 mod tests {
     use super::*;
     use crate::{
-        linear_solver::tests::{diagonal_op, test_grouped_lu_solve},
+        linear_solver::tests::{diagonal_op, test_grouped_lu_solve, test_narrow_state_lu_solve},
         Vector,
     };
 
@@ -105,5 +105,13 @@ mod tests {
     #[test]
     fn test_grouped_sparse_lu() {
         test_grouped_lu_solve::<FaerSparseMat<f64>, FaerSparseLU<f64>>(FaerContext::with_nbatch(2));
+    }
+
+    #[test]
+    #[should_panic(expected = "incompatible nbatch")]
+    fn test_narrow_state_sparse_lu() {
+        test_narrow_state_lu_solve::<FaerSparseMat<f64>, FaerSparseLU<f64>>(
+            FaerContext::with_nbatch(2),
+        );
     }
 }

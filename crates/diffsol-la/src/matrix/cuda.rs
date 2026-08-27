@@ -567,7 +567,7 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
     fn update_backward_diff(&mut self, order: IndexType, d: &Self::V) {
         assert!(order + 2 < self.ncols(), "order out of bounds");
         self.context
-            .assert_compatible_nbatch(d.context.nbatch(), "update_backward_diff");
+            .assert_broadcastable_into(d.context.nbatch(), "update_backward_diff");
 
         let nbatch = self.context.nbatch();
         let nrows = self.nrows();
@@ -614,8 +614,8 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
             x.len() >= nc,
             "gemv_cols: x must hold at least end - start values"
         );
-        self.context
-            .assert_compatible_nbatch(y.context.nbatch(), "gemv_cols");
+        y.context
+            .assert_broadcastable_into(self.context.nbatch(), "gemv_cols");
         // an empty column range contributes nothing, leaving y = beta * y
         if nc == 0 {
             if beta.is_zero() {
@@ -746,15 +746,18 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
     fn add_column_to_vector(&self, j: IndexType, v: &mut Self::V) {
         let nbatch = self.context.nbatch();
         let v_nbatch = v.context.nbatch();
-        self.context
-            .assert_compatible_nbatch(v_nbatch, "add_column_to_vector");
+        v.context
+            .assert_broadcastable_into(nbatch, "add_column_to_vector");
         let nrows = self.nrows();
         let ncols = self.ncols();
         let v_nstates = v.len();
         let f = self.context.function::<T>("vec_axpy_offset");
         let nrows_u32 = nrows as u32;
-        let nbatch_u32 = nbatch as u32;
-        let config = self.context.launch_config_2d(nrows_u32, nbatch_u32, &f);
+        // `v` is the destination, so it carries the launch's batch count and the matrix
+        // broadcasts over it (as on the CPU backends)
+        let config = self
+            .context
+            .launch_config_2d(nrows_u32, v_nbatch as u32, &f);
         let mut build = self.context.stream.launch_builder(&f);
         let alpha_val = T::one();
         let beta_val = T::one();
@@ -838,9 +841,8 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
         let nbatch = self.context.nbatch();
         let x_nbatch = x.context.nbatch();
         let y_nbatch = y.context.nbatch();
-        self.context.assert_compatible_nbatch(x_nbatch, "gemv");
-        y.context.assert_compatible_nbatch(nbatch, "gemv");
-        y.context.assert_compatible_nbatch(x_nbatch, "gemv");
+        y.context.assert_broadcastable_into(nbatch, "gemv");
+        y.context.assert_broadcastable_into(x_nbatch, "gemv");
         // `y` is the destination, so it carries the batch count of the result
         for b in 0..y_nbatch {
             let self_b = broadcast_batch(b, nbatch, y_nbatch);
@@ -881,7 +883,7 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
         let self_nbatch = self.context.nbatch();
         let other_nbatch = other.context.nbatch();
         self.context
-            .assert_compatible_nbatch(other_nbatch, "copy_from");
+            .assert_broadcastable_into(other_nbatch, "copy_from");
         let nrows = self.nrows;
         let self_ncols = self.ncols;
         let other_ncols = other.ncols;
@@ -963,7 +965,7 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
         let nbatch = self.context.nbatch();
         let v_nbatch = v.context.nbatch();
         self.context
-            .assert_compatible_nbatch(v_nbatch, "set_column");
+            .assert_broadcastable_into(v_nbatch, "set_column");
         let nrows = self.nrows();
         let v_nstates = v.len();
         assert_eq!(
@@ -999,9 +1001,9 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
         let x_nbatch = x.context.nbatch();
         let y_nbatch = y.context.nbatch();
         self.context
-            .assert_compatible_nbatch(x_nbatch, "scale_add_and_assign_x");
+            .assert_broadcastable_into(x_nbatch, "scale_add_and_assign_x");
         self.context
-            .assert_compatible_nbatch(y_nbatch, "scale_add_and_assign_y");
+            .assert_broadcastable_into(y_nbatch, "scale_add_and_assign_y");
         let f = self.context.function::<T>("mat_scale_add_assign");
         let nrows = self.nrows;
         let self_ncols = self.ncols;

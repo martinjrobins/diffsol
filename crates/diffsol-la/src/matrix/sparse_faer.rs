@@ -306,7 +306,7 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
 
     fn gather(&mut self, other: &Self, indices: &<Self::V as Vector>::Index) {
         self.context
-            .assert_compatible_nbatch(other.context.nbatch(), "gather");
+            .assert_broadcastable_into(other.context.nbatch(), "gather");
         let nb = self.data.len();
         for (batch, data) in self.data.iter_mut().enumerate() {
             let src = other.batch_bcast(batch, nb).val();
@@ -323,7 +323,7 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
         data: &Self::V,
     ) {
         self.context
-            .assert_compatible_nbatch(data.context.nbatch(), "set_data_with_indices");
+            .assert_broadcastable_into(data.context.nbatch(), "set_data_with_indices");
         let nb = self.data.len();
         for (batch, matrix) in self.data.iter_mut().enumerate() {
             let values = matrix.val_mut();
@@ -335,8 +335,8 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
     }
 
     fn add_column_to_vector(&self, j: IndexType, v: &mut Self::V) {
-        self.context
-            .assert_compatible_nbatch(v.context.nbatch(), "add_column_to_vector");
+        v.context
+            .assert_broadcastable_into(self.context.nbatch(), "add_column_to_vector");
         let nb = v.data.ncols();
         for batch in 0..nb {
             let matrix = self.batch_bcast(batch, nb);
@@ -391,13 +391,13 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
         Ok(Self { data, context: ctx })
     }
     fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
-        self.context
-            .assert_compatible_nbatch(x.context.nbatch(), "gemv");
-        self.context
-            .assert_compatible_nbatch(y.context.nbatch(), "gemv");
-        x.context
-            .assert_compatible_nbatch(y.context.nbatch(), "gemv");
+        y.context
+            .assert_broadcastable_into(self.context.nbatch(), "gemv");
+        y.context
+            .assert_broadcastable_into(x.context.nbatch(), "gemv");
         let nb = y.data.ncols();
+        // one parallelism query for the whole call rather than one per batch
+        let par = get_global_parallelism();
         for batch in 0..nb {
             let mut ycol = y.data.rb_mut().col_mut(batch);
             let accum = if beta.is_zero() {
@@ -414,7 +414,7 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
                 self.batch_bcast(batch, nb).rb(),
                 x.data.rb().col(x.batch(batch, nb)).as_mat(),
                 alpha,
-                get_global_parallelism(),
+                par,
             );
         }
     }
@@ -428,7 +428,7 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
     }
     fn copy_from(&mut self, other: &Self) {
         self.context
-            .assert_compatible_nbatch(other.context.nbatch(), "copy_from");
+            .assert_broadcastable_into(other.context.nbatch(), "copy_from");
         let nb = self.data.len();
         for (batch, data) in self.data.iter_mut().enumerate() {
             let other = other.batch_bcast(batch, nb);
@@ -480,7 +480,7 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
     fn set_column(&mut self, j: IndexType, v: &Self::V) {
         assert_eq!(v.len(), self.nrows());
         self.context
-            .assert_compatible_nbatch(v.context.nbatch(), "set_column");
+            .assert_broadcastable_into(v.context.nbatch(), "set_column");
         let nb = self.data.len();
         for (batch, data) in self.data.iter_mut().enumerate() {
             let column = v.data.rb().col(v.batch(batch, nb));
@@ -492,9 +492,9 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
 
     fn scale_add_and_assign(&mut self, x: &Self, beta: Self::T, y: &Self) {
         self.context
-            .assert_compatible_nbatch(x.context.nbatch(), "scale_add_and_assign");
+            .assert_broadcastable_into(x.context.nbatch(), "scale_add_and_assign");
         self.context
-            .assert_compatible_nbatch(y.context.nbatch(), "scale_add_and_assign");
+            .assert_broadcastable_into(y.context.nbatch(), "scale_add_and_assign");
         let nb = self.data.len();
         for (batch, data) in self.data.iter_mut().enumerate() {
             ternary_op_assign_into(

@@ -3,7 +3,7 @@ use std::ops::{Add, AddAssign, Div, Index, IndexMut, Mul, MulAssign, Sub, SubAss
 use faer::reborrow::{Reborrow, ReborrowMut};
 use faer::{unzip, zip, Col, Mat, MatMut, MatRef};
 
-use crate::context::broadcast_batch;
+use crate::context::{broadcast_batch, cold_call};
 use crate::{scalar::Scale, Context, FaerContext, FaerScalar, IndexType, Vector, VectorHost};
 
 use crate::{FaerMat, VectorCommon, VectorIndex, VectorView, VectorViewMut};
@@ -170,7 +170,7 @@ macro_rules! vec_assign {
             #[allow(clippy::suspicious_op_assign_impl)]
             fn $method(&mut self, rhs: $rhs) {
                 self.context
-                    .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($method));
+                    .assert_broadcastable_into(rhs.context.nbatch(), stringify!($method));
                 // the whole-matrix operator only pays off past one column: faer's 2-D
                 // iteration costs ~1.5x the single-column path on short vectors (see
                 // lin_alg_ops add_assign/faer/2)
@@ -192,7 +192,7 @@ macro_rules! copy_from_data {
     ($self:ident, $other:ident, $method:literal) => {
         $self
             .context
-            .assert_compatible_nbatch($other.context.nbatch(), $method);
+            .assert_broadcastable_into($other.context.nbatch(), $method);
         assert_eq!(
             $self.data.nrows(),
             $other.data.nrows(),
@@ -212,14 +212,17 @@ macro_rules! copy_from_data {
             $self.data.rb_mut().copy_from($other.data.rb());
             return;
         }
-        let nb = $self.data.ncols();
-        for b in 0..nb {
-            $self
-                .data
-                .rb_mut()
-                .col_mut(b)
-                .copy_from($other.data.rb().col($other.batch(b, nb)));
-        }
+        let (nb, onc) = ($self.data.ncols(), $other.data.ncols());
+        cold_call(|| {
+            for b in 0..nb {
+                let src = broadcast_batch(b, onc, nb);
+                $self
+                    .data
+                    .rb_mut()
+                    .col_mut(b)
+                    .copy_from($other.data.rb().col(src));
+            }
+        });
     };
 }
 
@@ -230,30 +233,33 @@ macro_rules! axpy_data {
     ($self:ident, $x:ident, $beta:expr, $op:literal, |$batch:ident| $alpha:expr) => {{
         $self
             .context
-            .assert_compatible_nbatch($x.context.nbatch(), $op);
+            .assert_broadcastable_into($x.context.nbatch(), $op);
         let nb = $self.data.ncols();
-        for $batch in 0..nb {
+        // the unbatched path keeps constant column indices and no loop, which is worth ~13%
+        // here (see lin_alg_ops axpy/faer/100)
+        if nb == 1 {
+            let $batch = 0;
             let alpha = $alpha;
-            zip!(
-                $self.data.rb_mut().col_mut($batch),
-                $x.data.rb().col($x.batch($batch, nb))
-            )
-            .for_each(|unzip!(s, xi)| *s = *s * $beta + *xi * alpha);
+            zip!($self.data.rb_mut().col_mut(0), $x.data.rb().col(0))
+                .for_each(|unzip!(s, xi)| *s = *s * $beta + *xi * alpha);
+            return;
         }
+        cold_call(|| {
+            for $batch in 0..nb {
+                let alpha = $alpha;
+                zip!(
+                    $self.data.rb_mut().col_mut($batch),
+                    $x.data.rb().col($x.batch($batch, nb))
+                )
+                .for_each(|unzip!(s, xi)| *s = *s * $beta + *xi * alpha);
+            }
+        });
     }};
 }
 
 /// Weighted error norm of every batch, reduced by taking the maximum.
 macro_rules! squared_norm_data {
     ($self:ident, $y:ident, $atol:ident, $rtol:ident) => {{
-        $self
-            .context
-            .assert_compatible_nbatch($y.context.nbatch(), "squared_norm");
-        $self
-            .context
-            .assert_compatible_nbatch($atol.context.nbatch(), "squared_norm");
-        $y.context
-            .assert_compatible_nbatch($atol.context.nbatch(), "squared_norm");
         let nrows = $self.data.nrows();
         assert!(
             nrows == $y.data.nrows() && nrows == $atol.data.nrows(),
@@ -286,27 +292,27 @@ macro_rules! squared_norm_data {
             );
             norm / nstates
         };
-        // every operand may be narrower than the widest one, so the reduction runs over the
-        // widest and broadcasts the rest
-        let nb = $self
-            .data
-            .ncols()
-            .max($y.data.ncols())
-            .max($atol.data.ncols());
+        // the reduction runs over `self`'s batches and broadcasts `y` and `atol` over them
+        let nb = $self.data.ncols();
         // the unbatched case keeps constant column indices, which codegens better than the
-        // loop variable below (and folds away the broadcast arithmetic)
+        // loop variable below (and folds away the broadcast arithmetic).  Checking the other
+        // two operands here as well costs ~0.9ns of a 5.3ns call, so it stays a single test.
         if nb == 1 {
             return batch_norm(0, 0, 0);
         }
-        let mut max_norm = T::zero();
-        for b in 0..nb {
-            max_norm = max_norm.max(batch_norm(
-                broadcast_batch(b, $self.data.ncols(), nb),
-                $y.batch(b, nb),
-                $atol.batch(b, nb),
-            ));
-        }
-        max_norm
+        $self
+            .context
+            .assert_broadcastable_into($y.context.nbatch(), "squared_norm");
+        $self
+            .context
+            .assert_broadcastable_into($atol.context.nbatch(), "squared_norm");
+        cold_call(|| {
+            let mut max_norm = T::zero();
+            for b in 0..nb {
+                max_norm = max_norm.max(batch_norm(b, $y.batch(b, nb), $atol.batch(b, nb)));
+            }
+            max_norm
+        })
     }};
 }
 
@@ -735,7 +741,7 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
     }
     fn component_div_assign(&mut self, o: &Self) {
         self.context
-            .assert_compatible_nbatch(o.context.nbatch(), "component_div_assign");
+            .assert_broadcastable_into(o.context.nbatch(), "component_div_assign");
         assert_eq!(
             self.data.nrows(),
             o.data.nrows(),
@@ -756,7 +762,7 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
     }
     fn component_mul_assign(&mut self, o: &Self) {
         self.context
-            .assert_compatible_nbatch(o.context.nbatch(), "component_mul_assign");
+            .assert_broadcastable_into(o.context.nbatch(), "component_mul_assign");
         assert_eq!(
             self.data.nrows(),
             o.data.nrows(),
@@ -777,18 +783,16 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
     }
     fn root_finding(&self, g1: &Self) -> (bool, T, i32) {
         self.context
-            .assert_compatible_nbatch(g1.context.nbatch(), "root_finding");
+            .assert_broadcastable_into(g1.context.nbatch(), "root_finding");
         assert_eq!(self.len(), g1.len(), "Vector lengths do not match");
         let mut out = None;
-        let nb = self.data.ncols().max(g1.data.ncols());
+        // the scan runs over `self`'s batches and broadcasts `g1` over them
+        let nb = self.data.ncols();
         for b in 0..nb {
             let mut found = false;
             let mut frac = T::zero();
             let mut idx = -1;
-            let g0_column = self
-                .data
-                .rb()
-                .col(broadcast_batch(b, self.data.ncols(), nb));
+            let g0_column = self.data.rb().col(b);
             let g1_column = g1.data.rb().col(g1.batch(b, nb));
             for (i, (&g0, &g)) in g0_column
                 .try_as_col_major()
@@ -829,7 +833,7 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
     }
     fn copy_from_indices(&mut self, o: &Self, idx: &Self::Index) {
         self.context
-            .assert_compatible_nbatch(o.context.nbatch(), "copy_from_indices");
+            .assert_broadcastable_into(o.context.nbatch(), "copy_from_indices");
         let nb = self.data.ncols();
         for b in 0..nb {
             for i in idx.data.iter() {
@@ -840,7 +844,7 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
     fn gather(&mut self, o: &Self, idx: &Self::Index) {
         assert_eq!(self.len(), idx.len());
         self.context
-            .assert_compatible_nbatch(o.context.nbatch(), "gather");
+            .assert_broadcastable_into(o.context.nbatch(), "gather");
         let nb = self.data.ncols();
         for b in 0..nb {
             for (i, j) in idx.data.iter().enumerate() {
@@ -850,14 +854,14 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
     }
     fn scatter(&self, idx: &Self::Index, o: &mut Self) {
         assert_eq!(self.len(), idx.len());
-        self.context
-            .assert_compatible_nbatch(o.context.nbatch(), "scatter");
-        let nb = self.data.ncols().max(o.data.ncols());
+        // `o` is the destination here, so its batch count governs the loop
+        o.context
+            .assert_broadcastable_into(self.data.ncols(), "scatter");
+        let nb = o.data.ncols();
         for b in 0..nb {
             let src = broadcast_batch(b, self.data.ncols(), nb);
             for (i, j) in idx.data.iter().enumerate() {
-                let batch = o.batch(b, nb);
-                o.data[(*j, batch)] = self.data[(i, src)]
+                o.data[(*j, b)] = self.data[(i, src)]
             }
         }
     }

@@ -41,7 +41,7 @@ impl<T: NalgebraScalar> LinearSolver<NalgebraMat<T>> for LU<T> {
         }
         state
             .context
-            .assert_compatible_nbatch(self.lu.len(), "lu_solve");
+            .assert_broadcastable_into(self.lu.len(), "lu_solve");
         if state.context.nbatch() == 1 {
             if self.lu[0].solve_mut(&mut state.data) {
                 return Ok(());
@@ -93,7 +93,7 @@ impl<T: NalgebraScalar> LinearSolver<NalgebraMat<T>> for LU<T> {
 mod tests {
     use super::*;
     use crate::{
-        linear_solver::tests::{diagonal_op, test_grouped_lu_solve},
+        linear_solver::tests::{diagonal_op, test_grouped_lu_solve, test_narrow_state_lu_solve},
         Vector,
     };
 
@@ -113,5 +113,11 @@ mod tests {
     #[test]
     fn test_grouped_lu() {
         test_grouped_lu_solve::<NalgebraMat<f64>, LU<f64>>(NalgebraContext::with_nbatch(2));
+    }
+
+    #[test]
+    #[should_panic(expected = "incompatible nbatch")]
+    fn test_narrow_state_lu() {
+        test_narrow_state_lu_solve::<NalgebraMat<f64>, LU<f64>>(NalgebraContext::with_nbatch(2));
     }
 }

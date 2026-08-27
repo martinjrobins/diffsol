@@ -1691,6 +1691,50 @@ pub(crate) mod tests {
         assert_eq!(triplet_values(&c), expected);
     }
 
+    // --- Narrow-destination tests: a wider source would silently drop batches ---
+
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_narrow_dest_gemv_m<M: Matrix>(ctx2: M::C) {
+        let wide = ctx4::<M>(&ctx2);
+        let indices = vec![(0, 0), (1, 1)];
+        let values = (1..=8).map(|i| f::<M>(i as f64)).collect::<Vec<_>>();
+        let a = M::try_from_triplets(2, 2, indices, values, wide.clone()).unwrap();
+        let x = M::V::zeros(2, wide);
+        let mut y = M::V::zeros(2, ctx2);
+        a.gemv(f::<M>(1.0), &x, f::<M>(0.0), &mut y);
+    }
+
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_narrow_dest_copy_from_m<M: Matrix>(ctx2: M::C) {
+        let wide = ctx4::<M>(&ctx2);
+        let indices = vec![(0, 0), (1, 1)];
+        let values = (1..=8).map(|i| f::<M>(i as f64)).collect::<Vec<_>>();
+        let a = M::try_from_triplets(2, 2, indices, values, wide).unwrap();
+        let mut b = M::zeros(2, 2, ctx2);
+        b.copy_from(&a);
+    }
+
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_narrow_dest_scale_add_m<M: Matrix>(ctx2: M::C) {
+        let wide = ctx4::<M>(&ctx2);
+        let indices = vec![(0, 0), (1, 1)];
+        let vals = (1..=8).map(|i| f::<M>(i as f64)).collect::<Vec<_>>();
+        let x = M::try_from_triplets(2, 2, indices.clone(), vals.clone(), wide.clone()).unwrap();
+        let y = M::try_from_triplets(2, 2, indices.clone(), vals, wide).unwrap();
+        let dst = (1..=4).map(|i| f::<M>(i as f64)).collect::<Vec<_>>();
+        let mut result = M::try_from_triplets(2, 2, indices, dst, ctx2).unwrap();
+        result.scale_add_and_assign(&x, f::<M>(2.0), &y);
+    }
+
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_narrow_dest_gemv_cols_m<M: DenseMatrix>(ctx2: M::C) {
+        let wide = ctx4::<M>(&ctx2);
+        let a = M::from_vec(2, 2, (0..16).map(|_| f::<M>(1.0)).collect(), wide);
+        let mut y = M::V::zeros(2, ctx2);
+        let ones = vec![f::<M>(1.0), f::<M>(1.0)];
+        a.gemv_cols(0, 2, f::<M>(1.0), &ones, f::<M>(0.0), &mut y);
+    }
+
     /// `gemv_cols` shares its coefficients across batches, so only the matrix broadcasts.
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_grouped_gemv_cols_m<M: DenseMatrix>(ctx2: M::C) {
@@ -2451,6 +2495,23 @@ macro_rules! generate_matrix_tests_batched {
                 $crate::matrix::tests::test_batched_gemv_beta_m::<$M>($ctx2);
             }
 
+            // --- Narrow-destination tests (source wider than destination panics) ---
+            #[test]
+            #[should_panic(expected = "incompatible nbatch")]
+            fn [<test_narrow_dest_gemv_ $suffix>]() {
+                $crate::matrix::tests::test_narrow_dest_gemv_m::<$M>($ctx2);
+            }
+            #[test]
+            #[should_panic(expected = "incompatible nbatch")]
+            fn [<test_narrow_dest_copy_from_ $suffix>]() {
+                $crate::matrix::tests::test_narrow_dest_copy_from_m::<$M>($ctx2);
+            }
+            #[test]
+            #[should_panic(expected = "incompatible nbatch")]
+            fn [<test_narrow_dest_scale_add_ $suffix>]() {
+                $crate::matrix::tests::test_narrow_dest_scale_add_m::<$M>($ctx2);
+            }
+
             // --- Grouped broadcast tests (B -> B * P, using $ctx2 widened to 4) ---
             #[test]
             fn [<test_grouped_gemv_ $suffix>]() {
@@ -2595,6 +2656,11 @@ macro_rules! generate_dense_matrix_tests_batched {
             #[test]
             fn [<test_grouped_add_assign_ $suffix>]() {
                 $crate::matrix::tests::test_grouped_add_assign_m::<$M>($ctx2);
+            }
+            #[test]
+            #[should_panic(expected = "incompatible nbatch")]
+            fn [<test_narrow_dest_gemv_cols_ $suffix>]() {
+                $crate::matrix::tests::test_narrow_dest_gemv_cols_m::<$M>($ctx2);
             }
             #[test]
             fn [<test_grouped_gemv_cols_ $suffix>]() {

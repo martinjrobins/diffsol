@@ -6,7 +6,7 @@ use nalgebra::{
 
 use super::default_solver::DefaultSolver;
 use super::sparsity::{Dense, DenseRef};
-use crate::context::broadcast_batch;
+use crate::context::{broadcast_batch, cold_call};
 use crate::error::LaError;
 use crate::{scalar::Scale, Context, NalgebraScalar, Vector};
 use crate::{
@@ -143,7 +143,7 @@ macro_rules! assign {
         impl<T: NalgebraScalar> $tr<$r> for $l {
             fn $fn(&mut self, rhs: $r) {
                 self.context
-                    .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($fn));
+                    .assert_broadcastable_into(rhs.context.nbatch(), stringify!($fn));
                 let nb = self.context.nbatch();
                 let nc = self.ncols();
                 if nb == rhs.context.nbatch()
@@ -215,12 +215,9 @@ impl<T: NalgebraScalar> IndexMut<(usize, usize)> for NalgebraMat<T> {
 macro_rules! gemv_data {
     ($self:ident, $a:ident, $x:ident, $beta:ident, $y:ident, $op:literal) => {{
         $y.context
-            .assert_compatible_nbatch($self.context.nbatch(), $op);
+            .assert_broadcastable_into($self.context.nbatch(), $op);
         $y.context
-            .assert_compatible_nbatch($x.context.nbatch(), $op);
-        $self
-            .context
-            .assert_compatible_nbatch($x.context.nbatch(), $op);
+            .assert_broadcastable_into($x.context.nbatch(), $op);
         let nc = $self.ncols();
         // the unbatched case keeps constant column indices, which codegens better than the
         // loop variable below
@@ -251,7 +248,7 @@ macro_rules! gemv_data {
 macro_rules! gemv_cols_data {
     ($self:ident, $start:expr, $nc:expr, $a:ident, $x:ident, $beta:ident, $y:ident, $op:literal) => {{
         $y.context
-            .assert_compatible_nbatch($self.context.nbatch(), $op);
+            .assert_broadcastable_into($self.context.nbatch(), $op);
         let (start, nc) = ($start, $nc);
         // only a debug assert: `ncols()` on the owned matrix is a division, and this runs once
         // per Runge-Kutta stage.  An out-of-range range still panics in release, inside
@@ -298,7 +295,7 @@ impl<T: NalgebraScalar> Matrix for NalgebraMat<T> {
         data: &NalgebraVec<T>,
     ) {
         self.context
-            .assert_compatible_nbatch(data.context.nbatch(), "set_data_with_indices");
+            .assert_broadcastable_into(data.context.nbatch(), "set_data_with_indices");
         let nb = self.context.nbatch();
         for (d, s) in dst.data.iter().zip(src.data.iter()) {
             let i = d % self.nrows();
@@ -311,7 +308,7 @@ impl<T: NalgebraScalar> Matrix for NalgebraMat<T> {
     }
     fn gather(&mut self, o: &Self, idx: &crate::vector::nalgebra_serial::NalgebraIndex) {
         self.context
-            .assert_compatible_nbatch(o.context.nbatch(), "gather");
+            .assert_broadcastable_into(o.context.nbatch(), "gather");
         let nb = self.context.nbatch();
         for b in 0..nb {
             for (d, s) in idx.data.iter().enumerate() {
@@ -345,7 +342,7 @@ impl<T: NalgebraScalar> Matrix for NalgebraMat<T> {
     }
     fn add_column_to_vector(&self, j: usize, v: &mut NalgebraVec<T>) {
         v.context
-            .assert_compatible_nbatch(self.context.nbatch(), "add_column_to_vector");
+            .assert_broadcastable_into(self.context.nbatch(), "add_column_to_vector");
         if self.context.nbatch() == 1 && v.context.nbatch() == 1 {
             v.data
                 .column_mut(0)
@@ -421,7 +418,7 @@ impl<T: NalgebraScalar> Matrix for NalgebraMat<T> {
     }
     fn copy_from(&mut self, o: &Self) {
         self.context
-            .assert_compatible_nbatch(o.context.nbatch(), "copy_from");
+            .assert_broadcastable_into(o.context.nbatch(), "copy_from");
         if self.context.nbatch() == o.context.nbatch() {
             self.data.copy_from(&o.data);
             return;
@@ -436,7 +433,7 @@ impl<T: NalgebraScalar> Matrix for NalgebraMat<T> {
     }
     fn set_column(&mut self, j: usize, v: &NalgebraVec<T>) {
         self.context
-            .assert_compatible_nbatch(v.context.nbatch(), "set_column");
+            .assert_broadcastable_into(v.context.nbatch(), "set_column");
         // unbatched fast path: worth ~4x on lin_alg_ops set_column/nalgebra/10
         if self.context.nbatch() == 1 && v.context.nbatch() == 1 {
             self.data.column_mut(j).copy_from(&v.data.column(0));
@@ -451,18 +448,30 @@ impl<T: NalgebraScalar> Matrix for NalgebraMat<T> {
     }
     fn scale_add_and_assign(&mut self, x: &Self, b: T, y: &Self) {
         self.context
-            .assert_compatible_nbatch(x.context.nbatch(), "scale_add_and_assign");
+            .assert_broadcastable_into(x.context.nbatch(), "scale_add_and_assign");
         self.context
-            .assert_compatible_nbatch(y.context.nbatch(), "scale_add_and_assign");
+            .assert_broadcastable_into(y.context.nbatch(), "scale_add_and_assign");
         let nc = self.ncols();
         let nb = self.context.nbatch();
-        for batch in 0..nb {
-            let mut columns = self.data.columns_mut(self.col(batch, 0), nc);
-            columns.copy_from(&x.data.columns(x.col_bcast(batch, 0, nb), nc));
-            columns.zip_apply(&y.data.columns(y.col_bcast(batch, 0, nb), nc), |s, y| {
+        // the unbatched path keeps constant column indices, which is worth ~6% here (see
+        // lin_alg_ops scale_add_and_assign/nalgebra)
+        if nb == 1 {
+            let mut columns = self.data.columns_mut(0, nc);
+            columns.copy_from(&x.data.columns(0, nc));
+            columns.zip_apply(&y.data.columns(0, nc), |s, y| {
                 *s += b * y;
             });
+            return;
         }
+        cold_call(|| {
+            for batch in 0..nb {
+                let mut columns = self.data.columns_mut(self.col(batch, 0), nc);
+                columns.copy_from(&x.data.columns(x.col_bcast(batch, 0, nb), nc));
+                columns.zip_apply(&y.data.columns(y.col_bcast(batch, 0, nb), nc), |s, y| {
+                    *s += b * y;
+                });
+            }
+        });
     }
     fn new_from_sparsity(nr: usize, nc: usize, _: Option<Self::Sparsity>, ctx: Self::C) -> Self {
         Self::zeros(nr, nc, ctx)
@@ -622,7 +631,7 @@ impl<T: NalgebraScalar> DenseMatrix for NalgebraMat<T> {
     fn update_backward_diff(&mut self, order: usize, d: &NalgebraVec<T>) {
         assert!(order + 2 < self.logical_ncols(), "order out of bounds");
         self.context
-            .assert_compatible_nbatch(d.context.nbatch(), "update_backward_diff");
+            .assert_broadcastable_into(d.context.nbatch(), "update_backward_diff");
         let nb = self.context.nbatch();
         for b in 0..nb {
             let base = self.col(b, 0);

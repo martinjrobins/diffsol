@@ -111,7 +111,7 @@ impl<T: ScalarCuda> LinearSolver<CudaMat<T>> for CudaLU<T> {
         }
         let nbatch = x.context.nbatch();
         let lu_nbatch = matrix.context().nbatch();
-        x.context.assert_compatible_nbatch(lu_nbatch, "lu_solve");
+        x.context.assert_broadcastable_into(lu_nbatch, "lu_solve");
         let nrows = matrix.nrows();
         let ncols = matrix.ncols();
         let x_nstates = x.data.len() / nbatch;
@@ -199,7 +199,7 @@ impl<T: ScalarCuda> LinearSolver<CudaMat<T>> for CudaLU<T> {
 mod tests {
     use super::*;
     use crate::{
-        linear_solver::tests::{diagonal_op, test_grouped_lu_solve},
+        linear_solver::tests::{diagonal_op, test_grouped_lu_solve, test_narrow_state_lu_solve},
         Vector,
     };
 
@@ -214,6 +214,14 @@ mod tests {
         x.assert_eq_st(
             &CudaVec::from_vec(vec![1.0, 2.0], Default::default()),
             1e-10,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "incompatible nbatch")]
+    fn test_narrow_state_lu() {
+        test_narrow_state_lu_solve::<CudaMat<f64>, CudaLU<f64>>(
+            CudaContext::default().with_nbatch(2),
         );
     }
 
@@ -367,4 +375,4 @@ mod tests {
 //CUDA_CHECK(cudaDeviceReset());
 //
 //return EXIT_SUCCESS;
-//}
+//

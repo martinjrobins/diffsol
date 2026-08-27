@@ -107,6 +107,18 @@ pub(crate) mod tests {
         x.assert_eq_st(&expected, f(1e-10));
     }
 
+    /// More factorizations than right-hand side batches would leave factorizations unused, so
+    /// the solve panics rather than silently dropping them.
+    pub fn test_narrow_state_lu_solve<M: Matrix, LS: LinearSolver<M>>(ctx2: M::C) {
+        let wide = ctx2.clone_with_nbatch(4).unwrap();
+        let op = batched_diagonal_op::<M>(&[2.0, 3.0, 4.0, 5.0], wide);
+        let mut s = LS::default();
+        s.set_sparsity(&op);
+        s.set_linearisation(&op);
+        let mut b = M::V::zeros(2, ctx2);
+        s.solve_in_place(&mut b).unwrap();
+    }
+
     impl<M: Matrix> LinearOp for DiagonalOp<M> {
         type T = M::T;
         type V = M::V;

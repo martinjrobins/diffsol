@@ -204,7 +204,7 @@ where
         let mut klu_common = self.klu_common.borrow_mut();
         let x_nbatch = x.context().nbatch();
         let nlu = self.klu_numeric.len();
-        x.context().assert_compatible_nbatch(nlu, "klu_solve");
+        x.context().assert_broadcastable_into(nlu, "klu_solve");
         for batch in 0..x_nbatch {
             unsafe {
                 klu_solve(
@@ -252,6 +252,15 @@ mod tests {
     #[test]
     fn test_grouped_klu() {
         crate::linear_solver::tests::test_grouped_lu_solve::<
+            FaerSparseMat<f64>,
+            KLU<FaerSparseMat<f64>>,
+        >(crate::FaerContext::with_nbatch(2));
+    }
+
+    #[test]
+    #[should_panic(expected = "incompatible nbatch")]
+    fn test_narrow_state_klu() {
+        crate::linear_solver::tests::test_narrow_state_lu_solve::<
             FaerSparseMat<f64>,
             KLU<FaerSparseMat<f64>>,
         >(crate::FaerContext::with_nbatch(2));

@@ -209,7 +209,7 @@ impl<'a, T: ScalarCuda> CudaVecMut<'a, T> {
         let nbatch = self.context.nbatch();
         let other_nbatch = other.context.nbatch();
         self.context
-            .assert_compatible_nbatch(other_nbatch, "copy_from_view");
+            .assert_broadcastable_into(other_nbatch, "copy_from_view");
         let nstates_u32 = self.nstates as u32;
         if nstates_u32 == 0 {
             return;
@@ -407,7 +407,7 @@ macro_rules! impl_assign {
                 let ctx = self.context.clone();
                 let self_nbatch = ctx.nbatch();
                 let other_nbatch = rhs.context.nbatch();
-                ctx.assert_compatible_nbatch(other_nbatch, $label);
+                ctx.assert_broadcastable_into(other_nbatch, $label);
                 let nstates = self.len();
                 if nstates == 0 {
                     return;
@@ -944,7 +944,7 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
         let self_nbatch = self.context.nbatch();
         let other_nbatch = other.context.nbatch();
         self.context
-            .assert_compatible_nbatch(other_nbatch, "copy_from_view");
+            .assert_broadcastable_into(other_nbatch, "copy_from_view");
         let nstates = self.len() as u32;
         if nstates == 0 {
             return;
@@ -972,7 +972,7 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
     fn axpy_v(&mut self, alpha: Self::T, x: &Self::View<'_>, beta: Self::T) {
         let self_nbatch = self.context.nbatch();
         let x_nbatch = x.context.nbatch();
-        self.context.assert_compatible_nbatch(x_nbatch, "axpy_v");
+        self.context.assert_broadcastable_into(x_nbatch, "axpy_v");
         let nstates = self.len();
         if nstates == 0 {
             return;
@@ -1008,7 +1008,7 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
             "batched_axpy: alpha.len() must equal self.nbatch()"
         );
         self.context
-            .assert_compatible_nbatch(x_nbatch, "batched_axpy");
+            .assert_broadcastable_into(x_nbatch, "batched_axpy");
         let nstates = self.len();
         if nstates == 0 {
             return;
@@ -1055,7 +1055,7 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
         let self_nbatch = self.context.nbatch();
         let other_nbatch = other.context.nbatch();
         self.context
-            .assert_compatible_nbatch(other_nbatch, "component_mul_assign");
+            .assert_broadcastable_into(other_nbatch, "component_mul_assign");
         let nstates = self.len() as u32;
         let other_nstates = other.len();
         if nstates == 0 {
@@ -1081,7 +1081,7 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
         let self_nbatch = self.context.nbatch();
         let other_nbatch = other.context.nbatch();
         self.context
-            .assert_compatible_nbatch(other_nbatch, "component_div_assign");
+            .assert_broadcastable_into(other_nbatch, "component_div_assign");
         let nstates = self.len() as u32;
         let other_nstates = other.len();
         if nstates == 0 {
@@ -1111,9 +1111,9 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
         }
         let g1_nbatch = g1.context.nbatch();
         self.context
-            .assert_compatible_nbatch(g1_nbatch, "root_finding");
-        // either operand may be narrower, so the reduction runs over the widest
-        let nbatch = g0_nbatch.max(g1_nbatch);
+            .assert_broadcastable_into(g1_nbatch, "root_finding");
+        // as on the CPU backends, the reduction runs over `self`'s batches
+        let nbatch = g0_nbatch;
         let g1_nstates = g1.len();
         assert_eq!(
             nstates, g1_nstates,
@@ -1268,6 +1268,8 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
     fn gather(&mut self, other: &Self, indices: &Self::Index) {
         let self_nbatch = self.context.nbatch();
         let other_nbatch = other.context.nbatch();
+        self.context
+            .assert_broadcastable_into(other_nbatch, "gather");
         let nindices_u32 = indices.len() as u32;
         if nindices_u32 == 0 {
             return;
@@ -1296,12 +1298,15 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
     fn scatter(&self, indices: &Self::Index, other: &mut Self) {
         let self_nbatch = self.context.nbatch();
         let other_nbatch = other.context.nbatch();
+        other
+            .context
+            .assert_broadcastable_into(self_nbatch, "scatter");
         let nindices_u32 = indices.len() as u32;
         if nindices_u32 == 0 {
             return;
         }
         let nstates = self.len();
-        let nbatch_u32 = self_nbatch as u32;
+        let nbatch_u32 = other_nbatch as u32;
         let f = self.context.function::<T>("vec_scatter");
         let config = self.context.launch_config_2d(nindices_u32, nbatch_u32, &f);
         let mut build = self.context.stream.launch_builder(&f);
@@ -1407,14 +1412,12 @@ impl<T: ScalarCuda> VectorView<'_> for CudaVecRef<'_, T> {
         let atol_nbatch = atol.context.nbatch();
         let y_nbatch = y.context.nbatch();
         self.context
-            .assert_compatible_nbatch(y_nbatch, "squared_norm");
+            .assert_broadcastable_into(y_nbatch, "squared_norm");
         self.context
-            .assert_compatible_nbatch(atol_nbatch, "squared_norm");
-        y.context
-            .assert_compatible_nbatch(atol_nbatch, "squared_norm");
-        // every operand may be narrower than the widest one, so the reduction runs over the
-        // widest and the kernel broadcasts the rest
-        let nbatch = self_nbatch.max(y_nbatch).max(atol_nbatch);
+            .assert_broadcastable_into(atol_nbatch, "squared_norm");
+        // as on the CPU backends, the reduction runs over `self`'s batches and the kernel
+        // broadcasts `y` and `atol` over them
+        let nbatch = self_nbatch;
 
         let nstates_u32 = nstates as u32;
         let nbatch_u32 = nbatch as u32;
@@ -1507,7 +1510,7 @@ impl<'a, T: ScalarCuda> VectorViewMut<'a> for CudaVecMut<'a, T> {
     fn axpy(&mut self, alpha: Self::T, x: &Self::Owned, beta: Self::T) {
         let nbatch = self.context.nbatch();
         let x_nbatch = x.context.nbatch();
-        self.context.assert_compatible_nbatch(x_nbatch, "axpy");
+        self.context.assert_broadcastable_into(x_nbatch, "axpy");
         let nstates_u32 = self.nstates as u32;
         if nstates_u32 == 0 {
             return;

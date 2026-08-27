@@ -742,6 +742,43 @@ macro_rules! generate_vector_tests_batched {
                 $crate::vector::tests::test_batched_binary_forms_broadcast::<$V>($ctx2);
             }
 
+            // --- Narrow-destination tests (source wider than destination panics) ---
+            #[test]
+            #[should_panic(expected = "incompatible nbatch")]
+            fn [<test_narrow_dest_copy_from_ $suffix>]() {
+                $crate::vector::tests::test_narrow_dest_copy_from::<$V>($ctx2);
+            }
+            #[test]
+            #[should_panic(expected = "incompatible nbatch")]
+            fn [<test_narrow_dest_add_assign_ $suffix>]() {
+                $crate::vector::tests::test_narrow_dest_add_assign::<$V>($ctx2);
+            }
+            #[test]
+            #[should_panic(expected = "incompatible nbatch")]
+            fn [<test_narrow_dest_axpy_ $suffix>]() {
+                $crate::vector::tests::test_narrow_dest_axpy::<$V>($ctx2);
+            }
+            #[test]
+            #[should_panic(expected = "incompatible nbatch")]
+            fn [<test_narrow_dest_component_mul_ $suffix>]() {
+                $crate::vector::tests::test_narrow_dest_component_mul::<$V>($ctx2);
+            }
+            #[test]
+            #[should_panic(expected = "incompatible nbatch")]
+            fn [<test_narrow_dest_gather_ $suffix>]() {
+                $crate::vector::tests::test_narrow_dest_gather::<$V>($ctx2);
+            }
+            #[test]
+            #[should_panic(expected = "incompatible nbatch")]
+            fn [<test_narrow_dest_scatter_ $suffix>]() {
+                $crate::vector::tests::test_narrow_dest_scatter::<$V>($ctx2);
+            }
+            #[test]
+            #[should_panic(expected = "incompatible nbatch")]
+            fn [<test_narrow_dest_squared_norm_ $suffix>]() {
+                $crate::vector::tests::test_narrow_dest_squared_norm::<$V>($ctx2);
+            }
+
             // --- Grouped broadcast tests (B -> B * P, using $ctx2 widened to 4) ---
             #[test]
             fn [<test_grouped_owned_lhs_ref_rhs_ $suffix>]() {
@@ -1967,6 +2004,70 @@ pub(crate) mod tests {
         let mut y = V::zeros(2, wide);
         let x = V::zeros(2, ctx3);
         y.axpy(f::<V>(1.0), &x, f::<V>(1.0));
+    }
+
+    // --- Narrow-destination tests: writing a wider operand into a narrower destination
+    // would silently drop batches, so it panics instead (`assert_broadcastable_into`) ---
+
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_narrow_dest_copy_from<V: Vector>(ctx2: V::C) {
+        let wide = ctx4::<V>(&ctx2);
+        let mut y = V::zeros(2, ctx2);
+        let x = V::zeros(2, wide);
+        y.copy_from(&x);
+    }
+
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_narrow_dest_add_assign<V: Vector>(ctx2: V::C) {
+        let wide = ctx4::<V>(&ctx2);
+        let mut y = V::zeros(2, ctx2);
+        let x = V::zeros(2, wide);
+        y += &x;
+    }
+
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_narrow_dest_axpy<V: Vector>(ctx2: V::C) {
+        let wide = ctx4::<V>(&ctx2);
+        let mut y = V::zeros(2, ctx2);
+        let x = V::zeros(2, wide);
+        y.axpy(f::<V>(1.0), &x, f::<V>(1.0));
+    }
+
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_narrow_dest_component_mul<V: Vector>(ctx2: V::C) {
+        let wide = ctx4::<V>(&ctx2);
+        let mut y = V::zeros(2, ctx2);
+        let x = V::zeros(2, wide);
+        y.component_mul_assign(&x);
+    }
+
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_narrow_dest_gather<V: Vector>(ctx2: V::C) {
+        let wide = ctx4::<V>(&ctx2);
+        let idx = V::Index::from_vec(vec![1, 0], Default::default());
+        let o = V::zeros(2, wide);
+        let mut a = V::zeros(2, ctx2);
+        a.gather(&o, &idx);
+    }
+
+    /// `scatter` writes into its argument, so the narrow operand is the one being written.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_narrow_dest_scatter<V: Vector>(ctx2: V::C) {
+        let wide = ctx4::<V>(&ctx2);
+        let idx = V::Index::from_vec(vec![1, 0], Default::default());
+        let source = V::zeros(2, wide);
+        let mut dest = V::zeros(2, ctx2);
+        source.scatter(&idx, &mut dest);
+    }
+
+    /// The reduction runs over `self`'s batches, so a wider `y`/`atol` is the same case.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_narrow_dest_squared_norm<V: Vector>(ctx2: V::C) {
+        let wide = ctx4::<V>(&ctx2);
+        let v = V::from_vec(fv::<V>(&[1.0, 1.0, 1.0, 1.0]), ctx2.clone());
+        let y = V::zeros(2, wide);
+        let atol = V::from_element(2, f::<V>(1.0), ctx2);
+        v.squared_norm(&y, &atol, f::<V>(1.0));
     }
 
     // --- Incompatible batch tests ---
