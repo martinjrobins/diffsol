@@ -742,6 +742,33 @@ macro_rules! generate_vector_tests_batched {
                 $crate::vector::tests::test_batched_binary_forms_broadcast::<$V>($ctx2);
             }
 
+            // --- Governing-operand tests: the operand that governs must be the wider one ---
+            #[test]
+            #[should_panic(expected = "incompatible nbatch")]
+            fn [<test_batched_owned_lhs_narrow_ $suffix>]() {
+                $crate::vector::tests::test_batched_owned_lhs_narrow::<$V>($ctx2);
+            }
+            #[test]
+            #[should_panic(expected = "incompatible nbatch")]
+            fn [<test_batched_owned_rhs_narrow_ $suffix>]() {
+                $crate::vector::tests::test_batched_owned_rhs_narrow::<$V>($ctx2);
+            }
+            #[test]
+            #[should_panic(expected = "incompatible nbatch")]
+            fn [<test_batched_view_add_narrow_ $suffix>]() {
+                $crate::vector::tests::test_batched_view_add_narrow::<$V>($ctx2);
+            }
+            #[test]
+            #[should_panic(expected = "incompatible nbatch")]
+            fn [<test_grouped_add_narrow_lhs_ $suffix>]() {
+                $crate::vector::tests::test_grouped_add_narrow_lhs::<$V>($ctx2);
+            }
+            #[test]
+            #[should_panic(expected = "incompatible nbatch")]
+            fn [<test_grouped_owned_lhs_narrow_ $suffix>]() {
+                $crate::vector::tests::test_grouped_owned_lhs_narrow::<$V>($ctx2);
+            }
+
             // --- Narrow-destination tests (source wider than destination panics) ---
             #[test]
             #[should_panic(expected = "incompatible nbatch")]
@@ -1506,59 +1533,64 @@ pub(crate) mod tests {
         for<'a> &'a V: Sub<V, Output = V>,
     {
         assert_eq!(ctx.nbatch(), 2);
-        // lhs broadcasts over the batches of rhs
+        // `rhs` is the owned operand, so it governs and `lhs` broadcasts into its batches
         let a = V::from_vec(fv::<V>(&[10.0, 20.0]), V::C::default());
-        let b = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0]), ctx.clone());
+        let b = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0]), ctx);
         let c = &a - b;
         assert_eq!(c.clone_as_vec(), fv::<V>(&[9.0, 18.0, 7.0, 16.0]));
         assert_eq!(c.context().nbatch(), 2);
-
-        // rhs broadcasts over the batches of lhs
-        let a = V::from_vec(fv::<V>(&[10.0, 20.0, 30.0, 40.0]), ctx);
-        let b = V::from_vec(fv::<V>(&[1.0, 2.0]), V::C::default());
-        let c = &a - b;
-        assert_eq!(c.clone_as_vec(), fv::<V>(&[9.0, 18.0, 29.0, 38.0]));
-        assert_eq!(c.context().nbatch(), 2);
     }
 
-    /// Owned left-hand side with broadcasting in both directions: the left-hand side can only
-    /// be written into in place when it already has the result's batch count.
+    /// The owned right-hand side governs, so a *wider* borrowed left-hand side is an error.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_batched_owned_rhs_narrow<V: Vector>(ctx: V::C)
+    where
+        for<'a> &'a V: Sub<V, Output = V>,
+    {
+        let a = V::from_vec(fv::<V>(&[10.0, 20.0, 30.0, 40.0]), ctx);
+        let b = V::from_vec(fv::<V>(&[1.0, 2.0]), V::C::default());
+        let _ = &a - b;
+    }
+
+    /// The owned left-hand side governs and is written into in place.
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_owned_lhs_broadcast<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
-        // lhs holds the result's batch count, so rhs broadcasts over it in place
-        let a = V::from_vec(fv::<V>(&[10.0, 20.0, 30.0, 40.0]), ctx.clone());
+        let a = V::from_vec(fv::<V>(&[10.0, 20.0, 30.0, 40.0]), ctx);
         let b = V::from_vec(fv::<V>(&[1.0, 2.0]), V::C::default());
         let c = a - b;
         assert_eq!(c.clone_as_vec(), fv::<V>(&[9.0, 18.0, 29.0, 38.0]));
         assert_eq!(c.context().nbatch(), 2);
-
-        // rhs holds the result's batch count, so lhs must be broadcast into a fresh allocation
-        let a = V::from_vec(fv::<V>(&[10.0, 20.0]), V::C::default());
-        let b = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0]), ctx);
-        let c = a - b;
-        assert_eq!(c.clone_as_vec(), fv::<V>(&[9.0, 18.0, 7.0, 16.0]));
-        assert_eq!(c.context().nbatch(), 2);
     }
 
-    /// View+view addition with mismatched batch counts, in both broadcast directions: exercises
-    /// the general (non-equal-ncols) branch of the view/ref arithmetic impls.
+    /// The owned left-hand side governs, so a *wider* right-hand side is an error.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_batched_owned_lhs_narrow<V: Vector>(ctx: V::C) {
+        let a = V::from_vec(fv::<V>(&[10.0, 20.0]), V::C::default());
+        let b = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0]), ctx);
+        let _ = a - b;
+    }
+
+    /// View+view addition with mismatched batch counts: neither operand is owned, so the
+    /// left-hand side governs and `rhs` broadcasts into it.  Exercises the general
+    /// (non-equal-ncols) branch of the view/ref arithmetic impls.
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_view_add_broadcast<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
-        // lhs broadcasts over the batches of rhs
-        let a = V::from_vec(fv::<V>(&[10.0, 20.0]), V::C::default());
-        let b = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0]), ctx.clone());
-        let c = a.as_view() + b.as_view();
-        assert_eq!(c.clone_as_vec(), fv::<V>(&[11.0, 22.0, 13.0, 24.0]));
-        assert_eq!(c.context().nbatch(), 2);
-
-        // rhs broadcasts over the batches of lhs
         let a = V::from_vec(fv::<V>(&[10.0, 20.0, 30.0, 40.0]), ctx);
         let b = V::from_vec(fv::<V>(&[1.0, 2.0]), V::C::default());
         let c = a.as_view() + b.as_view();
         assert_eq!(c.clone_as_vec(), fv::<V>(&[11.0, 22.0, 31.0, 42.0]));
         assert_eq!(c.context().nbatch(), 2);
+    }
+
+    /// Neither operand owned, so the left-hand side governs: a wider right-hand side is an
+    /// error rather than a wider result.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_batched_view_add_narrow<V: Vector>(ctx: V::C) {
+        let a = V::from_vec(fv::<V>(&[10.0, 20.0]), V::C::default());
+        let b = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0]), ctx);
+        let _ = a.as_view() + b.as_view();
     }
 
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
@@ -1738,10 +1770,11 @@ pub(crate) mod tests {
         y.batched_axpy(&[f::<V>(1.0)], &x, f::<V>(0.0));
     }
 
-    /// Every operand flavour of `+` and `-` (owned, reference, view, view reference on
-    /// either side), in both broadcast directions.  Each flavour is a separate `impl` that
-    /// decides on its own whether it can write in place or must allocate, so they all need
-    /// exercising with mismatched batch counts.
+    /// Every operand flavour of `+` and `-` (owned, reference, view, view reference on either
+    /// side), each with the widths the governing rule requires: an owned operand governs, and
+    /// with none owned the left-hand side does.  Each flavour is a separate `impl` that decides
+    /// on its own whether it can write in place, so they all need exercising with mismatched
+    /// batch counts.
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_binary_forms_broadcast<V: Vector>(ctx: V::C)
     where
@@ -1758,65 +1791,41 @@ pub(crate) mod tests {
         assert_eq!(ctx.nbatch(), 2);
         let wide = || V::from_vec(fv::<V>(&[10.0, 20.0, 30.0, 40.0]), ctx.clone());
         let narrow = || V::from_vec(fv::<V>(&[1.0, 2.0]), V::C::default());
-        let (w, n) = (wide(), narrow());
-        // wide - narrow, narrow - wide, wide + narrow (narrow + wide is the same)
+        let (n, w) = (narrow(), wide());
+        // wide - narrow, narrow - wide, wide + narrow
         let ws = fv::<V>(&[9.0, 18.0, 29.0, 38.0]);
         let ns = fv::<V>(&[-9.0, -18.0, -29.0, -38.0]);
         let sum = fv::<V>(&[11.0, 22.0, 31.0, 42.0]);
 
-        // owned left-hand side
+        // the owned left-hand side governs, so it is the wide one
         assert_eq!((wide() - narrow()).clone_as_vec(), ws);
         assert_eq!((wide() - &narrow()).clone_as_vec(), ws);
         assert_eq!((wide() - n.as_view()).clone_as_vec(), ws);
         assert_eq!((wide() - &n.as_view()).clone_as_vec(), ws);
-        assert_eq!((narrow() - wide()).clone_as_vec(), ns);
-        assert_eq!((narrow() - &wide()).clone_as_vec(), ns);
-        assert_eq!((narrow() - w.as_view()).clone_as_vec(), ns);
-        assert_eq!((narrow() - &w.as_view()).clone_as_vec(), ns);
         assert_eq!((wide() + narrow()).clone_as_vec(), sum);
         assert_eq!((wide() + &narrow()).clone_as_vec(), sum);
         assert_eq!((wide() + n.as_view()).clone_as_vec(), sum);
         assert_eq!((wide() + &n.as_view()).clone_as_vec(), sum);
-        assert_eq!((narrow() + wide()).clone_as_vec(), sum);
-        assert_eq!((narrow() + &wide()).clone_as_vec(), sum);
-        assert_eq!((narrow() + w.as_view()).clone_as_vec(), sum);
-        assert_eq!((narrow() + &w.as_view()).clone_as_vec(), sum);
 
-        // reference left-hand side
-        assert_eq!((&w - narrow()).clone_as_vec(), ws);
+        // only the right-hand side is owned, so it governs and must be the wide one
+        assert_eq!((&n - wide()).clone_as_vec(), ns);
+        assert_eq!((n.as_view() - wide()).clone_as_vec(), ns);
+        assert_eq!((&n + wide()).clone_as_vec(), sum);
+        assert_eq!((n.as_view() + wide()).clone_as_vec(), sum);
+
+        // neither operand is owned, so the left-hand side governs
         assert_eq!((&w - &n).clone_as_vec(), ws);
         assert_eq!((&w - n.as_view()).clone_as_vec(), ws);
         assert_eq!((&w - &n.as_view()).clone_as_vec(), ws);
-        assert_eq!((&n - wide()).clone_as_vec(), ns);
-        assert_eq!((&n - &w).clone_as_vec(), ns);
-        assert_eq!((&n - w.as_view()).clone_as_vec(), ns);
-        assert_eq!((&n - &w.as_view()).clone_as_vec(), ns);
-        assert_eq!((&w + narrow()).clone_as_vec(), sum);
-        assert_eq!((&w + &n).clone_as_vec(), sum);
-        assert_eq!((&w + n.as_view()).clone_as_vec(), sum);
-        assert_eq!((&w + &n.as_view()).clone_as_vec(), sum);
-        assert_eq!((&n + wide()).clone_as_vec(), sum);
-        assert_eq!((&n + &w).clone_as_vec(), sum);
-        assert_eq!((&n + w.as_view()).clone_as_vec(), sum);
-        assert_eq!((&n + &w.as_view()).clone_as_vec(), sum);
-
-        // view left-hand side
-        assert_eq!((w.as_view() - narrow()).clone_as_vec(), ws);
         assert_eq!((w.as_view() - &n).clone_as_vec(), ws);
         assert_eq!((w.as_view() - n.as_view()).clone_as_vec(), ws);
         assert_eq!((w.as_view() - &n.as_view()).clone_as_vec(), ws);
-        assert_eq!((n.as_view() - wide()).clone_as_vec(), ns);
-        assert_eq!((n.as_view() - &w).clone_as_vec(), ns);
-        assert_eq!((n.as_view() - w.as_view()).clone_as_vec(), ns);
-        assert_eq!((n.as_view() - &w.as_view()).clone_as_vec(), ns);
-        assert_eq!((w.as_view() + narrow()).clone_as_vec(), sum);
+        assert_eq!((&w + &n).clone_as_vec(), sum);
+        assert_eq!((&w + n.as_view()).clone_as_vec(), sum);
+        assert_eq!((&w + &n.as_view()).clone_as_vec(), sum);
         assert_eq!((w.as_view() + &n).clone_as_vec(), sum);
         assert_eq!((w.as_view() + n.as_view()).clone_as_vec(), sum);
         assert_eq!((w.as_view() + &n.as_view()).clone_as_vec(), sum);
-        assert_eq!((n.as_view() + wide()).clone_as_vec(), sum);
-        assert_eq!((n.as_view() + &w).clone_as_vec(), sum);
-        assert_eq!((n.as_view() + w.as_view()).clone_as_vec(), sum);
-        assert_eq!((n.as_view() + &w.as_view()).clone_as_vec(), sum);
     }
 
     /// Zero-length batched vectors: every kernel-launching op short-circuits rather than
@@ -1915,9 +1924,25 @@ pub(crate) mod tests {
             wide,
         );
         let b = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0]), ctx2);
+        // neither operand is owned, so the wide left-hand side governs
         let expected = fv::<V>(&[11.0, 22.0, 31.0, 42.0, 53.0, 64.0, 73.0, 84.0]);
         assert_eq!((&a + &b).clone_as_vec(), expected);
-        assert_eq!((&b + &a).clone_as_vec(), expected);
+    }
+
+    /// The reversed orientation of [`test_grouped_add`]: the narrow side is on the left and
+    /// neither operand is owned, so it governs and the wider right-hand side is an error.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_grouped_add_narrow_lhs<V: Vector>(ctx2: V::C)
+    where
+        for<'b> &'b V: Add<&'b V, Output = V>,
+    {
+        let wide = ctx4::<V>(&ctx2);
+        let a = V::from_vec(
+            fv::<V>(&[10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0]),
+            wide,
+        );
+        let b = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0]), ctx2);
+        let _ = &b + &a;
     }
 
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
@@ -1987,13 +2012,23 @@ pub(crate) mod tests {
         };
         let narrow = || V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0]), ctx2.clone());
         let wide_lhs = fv::<V>(&[9.0, 18.0, 29.0, 38.0, 47.0, 56.0, 67.0, 76.0]);
-        let narrow_lhs = fv::<V>(&[-9.0, -18.0, -29.0, -38.0, -47.0, -56.0, -67.0, -76.0]);
-        let (n, w) = (narrow(), wide());
+        let n = narrow();
 
+        // the owned left-hand side governs, so it must be the wider one
         assert_eq!((wide() - &narrow()).clone_as_vec(), wide_lhs);
         assert_eq!((wide() - &n.as_view()).clone_as_vec(), wide_lhs);
-        assert_eq!((narrow() - &wide()).clone_as_vec(), narrow_lhs);
-        assert_eq!((narrow() - &w.as_view()).clone_as_vec(), narrow_lhs);
+    }
+
+    /// The grouped flavour of [`test_batched_owned_lhs_narrow`].
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_grouped_owned_lhs_narrow<V: Vector>(ctx2: V::C) {
+        let ctx = ctx4::<V>(&ctx2);
+        let wide = V::from_vec(
+            fv::<V>(&[10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0]),
+            ctx,
+        );
+        let narrow = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0]), ctx2);
+        let _ = narrow - &wide;
     }
 
     /// 4 is not a multiple of 3 (nor 3 of 4), so this is not an exact repeat group.

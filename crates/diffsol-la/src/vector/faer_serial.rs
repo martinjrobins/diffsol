@@ -119,8 +119,10 @@ macro_rules! vec_binary {
             // arithmetic on the operands, which is what the lint is looking for
             #[allow(clippy::suspicious_arithmetic_impl)]
             fn $method(self, rhs: $rhs) -> Self::Output {
+                // neither operand is owned, so the result is allocated at the left-hand
+                // side's batch count and `rhs` broadcasts into it
                 self.context
-                    .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($method));
+                    .assert_broadcastable_into(rhs.context.nbatch(), stringify!($method));
                 // the unbatched path goes through the columns on purpose: faer's whole-matrix
                 // operators are ~45% slower for a single column (see lin_alg_ops
                 // add_ref_ref/faer)
@@ -143,20 +145,16 @@ macro_rules! vec_binary {
                         context: self.context,
                     };
                 }
-                let nb = self.data.ncols().max(rhs.data.ncols());
+                let nb = self.data.ncols();
                 let mut data = Mat::zeros(self.data.nrows(), nb);
                 for b in 0..nb {
                     let mut column = data.rb_mut().col_mut(b);
-                    column.copy_from(self.data.rb().col(self.batch(b, nb)));
+                    column.copy_from(self.data.rb().col(b));
                     column $op rhs.data.rb().col(rhs.batch(b, nb));
                 }
                 FaerVec {
                     data,
-                    context: if self.data.ncols() == nb {
-                        self.context
-                    } else {
-                        rhs.context
-                    },
+                    context: self.context,
                 }
             }
         }
@@ -316,95 +314,89 @@ macro_rules! squared_norm_data {
     }};
 }
 
-/// `rhs` is owned, so the result is written into its allocation whenever `rhs` already holds
-/// as many batches as the result: `combine(&mut rhs_i, lhs_i)` writes the result in place.
+/// `rhs` is the owned operand, so it is the destination.
+///
+/// A commutative op is just the in-place op with the operands swapped.  A non-commutative one
+/// cannot be: `rhs -= lhs` computes `rhs - lhs`, so it writes `combine(&mut rhs_i, lhs_i)`
+/// instead, which gets `lhs - rhs` in the same single pass.
 macro_rules! vec_binary_owned_rhs {
-    ($trait:ident, $method:ident, $lhs:ty, $op:tt, $combine:expr) => {
+    (commutes, $trait:ident, $method:ident, $assign_trait:ident, $assign:ident, $lhs:ty,
+     $op:tt, $combine:expr) => {
         impl<T: FaerScalar> $trait<FaerVec<T>> for $lhs {
             type Output = FaerVec<T>;
 
             fn $method(self, mut rhs: FaerVec<T>) -> Self::Output {
-                self.context
-                    .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($method));
+                $assign_trait::$assign(&mut rhs, self);
+                rhs
+            }
+        }
+    };
+    (noncommutes, $trait:ident, $method:ident, $assign_trait:ident, $assign:ident, $lhs:ty, $op:tt, $combine:expr) => {
+        impl<T: FaerScalar> $trait<FaerVec<T>> for $lhs {
+            type Output = FaerVec<T>;
+
+            fn $method(self, mut rhs: FaerVec<T>) -> Self::Output {
+                rhs.context
+                    .assert_broadcastable_into(self.context.nbatch(), stringify!($method));
                 if self.data.ncols() == rhs.data.ncols() {
                     zip!(rhs.data.rb_mut(), self.data.rb())
                         .for_each(|unzip!(r, l)| $combine(r, *l));
                     return rhs;
                 }
-                if rhs.data.ncols() > self.data.ncols() {
-                    let nb = rhs.data.ncols();
-                    for b in 0..nb {
-                        let lhs = self.data.rb().col(self.batch(b, nb));
-                        zip!(rhs.data.rb_mut().col_mut(b), lhs)
-                            .for_each(|unzip!(r, l)| $combine(r, *l));
-                    }
-                    return rhs;
-                }
-                // rhs holds fewer batches than the result, so it cannot be written into
-                let nb = self.data.ncols();
-                let mut data = Mat::zeros(self.data.nrows(), nb);
+                let nb = rhs.data.ncols();
                 for b in 0..nb {
-                    let mut column = data.rb_mut().col_mut(b);
-                    column.copy_from(self.data.rb().col(b));
-                    column $op rhs.data.rb().col(rhs.batch(b, nb));
+                    let lhs = self.data.rb().col(self.batch(b, nb));
+                    zip!(rhs.data.rb_mut().col_mut(b), lhs)
+                        .for_each(|unzip!(r, l)| $combine(r, *l));
                 }
-                FaerVec {
-                    data,
-                    context: self.context,
-                }
+                rhs
             }
         }
     };
 }
 
+/// `self` is the owned operand, so it is the destination -- which makes the in-place op the
+/// whole implementation, broadcast check included.
 macro_rules! vec_binary_owned_lhs {
-    ($trait:ident, $method:ident, $rhs:ty, $op:tt) => {
+    ($trait:ident, $method:ident, $assign_trait:ident, $assign:ident, $rhs:ty) => {
         impl<T: FaerScalar> $trait<$rhs> for FaerVec<T> {
             type Output = FaerVec<T>;
 
-            // the arithmetic in `batch` below is broadcast indexing over batches, not
-            // arithmetic on the operands, which is what the lint is looking for
-            #[allow(clippy::suspicious_arithmetic_impl)]
             fn $method(mut self, rhs: $rhs) -> Self::Output {
-                self.context
-                    .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($method));
-                // matching batch counts need no broadcast, so the whole matrix goes at once
-                // (past one column, where faer's 2-D iteration costs more than it saves)
-                if self.data.ncols() == rhs.data.ncols() && self.data.ncols() > 1 {
-                    self.data $op rhs.data.rb();
-                    return self;
-                }
-                if self.data.ncols() >= rhs.data.ncols() {
-                    let nb = self.data.ncols();
-                    for b in 0..nb {
-                        let mut column = self.data.rb_mut().col_mut(b);
-                        column $op rhs.data.rb().col(rhs.batch(b, nb));
-                    }
-                    return self;
-                }
-                let nb = rhs.data.ncols();
-                let mut data = Mat::zeros(self.data.nrows(), nb);
-                for b in 0..nb {
-                    let mut column = data.rb_mut().col_mut(b);
-                    column.copy_from(self.data.rb().col(self.batch(b, nb)));
-                    column $op rhs.data.rb().col(b);
-                }
-                FaerVec {
-                    data,
-                    context: rhs.context,
-                }
+                $assign_trait::$assign(&mut self, rhs);
+                self
             }
         }
     };
 }
+
 macro_rules! binary_set {
-    ($trait:ident,$method:ident,$op:tt,$binary:tt,$combine:expr) => {
-        vec_binary_owned_lhs!($trait, $method, FaerVec<T>, $op);
-        vec_binary_owned_lhs!($trait, $method, &FaerVec<T>, $op);
-        vec_binary_owned_lhs!($trait, $method, FaerVecRef<'_, T>, $op);
-        vec_binary_owned_lhs!($trait, $method, &FaerVecRef<'_, T>, $op);
-        vec_binary_owned_rhs!($trait, $method, FaerVecRef<'_, T>, $op, $combine);
-        vec_binary_owned_rhs!($trait, $method, &FaerVec<T>, $op, $combine);
+    ($trait:ident,$method:ident,$assign_trait:ident,$assign:ident,$commutes:ident,
+     $op:tt,$binary:tt,$combine:expr) => {
+        vec_binary_owned_lhs!($trait, $method, $assign_trait, $assign, FaerVec<T>);
+        vec_binary_owned_lhs!($trait, $method, $assign_trait, $assign, &FaerVec<T>);
+        vec_binary_owned_lhs!($trait, $method, $assign_trait, $assign, FaerVecRef<'_, T>);
+        vec_binary_owned_lhs!($trait, $method, $assign_trait, $assign, &FaerVecRef<'_, T>);
+        vec_binary_owned_rhs!(
+            $commutes,
+            $trait,
+            $method,
+            $assign_trait,
+            $assign,
+            FaerVecRef<'_, T>,
+            $op,
+            $combine
+        );
+        vec_binary_owned_rhs!(
+            $commutes,
+            $trait,
+            $method,
+            $assign_trait,
+            $assign,
+            &FaerVec<T>,
+            $op,
+            $combine
+        );
         vec_binary!(
             $trait,
             $method,
@@ -448,8 +440,8 @@ macro_rules! binary_set {
         );
     };
 }
-binary_set!(Add, add, +=, +, |rhs: &mut T, lhs: T| *rhs += lhs);
-binary_set!(Sub, sub, -=, -, |rhs: &mut T, lhs: T| *rhs = lhs - *rhs);
+binary_set!(Add, add, AddAssign, add_assign, commutes, +=, +, |rhs: &mut T, lhs: T| *rhs += lhs);
+binary_set!(Sub, sub, SubAssign, sub_assign, noncommutes, -=, -, |rhs: &mut T, lhs: T| *rhs = lhs - *rhs);
 macro_rules! assign_set {
     ($trait:ident,$method:ident,$op:tt) => {
         vec_assign!($trait, $method, FaerVec<T>, FaerVec<T>, $op);

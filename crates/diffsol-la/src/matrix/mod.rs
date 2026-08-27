@@ -1335,29 +1335,24 @@ pub(crate) mod tests {
                 f::<M>(-76.0),
             ]
         );
-
-        // rhs holds a single batch, so the two-batch result has to be allocated
-        let a = M::try_from_triplets(2, 2, indices.clone(), two_batches, ctx).unwrap();
-        let b = M::try_from_triplets(2, 2, indices, one_batch, M::C::default()).unwrap();
-        let c = &a - b;
-        assert_eq!(c.context().nbatch(), 2);
-        assert_eq!(
-            triplet_values(&c),
-            vec![
-                f::<M>(9.0),
-                f::<M>(18.0),
-                f::<M>(27.0),
-                f::<M>(36.0),
-                f::<M>(49.0),
-                f::<M>(58.0),
-                f::<M>(67.0),
-                f::<M>(76.0),
-            ]
-        );
     }
 
-    /// An owned left-hand side may be written into, which must still honour broadcasting in
-    /// both directions.
+    /// The owned right-hand side governs, so a *wider* borrowed left-hand side is an error.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_batched_owned_rhs_narrow_m<M>(ctx: M::C)
+    where
+        M: Matrix + DenseMatrix,
+        for<'a> &'a M: Sub<M, Output = M>,
+    {
+        let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
+        let wide = (1..=8).map(|i| f::<M>(i as f64)).collect::<Vec<_>>();
+        let narrow = (1..=4).map(|i| f::<M>(i as f64)).collect::<Vec<_>>();
+        let a = M::try_from_triplets(2, 2, indices.clone(), wide, ctx).unwrap();
+        let b = M::try_from_triplets(2, 2, indices, narrow, M::C::default()).unwrap();
+        let _ = &a - b;
+    }
+
+    /// The owned left-hand side governs and is written into.
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_owned_lhs_broadcast_m<M>(ctx: M::C)
     where
@@ -1397,25 +1392,20 @@ pub(crate) mod tests {
                 f::<M>(76.0),
             ]
         );
+    }
 
-        // lhs broadcasts over the batches of rhs
-        let a = M::try_from_triplets(2, 2, indices.clone(), one_batch, M::C::default()).unwrap();
-        let b = M::try_from_triplets(2, 2, indices, two_batches, ctx).unwrap();
-        let c = a - &b;
-        assert_eq!(c.context().nbatch(), 2);
-        assert_eq!(
-            triplet_values(&c),
-            vec![
-                f::<M>(-9.0),
-                f::<M>(-18.0),
-                f::<M>(-27.0),
-                f::<M>(-36.0),
-                f::<M>(-49.0),
-                f::<M>(-58.0),
-                f::<M>(-67.0),
-                f::<M>(-76.0),
-            ]
-        );
+    /// The owned left-hand side governs, so a *wider* right-hand side is an error.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_batched_owned_lhs_narrow_m<M>(ctx: M::C)
+    where
+        M: Matrix + for<'a> Sub<&'a M, Output = M>,
+    {
+        let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
+        let narrow = (1..=4).map(|i| f::<M>(i as f64)).collect::<Vec<_>>();
+        let wide = (1..=8).map(|i| f::<M>(10.0 * i as f64)).collect::<Vec<_>>();
+        let a = M::try_from_triplets(2, 2, indices.clone(), narrow, M::C::default()).unwrap();
+        let b = M::try_from_triplets(2, 2, indices, wide, ctx).unwrap();
+        let _ = a - &b;
     }
 
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
@@ -1520,12 +1510,12 @@ pub(crate) mod tests {
             ctx,
         )
         .unwrap();
-        // lhs is narrower than the result, so it cannot be written into
-        let c = narrow + &wide;
+        // the owned left-hand side governs, so it is the wide one and `narrow` broadcasts in
+        let c = wide + &narrow;
         assert_eq!(c.context().nbatch(), 2);
         let expected = (1..=4)
-            .map(|i| f::<M>(i as f64 + 10.0 * i as f64))
-            .chain((5..=8).map(|i| f::<M>((i - 4) as f64 + 10.0 * i as f64)))
+            .map(|i| f::<M>(10.0 * i as f64 + i as f64))
+            .chain((5..=8).map(|i| f::<M>(10.0 * i as f64 + (i - 4) as f64)))
             .collect::<Vec<_>>();
         assert_eq!(triplet_values(&c), expected);
     }
@@ -1678,7 +1668,9 @@ pub(crate) mod tests {
             wide_ctx,
         )
         .unwrap();
-        let c = narrow + &wide;
+        // the owned left-hand side governs, so the wide matrix is the owned one and the
+        // narrow one broadcasts into its groups
+        let c = wide + &narrow;
         assert_eq!(c.context().nbatch(), 4);
         let group0 = (1..=4).map(|i| f::<M>(i as f64));
         let group1 = (5..=8).map(|i| f::<M>(i as f64));
@@ -1689,6 +1681,33 @@ pub(crate) mod tests {
             .chain(group1)
             .collect::<Vec<_>>();
         assert_eq!(triplet_values(&c), expected);
+    }
+
+    /// The grouped flavour of [`test_batched_owned_lhs_narrow_m`].
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_grouped_owned_lhs_narrow_m<M>(ctx2: M::C)
+    where
+        M: Matrix + for<'a> Add<&'a M, Output = M>,
+    {
+        let wide_ctx = ctx4::<M>(&ctx2);
+        let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
+        let narrow = M::try_from_triplets(
+            2,
+            2,
+            indices.clone(),
+            (1..=8).map(|i| f::<M>(i as f64)).collect(),
+            ctx2,
+        )
+        .unwrap();
+        let wide = M::try_from_triplets(
+            2,
+            2,
+            indices,
+            (0..16).map(|_| f::<M>(0.0)).collect(),
+            wide_ctx,
+        )
+        .unwrap();
+        let _ = narrow + &wide;
     }
 
     // --- Narrow-destination tests: a wider source would silently drop batches ---
@@ -2493,6 +2512,18 @@ macro_rules! generate_matrix_tests_batched {
             #[test]
             fn [<test_batched_gemv_beta_ $suffix>]() {
                 $crate::matrix::tests::test_batched_gemv_beta_m::<$M>($ctx2);
+            }
+
+            // --- Governing-operand tests: the operand that governs must be the wider one ---
+            #[test]
+            #[should_panic(expected = "incompatible nbatch")]
+            fn [<test_batched_owned_lhs_narrow_ $suffix>]() {
+                $crate::matrix::tests::test_batched_owned_lhs_narrow_m::<$M>($ctx2);
+            }
+            #[test]
+            #[should_panic(expected = "incompatible nbatch")]
+            fn [<test_grouped_owned_lhs_narrow_ $suffix>]() {
+                $crate::matrix::tests::test_grouped_owned_lhs_narrow_m::<$M>($ctx2);
             }
 
             // --- Narrow-destination tests (source wider than destination panics) ---

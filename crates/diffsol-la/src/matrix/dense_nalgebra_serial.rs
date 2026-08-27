@@ -62,82 +62,65 @@ impl<T: NalgebraScalar> MatrixCommon for NalgebraMat<T> {
         &self.data
     }
 }
-/// `self` is owned, so the result is written into its columns whenever it already holds as
-/// many batches as the result.
+/// `self` is the owned operand, so it is the destination -- which makes the in-place op the
+/// whole implementation, broadcast check and whole-matrix fast path included.
 macro_rules! binary_owned_lhs {
-    ($tr:ident, $fn:ident, $rhs:ty, $op:tt) => {
+    ($tr:ident, $fn:ident, $assign_tr:ident, $assign:ident, $rhs:ty) => {
         impl<T: NalgebraScalar> $tr<$rhs> for NalgebraMat<T> {
             type Output = NalgebraMat<T>;
 
             fn $fn(mut self, rhs: $rhs) -> Self::Output {
-                self.context
-                    .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($fn));
-                let nc = self.ncols();
-                if self.context.nbatch() >= rhs.context.nbatch() {
-                    let nb = self.context.nbatch();
-                    for b in 0..nb {
-                        let mut columns = self.data.columns_mut(self.col(b, 0), nc);
-                        columns $op &rhs.data.columns(rhs.col_bcast(b, 0, nb), nc);
-                    }
-                    return self;
-                }
-                // self holds fewer batches than the result, so it cannot be written into
-                let nb = rhs.context.nbatch();
-                let mut data = DMatrix::zeros(self.nrows(), nc * nb);
-                for b in 0..nb {
-                    let mut columns = data.columns_mut(b * nc, nc);
-                    columns.copy_from(&self.data.columns(self.col_bcast(b, 0, nb), nc));
-                    columns $op &rhs.data.columns(rhs.col(b, 0), nc);
-                }
-                NalgebraMat {
-                    data,
-                    context: rhs.context,
-                }
+                $assign_tr::$assign(&mut self, rhs);
+                self
             }
         }
     };
 }
-binary_owned_lhs!(Add, add, &NalgebraMat<T>, +=);
-binary_owned_lhs!(Sub, sub, &NalgebraMat<T>, -=);
+binary_owned_lhs!(Add, add, AddAssign, add_assign, &NalgebraMat<T>);
+binary_owned_lhs!(Sub, sub, SubAssign, sub_assign, &NalgebraMat<T>);
 
-/// `rhs` is owned, so the result is written into its columns whenever it already holds as
-/// many batches as the result: `combine(&mut rhs_ij, lhs_ij)`.
+/// `rhs` is the owned operand, so it is the destination.
+///
+/// A commutative op is just the in-place op with the operands swapped.  A non-commutative one
+/// cannot be: `rhs -= lhs` computes `rhs - lhs`, so it writes `combine(&mut rhs_ij, lhs_ij)`
+/// instead, which gets `lhs - rhs` in the same single pass.
 macro_rules! binary_owned_rhs {
-    ($tr:ident, $fn:ident, $lhs:ty, $op:tt, $combine:expr) => {
+    (commutes, $tr:ident, $fn:ident, $assign_tr:ident, $assign:ident, $lhs:ty, $op:tt,
+     $combine:expr) => {
         impl<T: NalgebraScalar> $tr<NalgebraMat<T>> for $lhs {
             type Output = NalgebraMat<T>;
 
             fn $fn(self, mut rhs: NalgebraMat<T>) -> Self::Output {
-                self.context
-                    .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($fn));
+                $assign_tr::$assign(&mut rhs, self);
+                rhs
+            }
+        }
+    };
+    (noncommutes, $tr:ident, $fn:ident, $assign_tr:ident, $assign:ident, $lhs:ty, $op:tt, $combine:expr) => {
+        impl<T: NalgebraScalar> $tr<NalgebraMat<T>> for $lhs {
+            type Output = NalgebraMat<T>;
+
+            fn $fn(self, mut rhs: NalgebraMat<T>) -> Self::Output {
+                rhs.context
+                    .assert_broadcastable_into(self.context.nbatch(), stringify!($fn));
                 let nc = self.ncols();
-                if rhs.context.nbatch() >= self.context.nbatch() {
-                    let nb = rhs.context.nbatch();
-                    for b in 0..nb {
-                        let mut columns = rhs.data.columns_mut(rhs.col(b, 0), nc);
-                        columns
-                            .zip_apply(&self.data.columns(self.col_bcast(b, 0, nb), nc), $combine);
-                    }
-                    return rhs;
-                }
-                // rhs holds fewer batches than the result, so it cannot be written into
-                let nb = self.context.nbatch();
-                let mut data = DMatrix::zeros(self.nrows(), nc * nb);
+                let nb = rhs.context.nbatch();
                 for b in 0..nb {
-                    let mut columns = data.columns_mut(b * nc, nc);
-                    columns.copy_from(&self.data.columns(self.col(b, 0), nc));
-                    columns $op &rhs.data.columns(rhs.col_bcast(b, 0, nb), nc);
+                    let mut columns = rhs.data.columns_mut(rhs.col(b, 0), nc);
+                    columns.zip_apply(&self.data.columns(self.col_bcast(b, 0, nb), nc), $combine);
                 }
-                NalgebraMat {
-                    data,
-                    context: self.context,
-                }
+                rhs
             }
         }
     };
 }
-binary_owned_rhs!(Add, add, &NalgebraMat<T>, +=, |rhs: &mut T, lhs: T| *rhs += lhs);
-binary_owned_rhs!(Sub, sub, &NalgebraMat<T>, -=, |rhs: &mut T, lhs: T| *rhs = lhs - *rhs);
+binary_owned_rhs!(
+    commutes, Add, add, AddAssign, add_assign, &NalgebraMat<T>, +=, |rhs: &mut T, lhs: T| *rhs += lhs
+);
+binary_owned_rhs!(
+    noncommutes, Sub, sub, SubAssign, sub_assign, &NalgebraMat<T>, -=,
+    |rhs: &mut T, lhs: T| *rhs = lhs - *rhs
+);
 macro_rules! assign {
     ($tr:ident, $fn:ident, $l:ty, $r:ty, $op:tt) => {
         impl<T: NalgebraScalar> $tr<$r> for $l {
@@ -692,6 +675,14 @@ mod tests {
     #[test]
     fn test_batched_owned_rhs_broadcast() {
         super::super::tests::test_batched_owned_rhs_broadcast_m::<NalgebraMat<f64>>(
+            NalgebraContext::with_nbatch(2),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "incompatible nbatch")]
+    fn test_batched_owned_rhs_narrow() {
+        super::super::tests::test_batched_owned_rhs_narrow_m::<NalgebraMat<f64>>(
             NalgebraContext::with_nbatch(2),
         );
     }

@@ -286,8 +286,9 @@ macro_rules! impl_sub_lhs {
         impl<T: ScalarCuda> Sub<$rhs> for $lhs {
             type Output = $out;
             fn sub(mut self, rhs: $rhs) -> Self::Output {
+                // `self` is owned, so it is the destination and `rhs` broadcasts into it
                 self.context
-                    .assert_compatible_nbatch(rhs.context.nbatch(), "sub");
+                    .assert_broadcastable_into(rhs.context.nbatch(), "sub");
                 let nbatch = self.context.nbatch();
                 let nstates = (self.nrows() * self.ncols()) as u32;
                 let nbatch_u32 = nbatch as u32;
@@ -295,33 +296,6 @@ macro_rules! impl_sub_lhs {
                 let rhs_nbatch = rhs.context.nbatch() as i32;
                 let rhs_nstates = (rhs.nrows() * rhs.ncols()) as u32;
                 let rhs_stride = rhs_nstates as i32;
-                if nbatch < rhs.context.nbatch() {
-                    // self holds fewer batches than the result, so it cannot be written into
-                    let out_nbatch = rhs.context.nbatch();
-                    let mut ret =
-                        Self::Output::zeros(self.nrows(), self.ncols(), rhs.context.clone());
-                    let self_nbatch_i32 = nbatch as i32;
-                    let ret_nbatch = out_nbatch as i32;
-                    let ret_stride = (ret.nrows() * ret.ncols()) as i32;
-                    let f = self.context.function::<T>("vec_sub");
-                    let mut build = self.context.stream.launch_builder(&f);
-                    build
-                        .arg(&self.data)
-                        .arg(&rhs.data)
-                        .arg(&mut ret.data)
-                        .arg(&nstates)
-                        .arg(&self_stride)
-                        .arg(&self_nbatch_i32)
-                        .arg(&rhs_stride)
-                        .arg(&rhs_nbatch)
-                        .arg(&ret_stride)
-                        .arg(&ret_nbatch);
-                    let config = self
-                        .context
-                        .launch_config_2d(nstates, out_nbatch as u32, &f);
-                    unsafe { build.launch(config) }.expect("Failed to launch kernel");
-                    return ret;
-                }
                 let f = self.context.function::<T>("vec_sub_assign");
                 let mut build = self.context.stream.launch_builder(&f);
                 build
@@ -346,8 +320,9 @@ macro_rules! impl_add_lhs {
         impl<T: ScalarCuda> Add<$rhs> for $lhs {
             type Output = $out;
             fn add(mut self, rhs: $rhs) -> Self::Output {
+                // `self` is owned, so it is the destination and `rhs` broadcasts into it
                 self.context
-                    .assert_compatible_nbatch(rhs.context.nbatch(), "add");
+                    .assert_broadcastable_into(rhs.context.nbatch(), "add");
                 let nbatch = self.context.nbatch();
                 let nstates = (self.nrows() * self.ncols()) as u32;
                 let nbatch_u32 = nbatch as u32;
@@ -355,33 +330,6 @@ macro_rules! impl_add_lhs {
                 let rhs_nbatch = rhs.context.nbatch() as i32;
                 let rhs_nstates = (rhs.nrows() * rhs.ncols()) as u32;
                 let rhs_stride = rhs_nstates as i32;
-                if nbatch < rhs.context.nbatch() {
-                    // self holds fewer batches than the result, so it cannot be written into
-                    let out_nbatch = rhs.context.nbatch();
-                    let mut ret =
-                        Self::Output::zeros(self.nrows(), self.ncols(), rhs.context.clone());
-                    let self_nbatch_i32 = nbatch as i32;
-                    let ret_nbatch = out_nbatch as i32;
-                    let ret_stride = (ret.nrows() * ret.ncols()) as i32;
-                    let f = self.context.function::<T>("vec_add");
-                    let mut build = self.context.stream.launch_builder(&f);
-                    build
-                        .arg(&self.data)
-                        .arg(&rhs.data)
-                        .arg(&mut ret.data)
-                        .arg(&nstates)
-                        .arg(&self_stride)
-                        .arg(&self_nbatch_i32)
-                        .arg(&rhs_stride)
-                        .arg(&rhs_nbatch)
-                        .arg(&ret_stride)
-                        .arg(&ret_nbatch);
-                    let config = self
-                        .context
-                        .launch_config_2d(nstates, out_nbatch as u32, &f);
-                    unsafe { build.launch(config) }.expect("Failed to launch kernel");
-                    return ret;
-                }
                 let f = self.context.function::<T>("vec_add_assign");
                 let mut build = self.context.stream.launch_builder(&f);
                 build

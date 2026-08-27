@@ -17,7 +17,7 @@
 // `gridDim.y / src_nbatch` contiguous output batches, so `src_nbatch == 1` reads batch 0 for
 // every output batch and `src_nbatch == B` against `gridDim.y == B * P` reads batch `b / P`.
 // Batch counts that are not exact multiples of each other are rejected host-side
-// (`Context::assert_compatible_nbatch`).
+// (`Context::assert_broadcastable_into`).
 __device__ inline int broadcast_batch(int b, int src_nbatch) {
     return b * src_nbatch / (int)gridDim.y;
 }

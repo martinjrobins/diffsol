@@ -84,19 +84,16 @@ macro_rules! sparse_binary {
             type Output = FaerSparseMat<T>;
 
             fn $method(self, rhs: &FaerSparseMat<T>) -> Self::Output {
+                // `self` is the owned operand, so the result carries its batch count and `rhs`
+                // broadcasts into it (a new allocation either way: the sparsity is the union)
                 self.context
-                    .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($method));
-                // either side may broadcast, so the result carries the larger batch count
-                let nbatch = self.data.len().max(rhs.data.len());
+                    .assert_broadcastable_into(rhs.context.nbatch(), stringify!($method));
+                let nbatch = self.data.len();
                 FaerSparseMat {
                     data: (0..nbatch)
-                        .map(|b| self.batch_bcast(b, nbatch) $binary rhs.batch_bcast(b, nbatch))
+                        .map(|b| self.batch(b) $binary rhs.batch_bcast(b, nbatch))
                         .collect(),
-                    context: if self.data.len() == nbatch {
-                        self.context
-                    } else {
-                        rhs.context
-                    },
+                    context: self.context,
                 }
             }
         }

@@ -63,84 +63,70 @@ impl<T: FaerScalar> MatrixCommon for FaerMat<T> {
         &self.data
     }
 }
-/// `self` is owned, so the result is written into its columns whenever it already holds as
-/// many batches as the result.
+/// `self` is the owned operand, so it is the destination -- which makes the in-place op the
+/// whole implementation, broadcast check and whole-matrix fast path included.
 macro_rules! binary_owned_lhs {
-    ($tr:ident, $fn:ident, $rhs:ty, $op:tt) => {
+    ($tr:ident, $fn:ident, $assign_tr:ident, $assign:ident, $rhs:ty) => {
         impl<T: FaerScalar> $tr<$rhs> for FaerMat<T> {
             type Output = FaerMat<T>;
 
             fn $fn(mut self, rhs: $rhs) -> Self::Output {
-                self.context
-                    .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($fn));
-                let nc = self.ncols();
-                if self.context.nbatch() >= rhs.context.nbatch() {
-                    let nb = self.context.nbatch();
-                    for b in 0..nb {
-                        let c = self.col(b, 0);
-                        let mut columns = self.data.rb_mut().subcols_mut(c, nc);
-                        columns $op rhs.data.rb().subcols(rhs.col_bcast(b, 0, nb), nc);
-                    }
-                    return self;
-                }
-                // self holds fewer batches than the result, so it cannot be written into
-                let nb = rhs.context.nbatch();
-                let mut data = Mat::zeros(self.nrows(), nc * nb);
-                for b in 0..nb {
-                    let mut columns = data.rb_mut().subcols_mut(b * nc, nc);
-                    columns.copy_from(self.data.rb().subcols(self.col_bcast(b, 0, nb), nc));
-                    columns $op rhs.data.rb().subcols(rhs.col(b, 0), nc);
-                }
-                FaerMat {
-                    data,
-                    context: rhs.context,
-                }
+                $assign_tr::$assign(&mut self, rhs);
+                self
             }
         }
     };
 }
-binary_owned_lhs!(Add, add, &FaerMat<T>, +=);
-binary_owned_lhs!(Sub, sub, &FaerMat<T>, -=);
+binary_owned_lhs!(Add, add, AddAssign, add_assign, &FaerMat<T>);
+binary_owned_lhs!(Sub, sub, SubAssign, sub_assign, &FaerMat<T>);
 
-/// `rhs` is owned, so the result is written into its columns whenever it already holds as
-/// many batches as the result: `combine(&mut rhs_ij, lhs_ij)`.
+/// `rhs` is the owned operand, so it is the destination.
+///
+/// A commutative op is just the in-place op with the operands swapped.  A non-commutative one
+/// cannot be: `rhs -= lhs` computes `rhs - lhs`, so it writes `combine(&mut rhs_ij, lhs_ij)`
+/// instead, which gets `lhs - rhs` in the same single pass.
 macro_rules! binary_owned_rhs {
-    ($tr:ident, $fn:ident, $lhs:ty, $op:tt, $combine:expr) => {
+    (commutes, $tr:ident, $fn:ident, $assign_tr:ident, $assign:ident, $lhs:ty, $op:tt,
+     $combine:expr) => {
         impl<T: FaerScalar> $tr<FaerMat<T>> for $lhs {
             type Output = FaerMat<T>;
 
             fn $fn(self, mut rhs: FaerMat<T>) -> Self::Output {
-                self.context
-                    .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($fn));
+                $assign_tr::$assign(&mut rhs, self);
+                rhs
+            }
+        }
+    };
+    (noncommutes, $tr:ident, $fn:ident, $assign_tr:ident, $assign:ident, $lhs:ty, $op:tt, $combine:expr) => {
+        impl<T: FaerScalar> $tr<FaerMat<T>> for $lhs {
+            type Output = FaerMat<T>;
+
+            fn $fn(self, mut rhs: FaerMat<T>) -> Self::Output {
+                rhs.context
+                    .assert_broadcastable_into(self.context.nbatch(), stringify!($fn));
                 let nc = self.ncols();
-                if rhs.context.nbatch() >= self.context.nbatch() {
-                    let nb = rhs.context.nbatch();
-                    for b in 0..nb {
-                        let c = rhs.col(b, 0);
-                        let columns = rhs.data.rb_mut().subcols_mut(c, nc);
-                        zip!(columns, self.data.rb().subcols(self.col_bcast(b, 0, nb), nc))
-                            .for_each(|unzip!(r, l)| $combine(r, *l));
-                    }
-                    return rhs;
-                }
-                // rhs holds fewer batches than the result, so it cannot be written into
-                let nb = self.context.nbatch();
-                let mut data = Mat::zeros(self.nrows(), nc * nb);
+                let nb = rhs.context.nbatch();
                 for b in 0..nb {
-                    let mut columns = data.rb_mut().subcols_mut(b * nc, nc);
-                    columns.copy_from(self.data.rb().subcols(self.col(b, 0), nc));
-                    columns $op rhs.data.rb().subcols(rhs.col_bcast(b, 0, nb), nc);
+                    let c = rhs.col(b, 0);
+                    let columns = rhs.data.rb_mut().subcols_mut(c, nc);
+                    zip!(
+                        columns,
+                        self.data.rb().subcols(self.col_bcast(b, 0, nb), nc)
+                    )
+                    .for_each(|unzip!(r, l)| $combine(r, *l));
                 }
-                FaerMat {
-                    data,
-                    context: self.context,
-                }
+                rhs
             }
         }
     };
 }
-binary_owned_rhs!(Add, add, &FaerMat<T>, +=, |rhs: &mut T, lhs: T| *rhs += lhs);
-binary_owned_rhs!(Sub, sub, &FaerMat<T>, -=, |rhs: &mut T, lhs: T| *rhs = lhs - *rhs);
+binary_owned_rhs!(
+    commutes, Add, add, AddAssign, add_assign, &FaerMat<T>, +=, |rhs: &mut T, lhs: T| *rhs += lhs
+);
+binary_owned_rhs!(
+    noncommutes, Sub, sub, SubAssign, sub_assign, &FaerMat<T>, -=,
+    |rhs: &mut T, lhs: T| *rhs = lhs - *rhs
+);
 macro_rules! assign {
     ($tr:ident, $fn:ident, $l:ty, $r:ty, $op:tt) => {
         impl<T: FaerScalar> $tr<$r> for $l {
@@ -677,6 +663,14 @@ mod tests {
     #[test]
     fn test_batched_owned_rhs_broadcast() {
         super::super::tests::test_batched_owned_rhs_broadcast_m::<FaerMat<f64>>(
+            FaerContext::with_nbatch(2),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "incompatible nbatch")]
+    fn test_batched_owned_rhs_narrow() {
+        super::super::tests::test_batched_owned_rhs_narrow_m::<FaerMat<f64>>(
             FaerContext::with_nbatch(2),
         );
     }
