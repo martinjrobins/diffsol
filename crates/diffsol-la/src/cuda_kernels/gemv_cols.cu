@@ -18,7 +18,7 @@ __global__ void gemv_cols_f64(double* y, const double* __restrict__ mat,
     int row = blockIdx.x * blockDim.x + threadIdx.x;
     if (row >= nrows) return;
     int b = blockIdx.y;
-    int mat_base = (b % mat_nbatch) * mat_stride + start * nrows + row;
+    int mat_base = broadcast_batch(b, mat_nbatch) * mat_stride + start * nrows + row;
     int yi = b * y_stride + row;
 
     // consecutive threads are consecutive rows within a column, so each read is coalesced

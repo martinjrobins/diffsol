@@ -13,9 +13,13 @@ mod common;
 use common::{bench_explicit, bench_implicit, bench_implicit_cg, bench_implicit_rt};
 
 fn criterion_benchmark(c: &mut Criterion) {
+    // 10 samples over a second is criterion's floor, and it made the CI numbers useless: the
+    // runs are compared against a distribution collected on other GitHub runners, so the
+    // per-run noise has to be well under the regression we want to catch.  The problems are
+    // built outside the timed loop (see `common::setup_problem`), which keeps this affordable.
     *c = std::mem::take(c)
-        .measurement_time(Duration::from_secs(1))
-        .sample_size(10)
+        .measurement_time(Duration::from_secs(3))
+        .sample_size(50)
         .warm_up_time(Duration::from_secs(1));
 
     // -------------------------------------------------------------------------

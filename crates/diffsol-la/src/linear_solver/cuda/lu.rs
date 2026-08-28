@@ -1,5 +1,6 @@
 use std::{cell::RefCell, mem::MaybeUninit};
 
+use crate::context::broadcast_batch;
 use crate::{
     error::LaError, linear_solver_error, Context, CudaContext, CudaMat, CudaVec, LinearOp,
     LinearSolver, Matrix, ScalarCuda,
@@ -109,6 +110,8 @@ impl<T: ScalarCuda> LinearSolver<CudaMat<T>> for CudaLU<T> {
             Err(linear_solver_error!(LinearSolverNotSetup))?;
         }
         let nbatch = x.context.nbatch();
+        let lu_nbatch = matrix.context().nbatch();
+        x.context.assert_broadcastable_into(lu_nbatch, "lu_solve");
         let nrows = matrix.nrows();
         let ncols = matrix.ncols();
         let x_nstates = x.data.len() / nbatch;
@@ -125,8 +128,10 @@ impl<T: ScalarCuda> LinearSolver<CudaMat<T>> for CudaLU<T> {
         let (x_ptr, _) = x.data.device_ptr_mut(stream);
         let (n_ptr, _) = nfo.device_ptr_mut(stream);
         for b in 0..nbatch {
-            let a_offset = b * nrows * ncols;
-            let p_offset = b * nrows;
+            // one factorization can serve several right-hand side batches
+            let lu_b = broadcast_batch(b, lu_nbatch, nbatch);
+            let a_offset = lu_b * nrows * ncols;
+            let p_offset = lu_b * nrows;
             let x_offset = b * x_nstates;
             unsafe {
                 cusolverDnDgetrs(
@@ -139,7 +144,7 @@ impl<T: ScalarCuda> LinearSolver<CudaMat<T>> for CudaLU<T> {
                     (p_ptr as *const i32).add(p_offset),
                     (x_ptr as *mut f64).add(x_offset),
                     n,
-                    (n_ptr as *mut i32).add(b),
+                    (n_ptr as *mut i32).add(lu_b),
                 )
             };
         }
@@ -187,6 +192,42 @@ impl<T: ScalarCuda> LinearSolver<CudaMat<T>> for CudaLU<T> {
         }
 
         self.linearisation_set = false;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        linear_solver::tests::{diagonal_op, test_grouped_lu_solve, test_narrow_state_lu_solve},
+        Vector,
+    };
+
+    #[test]
+    fn test_lu() {
+        let mut s = CudaLU::<f64>::default();
+        let op = diagonal_op::<CudaMat<f64>>(2.0);
+        s.set_sparsity(&op);
+        s.set_linearisation(&op);
+        let b = CudaVec::from_vec(vec![2.0, 4.0], Default::default());
+        let x = s.solve(&b).unwrap();
+        x.assert_eq_st(
+            &CudaVec::from_vec(vec![1.0, 2.0], Default::default()),
+            1e-10,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "incompatible nbatch")]
+    fn test_narrow_state_lu() {
+        test_narrow_state_lu_solve::<CudaMat<f64>, CudaLU<f64>>(
+            CudaContext::default().with_nbatch(2),
+        );
+    }
+
+    #[test]
+    fn test_grouped_lu() {
+        test_grouped_lu_solve::<CudaMat<f64>, CudaLU<f64>>(CudaContext::default().with_nbatch(2));
     }
 }
 

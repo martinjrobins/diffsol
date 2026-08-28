@@ -3,6 +3,7 @@ use std::ops::{Add, AddAssign, Div, Index, IndexMut, Mul, MulAssign, Sub, SubAss
 use faer::reborrow::{Reborrow, ReborrowMut};
 use faer::{unzip, zip, Col, Mat, MatMut, MatRef};
 
+use crate::context::broadcast_batch;
 use crate::{scalar::Scale, Context, FaerContext, FaerScalar, IndexType, Vector, VectorHost};
 
 use crate::{FaerMat, VectorCommon, VectorIndex, VectorView, VectorViewMut};
@@ -38,17 +39,11 @@ pub struct FaerVecMut<'a, T: FaerScalar> {
     pub(crate) context: FaerContext,
 }
 
-/// Column holding `batch`, broadcasting a single-batch vector over all batches.
-macro_rules! batch_method {
-    () => {
-        #[inline]
-        pub(crate) fn batch(&self, batch: usize) -> usize {
-            batch % self.data.ncols()
-        }
-    };
-}
 impl<T: FaerScalar> FaerVec<T> {
-    batch_method!();
+    #[inline]
+    pub(crate) fn batch(&self, batch: usize, nbatch: usize) -> usize {
+        broadcast_batch(batch, self.data.ncols(), nbatch)
+    }
 
     pub fn check_for_nan(&self, label: &str) -> bool {
         for b in 0..self.data.ncols() {
@@ -64,7 +59,10 @@ impl<T: FaerScalar> FaerVec<T> {
     }
 }
 impl<T: FaerScalar> FaerVecRef<'_, T> {
-    batch_method!();
+    #[inline]
+    pub(crate) fn batch(&self, batch: usize, nbatch: usize) -> usize {
+        broadcast_batch(batch, self.data.ncols(), nbatch)
+    }
 }
 
 impl<T: FaerScalar> From<Col<T>> for FaerVec<T> {
@@ -80,7 +78,7 @@ impl<T: FaerScalar> DefaultDenseMatrix for FaerVec<T> {
     type M = FaerMat<T>;
 }
 
-macro_rules! common {
+macro_rules! impl_vector_common {
     ($t:ty, $inner:ty) => {
         impl<T: FaerScalar> VectorCommon for $t {
             type T = T;
@@ -92,8 +90,8 @@ macro_rules! common {
         }
     };
 }
-common!(FaerVec<T>, Mat<T>);
-macro_rules! common_ref {
+impl_vector_common!(FaerVec<T>, Mat<T>);
+macro_rules! impl_vector_common_ref {
     ($t:ty, $inner:ty) => {
         impl<'a, T: FaerScalar> VectorCommon for $t {
             type T = T;
@@ -105,20 +103,22 @@ macro_rules! common_ref {
         }
     };
 }
-common_ref!(FaerVecRef<'a, T>, MatRef<'a, T>);
-common_ref!(FaerVecMut<'a, T>, MatMut<'a, T>);
+impl_vector_common_ref!(FaerVecRef<'a, T>, MatRef<'a, T>);
+impl_vector_common_ref!(FaerVecMut<'a, T>, MatMut<'a, T>);
 
-macro_rules! vec_binary {
+macro_rules! impl_binary_ref_ref {
     ($trait:ident, $method:ident, $lhs:ty, $rhs:ty, $op:tt, $binary:tt) => {
         impl<T: FaerScalar> $trait<$rhs> for $lhs {
             type Output = FaerVec<T>;
 
-            // the `%` below is broadcast indexing over batches, not arithmetic on the
-            // operands, which is what the lint is looking for
+            // the arithmetic in `batch` below is broadcast indexing over batches, not
+            // arithmetic on the operands, which is what the lint is looking for
             #[allow(clippy::suspicious_arithmetic_impl)]
             fn $method(self, rhs: $rhs) -> Self::Output {
+                // neither operand is owned, so the result is allocated at the left-hand
+                // side's batch count and `rhs` broadcasts into it
                 self.context
-                    .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($method));
+                    .assert_broadcastable_into(rhs.context.nbatch(), stringify!($method));
                 // the unbatched path goes through the columns on purpose: faer's whole-matrix
                 // operators are ~45% slower for a single column (see lin_alg_ops
                 // add_ref_ref/faer)
@@ -141,34 +141,30 @@ macro_rules! vec_binary {
                         context: self.context,
                     };
                 }
-                let nb = self.data.ncols().max(rhs.data.ncols());
+                let nb = self.data.ncols();
                 let mut data = Mat::zeros(self.data.nrows(), nb);
                 for b in 0..nb {
                     let mut column = data.rb_mut().col_mut(b);
-                    column.copy_from(self.data.rb().col(b % self.data.ncols()));
-                    column $op rhs.data.rb().col(b % rhs.data.ncols());
+                    column.copy_from(self.data.rb().col(b));
+                    column $op rhs.data.rb().col(rhs.batch(b, nb));
                 }
                 FaerVec {
                     data,
-                    context: if self.data.ncols() == nb {
-                        self.context
-                    } else {
-                        rhs.context
-                    },
+                    context: self.context,
                 }
             }
         }
     };
 }
-macro_rules! vec_assign {
+macro_rules! impl_assign {
     ($trait:ident, $method:ident, $lhs:ty, $rhs:ty, $op:tt) => {
         impl<T: FaerScalar> $trait<$rhs> for $lhs {
-            // the `%` below is broadcast indexing over batches, not arithmetic on the
-            // operands, which is what the lint is looking for
+            // the arithmetic in `batch` below is broadcast indexing over batches, not
+            // arithmetic on the operands, which is what the lint is looking for
             #[allow(clippy::suspicious_op_assign_impl)]
             fn $method(&mut self, rhs: $rhs) {
                 self.context
-                    .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($method));
+                    .assert_broadcastable_into(rhs.context.nbatch(), stringify!($method));
                 // the whole-matrix operator only pays off past one column: faer's 2-D
                 // iteration costs ~1.5x the single-column path on short vectors (see
                 // lin_alg_ops add_assign/faer/2)
@@ -176,20 +172,256 @@ macro_rules! vec_assign {
                     self.data $op rhs.data.rb();
                     return;
                 }
-                for b in 0..self.data.ncols() {
+                let nb = self.data.ncols();
+                for b in 0..nb {
                     let mut column = self.data.rb_mut().col_mut(b);
-                    column $op rhs.data.rb().col(b % rhs.data.ncols());
+                    column $op rhs.data.rb().col(rhs.batch(b, nb));
                 }
             }
         }
     };
 }
 
-macro_rules! copy_from_data {
+/// `self` is the owned operand, so it is the destination -- which makes the in-place op the
+/// whole implementation, broadcast check included.
+macro_rules! impl_binary_owned_lhs {
+    ($trait:ident, $method:ident, $assign_trait:ident, $assign:ident, $rhs:ty) => {
+        impl<T: FaerScalar> $trait<$rhs> for FaerVec<T> {
+            type Output = FaerVec<T>;
+
+            fn $method(mut self, rhs: $rhs) -> Self::Output {
+                $assign_trait::$assign(&mut self, rhs);
+                self
+            }
+        }
+    };
+}
+
+/// `rhs` is the owned operand, so it is the destination.
+///
+/// A commutative op is just the in-place op with the operands swapped.  A non-commutative one
+/// cannot be: `rhs -= lhs` computes `rhs - lhs`, so it writes `combine(&mut rhs_i, lhs_i)`
+/// instead, which gets `lhs - rhs` in the same single pass.
+macro_rules! impl_binary_owned_rhs {
+    (commutes, $trait:ident, $method:ident, $assign_trait:ident, $assign:ident, $lhs:ty,
+     $op:tt, $combine:expr) => {
+        impl<T: FaerScalar> $trait<FaerVec<T>> for $lhs {
+            type Output = FaerVec<T>;
+
+            fn $method(self, mut rhs: FaerVec<T>) -> Self::Output {
+                $assign_trait::$assign(&mut rhs, self);
+                rhs
+            }
+        }
+    };
+    (noncommutes, $trait:ident, $method:ident, $assign_trait:ident, $assign:ident, $lhs:ty, $op:tt, $combine:expr) => {
+        impl<T: FaerScalar> $trait<FaerVec<T>> for $lhs {
+            type Output = FaerVec<T>;
+
+            fn $method(self, mut rhs: FaerVec<T>) -> Self::Output {
+                rhs.context
+                    .assert_broadcastable_into(self.context.nbatch(), stringify!($method));
+                if self.data.ncols() == rhs.data.ncols() {
+                    zip!(rhs.data.rb_mut(), self.data.rb())
+                        .for_each(|unzip!(r, l)| $combine(r, *l));
+                    return rhs;
+                }
+                let nb = rhs.data.ncols();
+                for b in 0..nb {
+                    let lhs = self.data.rb().col(self.batch(b, nb));
+                    zip!(rhs.data.rb_mut().col_mut(b), lhs)
+                        .for_each(|unzip!(r, l)| $combine(r, *l));
+                }
+                rhs
+            }
+        }
+    };
+}
+
+macro_rules! impl_binary_set {
+    ($trait:ident,$method:ident,$assign_trait:ident,$assign:ident,$commutes:ident,
+     $op:tt,$binary:tt,$combine:expr) => {
+        impl_binary_owned_lhs!($trait, $method, $assign_trait, $assign, FaerVec<T>);
+        impl_binary_owned_lhs!($trait, $method, $assign_trait, $assign, &FaerVec<T>);
+        impl_binary_owned_lhs!($trait, $method, $assign_trait, $assign, FaerVecRef<'_, T>);
+        impl_binary_owned_lhs!($trait, $method, $assign_trait, $assign, &FaerVecRef<'_, T>);
+        impl_binary_owned_rhs!(
+            $commutes,
+            $trait,
+            $method,
+            $assign_trait,
+            $assign,
+            FaerVecRef<'_, T>,
+            $op,
+            $combine
+        );
+        impl_binary_owned_rhs!(
+            $commutes,
+            $trait,
+            $method,
+            $assign_trait,
+            $assign,
+            &FaerVec<T>,
+            $op,
+            $combine
+        );
+        impl_binary_ref_ref!(
+            $trait,
+            $method,
+            FaerVecRef<'_, T>,
+            &FaerVec<T>,
+            $op,
+            $binary
+        );
+        impl_binary_ref_ref!(
+            $trait,
+            $method,
+            FaerVecRef<'_, T>,
+            FaerVecRef<'_, T>,
+            $op,
+            $binary
+        );
+        impl_binary_ref_ref!(
+            $trait,
+            $method,
+            FaerVecRef<'_, T>,
+            &FaerVecRef<'_, T>,
+            $op,
+            $binary
+        );
+        impl_binary_ref_ref!($trait, $method, &FaerVec<T>, &FaerVec<T>, $op, $binary);
+        impl_binary_ref_ref!(
+            $trait,
+            $method,
+            &FaerVec<T>,
+            FaerVecRef<'_, T>,
+            $op,
+            $binary
+        );
+        impl_binary_ref_ref!(
+            $trait,
+            $method,
+            &FaerVec<T>,
+            &FaerVecRef<'_, T>,
+            $op,
+            $binary
+        );
+    };
+}
+macro_rules! impl_assign_set {
+    ($trait:ident,$method:ident,$op:tt) => {
+        impl_assign!($trait, $method, FaerVec<T>, FaerVec<T>, $op);
+        impl_assign!($trait, $method, FaerVec<T>, &FaerVec<T>, $op);
+        impl_assign!($trait, $method, FaerVec<T>, FaerVecRef<'_, T>, $op);
+        impl_assign!($trait, $method, FaerVec<T>, &FaerVecRef<'_, T>, $op);
+        impl_assign!($trait, $method, FaerVecMut<'_, T>, FaerVec<T>, $op);
+        impl_assign!($trait, $method, FaerVecMut<'_, T>, &FaerVec<T>, $op);
+        impl_assign!($trait, $method, FaerVecMut<'_, T>, FaerVecRef<'_, T>, $op);
+        impl_assign!($trait, $method, FaerVecMut<'_, T>, &FaerVecRef<'_, T>, $op);
+    };
+}
+impl_binary_set!(Add, add, AddAssign, add_assign, commutes, +=, +, |rhs: &mut T, lhs: T| *rhs += lhs);
+impl_binary_set!(Sub, sub, SubAssign, sub_assign, noncommutes, -=, -, |rhs: &mut T, lhs: T| *rhs = lhs - *rhs);
+impl_assign_set!(AddAssign, add_assign, +=);
+impl_assign_set!(SubAssign, sub_assign, -=);
+
+impl<T: FaerScalar> Mul<Scale<T>> for FaerVec<T> {
+    type Output = Self;
+    fn mul(mut self, rhs: Scale<T>) -> Self {
+        self.data *= faer::Scale(rhs.value());
+        self
+    }
+}
+macro_rules! impl_mul_scalar_alloc {
+    ($t:ty) => {
+        impl<T: FaerScalar> Mul<Scale<T>> for $t {
+            type Output = FaerVec<T>;
+            fn mul(self, rhs: Scale<T>) -> Self::Output {
+                FaerVec {
+                    data: self.data.rb() * faer::Scale(rhs.value()),
+                    context: self.context,
+                }
+            }
+        }
+    };
+}
+impl_mul_scalar_alloc!(&FaerVec<T>);
+impl_mul_scalar_alloc!(FaerVecRef<'_, T>);
+impl_mul_scalar_alloc!(FaerVecMut<'_, T>);
+impl<T: FaerScalar> Div<Scale<T>> for FaerVec<T> {
+    type Output = Self;
+    #[allow(clippy::suspicious_arithmetic_impl)]
+    fn div(mut self, rhs: Scale<T>) -> Self {
+        // self is owned, so scale it in place rather than allocating a result
+        self.data *= faer::Scale(T::one() / rhs.value());
+        self
+    }
+}
+macro_rules! impl_mul_assign_scalar {
+    ($t:ty) => {
+        impl<T: FaerScalar> MulAssign<Scale<T>> for $t {
+            fn mul_assign(&mut self, rhs: Scale<T>) {
+                if self.data.ncols() == 1 {
+                    let mut column = self.data.rb_mut().col_mut(0);
+                    column *= faer::Scale(rhs.value());
+                    return;
+                }
+                self.data *= faer::Scale(rhs.value());
+            }
+        }
+    };
+}
+impl_mul_assign_scalar!(FaerVec<T>);
+impl_mul_assign_scalar!(FaerVecMut<'_, T>);
+macro_rules! impl_index {
+    ($t:ty) => {
+        impl<T: FaerScalar> Index<IndexType> for $t {
+            type Output = T;
+            fn index(&self, i: IndexType) -> &T {
+                &self.data[(i, 0)]
+            }
+        }
+    };
+}
+impl_index!(FaerVec<T>);
+impl_index!(FaerVecRef<'_, T>);
+impl<T: FaerScalar> IndexMut<IndexType> for FaerVec<T> {
+    fn index_mut(&mut self, i: IndexType) -> &mut T {
+        &mut self.data[(i, 0)]
+    }
+}
+
+impl VectorIndex for FaerVecIndex {
+    type C = FaerContext;
+    fn zeros(len: IndexType, ctx: Self::C) -> Self {
+        Self {
+            data: vec![0; len],
+            context: ctx,
+        }
+    }
+    fn len(&self) -> IndexType {
+        self.data.len()
+    }
+    fn from_vec(v: Vec<IndexType>, ctx: Self::C) -> Self {
+        Self {
+            data: v,
+            context: ctx,
+        }
+    }
+    fn clone_as_vec(&self) -> Vec<IndexType> {
+        self.data.clone()
+    }
+    fn context(&self) -> &Self::C {
+        &self.context
+    }
+}
+
+// Shared bodies for the `Vector` methods below, in the owned and view flavours.
+macro_rules! copy_from_body {
     ($self:ident, $other:ident, $method:literal) => {
         $self
             .context
-            .assert_compatible_nbatch($other.context.nbatch(), $method);
+            .assert_broadcastable_into($other.context.nbatch(), $method);
         assert_eq!(
             $self.data.nrows(),
             $other.data.nrows(),
@@ -209,12 +441,14 @@ macro_rules! copy_from_data {
             $self.data.rb_mut().copy_from($other.data.rb());
             return;
         }
-        for b in 0..$self.data.ncols() {
+        let (nb, onc) = ($self.data.ncols(), $other.data.ncols());
+        for b in 0..nb {
+            let src = broadcast_batch(b, onc, nb);
             $self
                 .data
                 .rb_mut()
                 .col_mut(b)
-                .copy_from($other.data.rb().col(b % $other.data.ncols()));
+                .copy_from($other.data.rb().col(src));
         }
     };
 }
@@ -222,16 +456,26 @@ macro_rules! copy_from_data {
 /// `self_b = alpha_b * x_b + beta * self_b` for every batch of `self`, broadcasting a
 /// single-batch `x`.  Shared by the owned vector and its mutable view, with `x` either an
 /// owned vector or a view, and `alpha` either one scalar or one value per batch.
-macro_rules! axpy_data {
+macro_rules! axpy_body {
     ($self:ident, $x:ident, $beta:expr, $op:literal, |$batch:ident| $alpha:expr) => {{
         $self
             .context
-            .assert_compatible_nbatch($x.context.nbatch(), $op);
-        for $batch in 0..$self.data.ncols() {
+            .assert_broadcastable_into($x.context.nbatch(), $op);
+        let nb = $self.data.ncols();
+        // the unbatched path keeps constant column indices and no loop, which is worth ~13%
+        // here (see lin_alg_ops axpy/faer/100)
+        if nb == 1 {
+            let $batch = 0;
+            let alpha = $alpha;
+            zip!($self.data.rb_mut().col_mut(0), $x.data.rb().col(0))
+                .for_each(|unzip!(s, xi)| *s = *s * $beta + *xi * alpha);
+            return;
+        }
+        for $batch in 0..nb {
             let alpha = $alpha;
             zip!(
                 $self.data.rb_mut().col_mut($batch),
-                $x.data.rb().col($x.batch($batch))
+                $x.data.rb().col($x.batch($batch, nb))
             )
             .for_each(|unzip!(s, xi)| *s = *s * $beta + *xi * alpha);
         }
@@ -239,14 +483,8 @@ macro_rules! axpy_data {
 }
 
 /// Weighted error norm of every batch, reduced by taking the maximum.
-macro_rules! squared_norm_data {
+macro_rules! squared_norm_body {
     ($self:ident, $y:ident, $atol:ident, $rtol:ident) => {{
-        $self
-            .context
-            .assert_compatible_nbatch($y.context.nbatch(), "squared_norm");
-        $self
-            .context
-            .assert_compatible_nbatch($atol.context.nbatch(), "squared_norm");
         let nrows = $self.data.nrows();
         assert!(
             nrows == $y.data.nrows() && nrows == $atol.data.nrows(),
@@ -279,310 +517,27 @@ macro_rules! squared_norm_data {
             );
             norm / nstates
         };
-        // the unbatched case keeps a constant column index, which codegens better than the
-        // loop variable below (and folds away `batch`'s modulus)
-        if $self.data.ncols() == 1 {
-            return batch_norm(0, $y.batch(0), $atol.batch(0));
+        // the reduction runs over `self`'s batches and broadcasts `y` and `atol` over them
+        let nb = $self.data.ncols();
+        $self
+            .context
+            .assert_broadcastable_into($y.context.nbatch(), "squared_norm");
+        $self
+            .context
+            .assert_broadcastable_into($atol.context.nbatch(), "squared_norm");
+        // the unbatched case keeps constant column indices, which codegens better than the
+        // loop variable below (and folds away the broadcast arithmetic)
+        if nb == 1 {
+            return batch_norm(0, 0, 0);
         }
         let mut max_norm = T::zero();
-        for b in 0..$self.data.ncols() {
-            max_norm = max_norm.max(batch_norm(b, $y.batch(b), $atol.batch(b)));
+        for b in 0..nb {
+            max_norm = max_norm.max(batch_norm(b, $y.batch(b, nb), $atol.batch(b, nb)));
         }
         max_norm
     }};
 }
 
-/// `rhs` is owned, so the result is written into its allocation whenever `rhs` already holds
-/// as many batches as the result: `combine(&mut rhs_i, lhs_i)` writes the result in place.
-macro_rules! vec_binary_owned_rhs {
-    ($trait:ident, $method:ident, $lhs:ty, $op:tt, $combine:expr) => {
-        impl<T: FaerScalar> $trait<FaerVec<T>> for $lhs {
-            type Output = FaerVec<T>;
-
-            fn $method(self, mut rhs: FaerVec<T>) -> Self::Output {
-                self.context
-                    .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($method));
-                if self.data.ncols() == rhs.data.ncols() {
-                    zip!(rhs.data.rb_mut(), self.data.rb())
-                        .for_each(|unzip!(r, l)| $combine(r, *l));
-                    return rhs;
-                }
-                if rhs.data.ncols() > self.data.ncols() {
-                    for b in 0..rhs.data.ncols() {
-                        let lhs = self.data.rb().col(self.batch(b));
-                        zip!(rhs.data.rb_mut().col_mut(b), lhs)
-                            .for_each(|unzip!(r, l)| $combine(r, *l));
-                    }
-                    return rhs;
-                }
-                // rhs holds fewer batches than the result, so it cannot be written into
-                let nb = self.data.ncols();
-                let mut data = Mat::zeros(self.data.nrows(), nb);
-                for b in 0..nb {
-                    let mut column = data.rb_mut().col_mut(b);
-                    column.copy_from(self.data.rb().col(b));
-                    column $op rhs.data.rb().col(rhs.batch(b));
-                }
-                FaerVec {
-                    data,
-                    context: self.context,
-                }
-            }
-        }
-    };
-}
-
-macro_rules! vec_binary_owned_lhs {
-    ($trait:ident, $method:ident, $rhs:ty, $op:tt) => {
-        impl<T: FaerScalar> $trait<$rhs> for FaerVec<T> {
-            type Output = FaerVec<T>;
-
-            // the `%` below is broadcast indexing over batches, not arithmetic on the
-            // operands, which is what the lint is looking for
-            #[allow(clippy::suspicious_arithmetic_impl)]
-            fn $method(mut self, rhs: $rhs) -> Self::Output {
-                self.context
-                    .assert_compatible_nbatch(rhs.context.nbatch(), stringify!($method));
-                // matching batch counts need no broadcast, so the whole matrix goes at once
-                // (past one column, where faer's 2-D iteration costs more than it saves)
-                if self.data.ncols() == rhs.data.ncols() && self.data.ncols() > 1 {
-                    self.data $op rhs.data.rb();
-                    return self;
-                }
-                if self.data.ncols() >= rhs.data.ncols() {
-                    for b in 0..self.data.ncols() {
-                        let mut column = self.data.rb_mut().col_mut(b);
-                        column $op rhs.data.rb().col(b % rhs.data.ncols());
-                    }
-                    return self;
-                }
-                let nb = rhs.data.ncols();
-                let mut data = Mat::zeros(self.data.nrows(), nb);
-                for b in 0..nb {
-                    let mut column = data.rb_mut().col_mut(b);
-                    column.copy_from(self.data.rb().col(b % self.data.ncols()));
-                    column $op rhs.data.rb().col(b);
-                }
-                FaerVec {
-                    data,
-                    context: rhs.context,
-                }
-            }
-        }
-    };
-}
-macro_rules! binary_set {
-    ($trait:ident,$method:ident,$op:tt,$binary:tt,$combine:expr) => {
-        vec_binary_owned_lhs!($trait, $method, FaerVec<T>, $op);
-        vec_binary_owned_lhs!($trait, $method, &FaerVec<T>, $op);
-        vec_binary_owned_lhs!($trait, $method, FaerVecRef<'_, T>, $op);
-        vec_binary_owned_lhs!($trait, $method, &FaerVecRef<'_, T>, $op);
-        vec_binary_owned_rhs!($trait, $method, FaerVecRef<'_, T>, $op, $combine);
-        vec_binary_owned_rhs!($trait, $method, &FaerVec<T>, $op, $combine);
-        vec_binary!(
-            $trait,
-            $method,
-            FaerVecRef<'_, T>,
-            &FaerVec<T>,
-            $op,
-            $binary
-        );
-        vec_binary!(
-            $trait,
-            $method,
-            FaerVecRef<'_, T>,
-            FaerVecRef<'_, T>,
-            $op,
-            $binary
-        );
-        vec_binary!(
-            $trait,
-            $method,
-            FaerVecRef<'_, T>,
-            &FaerVecRef<'_, T>,
-            $op,
-            $binary
-        );
-        vec_binary!($trait, $method, &FaerVec<T>, &FaerVec<T>, $op, $binary);
-        vec_binary!(
-            $trait,
-            $method,
-            &FaerVec<T>,
-            FaerVecRef<'_, T>,
-            $op,
-            $binary
-        );
-        vec_binary!(
-            $trait,
-            $method,
-            &FaerVec<T>,
-            &FaerVecRef<'_, T>,
-            $op,
-            $binary
-        );
-    };
-}
-binary_set!(Add, add, +=, +, |rhs: &mut T, lhs: T| *rhs += lhs);
-binary_set!(Sub, sub, -=, -, |rhs: &mut T, lhs: T| *rhs = lhs - *rhs);
-macro_rules! assign_set {
-    ($trait:ident,$method:ident,$op:tt) => {
-        vec_assign!($trait, $method, FaerVec<T>, FaerVec<T>, $op);
-        vec_assign!($trait, $method, FaerVec<T>, &FaerVec<T>, $op);
-        vec_assign!($trait, $method, FaerVec<T>, FaerVecRef<'_, T>, $op);
-        vec_assign!($trait, $method, FaerVec<T>, &FaerVecRef<'_, T>, $op);
-        vec_assign!($trait, $method, FaerVecMut<'_, T>, FaerVec<T>, $op);
-        vec_assign!($trait, $method, FaerVecMut<'_, T>, &FaerVec<T>, $op);
-        vec_assign!($trait, $method, FaerVecMut<'_, T>, FaerVecRef<'_, T>, $op);
-        vec_assign!($trait, $method, FaerVecMut<'_, T>, &FaerVecRef<'_, T>, $op);
-    };
-}
-assign_set!(AddAssign, add_assign, +=);
-assign_set!(SubAssign, sub_assign, -=);
-
-impl<T: FaerScalar> Mul<Scale<T>> for FaerVec<T> {
-    type Output = Self;
-    fn mul(mut self, rhs: Scale<T>) -> Self {
-        self.data *= faer::Scale(rhs.value());
-        self
-    }
-}
-macro_rules! scale_ref {
-    ($t:ty) => {
-        impl<T: FaerScalar> Mul<Scale<T>> for $t {
-            type Output = FaerVec<T>;
-            fn mul(self, rhs: Scale<T>) -> Self::Output {
-                // ponytail: a scaled copy of an unbatched vector is ~1.5x the old
-                // `Col`-of-batches cost (lin_alg_ops scalar_mul/faer).  faer's 2-D
-                // iteration machinery looks like the floor: an unbatched fast path over
-                // the single column measured no better with `Mat::zeros` + `zip!` and
-                // ~1.8x worse with `Mat::from_fn`.  Revisit if faer grows a way to fill a
-                // fresh `Mat` in one vectorised pass.
-                FaerVec {
-                    data: self.data.rb() * faer::Scale(rhs.value()),
-                    context: self.context,
-                }
-            }
-        }
-    };
-}
-scale_ref!(&FaerVec<T>);
-scale_ref!(FaerVecRef<'_, T>);
-scale_ref!(FaerVecMut<'_, T>);
-impl<T: FaerScalar> Div<Scale<T>> for FaerVec<T> {
-    type Output = Self;
-    #[allow(clippy::suspicious_arithmetic_impl)]
-    fn div(mut self, rhs: Scale<T>) -> Self {
-        // self is owned, so scale it in place rather than allocating a result
-        self.data *= faer::Scale(T::one() / rhs.value());
-        self
-    }
-}
-macro_rules! mul_assign_scale {
-    ($t:ty) => {
-        impl<T: FaerScalar> MulAssign<Scale<T>> for $t {
-            fn mul_assign(&mut self, rhs: Scale<T>) {
-                if self.data.ncols() == 1 {
-                    let mut column = self.data.rb_mut().col_mut(0);
-                    column *= faer::Scale(rhs.value());
-                    return;
-                }
-                self.data *= faer::Scale(rhs.value());
-            }
-        }
-    };
-}
-mul_assign_scale!(FaerVec<T>);
-mul_assign_scale!(FaerVecMut<'_, T>);
-macro_rules! index {
-    ($t:ty) => {
-        impl<T: FaerScalar> Index<IndexType> for $t {
-            type Output = T;
-            fn index(&self, i: IndexType) -> &T {
-                &self.data[(i, 0)]
-            }
-        }
-    };
-}
-index!(FaerVec<T>);
-index!(FaerVecRef<'_, T>);
-impl<T: FaerScalar> IndexMut<IndexType> for FaerVec<T> {
-    fn index_mut(&mut self, i: IndexType) -> &mut T {
-        &mut self.data[(i, 0)]
-    }
-}
-
-impl VectorIndex for FaerVecIndex {
-    type C = FaerContext;
-    fn zeros(len: IndexType, ctx: Self::C) -> Self {
-        Self {
-            data: vec![0; len],
-            context: ctx,
-        }
-    }
-    fn len(&self) -> IndexType {
-        self.data.len()
-    }
-    fn from_vec(v: Vec<IndexType>, ctx: Self::C) -> Self {
-        Self {
-            data: v,
-            context: ctx,
-        }
-    }
-    fn clone_as_vec(&self) -> Vec<IndexType> {
-        self.data.clone()
-    }
-    fn context(&self) -> &Self::C {
-        &self.context
-    }
-}
-
-impl<'a, T: FaerScalar> VectorView<'a> for FaerVecRef<'a, T> {
-    type Owned = FaerVec<T>;
-    fn get_index(&self, i: IndexType) -> T {
-        assert_eq!(self.context.nbatch(), 1, "get_index requires nbatch == 1");
-        self.data[(i, 0)]
-    }
-    fn into_owned(self) -> Self::Owned {
-        FaerVec {
-            data: self.data.to_owned(),
-            context: self.context,
-        }
-    }
-    fn squared_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: T) -> T {
-        squared_norm_data!(self, y, atol, rtol)
-    }
-}
-impl<'a, T: FaerScalar> VectorViewMut<'a> for FaerVecMut<'a, T> {
-    type Owned = FaerVec<T>;
-    type View = FaerVecRef<'a, T>;
-    type Index = FaerVecIndex;
-    fn copy_from(&mut self, o: &Self::Owned) {
-        copy_from_data!(self, o, "copy_from");
-    }
-    fn copy_from_view(&mut self, o: &Self::View) {
-        copy_from_data!(self, o, "copy_from_view");
-    }
-    fn set_index(&mut self, i: IndexType, v: T) {
-        if self.data.ncols() == 1 {
-            self.data[(i, 0)] = v;
-            return;
-        }
-        self.data.rb_mut().row_mut(i).fill(v);
-    }
-    fn axpy(&mut self, a: T, x: &Self::Owned, beta: T) {
-        axpy_data!(self, x, beta, "axpy", |_batch| a)
-    }
-}
-impl<T: FaerScalar> VectorHost for FaerVec<T> {
-    fn as_slice(&self) -> &[T] {
-        assert_eq!(self.context.nbatch(), 1);
-        self.data.col_as_slice(0)
-    }
-    fn as_mut_slice(&mut self) -> &mut [T] {
-        assert_eq!(self.context.nbatch(), 1);
-        self.data.col_as_slice_mut(0)
-    }
-}
 impl<T: FaerScalar> Vector for FaerVec<T> {
     type View<'a> = FaerVecRef<'a, T>;
     type ViewMut<'a> = FaerVecMut<'a, T>;
@@ -627,7 +582,7 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
         self.data.rb_mut().row_mut(i).fill(v);
     }
     fn squared_norm(&self, y: &Self, atol: &Self, rtol: T) -> T {
-        squared_norm_data!(self, y, atol, rtol)
+        squared_norm_body!(self, y, atol, rtol)
     }
     fn as_view(&self) -> Self::View<'_> {
         FaerVecRef {
@@ -654,7 +609,7 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
         }
     }
     fn copy_from(&mut self, o: &Self) {
-        copy_from_data!(self, o, "copy_from");
+        copy_from_body!(self, o, "copy_from");
     }
     fn fill(&mut self, v: T) {
         if self.data.ncols() == 1 {
@@ -664,7 +619,7 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
         self.data.rb_mut().fill(v)
     }
     fn copy_from_view(&mut self, o: &Self::View<'_>) {
-        copy_from_data!(self, o, "copy_from_view");
+        copy_from_body!(self, o, "copy_from_view");
     }
     fn from_element(n: usize, v: T, ctx: Self::C) -> Self {
         Self {
@@ -700,10 +655,10 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
         }
     }
     fn axpy(&mut self, a: T, x: &Self, beta: T) {
-        axpy_data!(self, x, beta, "axpy", |_batch| a)
+        axpy_body!(self, x, beta, "axpy", |_batch| a)
     }
     fn axpy_v(&mut self, a: T, x: &Self::View<'_>, beta: T) {
-        axpy_data!(self, x, beta, "axpy_v", |_batch| a)
+        axpy_body!(self, x, beta, "axpy_v", |_batch| a)
     }
     fn batched_axpy(&mut self, a: &[T], x: &Self, beta: T) {
         assert_eq!(
@@ -711,11 +666,11 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
             self.context.nbatch(),
             "alpha.len() must equal nbatch"
         );
-        axpy_data!(self, x, beta, "batched_axpy", |batch| a[batch])
+        axpy_body!(self, x, beta, "batched_axpy", |batch| a[batch])
     }
     fn component_div_assign(&mut self, o: &Self) {
         self.context
-            .assert_compatible_nbatch(o.context.nbatch(), "component_div_assign");
+            .assert_broadcastable_into(o.context.nbatch(), "component_div_assign");
         assert_eq!(
             self.data.nrows(),
             o.data.nrows(),
@@ -725,14 +680,18 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
             zip!(self.data.rb_mut(), o.data.rb()).for_each(|unzip!(s, o)| *s /= *o);
             return;
         }
-        for c in 0..self.data.ncols() {
-            zip!(self.data.rb_mut().col_mut(c), o.data.rb().col(o.batch(c)))
-                .for_each(|unzip!(s, o)| *s /= *o);
+        let nb = self.data.ncols();
+        for c in 0..nb {
+            zip!(
+                self.data.rb_mut().col_mut(c),
+                o.data.rb().col(o.batch(c, nb))
+            )
+            .for_each(|unzip!(s, o)| *s /= *o);
         }
     }
     fn component_mul_assign(&mut self, o: &Self) {
         self.context
-            .assert_compatible_nbatch(o.context.nbatch(), "component_mul_assign");
+            .assert_broadcastable_into(o.context.nbatch(), "component_mul_assign");
         assert_eq!(
             self.data.nrows(),
             o.data.nrows(),
@@ -742,22 +701,28 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
             zip!(self.data.rb_mut(), o.data.rb()).for_each(|unzip!(s, o)| *s *= *o);
             return;
         }
-        for c in 0..self.data.ncols() {
-            zip!(self.data.rb_mut().col_mut(c), o.data.rb().col(o.batch(c)))
-                .for_each(|unzip!(s, o)| *s *= *o);
+        let nb = self.data.ncols();
+        for c in 0..nb {
+            zip!(
+                self.data.rb_mut().col_mut(c),
+                o.data.rb().col(o.batch(c, nb))
+            )
+            .for_each(|unzip!(s, o)| *s *= *o);
         }
     }
     fn root_finding(&self, g1: &Self) -> (bool, T, i32) {
         self.context
-            .assert_compatible_nbatch(g1.context.nbatch(), "root_finding");
+            .assert_broadcastable_into(g1.context.nbatch(), "root_finding");
         assert_eq!(self.len(), g1.len(), "Vector lengths do not match");
         let mut out = None;
-        for b in 0..self.data.ncols() {
+        // the scan runs over `self`'s batches and broadcasts `g1` over them
+        let nb = self.data.ncols();
+        for b in 0..nb {
             let mut found = false;
             let mut frac = T::zero();
             let mut idx = -1;
             let g0_column = self.data.rb().col(b);
-            let g1_column = g1.data.rb().col(g1.batch(b));
+            let g1_column = g1.data.rb().col(g1.batch(b, nb));
             for (i, (&g0, &g)) in g0_column
                 .try_as_col_major()
                 .unwrap()
@@ -797,36 +762,87 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
     }
     fn copy_from_indices(&mut self, o: &Self, idx: &Self::Index) {
         self.context
-            .assert_compatible_nbatch(o.context.nbatch(), "copy_from_indices");
-        for b in 0..self.data.ncols() {
+            .assert_broadcastable_into(o.context.nbatch(), "copy_from_indices");
+        let nb = self.data.ncols();
+        for b in 0..nb {
             for i in idx.data.iter() {
-                self.data[(*i, b)] = o.data[(*i, o.batch(b))]
+                self.data[(*i, b)] = o.data[(*i, o.batch(b, nb))]
             }
         }
     }
     fn gather(&mut self, o: &Self, idx: &Self::Index) {
         assert_eq!(self.len(), idx.len());
         self.context
-            .assert_compatible_nbatch(o.context.nbatch(), "gather");
-        for b in 0..self.data.ncols() {
+            .assert_broadcastable_into(o.context.nbatch(), "gather");
+        let nb = self.data.ncols();
+        for b in 0..nb {
             for (i, j) in idx.data.iter().enumerate() {
-                self.data[(i, b)] = o.data[(*j, o.batch(b))]
+                self.data[(i, b)] = o.data[(*j, o.batch(b, nb))]
             }
         }
     }
     fn scatter(&self, idx: &Self::Index, o: &mut Self) {
         assert_eq!(self.len(), idx.len());
-        self.context
-            .assert_compatible_nbatch(o.context.nbatch(), "scatter");
-        for b in 0..self.data.ncols() {
+        // `o` is the destination here, so its batch count governs the loop
+        o.context
+            .assert_broadcastable_into(self.data.ncols(), "scatter");
+        let nb = o.data.ncols();
+        for b in 0..nb {
+            let src = broadcast_batch(b, self.data.ncols(), nb);
             for (i, j) in idx.data.iter().enumerate() {
-                let batch = o.batch(b);
-                o.data[(*j, batch)] = self.data[(i, b)]
+                o.data[(*j, b)] = self.data[(i, src)]
             }
         }
     }
 }
 
+impl<'a, T: FaerScalar> VectorView<'a> for FaerVecRef<'a, T> {
+    type Owned = FaerVec<T>;
+    fn get_index(&self, i: IndexType) -> T {
+        assert_eq!(self.context.nbatch(), 1, "get_index requires nbatch == 1");
+        self.data[(i, 0)]
+    }
+    fn into_owned(self) -> Self::Owned {
+        FaerVec {
+            data: self.data.to_owned(),
+            context: self.context,
+        }
+    }
+    fn squared_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: T) -> T {
+        squared_norm_body!(self, y, atol, rtol)
+    }
+}
+impl<'a, T: FaerScalar> VectorViewMut<'a> for FaerVecMut<'a, T> {
+    type Owned = FaerVec<T>;
+    type View = FaerVecRef<'a, T>;
+    type Index = FaerVecIndex;
+    fn copy_from(&mut self, o: &Self::Owned) {
+        copy_from_body!(self, o, "copy_from");
+    }
+    fn copy_from_view(&mut self, o: &Self::View) {
+        copy_from_body!(self, o, "copy_from_view");
+    }
+    fn set_index(&mut self, i: IndexType, v: T) {
+        if self.data.ncols() == 1 {
+            self.data[(i, 0)] = v;
+            return;
+        }
+        self.data.rb_mut().row_mut(i).fill(v);
+    }
+    fn axpy(&mut self, a: T, x: &Self::Owned, beta: T) {
+        axpy_body!(self, x, beta, "axpy", |_batch| a)
+    }
+}
+impl<T: FaerScalar> VectorHost for FaerVec<T> {
+    fn as_slice(&self) -> &[T] {
+        assert_eq!(self.context.nbatch(), 1);
+        self.data.col_as_slice(0)
+    }
+    fn as_mut_slice(&mut self) -> &mut [T] {
+        assert_eq!(self.context.nbatch(), 1);
+        self.data.col_as_slice_mut(0)
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;

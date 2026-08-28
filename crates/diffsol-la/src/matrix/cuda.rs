@@ -6,6 +6,7 @@ use cudarc::{
 use std::ffi::c_int;
 use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
 
+use crate::context::broadcast_batch;
 use crate::{
     error::LaError, linear_solver::cuda::lu::CudaLU, matrix::default_solver::DefaultSolver,
     matrix_error, Context, CudaContext, CudaVec, CudaVecMut, CudaVecRef, IndexType, MatrixCommon,
@@ -226,6 +227,9 @@ macro_rules! impl_sub_assign {
     ($lhs:ty, $rhs:ty) => {
         impl<T: ScalarCuda> SubAssign<$rhs> for $lhs {
             fn sub_assign(&mut self, rhs: $rhs) {
+                // `self` is the destination, so `rhs` broadcasts into it
+                self.context
+                    .assert_broadcastable_into(rhs.context.nbatch(), "sub_assign");
                 let f = self.context.function::<T>("vec_sub_assign");
                 let nbatch = self.context.nbatch();
                 let nstates = (self.nrows() * self.ncols()) as u32;
@@ -253,6 +257,9 @@ macro_rules! impl_add_assign {
     ($lhs:ty, $rhs:ty) => {
         impl<T: ScalarCuda> AddAssign<$rhs> for $lhs {
             fn add_assign(&mut self, rhs: $rhs) {
+                // `self` is the destination, so `rhs` broadcasts into it
+                self.context
+                    .assert_broadcastable_into(rhs.context.nbatch(), "add_assign");
                 let f = self.context.function::<T>("vec_add_assign");
                 let nbatch = self.context.nbatch();
                 let nstates = (self.nrows() * self.ncols()) as u32;
@@ -285,8 +292,9 @@ macro_rules! impl_sub_lhs {
         impl<T: ScalarCuda> Sub<$rhs> for $lhs {
             type Output = $out;
             fn sub(mut self, rhs: $rhs) -> Self::Output {
+                // `self` is owned, so it is the destination and `rhs` broadcasts into it
                 self.context
-                    .assert_compatible_nbatch(rhs.context.nbatch(), "sub");
+                    .assert_broadcastable_into(rhs.context.nbatch(), "sub");
                 let nbatch = self.context.nbatch();
                 let nstates = (self.nrows() * self.ncols()) as u32;
                 let nbatch_u32 = nbatch as u32;
@@ -294,33 +302,6 @@ macro_rules! impl_sub_lhs {
                 let rhs_nbatch = rhs.context.nbatch() as i32;
                 let rhs_nstates = (rhs.nrows() * rhs.ncols()) as u32;
                 let rhs_stride = rhs_nstates as i32;
-                if nbatch < rhs.context.nbatch() {
-                    // self holds fewer batches than the result, so it cannot be written into
-                    let out_nbatch = rhs.context.nbatch();
-                    let mut ret =
-                        Self::Output::zeros(self.nrows(), self.ncols(), rhs.context.clone());
-                    let self_nbatch_i32 = nbatch as i32;
-                    let ret_nbatch = out_nbatch as i32;
-                    let ret_stride = (ret.nrows() * ret.ncols()) as i32;
-                    let f = self.context.function::<T>("vec_sub");
-                    let mut build = self.context.stream.launch_builder(&f);
-                    build
-                        .arg(&self.data)
-                        .arg(&rhs.data)
-                        .arg(&mut ret.data)
-                        .arg(&nstates)
-                        .arg(&self_stride)
-                        .arg(&self_nbatch_i32)
-                        .arg(&rhs_stride)
-                        .arg(&rhs_nbatch)
-                        .arg(&ret_stride)
-                        .arg(&ret_nbatch);
-                    let config = self
-                        .context
-                        .launch_config_2d(nstates, out_nbatch as u32, &f);
-                    unsafe { build.launch(config) }.expect("Failed to launch kernel");
-                    return ret;
-                }
                 let f = self.context.function::<T>("vec_sub_assign");
                 let mut build = self.context.stream.launch_builder(&f);
                 build
@@ -345,8 +326,9 @@ macro_rules! impl_add_lhs {
         impl<T: ScalarCuda> Add<$rhs> for $lhs {
             type Output = $out;
             fn add(mut self, rhs: $rhs) -> Self::Output {
+                // `self` is owned, so it is the destination and `rhs` broadcasts into it
                 self.context
-                    .assert_compatible_nbatch(rhs.context.nbatch(), "add");
+                    .assert_broadcastable_into(rhs.context.nbatch(), "add");
                 let nbatch = self.context.nbatch();
                 let nstates = (self.nrows() * self.ncols()) as u32;
                 let nbatch_u32 = nbatch as u32;
@@ -354,33 +336,6 @@ macro_rules! impl_add_lhs {
                 let rhs_nbatch = rhs.context.nbatch() as i32;
                 let rhs_nstates = (rhs.nrows() * rhs.ncols()) as u32;
                 let rhs_stride = rhs_nstates as i32;
-                if nbatch < rhs.context.nbatch() {
-                    // self holds fewer batches than the result, so it cannot be written into
-                    let out_nbatch = rhs.context.nbatch();
-                    let mut ret =
-                        Self::Output::zeros(self.nrows(), self.ncols(), rhs.context.clone());
-                    let self_nbatch_i32 = nbatch as i32;
-                    let ret_nbatch = out_nbatch as i32;
-                    let ret_stride = (ret.nrows() * ret.ncols()) as i32;
-                    let f = self.context.function::<T>("vec_add");
-                    let mut build = self.context.stream.launch_builder(&f);
-                    build
-                        .arg(&self.data)
-                        .arg(&rhs.data)
-                        .arg(&mut ret.data)
-                        .arg(&nstates)
-                        .arg(&self_stride)
-                        .arg(&self_nbatch_i32)
-                        .arg(&rhs_stride)
-                        .arg(&rhs_nbatch)
-                        .arg(&ret_stride)
-                        .arg(&ret_nbatch);
-                    let config = self
-                        .context
-                        .launch_config_2d(nstates, out_nbatch as u32, &f);
-                    unsafe { build.launch(config) }.expect("Failed to launch kernel");
-                    return ret;
-                }
                 let f = self.context.function::<T>("vec_add_assign");
                 let mut build = self.context.stream.launch_builder(&f);
                 build
@@ -566,7 +521,7 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
     fn update_backward_diff(&mut self, order: IndexType, d: &Self::V) {
         assert!(order + 2 < self.ncols(), "order out of bounds");
         self.context
-            .assert_compatible_nbatch(d.context.nbatch(), "update_backward_diff");
+            .assert_broadcastable_into(d.context.nbatch(), "update_backward_diff");
 
         let nbatch = self.context.nbatch();
         let nrows = self.nrows();
@@ -613,8 +568,8 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
             x.len() >= nc,
             "gemv_cols: x must hold at least end - start values"
         );
-        self.context
-            .assert_compatible_nbatch(y.context.nbatch(), "gemv_cols");
+        y.context
+            .assert_broadcastable_into(self.context.nbatch(), "gemv_cols");
         // an empty column range contributes nothing, leaving y = beta * y
         if nc == 0 {
             if beta.is_zero() {
@@ -675,6 +630,8 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
     fn gather(&mut self, other: &Self, indices: &<Self::V as Vector>::Index) {
         let nbatch = self.context.nbatch();
         let other_nbatch = other.context.nbatch();
+        self.context
+            .assert_broadcastable_into(other_nbatch, "gather");
         let self_nrows = self.nrows;
         let self_ncols = self.ncols;
         let other_nrows = other.nrows;
@@ -716,6 +673,8 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
         );
         let nbatch = self.context.nbatch();
         let data_nbatch = data.context.nbatch();
+        self.context
+            .assert_broadcastable_into(data_nbatch, "set_data_with_indices");
         let f = self.context.function::<T>("mat_set_data_with_indices");
         let n = dst_indices.len() as u32;
         if n == 0 {
@@ -745,15 +704,18 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
     fn add_column_to_vector(&self, j: IndexType, v: &mut Self::V) {
         let nbatch = self.context.nbatch();
         let v_nbatch = v.context.nbatch();
-        self.context
-            .assert_compatible_nbatch(v_nbatch, "add_column_to_vector");
+        v.context
+            .assert_broadcastable_into(nbatch, "add_column_to_vector");
         let nrows = self.nrows();
         let ncols = self.ncols();
         let v_nstates = v.len();
         let f = self.context.function::<T>("vec_axpy_offset");
         let nrows_u32 = nrows as u32;
-        let nbatch_u32 = nbatch as u32;
-        let config = self.context.launch_config_2d(nrows_u32, nbatch_u32, &f);
+        // `v` is the destination, so it carries the launch's batch count and the matrix
+        // broadcasts over it (as on the CPU backends)
+        let config = self
+            .context
+            .launch_config_2d(nrows_u32, v_nbatch as u32, &f);
         let mut build = self.context.stream.launch_builder(&f);
         let alpha_val = T::one();
         let beta_val = T::one();
@@ -836,11 +798,13 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
     fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
         let nbatch = self.context.nbatch();
         let x_nbatch = x.context.nbatch();
-        self.context.assert_compatible_nbatch(x_nbatch, "gemv");
-        let effective_nbatch = nbatch.max(x_nbatch);
-        for b in 0..effective_nbatch {
-            let self_b = if nbatch == 1 { 0 } else { b };
-            let x_b = if x_nbatch == 1 { 0 } else { b };
+        let y_nbatch = y.context.nbatch();
+        y.context.assert_broadcastable_into(nbatch, "gemv");
+        y.context.assert_broadcastable_into(x_nbatch, "gemv");
+        // `y` is the destination, so it carries the batch count of the result
+        for b in 0..y_nbatch {
+            let self_b = broadcast_batch(b, nbatch, y_nbatch);
+            let x_b = broadcast_batch(b, x_nbatch, y_nbatch);
             let x_nstates = self.ncols;
             let self_batch_size = self.nrows * self.ncols;
             let a_start = self_b * self_batch_size;
@@ -877,7 +841,7 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
         let self_nbatch = self.context.nbatch();
         let other_nbatch = other.context.nbatch();
         self.context
-            .assert_compatible_nbatch(other_nbatch, "copy_from");
+            .assert_broadcastable_into(other_nbatch, "copy_from");
         let nrows = self.nrows;
         let self_ncols = self.ncols;
         let other_ncols = other.ncols;
@@ -959,7 +923,7 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
         let nbatch = self.context.nbatch();
         let v_nbatch = v.context.nbatch();
         self.context
-            .assert_compatible_nbatch(v_nbatch, "set_column");
+            .assert_broadcastable_into(v_nbatch, "set_column");
         let nrows = self.nrows();
         let v_nstates = v.len();
         assert_eq!(
@@ -995,9 +959,9 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
         let x_nbatch = x.context.nbatch();
         let y_nbatch = y.context.nbatch();
         self.context
-            .assert_compatible_nbatch(x_nbatch, "scale_add_and_assign_x");
+            .assert_broadcastable_into(x_nbatch, "scale_add_and_assign_x");
         self.context
-            .assert_compatible_nbatch(y_nbatch, "scale_add_and_assign_y");
+            .assert_broadcastable_into(y_nbatch, "scale_add_and_assign_y");
         let f = self.context.function::<T>("mat_scale_add_assign");
         let nrows = self.nrows;
         let self_ncols = self.ncols;

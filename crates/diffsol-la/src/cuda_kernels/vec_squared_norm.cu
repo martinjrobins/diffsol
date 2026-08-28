@@ -28,9 +28,9 @@ void vec_squared_norm_f64(const double* __restrict__ y,
 
     for (int i = idx; i < nstates; i += blockDim.x * gridDim.x) {
         // TODO: do we need all these batch guards?
-        int yi = (b % y_nbatch) * y_stride + i;
-        int y0i = (b % y0_nbatch) * y0_stride + i;
-        int ati = (b % atol_nbatch) * atol_stride + i;
+        int yi = broadcast_batch(b, y_nbatch) * y_stride + i;
+        int y0i = broadcast_batch(b, y0_nbatch) * y0_stride + i;
+        int ati = broadcast_batch(b, atol_nbatch) * atol_stride + i;
         double denom = fabs(y0[y0i]) * rel_tol + abs_tol[ati];
         double ratio = y[yi] / denom;
         local_sum += ratio * ratio;

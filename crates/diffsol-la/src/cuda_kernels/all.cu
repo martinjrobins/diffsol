@@ -28,5 +28,6 @@ extern "C" {
 #include "vec_scatter.cu"
 #include "vec_squared_norm.cu"
 #include "vec_sub_assign.cu"
+#include "vec_sub_assign_rev.cu"
 #include "vec_sub.cu"
 }

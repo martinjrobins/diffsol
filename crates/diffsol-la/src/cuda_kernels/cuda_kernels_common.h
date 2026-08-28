@@ -13,8 +13,14 @@
 // gridDim.y = nbatch (number of batches of the output/first array)
 // blockIdx.y = batch index (always < nbatch by construction — no batch guard needed)
 //
-// Broadcasting: when an operand has nbatch=1, `b % 1 == 0` makes every
-// output batch read from batch 0 of that operand.
+// Broadcasting is grouped: an operand holding `src_nbatch` batches repeats each of them over
+// `gridDim.y / src_nbatch` contiguous output batches, so `src_nbatch == 1` reads batch 0 for
+// every output batch and `src_nbatch == B` against `gridDim.y == B * P` reads batch `b / P`.
+// Batch counts that are not exact multiples of each other are rejected host-side
+// (`Context::assert_broadcastable_into`).
+__device__ inline int broadcast_batch(int b, int src_nbatch) {
+    return b * src_nbatch / (int)gridDim.y;
+}
 
 // (a) Unary: one array, no broadcasting.
 // Used by: vec_fill, vec_mul_assign_scalar
@@ -38,12 +44,12 @@ __device__ inline bool batch_binary_setup(
     if (*elem >= nstates) return false;
     int b = blockIdx.y;
     *li = b * lhs_stride + *elem;
-    *ri = (b % rhs_nbatch) * rhs_stride + *elem;
+    *ri = broadcast_batch(b, rhs_nbatch) * rhs_stride + *elem;
     return true;
 }
 
 // (c) Binary operator with an output array: every operand may broadcast, so the output
-// carries the largest batch count and each side is indexed modulo its own.
+// carries the largest batch count and each side is broadcast against it.
 // Used by: vec_add, vec_sub
 __device__ inline bool batch_binary_op_setup(
     int* elem, int nstates,
@@ -54,9 +60,9 @@ __device__ inline bool batch_binary_op_setup(
     *elem = blockIdx.x * blockDim.x + threadIdx.x;
     if (*elem >= nstates) return false;
     int b = blockIdx.y;
-    *li = (b % lhs_nbatch) * lhs_stride + *elem;
-    *ri = (b % rhs_nbatch) * rhs_stride + *elem;
-    *oi = (b % out_nbatch) * out_stride + *elem;
+    *li = broadcast_batch(b, lhs_nbatch) * lhs_stride + *elem;
+    *ri = broadcast_batch(b, rhs_nbatch) * rhs_stride + *elem;
+    *oi = broadcast_batch(b, out_nbatch) * out_stride + *elem;
     return true;
 }
 
@@ -73,8 +79,8 @@ __device__ inline bool batch_ternary_setup(
     if (*elem >= nstates) return false;
     int b = blockIdx.y;
     *li = b * lhs_stride + *elem;
-    *ri = (b % rhs_nbatch) * rhs_stride + *elem;
-    *oi = (b % out_nbatch) * out_stride + *elem;
+    *ri = broadcast_batch(b, rhs_nbatch) * rhs_stride + *elem;
+    *oi = broadcast_batch(b, out_nbatch) * out_stride + *elem;
     return true;
 }
 
@@ -92,8 +98,8 @@ __device__ inline bool batch_gather_scatter_setup(
     if (*j >= nindices) return false;
     int b = blockIdx.y;
     int src = indices[*j];
-    *si = (b % self_nbatch) * self_stride + *j;
-    *oi = (b % other_nbatch) * other_stride + src;
+    *si = broadcast_batch(b, self_nbatch) * self_stride + *j;
+    *oi = broadcast_batch(b, other_nbatch) * other_stride + src;
     return true;
 }
 
@@ -108,7 +114,7 @@ __device__ inline bool batch_assign_at_setup(
     if (*j >= nindices) return false;
     int b = blockIdx.y;
     int idx = indices[*j];
-    *si = (b % self_nbatch) * self_stride + idx;
+    *si = broadcast_batch(b, self_nbatch) * self_stride + idx;
     return true;
 }
 
@@ -124,8 +130,8 @@ __device__ inline bool batch_copy_indices_setup(
     if (*j >= nindices) return false;
     int b = blockIdx.y;
     int idx = indices[*j];
-    *si = (b % self_nbatch) * self_stride + idx;
-    *oi = (b % other_nbatch) * other_stride + idx;
+    *si = broadcast_batch(b, self_nbatch) * self_stride + idx;
+    *oi = broadcast_batch(b, other_nbatch) * other_stride + idx;
     return true;
 }
 
@@ -143,8 +149,8 @@ __device__ inline bool batch_set_data_setup(
     int b = blockIdx.y;
     int di = dst_indices[*j];
     int si_idx = src_indices[*j];
-    *si = (b % self_nbatch) * self_stride + di;
-    *oi = (b % other_nbatch) * other_stride + si_idx;
+    *si = broadcast_batch(b, self_nbatch) * self_stride + di;
+    *oi = broadcast_batch(b, other_nbatch) * other_stride + si_idx;
     return true;
 }
 
@@ -158,8 +164,8 @@ __device__ inline bool batch_diagonal_setup(
     *i = blockIdx.x * blockDim.x + threadIdx.x;
     if (*i >= nrows) return false;
     int b = blockIdx.y;
-    *mi = (b % mat_nbatch) * mat_stride + *i * nrows + *i;
-    *di = (b % diag_nbatch) * diag_stride + *i;
+    *mi = broadcast_batch(b, mat_nbatch) * mat_stride + *i * nrows + *i;
+    *di = broadcast_batch(b, diag_nbatch) * diag_stride + *i;
     return true;
 }
 
@@ -174,7 +180,7 @@ __device__ inline bool batch_set_column_setup(
     *i = blockIdx.x * blockDim.x + threadIdx.x;
     if (*i >= nrows) return false;
     int b = blockIdx.y;
-    *mi = (b % mat_nbatch) * mat_stride + column_index * nrows + *i;
-    *ci = (b % col_nbatch) * col_stride + *i;
+    *mi = broadcast_batch(b, mat_nbatch) * mat_stride + column_index * nrows + *i;
+    *ci = broadcast_batch(b, col_nbatch) * col_stride + *i;
     return true;
 }
