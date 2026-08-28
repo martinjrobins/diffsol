@@ -6,16 +6,30 @@ use diffsol::{
     OdeSolverProblem,
 };
 
+/// Builds the problem and its evaluation times once, outside the timed loop.
+///
+/// The solvers take the problem by reference and construct their own state, so one problem
+/// serves every iteration.  Building it inside `iter` instead makes the measurement mostly
+/// allocation, which is the most machine-sensitive thing in the benchmark -- the CI runs
+/// compare across a heterogeneous runner fleet and cannot afford the extra variance.
+macro_rules! setup_problem {
+    ($problem:expr) => {{
+        let (problem, soln) = $problem;
+        let t_evals = soln
+            .solution_points
+            .iter()
+            .map(|sp| sp.t)
+            .collect::<Vec<_>>();
+        (problem, t_evals)
+    }};
+}
+pub(crate) use setup_problem;
+
 macro_rules! bench_implicit {
     ($g:ident, $name:ident, $solver:ident, $ls:ident, $problem:ident, $m:ty) => {
+        let (problem, t_evals) = $crate::common::setup_problem!($problem::<$m>(false));
         $g.bench_function(stringify!($name), |b| {
             b.iter(|| {
-                let (problem, soln) = $problem::<$m>(false);
-                let t_evals = soln
-                    .solution_points
-                    .iter()
-                    .map(|sp| sp.t)
-                    .collect::<Vec<_>>();
                 $crate::common::$solver::<_, $ls<_>>(&problem, &t_evals);
             })
         });
@@ -26,17 +40,14 @@ pub(crate) use bench_implicit;
 macro_rules! bench_implicit_cg {
     ($g:ident, $name:ident, $solver:ident, $ls:ident, $problem:ident, $m:ty, $($N:expr),+ $(,)?) => {
         $(
-            $g.bench_function(concat!(stringify!($name), "_", $N), |b| {
-                b.iter(|| {
-                    let (problem, soln) = $problem::<$m, $N>();
-                    let t_evals = soln
-                        .solution_points
-                        .iter()
-                        .map(|sp| sp.t)
-                        .collect::<Vec<_>>();
-                    $crate::common::$solver::<_, $ls<_>>(&problem, &t_evals);
-                })
-            });
+            {
+                let (problem, t_evals) = $crate::common::setup_problem!($problem::<$m, $N>());
+                $g.bench_function(concat!(stringify!($name), "_", $N), |b| {
+                    b.iter(|| {
+                        $crate::common::$solver::<_, $ls<_>>(&problem, &t_evals);
+                    })
+                });
+            }
         )+
     };
 }
@@ -45,17 +56,14 @@ pub(crate) use bench_implicit_cg;
 macro_rules! bench_implicit_rt {
     ($g:ident, $name:ident, $solver:ident, $ls:ident, $problem:ident, $m:ty, $($N:expr),+ $(,)?) => {
         $(
-            $g.bench_function(concat!(stringify!($name), "_", $N), |b| {
-                b.iter(|| {
-                    let (problem, soln) = $problem::<$m>(false, $N);
-                    let t_evals = soln
-                        .solution_points
-                        .iter()
-                        .map(|sp| sp.t)
-                        .collect::<Vec<_>>();
-                    $crate::common::$solver::<_, $ls<_>>(&problem, &t_evals);
-                })
-            });
+            {
+                let (problem, t_evals) = $crate::common::setup_problem!($problem::<$m>(false, $N));
+                $g.bench_function(concat!(stringify!($name), "_", $N), |b| {
+                    b.iter(|| {
+                        $crate::common::$solver::<_, $ls<_>>(&problem, &t_evals);
+                    })
+                });
+            }
         )+
     };
 }
@@ -63,14 +71,9 @@ pub(crate) use bench_implicit_rt;
 
 macro_rules! bench_explicit {
     ($g:ident, $name:ident, $solver:ident, $problem:ident, $m:ty) => {
+        let (problem, t_evals) = $crate::common::setup_problem!($problem::<$m>(false));
         $g.bench_function(stringify!($name), |b| {
             b.iter(|| {
-                let (problem, soln) = $problem::<$m>(false);
-                let t_evals = soln
-                    .solution_points
-                    .iter()
-                    .map(|sp| sp.t)
-                    .collect::<Vec<_>>();
                 $crate::common::$solver::<_>(&problem, &t_evals);
             })
         });
