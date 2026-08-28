@@ -35,17 +35,6 @@ pub(crate) fn broadcast_batch(dest: usize, src_nbatch: usize, dest_nbatch: usize
     dest * src_nbatch / dest_nbatch
 }
 
-/// Runs `f` out of line and marked unlikely.
-///
-/// Used for the broadcasting tails of the elementwise macros: they are cold next to the
-/// equal-batch paths above them, and leaving them inline costs the hot path its own inlining
-/// (worth ~15% on lin_alg_ops copy_from_view/faer/100).
-#[cold]
-#[inline(never)]
-pub(crate) fn cold_call<R, F: FnOnce() -> R>(f: F) -> R {
-    f()
-}
-
 /// defines the current execution and allocation context of an operator / vector / matrix
 /// for example:
 /// - threading model (e.g. single-threaded, multi-threaded, GPU)

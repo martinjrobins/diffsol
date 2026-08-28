@@ -3,7 +3,7 @@ use std::ops::{Add, AddAssign, Div, Index, IndexMut, Mul, MulAssign, Sub, SubAss
 use faer::reborrow::{Reborrow, ReborrowMut};
 use faer::{unzip, zip, Col, Mat, MatMut, MatRef};
 
-use crate::context::{broadcast_batch, cold_call};
+use crate::context::broadcast_batch;
 use crate::{scalar::Scale, Context, FaerContext, FaerScalar, IndexType, Vector, VectorHost};
 
 use crate::{FaerMat, VectorCommon, VectorIndex, VectorView, VectorViewMut};
@@ -442,16 +442,14 @@ macro_rules! copy_from_body {
             return;
         }
         let (nb, onc) = ($self.data.ncols(), $other.data.ncols());
-        cold_call(|| {
-            for b in 0..nb {
-                let src = broadcast_batch(b, onc, nb);
-                $self
-                    .data
-                    .rb_mut()
-                    .col_mut(b)
-                    .copy_from($other.data.rb().col(src));
-            }
-        });
+        for b in 0..nb {
+            let src = broadcast_batch(b, onc, nb);
+            $self
+                .data
+                .rb_mut()
+                .col_mut(b)
+                .copy_from($other.data.rb().col(src));
+        }
     };
 }
 
@@ -473,16 +471,14 @@ macro_rules! axpy_body {
                 .for_each(|unzip!(s, xi)| *s = *s * $beta + *xi * alpha);
             return;
         }
-        cold_call(|| {
-            for $batch in 0..nb {
-                let alpha = $alpha;
-                zip!(
-                    $self.data.rb_mut().col_mut($batch),
-                    $x.data.rb().col($x.batch($batch, nb))
-                )
-                .for_each(|unzip!(s, xi)| *s = *s * $beta + *xi * alpha);
-            }
-        });
+        for $batch in 0..nb {
+            let alpha = $alpha;
+            zip!(
+                $self.data.rb_mut().col_mut($batch),
+                $x.data.rb().col($x.batch($batch, nb))
+            )
+            .for_each(|unzip!(s, xi)| *s = *s * $beta + *xi * alpha);
+        }
     }};
 }
 
@@ -534,13 +530,11 @@ macro_rules! squared_norm_body {
         if nb == 1 {
             return batch_norm(0, 0, 0);
         }
-        cold_call(|| {
-            let mut max_norm = T::zero();
-            for b in 0..nb {
-                max_norm = max_norm.max(batch_norm(b, $y.batch(b, nb), $atol.batch(b, nb)));
-            }
-            max_norm
-        })
+        let mut max_norm = T::zero();
+        for b in 0..nb {
+            max_norm = max_norm.max(batch_norm(b, $y.batch(b, nb), $atol.batch(b, nb)));
+        }
+        max_norm
     }};
 }
 

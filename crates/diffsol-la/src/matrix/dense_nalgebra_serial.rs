@@ -6,7 +6,9 @@ use nalgebra::{
 
 use super::default_solver::DefaultSolver;
 use super::sparsity::{Dense, DenseRef};
-use crate::context::{broadcast_batch, cold_call};
+use std::mem::MaybeUninit;
+
+use crate::context::broadcast_batch;
 use crate::error::LaError;
 use crate::{scalar::Scale, Context, NalgebraScalar, Vector};
 use crate::{
@@ -40,8 +42,14 @@ impl<T: NalgebraScalar> NalgebraMat<T> {
 }
 /// Scalars of staging buffer `mul_cols_by` uses per row tile. The tile is
 /// `MUL_COLS_TILE / ncols` rows, so a narrow range gets a tall tile and a wide one a short
-/// tile, and either way the staged values stay in L1.
-const MUL_COLS_TILE: usize = 512;
+/// tile, and either way the staged tile and the destination it writes back stay in L1.
+///
+/// Swept over 64..=2048 against `lin_alg_ops mul_cols_by` (nstates 2..=10000, `ncols` 2 and
+/// 6): 1024 is the best or tied-best at every tall shape and 8% ahead of 512 on
+/// `mul_cols_by/faer/k6/10000`, while 2048 falls off again.  The buffer is uninitialised, so
+/// short vectors no longer pay for the part of it they do not use and the choice is decided
+/// purely by the tall shapes.
+const MUL_COLS_TILE: usize = 1024;
 
 impl<T: NalgebraScalar> DefaultSolver for NalgebraMat<T> {
     type LS = NalgebraLU<T>;
@@ -446,15 +454,13 @@ impl<T: NalgebraScalar> Matrix for NalgebraMat<T> {
             });
             return;
         }
-        cold_call(|| {
-            for batch in 0..nb {
-                let mut columns = self.data.columns_mut(self.col(batch, 0), nc);
-                columns.copy_from(&x.data.columns(x.col_bcast(batch, 0, nb), nc));
-                columns.zip_apply(&y.data.columns(y.col_bcast(batch, 0, nb), nc), |s, y| {
-                    *s += b * y;
-                });
-            }
-        });
+        for batch in 0..nb {
+            let mut columns = self.data.columns_mut(self.col(batch, 0), nc);
+            columns.copy_from(&x.data.columns(x.col_bcast(batch, 0, nb), nc));
+            columns.zip_apply(&y.data.columns(y.col_bcast(batch, 0, nb), nc), |s, y| {
+                *s += b * y;
+            });
+        }
     }
     fn new_from_sparsity(nr: usize, nc: usize, _: Option<Self::Sparsity>, ctx: Self::C) -> Self {
         Self::zeros(nr, nc, ctx)
@@ -581,7 +587,11 @@ impl<T: NalgebraScalar> DenseMatrix for NalgebraMat<T> {
         // column: stage the tile's old values (the multiply cannot alias its input and
         // output), then overwrite in place.
         let tile = (MUL_COLS_TILE / ncols).max(1);
-        let mut buf = [T::zero(); MUL_COLS_TILE];
+        // uninitialised on purpose: the staging loop below writes every element that the
+        // accumulate loop reads, and zeroing the whole buffer costs more than the entire
+        // operation for the two- and three-state systems the ODE solvers spend their time in
+        let mut buf: [MaybeUninit<T>; MUL_COLS_TILE] =
+            [const { MaybeUninit::uninit() }; MUL_COLS_TILE];
         let data = self.data.as_mut_slice();
         for b in 0..nbatch {
             let base = b * logical_ncols * nrows;
@@ -590,8 +600,22 @@ impl<T: NalgebraScalar> DenseMatrix for NalgebraMat<T> {
                 let rows = tile.min(nrows - row);
                 for j in 0..ncols {
                     let src = &data[base + j * nrows + row..][..rows];
-                    buf[j * rows..][..rows].copy_from_slice(src);
+                    // SAFETY: `MaybeUninit<T>` is layout-compatible with `T`, and
+                    // `j * rows + rows <= rows * ncols <= MUL_COLS_TILE` (see below), so the
+                    // destination run is in bounds; the two buffers cannot overlap.
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(
+                            src.as_ptr(),
+                            buf.as_mut_ptr().add(j * rows) as *mut T,
+                            rows,
+                        );
+                    }
                 }
+                // SAFETY: the loop above initialised `buf[..rows * ncols]`, and
+                // `rows * ncols <= tile * ncols <= MUL_COLS_TILE` -- the `.max(1)` branch
+                // cannot be taken because `ncols <= MAX_SMALL_COLS`, asserted above.
+                let buf =
+                    unsafe { &*(&buf[..rows * ncols] as *const [MaybeUninit<T>] as *const [T]) };
                 // One dot product per output element, rather than accumulating a column at a
                 // time. Two alternatives were (a) an explicit per-column axpy pass, and (b) handing the staged
                 // tile to nalgebra's `gemm`. Both performed worse for the very small rhs matrix

@@ -2,7 +2,7 @@ use std::ops::{Add, AddAssign, Div, Index, IndexMut, Mul, MulAssign, Sub, SubAss
 
 use nalgebra::{Const, DMatrix, DVector, Dyn, LpNorm, MatrixView, MatrixViewMut};
 
-use crate::context::{broadcast_batch, cold_call};
+use crate::context::broadcast_batch;
 use crate::{Context, IndexType, NalgebraContext, NalgebraMat, NalgebraScalar, Scale, VectorHost};
 
 use super::{DefaultDenseMatrix, Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
@@ -426,14 +426,12 @@ macro_rules! copy_from_body {
             return;
         }
         let nb = $self.data.ncols();
-        cold_call(|| {
-            for b in 0..nb {
-                $self
-                    .data
-                    .column_mut(b)
-                    .copy_from(&$other.data.column($other.batch(b, nb)));
-            }
-        });
+        for b in 0..nb {
+            $self
+                .data
+                .column_mut(b)
+                .copy_from(&$other.data.column($other.batch(b, nb)));
+        }
     };
 }
 
@@ -457,16 +455,13 @@ macro_rules! axpy_body {
                 .axpy(alpha, &$x.data.column(0), $beta);
             return;
         }
-        cold_call(|| {
-            for $batch in 0..nb {
-                let alpha = $alpha;
-                $self.data.column_mut($batch).axpy(
-                    alpha,
-                    &$x.data.column($x.batch($batch, nb)),
-                    $beta,
-                );
-            }
-        });
+        for $batch in 0..nb {
+            let alpha = $alpha;
+            $self
+                .data
+                .column_mut($batch)
+                .axpy(alpha, &$x.data.column($x.batch($batch, nb)), $beta);
+        }
     }};
 }
 
@@ -507,13 +502,11 @@ macro_rules! squared_norm_body {
         if nb == 1 {
             return batch_norm(0, 0, 0);
         }
-        cold_call(|| {
-            let mut max_norm = T::zero();
-            for b in 0..nb {
-                max_norm = max_norm.max(batch_norm(b, $y.batch(b, nb), $atol.batch(b, nb)));
-            }
-            max_norm
-        })
+        let mut max_norm = T::zero();
+        for b in 0..nb {
+            max_norm = max_norm.max(batch_norm(b, $y.batch(b, nb), $atol.batch(b, nb)));
+        }
+        max_norm
     }};
 }
 

@@ -2,6 +2,8 @@ use std::ops::{Add, AddAssign, Index, IndexMut, Mul, Sub, SubAssign};
 
 use super::default_solver::DefaultSolver;
 use super::sparsity::{Dense, DenseRef};
+use std::mem::MaybeUninit;
+
 use crate::context::broadcast_batch;
 use crate::error::LaError;
 use crate::{scalar::Scale, Context, FaerScalar, Vector};
@@ -41,8 +43,14 @@ impl<T: FaerScalar> FaerMat<T> {
 }
 /// Scalars of staging buffer `mul_cols_by` uses per row tile. The tile is
 /// `MUL_COLS_TILE / ncols` rows, so a narrow range gets a tall tile and a wide one a short
-/// tile, and either way the staged values stay in L1.
-const MUL_COLS_TILE: usize = 512;
+/// tile, and either way the staged tile and the destination it writes back stay in L1.
+///
+/// Swept over 64..=2048 against `lin_alg_ops mul_cols_by` (nstates 2..=10000, `ncols` 2 and
+/// 6): 1024 is the best or tied-best at every tall shape and 8% ahead of 512 on
+/// `mul_cols_by/faer/k6/10000`, while 2048 falls off again.  The buffer is uninitialised, so
+/// short vectors no longer pay for the part of it they do not use and the choice is decided
+/// purely by the tall shapes.
+const MUL_COLS_TILE: usize = 1024;
 
 impl<T: FaerScalar> DefaultSolver for FaerMat<T> {
     type LS = FaerLU<T>;
@@ -570,18 +578,38 @@ impl<T: FaerScalar> DenseMatrix for FaerMat<T> {
         // column: stage the tile's old values, then overwrite in place. Tall for a narrow
         // range, short for a wide one, so the tile always fits the same buffer.
         let tile = (MUL_COLS_TILE / ncols).max(1);
-        let mut buf = [T::zero(); MUL_COLS_TILE];
+        // uninitialised on purpose: the staging loop below writes every element that the
+        // accumulate loop reads, and zeroing the whole buffer costs more than the entire
+        // operation for the two- and three-state systems the ODE solvers spend their time in
+        let mut buf: [MaybeUninit<T>; MUL_COLS_TILE] =
+            [const { MaybeUninit::uninit() }; MUL_COLS_TILE];
         for b in 0..nbatch {
             let base = self.col(b, 0);
             let mut row = 0;
             while row < nrows {
                 let rows = tile.min(nrows - row);
                 for j in 0..ncols {
-                    let src = self.data.rb().col(base + j);
-                    for i in 0..rows {
-                        buf[j * rows + i] = src[row + i];
+                    // a column is contiguous whatever the column stride, so the tile is one
+                    // run and stages as a single copy
+                    let col = self.data.rb().col(base + j);
+                    let src = &col.try_as_col_major().unwrap().as_slice()[row..][..rows];
+                    // SAFETY: `MaybeUninit<T>` is layout-compatible with `T`, and
+                    // `j * rows + rows <= rows * ncols <= MUL_COLS_TILE` (see below), so the
+                    // destination run is in bounds; the two buffers cannot overlap.
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(
+                            src.as_ptr(),
+                            buf.as_mut_ptr().add(j * rows) as *mut T,
+                            rows,
+                        );
                     }
                 }
+                // SAFETY: the loop above initialised `buf[..rows * ncols]`, and
+                // `rows * ncols <= tile * ncols <= MUL_COLS_TILE` -- the `.max(1)` branch
+                // cannot be taken because `ncols <= MAX_SMALL_COLS`, asserted above.
+                // `MaybeUninit<T>` is layout-compatible with `T`.
+                let buf =
+                    unsafe { &*(&buf[..rows * ncols] as *const [MaybeUninit<T>] as *const [T]) };
                 for j in 0..ncols {
                     let w = &rhs[j * ncols..][..ncols];
                     let mut dst = self.data.rb_mut().col_mut(base + j);

@@ -446,6 +446,44 @@ fn bench_stage_accumulate<M: Matrix<T = f64> + DenseMatrix + 'static>(
     group.finish();
 }
 
+/// Row counts `mul_cols_by` sees: the ODE benchmark problems are 2-3 states, the sparse ones
+/// run into the thousands, and the staging buffer is a fixed size at both ends.
+const MUL_COLS_SIZES: &[usize] = &[2, 3, 10, 100, 1000, 10000];
+
+/// 🟡 mul_cols_by — `D[:, 0..k] = D[:, 0..k] * (R * U)`, the BDF difference-table rescale on a
+/// step-size change (`Bdf::_update_diff_for_step_size`). `k` is `order + 1`, so 1..=6.
+///
+/// The serial backends stage each row tile in a fixed `MUL_COLS_TILE` buffer sized so the tile
+/// stays in L1; the buffer is the same size whatever `ns` is, so watch both the 2-3 row rows
+/// (where the staging setup is the whole cost) and the tall ones (where the tiling pays off).
+fn bench_mul_cols_by<M: Matrix<T = f64> + DenseMatrix + 'static>(c: &mut Criterion, label: &str)
+where
+    M::C: Default + Clone,
+    M::V: Vector<T = f64, C = M::C> + Clone,
+{
+    let mut group = c.benchmark_group(label);
+    for &k in &[2usize, 6] {
+        // the identity leaves the values unchanged across iterations -- same arithmetic, but
+        // nothing drifts or denormalises over a long measurement
+        let mut rhs = vec![0.0; k * k];
+        for j in 0..k {
+            rhs[j * k + j] = 1.0;
+        }
+        for &ns in MUL_COLS_SIZES {
+            group.bench_with_input(BenchmarkId::new(format!("k{k}"), ns), &ns, |b, &ns| {
+                let ctx = M::C::default();
+                let mut mat = M::zeros(ns, k + 3, ctx);
+                fill_dense(&mut mat, ns);
+                b.iter(|| {
+                    mat.mul_cols_by(k, &rhs);
+                    black_box(&mat);
+                });
+            });
+        }
+    }
+    group.finish();
+}
+
 // ═════════════════════════════════════════════════════════
 // 🟡 MEDIUM — once or few times per step
 // ═════════════════════════════════════════════════════════
@@ -877,6 +915,7 @@ macro_rules! bench_dense_matrix_backend {
         bench_matrix_column::<$M>($c, concat!("matrix_column/", $label));
         bench_gemv_cols::<$M>($c, concat!("gemv_cols/", $label));
         bench_stage_accumulate::<$M>($c, concat!("stage_accumulate/", $label));
+        bench_mul_cols_by::<$M>($c, concat!("mul_cols_by/", $label));
     };
 }
 
