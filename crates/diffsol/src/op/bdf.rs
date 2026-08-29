@@ -55,13 +55,16 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
         let c = self.c.borrow();
         d.axpy(*c, dg, -Eqn::T::one());
     }
-    pub fn new_no_jacobian(eqn: Eqn) -> Self {
+    /// `vec_ctx` is the context to allocate the state-shaped working vectors with. It is the
+    /// equation's own context for the main equations, and the augmented context (one batch lane
+    /// per augmented channel) when `eqn` is an augmented equation set.
+    pub fn new_no_jacobian(eqn: Eqn, vec_ctx: Eqn::C) -> Self {
         let n = eqn.rhs().nstates();
         let ctx = eqn.context();
         let c = RefCell::new(Eqn::T::zero());
-        let psi_neg_y0 = RefCell::new(<Eqn::V as Vector>::zeros(n, ctx.clone()));
+        let psi_neg_y0 = RefCell::new(<Eqn::V as Vector>::zeros(n, vec_ctx.clone()));
         let jacobian_is_stale = RefCell::new(true);
-        let tmp = RefCell::new(<Eqn::V as Vector>::zeros(n, ctx.clone()));
+        let tmp = RefCell::new(<Eqn::V as Vector>::zeros(n, vec_ctx));
         let rhs_jac = RefCell::new(<Eqn::M as Matrix>::zeros(0, 0, ctx.clone()));
         let mass_jac = RefCell::new(<Eqn::M as Matrix>::zeros(0, 0, ctx.clone()));
         let sparsity = None;
@@ -101,13 +104,14 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
         }
         self.mass_jac.borrow()
     }
-    pub fn new(eqn: Eqn) -> Self {
+    /// See [`Self::new_no_jacobian`] for `vec_ctx`.
+    pub fn new(eqn: Eqn, vec_ctx: Eqn::C) -> Self {
         let n = eqn.rhs().nstates();
         let ctx = eqn.context();
         let c = RefCell::new(Eqn::T::zero());
-        let psi_neg_y0 = RefCell::new(<Eqn::V as Vector>::zeros(n, ctx.clone()));
+        let psi_neg_y0 = RefCell::new(<Eqn::V as Vector>::zeros(n, vec_ctx.clone()));
         let jacobian_is_stale = RefCell::new(true);
-        let tmp = RefCell::new(<Eqn::V as Vector>::zeros(n, ctx.clone()));
+        let tmp = RefCell::new(<Eqn::V as Vector>::zeros(n, vec_ctx));
 
         // create the mass and rhs jacobians according to the sparsity pattern
         let rhs_jac_sparsity = eqn.rhs().jacobian_sparsity();
@@ -317,7 +321,7 @@ mod tests {
     #[test]
     fn test_bdf_callable() {
         let (problem, _soln) = exponential_decay_problem::<Mcpu>(false);
-        let mut bdf_callable = BdfCallable::new(&problem.eqn);
+        let mut bdf_callable = BdfCallable::new(&problem.eqn, *problem.context());
         let ctx = problem.context();
         let c = 0.1;
         let phi_neg_y0 = Vcpu::from_vec(vec![1.1, 1.2], *ctx);

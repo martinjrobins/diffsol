@@ -65,13 +65,16 @@ impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
     pub fn current_mass(&self) -> Ref<'_, Eqn::M> {
         self.mass_jac.borrow()
     }
-    pub fn new_no_jacobian(eqn: Eqn, c: Eqn::T) -> Self {
+    /// `vec_ctx` is the context to allocate the state-shaped working vectors with. It is the
+    /// equation's own context for the main equations, and the augmented context (one batch lane
+    /// per augmented channel) when `eqn` is an augmented equation set.
+    pub fn new_no_jacobian(eqn: Eqn, c: Eqn::T, vec_ctx: Eqn::C) -> Self {
         let n = eqn.rhs().nstates();
         let h = RefCell::new(Eqn::T::zero());
         let ctx = eqn.context();
-        let phi = RefCell::new(<Eqn::V as Vector>::zeros(n, ctx.clone()));
+        let phi = RefCell::new(<Eqn::V as Vector>::zeros(n, vec_ctx.clone()));
         let jacobian_is_stale = RefCell::new(false);
-        let tmp = RefCell::new(<Eqn::V as Vector>::zeros(n, ctx.clone()));
+        let tmp = RefCell::new(<Eqn::V as Vector>::zeros(n, vec_ctx));
         let rhs_jac = RefCell::new(<Eqn::M as Matrix>::zeros(0, 0, ctx.clone()));
         let mass_jac = RefCell::new(<Eqn::M as Matrix>::zeros(0, 0, ctx.clone()));
         let sparsity = None;
@@ -92,13 +95,14 @@ impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
         &mut self.eqn
     }
 
-    pub fn new(eqn: Eqn, c: Eqn::T) -> Self {
+    /// See [`Self::new_no_jacobian`] for `vec_ctx`.
+    pub fn new(eqn: Eqn, c: Eqn::T, vec_ctx: Eqn::C) -> Self {
         let n = eqn.rhs().nstates();
         let ctx = eqn.context();
         let h = RefCell::new(Eqn::T::zero());
-        let phi = RefCell::new(<Eqn::V as Vector>::zeros(n, ctx.clone()));
+        let phi = RefCell::new(<Eqn::V as Vector>::zeros(n, vec_ctx.clone()));
         let jacobian_is_stale = RefCell::new(true);
-        let tmp = RefCell::new(<Eqn::V as Vector>::zeros(n, ctx.clone()));
+        let tmp = RefCell::new(<Eqn::V as Vector>::zeros(n, vec_ctx));
 
         // create the mass and rhs jacobians according to the sparsity pattern
         let rhs_jac = RefCell::new(Eqn::M::new_from_sparsity(
@@ -326,7 +330,7 @@ mod tests {
             let h = 1.3;
             let ctx = problem.context();
             let phi = Vcpu::from_vec(vec![1.1, 1.2, 1.3], *ctx);
-            let sdirk_callable = SdirkCallable::new(&problem.eqn, c);
+            let sdirk_callable = SdirkCallable::new(&problem.eqn, c, *problem.context());
             sdirk_callable.set_h(h);
             sdirk_callable.set_phi_direct(&phi);
             let t = 0.9;
@@ -346,7 +350,7 @@ mod tests {
         let c = 0.1;
         let h = 1.0;
         let ctx = problem.context();
-        let sdirk_callable = SdirkCallable::new(&problem.eqn, c);
+        let sdirk_callable = SdirkCallable::new(&problem.eqn, c, *problem.context());
         sdirk_callable.set_h(h);
 
         let phi = Vcpu::from_vec(vec![1.1, 1.2], *ctx);

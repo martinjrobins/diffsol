@@ -799,6 +799,15 @@ impl<T: NalgebraScalar> VectorHost for NalgebraVec<T> {
         assert_eq!(self.context.nbatch(), 1);
         self.data.as_mut_slice()
     }
+    fn batch_as_slice(&self, batch: usize) -> &[T] {
+        // batches are the columns of the backing matrix, and the storage is column-major
+        let n = self.data.nrows();
+        &self.data.as_slice()[batch * n..(batch + 1) * n]
+    }
+    fn batch_as_mut_slice(&mut self, batch: usize) -> &mut [T] {
+        let n = self.data.nrows();
+        &mut self.data.as_mut_slice()[batch * n..(batch + 1) * n]
+    }
 }
 #[cfg(test)]
 mod tests {

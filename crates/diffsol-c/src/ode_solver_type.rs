@@ -4,8 +4,8 @@
 use diffsol::error::DiffsolError;
 use diffsol::ode_equations::{OdeEquationsImplicit, OdeEquationsImplicitSens};
 use diffsol::{
-    matrix::MatrixRef, DefaultDenseMatrix, DenseMatrix, DiffSl, LinearSolver, Matrix,
-    OdeSolverProblem, OdeSolverState, VectorHost, VectorRef, VectorView,
+    matrix::MatrixRef, Context, DefaultDenseMatrix, DenseMatrix, DiffSl, LinearSolver, Matrix,
+    OdeSolverProblem, OdeSolverState, Vector, VectorHost, VectorRef, VectorView,
 };
 use diffsol::{
     ode_solver_error, AdjointOdeSolverMethod, CheckpointingPath, CodegenModule, DefaultSolver,
@@ -360,7 +360,13 @@ where
         let (mut state, adjoint_checkpointing) =
             adjoint.solve_adjoint_backwards_pass(t_eval, dgdu_eval)?;
         let Some(previous_checkpointing) = checkpointing.pop() else {
-            return Ok(state.into_common().sg);
+            // the adjoint state holds one output channel per batch lane; the C API returns one
+            // gradient vector per channel
+            let sg = state.into_common().sg;
+            let nchannels = sg.context().nbatch();
+            return Ok((0..nchannels)
+                .map(|i| sg.get_batch(i).into_owned())
+                .collect());
         };
         let model_index = checkpointing
             .last()
@@ -391,7 +397,7 @@ where
             vec![previous_checkpointing],
             Some(fwd_solver),
             nout_override,
-        );
+        )?;
 
         adjoint = BwdTag::solver_adjoint_from_state::<BwdLS, _>(&*problem, state, adjoint_eqn)?;
     }

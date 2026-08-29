@@ -107,8 +107,10 @@ where
         let op = ParameterisedOp { op: self, p };
         let non_zeros = find_sens_adjoint_non_zeros(&op, y0, t0);
         let nparams = p.len();
+        // `-g_p^T` maps outputs to parameters: the same as `nstates` for the rhs, but not for an
+        // out operator
         self.sens_sparsity = Some(
-            MatrixSparsity::try_from_indices(nparams, self.nstates, non_zeros.clone())
+            MatrixSparsity::try_from_indices(nparams, self.nout(), non_zeros.clone())
                 .expect("invalid sparsity pattern"),
         );
         self.coloring_sens_adjoint = Some(JacobianColoring::new(
@@ -158,6 +160,11 @@ where
 {
     fn calculate_sparsity(&mut self, y0: &Self::V, t0: Self::T, p: &Self::V) {
         self.calculate_jacobian_sparsity(y0, t0, p);
+        self.calculate_adjoint_sparsity(y0, t0, p);
+        self.calculate_sens_adjoint_sparsity(y0, t0, p);
+    }
+
+    fn calculate_augmented_sparsity(&mut self, y0: &Self::V, t0: Self::T, p: &Self::V) {
         self.calculate_adjoint_sparsity(y0, t0, p);
         self.calculate_sens_adjoint_sparsity(y0, t0, p);
     }

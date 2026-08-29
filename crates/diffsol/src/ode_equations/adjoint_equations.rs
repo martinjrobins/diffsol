@@ -1,15 +1,16 @@
 use num_traits::{One, Signed, Zero};
 use std::{
-    cell::RefCell,
-    ops::{AddAssign, SubAssign},
+    cell::{Cell, RefCell},
+    ops::SubAssign,
     rc::Rc,
 };
 
 use crate::{
     error::DiffsolError, op::nonlinear_op::NonLinearOpJacobian, AugmentedOdeEquations,
-    CheckpointingPath, ConstantOp, ConstantOpSensAdjoint, LinearOp, LinearOpTranspose, Matrix,
-    NonLinearOp, NonLinearOpAdjoint, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsAdjoint,
-    OdeEquationsRef, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, Scalar, Vector,
+    CheckpointingPath, ConstantOp, ConstantOpSensAdjoint, Context, LinearOp, LinearOpTranspose,
+    Matrix, NonLinearOp, NonLinearOpAdjoint, NonLinearOpSensAdjoint, OdeEquations,
+    OdeEquationsAdjoint, OdeEquationsRef, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op,
+    Scalar, Vector,
 };
 
 pub struct AdjointContext<'a, Eqn, State, Method>
@@ -24,10 +25,9 @@ where
     active_checkpointer: usize,
     solver: Option<RefCell<Method>>,
     x: Eqn::V,
-    index: usize,
     max_index: usize,
     last_t: Option<Eqn::T>,
-    col: Eqn::V,
+    aug_ctx: Eqn::C,
 }
 
 impl<'a, Eqn, State, Method> AdjointContext<'a, Eqn, State, Method>
@@ -36,12 +36,15 @@ where
     State: OdeSolverState<Eqn::V>,
     Method: OdeSolverMethod<'a, Eqn, State = State>,
 {
+    /// `aug_ctx` must hold `eqn.context().nbatch() * max_index` batches, see
+    /// [`AugmentedOdeEquations`].
     pub fn new(
         eqn: &'a Eqn,
         t0: Eqn::T,
         checkpointers: CheckpointingPath<Eqn, State>,
         solver: Option<Method>,
         max_index: usize,
+        aug_ctx: Eqn::C,
     ) -> Self {
         let active_checkpointer = checkpointers
             .len()
@@ -49,9 +52,6 @@ where
             .expect("adjoint checkpointing path must not be empty");
         let ctx = eqn.context();
         let x = <Eqn::V as Vector>::zeros(eqn.rhs().nstates(), ctx.clone());
-        let mut col = <Eqn::V as Vector>::zeros(max_index, ctx.clone());
-        let index = 0;
-        col.set_index(0, Eqn::T::one());
         Self {
             eqn,
             t0,
@@ -59,9 +59,8 @@ where
             active_checkpointer,
             solver: solver.map(RefCell::new),
             x,
-            index,
             max_index,
-            col,
+            aug_ctx,
             last_t: None,
         }
     }
@@ -128,14 +127,9 @@ where
         &self.x
     }
 
-    pub fn col(&self) -> &Eqn::V {
-        &self.col
-    }
-
-    pub fn set_index(&mut self, index: usize) {
-        self.col.set_index(self.index, Eqn::T::zero());
-        self.index = index;
-        self.col.set_index(self.index, Eqn::T::one());
+    /// The context of the augmented state, holding `nbatch * max_index` batches.
+    pub fn aug_context(&self) -> &Eqn::C {
+        &self.aug_ctx
     }
 }
 
@@ -273,13 +267,16 @@ where
 {
     eqn: &'a Eqn,
     context: Rc<RefCell<AdjointContext<'a, Eqn, Method::State, Method>>>,
-    tmp: RefCell<Eqn::V>,
+    /// `-g_y^T`, at the problem's own batch count, one column per output channel
+    out_adjoint: RefCell<Eqn::M>,
+    /// the time `out_adjoint` was last filled at
+    cached_t: Cell<Option<Eqn::T>>,
     with_out: bool,
 }
 
 impl<'a, Eqn, Method> AdjointRhs<'a, Eqn, Method>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsAdjoint,
     Method: OdeSolverMethod<'a, Eqn>,
 {
     pub fn new(
@@ -287,12 +284,30 @@ where
         context: Rc<RefCell<AdjointContext<'a, Eqn, Method::State, Method>>>,
         with_out: bool,
     ) -> Self {
-        let tmp_n = if with_out { eqn.rhs().nstates() } else { 0 };
-        let tmp = RefCell::new(<Eqn::V as Vector>::zeros(tmp_n, eqn.context().clone()));
+        let nstates = eqn.rhs().nstates();
+        let nout = context.borrow().max_index;
+        let ctx = eqn.context().clone();
+        let out_adjoint = match (with_out, eqn.out()) {
+            (false, _) => <Eqn::M as Matrix>::zeros(0, 0, ctx),
+            (true, Some(out)) => {
+                <Eqn::M as Matrix>::new_from_sparsity(nstates, nout, out.adjoint_sparsity(), ctx)
+            }
+            (true, None) => {
+                // The default output is the identity on the state, so `g_y = I` and this operator
+                // contributes `-g_y^T = -I` — this is currently dead code as you can't integrate
+                // the output without defining one, kept in case this changes.
+                let n = nstates.min(nout);
+                let indices = (0..n).map(|i| (i, i)).collect::<Vec<_>>();
+                let values = vec![-Eqn::T::one(); n * ctx.nbatch()];
+                <Eqn::M as Matrix>::try_from_triplets(nstates, nout, indices, values, ctx)
+                    .expect("failed to build the identity output Jacobian")
+            }
+        };
         Self {
             eqn,
             context,
-            tmp,
+            out_adjoint: RefCell::new(out_adjoint),
+            cached_t: Cell::new(None),
             with_out,
         }
     }
@@ -336,17 +351,19 @@ where
         // y = -f^T_x(x, t) λ
         self.eqn.rhs().jac_transpose_mul_inplace(x, t, lambda, y);
 
-        // y = -f^T_x(x, t) λ - g^T_x(x,t)
+        // y = -f^T_x(x, t) λ - g^T_x(x,t): column `i` of `-g_y^T` is channel `i`'s contribution,
+        // so it goes straight onto lane `b * nout + i`
         if self.with_out {
-            let col = context.col();
+            let mut out_adjoint = self.out_adjoint.borrow_mut();
+            // with no out operator the matrix is the constant identity and is never refilled
             if let Some(out) = self.eqn.out() {
-                let mut tmp = self.tmp.borrow_mut();
-                out.jac_transpose_mul_inplace(x, t, col, &mut tmp);
-                y.add_assign(&*tmp);
-            } else {
-                // Default output is identity on state when no explicit out is defined.
-                y.add_assign(col);
+                if self.cached_t.get() != Some(t) {
+                    // the forward state only moves when `t` does, so refill once per time point
+                    out.adjoint_inplace(x, t, &mut out_adjoint);
+                    self.cached_t.set(Some(t));
+                }
             }
+            out_adjoint.add_columns_to_batched_vector(y);
         }
     }
 }
@@ -389,13 +406,16 @@ where
 {
     eqn: &'a Eqn,
     context: Rc<RefCell<AdjointContext<'a, Eqn, Method::State, Method>>>,
-    tmp: RefCell<Eqn::V>,
+    /// `-g_p^T`, at the problem's own batch count, one column per output channel
+    out_sens_adjoint: RefCell<Eqn::M>,
+    /// the time `out_sens_adjoint` was last filled at
+    cached_t: Cell<Option<Eqn::T>>,
     with_out: bool,
 }
 
 impl<'a, Eqn, Method> AdjointOut<'a, Eqn, Method>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsAdjoint,
     Method: OdeSolverMethod<'a, Eqn>,
 {
     pub fn new(
@@ -403,12 +423,22 @@ where
         context: Rc<RefCell<AdjointContext<'a, Eqn, Method::State, Method>>>,
         with_out: bool,
     ) -> Self {
-        let tmp_n = if with_out { eqn.rhs().nparams() } else { 0 };
-        let tmp = RefCell::new(<Eqn::V as Vector>::zeros(tmp_n, eqn.context().clone()));
+        let ctx = eqn.context().clone();
+        // with no out operator there is no `g_p` term at all
+        let out_sens_adjoint = match (with_out, eqn.out()) {
+            (true, Some(out)) => <Eqn::M as Matrix>::new_from_sparsity(
+                eqn.rhs().nparams(),
+                context.borrow().max_index,
+                out.sens_adjoint_sparsity(),
+                ctx,
+            ),
+            _ => <Eqn::M as Matrix>::zeros(0, 0, ctx),
+        };
         Self {
             eqn,
             context,
-            tmp,
+            out_sens_adjoint: RefCell::new(out_sens_adjoint),
+            cached_t: Cell::new(None),
             with_out,
         }
     }
@@ -450,12 +480,15 @@ where
         let x = context.state();
         self.eqn.rhs().sens_transpose_mul_inplace(x, t, lambda, y);
 
+        // column `i` of `-g_p^T` is channel `i`'s contribution, see `AdjointRhs::call_inplace`
         if self.with_out {
-            let col = context.col();
             if let Some(out) = self.eqn.out() {
-                let mut tmp = self.tmp.borrow_mut();
-                out.sens_transpose_mul_inplace(x, t, col, &mut tmp);
-                y.add_assign(&*tmp);
+                let mut out_sens_adjoint = self.out_sens_adjoint.borrow_mut();
+                if self.cached_t.get() != Some(t) {
+                    out.sens_adjoint_inplace(x, t, &mut out_sens_adjoint);
+                    self.cached_t.set(Some(t));
+                }
+                out_sens_adjoint.add_columns_to_batched_vector(y);
             }
         }
     }
@@ -502,6 +535,7 @@ where
     context: Rc<RefCell<AdjointContext<'a, Eqn, Method::State, Method>>>,
     tmp: RefCell<Eqn::V>,
     tmp2: RefCell<Eqn::V>,
+    aug_ctx: Eqn::C,
     init: AdjointInit<'a, Eqn, Method>,
     atol: Option<&'a Eqn::V>,
     rtol: Option<Eqn::T>,
@@ -511,7 +545,7 @@ where
 
 impl<'a, Eqn, Method> Clone for AdjointEquations<'a, Eqn, Method>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsAdjoint,
     Method: OdeSolverMethod<'a, Eqn>,
 {
     fn clone(&self) -> Self {
@@ -525,6 +559,7 @@ where
                 .as_ref()
                 .map(|solver| solver.borrow().clone()),
             context_ref.max_index,
+            context_ref.aug_ctx.clone(),
         )));
         let rhs = AdjointRhs::new(self.eqn, context.clone(), self.rhs.with_out);
         let init = AdjointInit::new(self.eqn, context.clone(), self.rhs.with_out);
@@ -536,6 +571,7 @@ where
         let out_atol = self.out_atol;
         let out_rtol = self.out_rtol;
         let mass = self.eqn.mass().map(|_m| AdjointMass::new(self.eqn));
+        let aug_ctx = self.aug_ctx.clone();
         Self {
             rhs,
             init,
@@ -544,6 +580,7 @@ where
             out,
             tmp,
             tmp2,
+            aug_ctx,
             eqn: self.eqn,
             atol,
             rtol,
@@ -567,13 +604,14 @@ where
         let rhs = AdjointRhs::new(eqn, context.clone(), with_out);
         let init = AdjointInit::new(eqn, context.clone(), with_out);
         let out = AdjointOut::new(eqn, context.clone(), with_out);
+        let aug_ctx = context.borrow().aug_context().clone();
         let tmp = RefCell::new(<Eqn::V as Vector>::zeros(
             eqn.rhs().nparams(),
-            eqn.context().clone(),
+            aug_ctx.clone(),
         ));
         let tmp2 = RefCell::new(<Eqn::V as Vector>::zeros(
             eqn.rhs().nstates(),
-            eqn.context().clone(),
+            aug_ctx.clone(),
         ));
         let atol = Some(&problem.atol);
         let rtol = Some(problem.rtol);
@@ -588,6 +626,7 @@ where
             out,
             tmp,
             tmp2,
+            aug_ctx,
             eqn,
             atol,
             rtol,
@@ -626,21 +665,18 @@ where
         self.rhs.with_out
     }
 
-    pub fn correct_sg_for_init(&self, t: Eqn::T, s: &[Eqn::V], sg: &mut [Eqn::V]) {
+    pub fn correct_sg_for_init(&self, t: Eqn::T, s: &Eqn::V, sg: &mut Eqn::V) {
         let mut tmp = self.tmp.borrow_mut();
-        for (s_i, sg_i) in s.iter().zip(sg.iter_mut()) {
-            if let Some(mass) = self.eqn.mass() {
-                let mut tmp2 = self.tmp2.borrow_mut();
-                mass.call_transpose_inplace(s_i, t, &mut tmp2);
-                self.eqn
-                    .init()
-                    .sens_transpose_mul_inplace(t, &tmp2, &mut tmp);
-                sg_i.sub_assign(&*tmp);
-            } else {
-                self.eqn.init().sens_transpose_mul_inplace(t, s_i, &mut tmp);
-                sg_i.sub_assign(&*tmp);
-            }
+        if let Some(mass) = self.eqn.mass() {
+            let mut tmp2 = self.tmp2.borrow_mut();
+            mass.call_transpose_inplace(s, t, &mut tmp2);
+            self.eqn
+                .init()
+                .sens_transpose_mul_inplace(t, &tmp2, &mut tmp);
+        } else {
+            self.eqn.init().sens_transpose_mul_inplace(t, s, &mut tmp);
         }
+        sg.sub_assign(&*tmp);
     }
 
     pub fn interpolate_forward_state(&self, t: Eqn::T, y: &mut Eqn::V) -> Result<(), DiffsolError> {
@@ -680,6 +716,7 @@ where
             mass: _,
             tmp: _,
             tmp2: _,
+            aug_ctx: _,
             init: _,
             atol: _,
             rtol: _,
@@ -789,7 +826,7 @@ where
         self.out().is_some() && self.out_atol.is_some() && self.out_rtol.is_some()
     }
 
-    fn atol(&self, _index: usize) -> Option<&Eqn::V> {
+    fn atol(&self) -> Option<&Eqn::V> {
         self.atol
     }
     fn out_atol(&self) -> Option<&Eqn::V> {
@@ -806,8 +843,8 @@ where
         self.context.borrow().max_index
     }
 
-    fn set_index(&mut self, index: usize) {
-        self.context.borrow_mut().set_index(index);
+    fn aug_context(&self) -> &Eqn::C {
+        &self.aug_ctx
     }
 
     fn update_rhs_out_state(&mut self, _y: &Eqn::V, _dy: &Eqn::V, _t: Eqn::T) {}
@@ -825,15 +862,68 @@ mod tests {
         matrix::dense_nalgebra_serial::NalgebraMat,
         ode_equations::{
             adjoint_equations::AdjointEquations,
-            test_models::exponential_decay::exponential_decay_problem_adjoint,
+            test_models::{
+                exponential_decay::exponential_decay_problem_adjoint,
+                logistic::logistic_problem_adjoint_no_out,
+            },
         },
-        AdjointContext, AugmentedOdeEquations, Checkpointing, DenseMatrix, FaerSparseLU,
+        AdjointContext, AugmentedOdeEquations, Checkpointing, Context, DenseMatrix, FaerSparseLU,
         FaerSparseMat, FaerVec, Matrix, MatrixCommon, NalgebraVec, NonLinearOp,
         NonLinearOpJacobian, OdeEquations, Op, RkState, Vector,
     };
     type Mcpu = NalgebraMat<f64>;
     type Vcpu = NalgebraVec<f64>;
     type LS = crate::NalgebraLU<f64>;
+
+    /// With no explicit output operator the output is the identity on the state, so `g_y = I` and
+    /// each adjoint channel picks up `-g_y^T e_i = -e_i`. That term used to be a one-hot basis
+    /// vector added with the *opposite* sign; it is now `-I`, taking the same reshape path as an
+    /// explicit `-g_y^T`.
+    #[test]
+    fn test_rhs_identity_output() {
+        // dy/dt = r*u*(1 - u/k), no out operator, so nout == nstates == 1
+        let (problem, _soln) = logistic_problem_adjoint_no_out::<Mcpu>();
+        let ctx = problem.eqn.context();
+        let state = RkState {
+            t: 0.0,
+            y: Vcpu::from_vec(vec![2.0], *ctx),
+            dy: Vcpu::from_vec(vec![0.0], *ctx),
+            g: Vcpu::zeros(0, *ctx),
+            dg: Vcpu::zeros(0, *ctx),
+            sg: Vcpu::zeros(0, *ctx),
+            dsg: Vcpu::zeros(0, *ctx),
+            s: Vcpu::zeros(0, *ctx),
+            ds: Vcpu::zeros(0, *ctx),
+            h: 0.0,
+        };
+        let nout = problem.eqn.nout();
+        assert_eq!(nout, 1);
+        let mut solver = problem.esdirk34_solver::<LS>(state.clone()).unwrap();
+        let checkpointer = Checkpointing::new(
+            Some(&mut solver),
+            0,
+            vec![state.clone(), state.clone()],
+            None,
+        );
+        let aug_ctx = ctx.clone_with_nbatch(nout).unwrap();
+        let context = Rc::new(RefCell::new(AdjointContext::new(
+            &problem.eqn,
+            problem.t0,
+            vec![checkpointer],
+            Some(solver.clone()),
+            nout,
+            aug_ctx,
+        )));
+        // `with_out` with no out operator: the identity-output branch
+        let adj_eqn = AdjointEquations::new(&problem, context, true);
+
+        // F(λ, x, t) = -f^T_x(x, t) λ - g^T_y e_0, with r = k = 1, x = 2 and g_y = I:
+        //   -f_x = -r(1 - 2x/k) = 3, so F = 3λ - 1 = 2 at λ = 1
+        let lambda = Vcpu::from_vec(vec![1.0], *ctx);
+        let mut f = Vcpu::zeros(1, *ctx);
+        adj_eqn.rhs.call_inplace(&lambda, state.t, &mut f);
+        f.assert_eq_st(&Vcpu::from_vec(vec![2.0], *ctx), 1e-10);
+    }
 
     #[test]
     fn test_rhs_exponential() {
@@ -847,10 +937,10 @@ mod tests {
             dy: Vcpu::from_vec(vec![1.0, 1.0], *ctx),
             g: Vcpu::zeros(0, *ctx),
             dg: Vcpu::zeros(0, *ctx),
-            sg: Vec::new(),
-            dsg: Vec::new(),
-            s: Vec::new(),
-            ds: Vec::new(),
+            sg: Vcpu::zeros(0, *ctx),
+            dsg: Vcpu::zeros(0, *ctx),
+            s: Vcpu::zeros(0, *ctx),
+            ds: Vcpu::zeros(0, *ctx),
             h: 0.0,
         };
         let nout = problem.eqn.out().unwrap().nout();
@@ -861,12 +951,15 @@ mod tests {
             vec![state.clone(), state.clone()],
             None,
         );
+        // the adjoint state holds one channel per output in its batch lanes
+        let aug_ctx = ctx.clone_with_nbatch(nout).unwrap();
         let context = Rc::new(RefCell::new(AdjointContext::new(
             &problem.eqn,
             problem.t0,
             vec![checkpointer],
             Some(solver.clone()),
             nout,
+            aug_ctx,
         )));
         let adj_eqn = AdjointEquations::new(&problem, context.clone(), false);
         // F(λ, x, t) = -f^T_x(x, t) λ
@@ -879,7 +972,7 @@ mod tests {
         let f_expect = Vcpu::from_vec(vec![0.1, 0.2], *ctx);
         f.assert_eq_st(&f_expect, 1e-10);
 
-        let mut adj_eqn = AdjointEquations::new(&problem, context, true);
+        let adj_eqn = AdjointEquations::new(&problem, context, true);
 
         // f_x^T = |-a 0|
         //         |0 -a|
@@ -903,18 +996,25 @@ mod tests {
         // g(λ, x, t) = -g_p(x, t) - λ^T f_p(x, t)
         //            = |1  1| |1| + |0| = |3|
         //              |0  0| |2|  |0|  = |0|
-        adj_eqn.set_index(0);
-        let out = adj_eqn.out.call(&v, state.t);
-        let out_expect = Vcpu::from_vec(vec![3.0, 0.0], *ctx);
+        // one lambda per output channel, all channels evaluated at once
+        let aug_ctx = *adj_eqn.aug_context();
+        let v_aug = Vcpu::from_vec(vec![1.0, 2.0, 1.0, 2.0], aug_ctx);
+        let mut out = Vcpu::zeros(2, aug_ctx);
+        adj_eqn.out.call_inplace(&v_aug, state.t, &mut out);
+        // g_p = 0, so both channels give the same result
+        let out_expect = Vcpu::from_vec(vec![3.0, 0.0, 3.0, 0.0], aug_ctx);
         out.assert_eq_st(&out_expect, 1e-10);
 
-        // F(λ, x, t) = -f^T_x(x, t) λ - g^T_x(x,t)
+        // F(λ, x, t) = -f^T_x(x, t) λ - g^T_x(x,t) E
         // f_x = |-a 0|
         //       |0 -a|
-        // F(s, t)_0 =  |a 0| |1| - |1.0| = | a - 1| = |-0.9|
-        //              |0 a| |2|   |2.0|   |2a - 2| = |-1.8|
-        let f = adj_eqn.rhs.call(&v, state.t);
-        let f_expect = Vcpu::from_vec(vec![-0.9, -1.8], *ctx);
+        // channel 0 = |a 0| |1| - |1.0| = | a - 1| = |-0.9|
+        //             |0 a| |2|   |2.0|   |2a - 2|   |-1.8|
+        // channel 1 = |a 0| |1| - |3.0| = | a - 3| = |-2.9|
+        //             |0 a| |2|   |4.0|   |2a - 4|   |-3.8|
+        let mut f = Vcpu::zeros(2, aug_ctx);
+        adj_eqn.rhs.call_inplace(&v_aug, state.t, &mut f);
+        let f_expect = Vcpu::from_vec(vec![-0.9, -1.8, -2.9, -3.8], aug_ctx);
         f.assert_eq_st(&f_expect, 1e-10);
     }
 
@@ -930,10 +1030,10 @@ mod tests {
             dy: FaerVec::from_vec(vec![1.0, 1.0], *ctx),
             g: FaerVec::zeros(0, *ctx),
             dg: FaerVec::zeros(0, *ctx),
-            sg: Vec::new(),
-            dsg: Vec::new(),
-            s: Vec::new(),
-            ds: Vec::new(),
+            sg: FaerVec::zeros(0, *ctx),
+            dsg: FaerVec::zeros(0, *ctx),
+            s: FaerVec::zeros(0, *ctx),
+            ds: FaerVec::zeros(0, *ctx),
             h: 0.0,
         };
         let nout = problem.eqn.out().unwrap().nout();
@@ -946,14 +1046,17 @@ mod tests {
             vec![state.clone(), state.clone()],
             None,
         );
+        // the adjoint state holds one channel per output in its batch lanes
+        let aug_ctx = ctx.clone_with_nbatch(nout).unwrap();
         let context = Rc::new(RefCell::new(AdjointContext::new(
             &problem.eqn,
             problem.t0,
             vec![checkpointer],
             Some(solver.clone()),
             nout,
+            aug_ctx,
         )));
-        let mut adj_eqn = AdjointEquations::new(&problem, context, true);
+        let adj_eqn = AdjointEquations::new(&problem, context, true);
 
         // f_x^T = |-a 0|
         //         |0 -a|
@@ -981,10 +1084,11 @@ mod tests {
         //       |0 -a|
         // F(s, t)_0 =  |a 0| |1| - |1.0| = |a - 1| = |-0.9|
         //              |0 a| |2|   |2.0|   |2a - 2| = |-1.8|
-        adj_eqn.set_index(0);
-        let v = FaerVec::from_vec(vec![1.0, 2.0], *ctx);
-        let f = adj_eqn.rhs.call(&v, state.t);
-        let f_expect = FaerVec::from_vec(vec![-0.9, -1.8], *ctx);
+        let aug_ctx = *adj_eqn.aug_context();
+        let v = FaerVec::from_vec(vec![1.0, 2.0, 1.0, 2.0], aug_ctx);
+        let mut f = FaerVec::zeros(2, aug_ctx);
+        adj_eqn.rhs.call_inplace(&v, state.t, &mut f);
+        let f_expect = FaerVec::from_vec(vec![-0.9, -1.8, -2.9, -3.8], aug_ctx);
         f.assert_eq_st(&f_expect, 1e-10);
     }
 }

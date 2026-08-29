@@ -15,7 +15,7 @@ fn exponential_decay<M: Matrix>(x: &M::V, p: &M::V, _t: M::T, y: &mut M::V) {
     y.copy_from(x);
     let nbatch = y.context().nbatch();
     for b in 0..nbatch {
-        let k = p.get_batch(b).get_index(0);
+        let k = p.get_batch_bcast(b, nbatch).get_index(0);
         y.get_batch_mut(b).mul_assign(scale(-k));
     }
 }
@@ -30,24 +30,8 @@ fn exponential_decay_mass<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, beta: M::T, 
 //         | -y  0 |
 // df/dp v = | -y  0 | |v_1| = |-yv_1|
 //           | -y  0 | |v_2|   |-yv_1 |
-fn exponential_decay_sens<M: MatrixHost>(x: &M::V, _p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
-    y.copy_from(x);
-    y.mul_assign(scale(-v[0]));
-}
-
 // df/dp^T v = | -y  -y | |v_1| = |-yv_1 - yv_2|
 //             |  0   0 | |v_2|   |  0  |
-fn exponential_decay_sens_transpose<M: MatrixHost>(
-    x: &M::V,
-    _p: &M::V,
-    _t: M::T,
-    v: &M::V,
-    y: &mut M::V,
-) {
-    y[0] = x[0] * v[0] + x[1] * v[1];
-    y[1] = M::T::zero();
-}
-
 // J = | -a  0 |
 //     | 0  -a |
 // Jv = -av
@@ -55,29 +39,18 @@ fn exponential_decay_jacobian<M: Matrix>(_x: &M::V, p: &M::V, _t: M::T, v: &M::V
     y.copy_from(v);
     let nbatch = y.context().nbatch();
     for b in 0..nbatch {
-        let k = p.get_batch(b).get_index(0);
+        let k = p.get_batch_bcast(b, nbatch).get_index(0);
         y.get_batch_mut(b).mul_assign(scale(-k));
     }
 }
 
 // -J^Tv = av
-fn exponential_decay_jacobian_adjoint<M: MatrixHost>(
-    _x: &M::V,
-    p: &M::V,
-    _t: M::T,
-    v: &M::V,
-    y: &mut M::V,
-) {
-    y.copy_from(v);
-    y.mul_assign(scale(p[0]));
-}
-
 fn exponential_decay_init<M: Matrix>(p: &M::V, _t: M::T, y: &mut M::V) {
     let nstates = y.len();
     let nbatch = y.context().nbatch();
     let ctx1 = y.context().clone_with_nbatch(1).unwrap();
     for b in 0..nbatch {
-        let y0 = p.get_batch(b).get_index(1);
+        let y0 = p.get_batch_bcast(b, nbatch).get_index(1);
         let val = M::V::from_element(nstates, y0, ctx1.clone());
         y.get_batch_mut(b).copy_from(&val);
     }
@@ -87,59 +60,27 @@ fn exponential_decay_init<M: Matrix>(p: &M::V, _t: M::T, y: &mut M::V) {
 //          | 0 1 |
 // dy0/dp v = | 0 1 | |v_1| = |v_2|
 //            | 0 1 | |v_2|   |v_2|
-fn exponential_decay_init_sens<M: MatrixHost>(_p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
-    y[0] = v[1];
-    y[1] = v[1];
-}
-
 // dy0/dp^T v = | 0 0 | |v_1| = |0 |
 //              | 1 1 | |v_2|   |v_1 + v_2|
-fn exponential_decay_init_sens_adjoint<M: MatrixHost>(_p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
-    y[0] = M::T::zero();
-    y[1] = -v[0] - v[1];
-}
-
 fn exponential_decay_root<M: MatrixHost>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
-    y[0] = x[0] - M::T::from_f64(0.6).unwrap();
+    let nbatch = y.context().nbatch();
+    for b in 0..nbatch {
+        let xb = x.get_batch_bcast(b, nbatch);
+        y.get_batch_mut(b)
+            .set_index(0, xb.get_index(0) - M::T::from_f64(0.6).unwrap());
+    }
 }
 
 /// g_1 = 1 * x_1  +  2 * x_2
 /// g_2 = 3 * x_1  +  4 * x_2
-fn exponential_decay_out<M: MatrixHost>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
-    y[0] = M::T::one() * x[0] + M::T::from_f64(2.0).unwrap() * x[1];
-    y[1] = M::T::from_f64(3.0).unwrap() * x[0] + M::T::from_f64(4.0).unwrap() * x[1];
-}
-
 /// J = |1 2|
 ///    |3 4|
 /// J v = |1 2| |v_1| = |v_1 + 2v_2|
 ///       |3 4| |v_2|   |3v_1 + 4v_2|
-fn exponential_decay_out_jac_mul<M: MatrixHost>(
-    _x: &M::V,
-    _p: &M::V,
-    _t: M::T,
-    v: &M::V,
-    y: &mut M::V,
-) {
-    y[0] = v[0] + M::T::from_f64(2.0).unwrap() * v[1];
-    y[1] = M::T::from_f64(3.0).unwrap() * v[0] + M::T::from_f64(4.0).unwrap() * v[1];
-}
-
 /// J = |1 2|
 ///    |3 4|
 /// -J^T v = |-1 -3| |v_1| = |-v_1 - 3v_2|
 ///         |-2 -4| |v_2|   |-2v_1 - 4v_2|
-fn exponential_decay_out_adj_mul<M: MatrixHost>(
-    _x: &M::V,
-    _p: &M::V,
-    _t: M::T,
-    v: &M::V,
-    y: &mut M::V,
-) {
-    y[0] = -v[0] - M::T::from_f64(3.0).unwrap() * v[1];
-    y[1] = -M::T::from_f64(2.0).unwrap() * v[0] - M::T::from_f64(4.0).unwrap() * v[1];
-}
-
 /// J = |0 0|
 ///     |0 0|
 fn exponential_decay_out_sens<M: MatrixHost>(
@@ -154,16 +95,6 @@ fn exponential_decay_out_sens<M: MatrixHost>(
 
 /// J = |0 0|
 ///     |0 0|
-fn exponential_decay_out_sens_adj<M: MatrixHost>(
-    _x: &M::V,
-    _p: &M::V,
-    _t: M::T,
-    _v: &M::V,
-    y: &mut M::V,
-) {
-    y.fill(M::T::zero());
-}
-
 #[allow(clippy::type_complexity)]
 pub fn negative_exponential_decay_problem<M: MatrixHost + 'static>(
     use_coloring: bool,
@@ -426,19 +357,19 @@ pub fn exponential_decay_problem_adjoint<M: MatrixHost>(
         .rhs_adjoint_implicit(
             exponential_decay::<M>,
             exponential_decay_jacobian::<M>,
-            exponential_decay_jacobian_adjoint::<M>,
-            exponential_decay_sens_transpose::<M>,
+            exponential_decay_jacobian_adjoint_batched::<M>,
+            exponential_decay_sens_transpose_batched::<M>,
         )
         .init_adjoint(
             exponential_decay_init::<M>,
-            exponential_decay_init_sens_adjoint::<M>,
+            exponential_decay_init_sens_adjoint_batched::<M>,
             2,
         )
         .out_adjoint_implicit(
-            exponential_decay_out::<M>,
-            exponential_decay_out_jac_mul::<M>,
-            exponential_decay_out_adj_mul::<M>,
-            exponential_decay_out_sens_adj::<M>,
+            exponential_decay_out_batched::<M>,
+            exponential_decay_out_jac_mul_batched::<M>,
+            exponential_decay_out_adj_mul_batched::<M>,
+            exponential_decay_out_sens_adj_batched::<M>,
             2,
         );
     if use_error_control {
@@ -503,7 +434,12 @@ fn exponential_decay_fixed_init_sens_adjoint<M: MatrixHost>(
 }
 
 fn exponential_decay_root_single_half<M: MatrixHost>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
-    y[0] = x[0] - M::T::from_f64(0.5).unwrap();
+    let nbatch = y.context().nbatch();
+    for b in 0..nbatch {
+        let xb = x.get_batch_bcast(b, nbatch);
+        y.get_batch_mut(b)
+            .set_index(0, xb.get_index(0) - M::T::from_f64(0.5).unwrap());
+    }
 }
 
 fn exponential_decay_root_single_half_jac<M: MatrixHost>(
@@ -513,7 +449,11 @@ fn exponential_decay_root_single_half_jac<M: MatrixHost>(
     v: &M::V,
     y: &mut M::V,
 ) {
-    y[0] = v[0];
+    let nbatch = y.context().nbatch();
+    for b in 0..nbatch {
+        let vb = v.get_batch_bcast(b, nbatch);
+        y.get_batch_mut(b).set_index(0, vb.get_index(0));
+    }
 }
 
 fn exponential_decay_root_single_half_adj<M: MatrixHost>(
@@ -523,8 +463,13 @@ fn exponential_decay_root_single_half_adj<M: MatrixHost>(
     v: &M::V,
     y: &mut M::V,
 ) {
-    y[0] = -v[0];
-    y[1] = M::T::zero();
+    let nbatch = y.context().nbatch();
+    for b in 0..nbatch {
+        let vb = v.get_batch_bcast(b, nbatch);
+        let mut yb = y.get_batch_mut(b);
+        yb.set_index(0, -vb.get_index(0));
+        yb.set_index(1, M::T::zero());
+    }
 }
 
 fn exponential_decay_root_single_half_sens_adj<M: MatrixHost>(
@@ -572,12 +517,25 @@ fn exponential_decay_reset_y_plus_2r_sens_adj<M: MatrixHost>(
     v: &M::V,
     y: &mut M::V,
 ) {
-    y[0] = M::T::zero();
-    y[1] = -(M::T::from_f64(2.0).unwrap() * v[0] + M::T::from_f64(2.0).unwrap() * v[1]);
+    let nbatch = y.context().nbatch();
+    for b in 0..nbatch {
+        let vb = v.get_batch_bcast(b, nbatch);
+        let mut yb = y.get_batch_mut(b);
+        yb.set_index(0, M::T::zero());
+        yb.set_index(
+            1,
+            -(M::T::from_f64(2.0).unwrap() * vb.get_index(0)
+                + M::T::from_f64(2.0).unwrap() * vb.get_index(1)),
+        );
+    }
 }
 
 fn exponential_decay_out_first_state<M: MatrixHost>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
-    y[0] = x[0];
+    let nbatch = y.context().nbatch();
+    for b in 0..nbatch {
+        let xb = x.get_batch_bcast(b, nbatch);
+        y.get_batch_mut(b).set_index(0, xb.get_index(0));
+    }
 }
 
 fn exponential_decay_out_first_state_jac<M: MatrixHost>(
@@ -587,7 +545,11 @@ fn exponential_decay_out_first_state_jac<M: MatrixHost>(
     v: &M::V,
     y: &mut M::V,
 ) {
-    y[0] = v[0];
+    let nbatch = y.context().nbatch();
+    for b in 0..nbatch {
+        let vb = v.get_batch_bcast(b, nbatch);
+        y.get_batch_mut(b).set_index(0, vb.get_index(0));
+    }
 }
 
 fn exponential_decay_out_first_state_adj<M: MatrixHost>(
@@ -597,8 +559,13 @@ fn exponential_decay_out_first_state_adj<M: MatrixHost>(
     v: &M::V,
     y: &mut M::V,
 ) {
-    y[0] = -v[0];
-    y[1] = M::T::zero();
+    let nbatch = y.context().nbatch();
+    for b in 0..nbatch {
+        let vb = v.get_batch_bcast(b, nbatch);
+        let mut yb = y.get_batch_mut(b);
+        yb.set_index(0, -vb.get_index(0));
+        yb.set_index(1, M::T::zero());
+    }
 }
 
 fn exponential_decay_out_first_state_sens_adj<M: MatrixHost>(
@@ -641,8 +608,8 @@ pub fn exponential_decay_with_single_reset_root_problem_adjoint<M: MatrixHost + 
         .rhs_adjoint_implicit(
             exponential_decay::<M>,
             exponential_decay_jacobian::<M>,
-            exponential_decay_jacobian_adjoint::<M>,
-            exponential_decay_sens_transpose::<M>,
+            exponential_decay_jacobian_adjoint_batched::<M>,
+            exponential_decay_sens_transpose_batched::<M>,
         )
         .init_adjoint(
             exponential_decay_fixed_init::<M>,
@@ -716,11 +683,11 @@ pub fn exponential_decay_problem_sens<M: MatrixHost + 'static>(
         .rhs_sens_implicit(
             exponential_decay::<M>,
             exponential_decay_jacobian::<M>,
-            exponential_decay_sens::<M>,
+            exponential_decay_sens_batched::<M>,
         )
         .init_sens(
             exponential_decay_init::<M>,
-            exponential_decay_init_sens::<M>,
+            exponential_decay_init_sens_batched::<M>,
             2,
         )
         .build()
@@ -758,18 +725,18 @@ pub fn exponential_decay_problem_sens_with_out<M: MatrixHost + 'static>(
         .rhs_sens_implicit(
             exponential_decay::<M>,
             exponential_decay_jacobian::<M>,
-            exponential_decay_sens::<M>,
+            exponential_decay_sens_batched::<M>,
         )
         .init_sens(
             exponential_decay_init::<M>,
-            exponential_decay_init_sens::<M>,
+            exponential_decay_init_sens_batched::<M>,
             2,
         )
         // g_1 = 1 * x_1  +  2 * x_2
         // g_2 = 3 * x_1  +  4 * x_2
         .out_sens_implicit(
-            exponential_decay_out::<M>,
-            exponential_decay_out_jac_mul::<M>,
+            exponential_decay_out_batched::<M>,
+            exponential_decay_out_jac_mul_batched::<M>,
             exponential_decay_out_sens::<M>,
             2,
         )
@@ -963,8 +930,13 @@ pub(crate) fn exponential_decay_root_0_6_and_2_0_jac<M: Matrix>(
     v: &M::V,
     y: &mut M::V,
 ) {
-    y.set_index(0, v.get_index(0));
-    y.set_index(1, v.get_index(0));
+    let nbatch = y.context().nbatch();
+    for b in 0..nbatch {
+        let v0 = v.get_batch_bcast(b, nbatch).get_index(0);
+        let mut yb = y.get_batch_mut(b);
+        yb.set_index(0, v0);
+        yb.set_index(1, v0);
+    }
 }
 
 pub(crate) fn exponential_decay_root_0_6_and_2_0_sens<M: Matrix>(
@@ -1021,11 +993,11 @@ pub fn exponential_decay_with_reset_problem_sens<M: MatrixHost + 'static>() -> (
         .rhs_sens_implicit(
             exponential_decay::<M>,
             exponential_decay_jacobian::<M>,
-            exponential_decay_sens::<M>,
+            exponential_decay_sens_batched::<M>,
         )
         .init_sens(
             exponential_decay_init::<M>,
-            exponential_decay_init_sens::<M>,
+            exponential_decay_init_sens_batched::<M>,
             2,
         )
         .root_sens_implicit(
@@ -1095,7 +1067,7 @@ fn exponential_decay_sens_batched<M: Matrix>(
     y.copy_from(x);
     let nbatch = y.context().nbatch();
     for b in 0..nbatch {
-        let vb = v.get_batch(b);
+        let vb = v.get_batch_bcast(b, nbatch);
         y.get_batch_mut(b).mul_assign(scale(-vb.get_index(0)));
     }
 }
@@ -1103,7 +1075,7 @@ fn exponential_decay_sens_batched<M: Matrix>(
 fn exponential_decay_init_sens_batched<M: Matrix>(_p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
     let nbatch = y.context().nbatch();
     for b in 0..nbatch {
-        let vb = v.get_batch(b);
+        let vb = v.get_batch_bcast(b, nbatch);
         let v1 = vb.get_index(1);
         let mut yb = y.get_batch_mut(b);
         yb.set_index(0, v1);
@@ -1121,7 +1093,7 @@ fn exponential_decay_jacobian_adjoint_batched<M: Matrix>(
     y.copy_from(v);
     let nbatch = y.context().nbatch();
     for b in 0..nbatch {
-        let pb = p.get_batch(b);
+        let pb = p.get_batch_bcast(b, nbatch);
         y.get_batch_mut(b).mul_assign(scale(pb.get_index(0)));
     }
 }
@@ -1135,8 +1107,8 @@ fn exponential_decay_sens_transpose_batched<M: Matrix>(
 ) {
     let nbatch = y.context().nbatch();
     for b in 0..nbatch {
-        let xb = x.get_batch(b);
-        let vb = v.get_batch(b);
+        let xb = x.get_batch_bcast(b, nbatch);
+        let vb = v.get_batch_bcast(b, nbatch);
         let mut yb = y.get_batch_mut(b);
         yb.set_index(
             0,
@@ -1154,7 +1126,7 @@ fn exponential_decay_init_sens_adjoint_batched<M: Matrix>(
 ) {
     let nbatch = y.context().nbatch();
     for b in 0..nbatch {
-        let vb = v.get_batch(b);
+        let vb = v.get_batch_bcast(b, nbatch);
         let mut yb = y.get_batch_mut(b);
         yb.set_index(0, M::T::zero());
         yb.set_index(1, -vb.get_index(0) - vb.get_index(1));
@@ -1164,7 +1136,7 @@ fn exponential_decay_init_sens_adjoint_batched<M: Matrix>(
 fn exponential_decay_out_batched<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
     let nbatch = y.context().nbatch();
     for b in 0..nbatch {
-        let xb = x.get_batch(b);
+        let xb = x.get_batch_bcast(b, nbatch);
         let mut yb = y.get_batch_mut(b);
         yb.set_index(
             0,
@@ -1187,7 +1159,7 @@ fn exponential_decay_out_jac_mul_batched<M: Matrix>(
 ) {
     let nbatch = y.context().nbatch();
     for b in 0..nbatch {
-        let vb = v.get_batch(b);
+        let vb = v.get_batch_bcast(b, nbatch);
         let mut yb = y.get_batch_mut(b);
         yb.set_index(
             0,
@@ -1210,7 +1182,7 @@ fn exponential_decay_out_adj_mul_batched<M: Matrix>(
 ) {
     let nbatch = y.context().nbatch();
     for b in 0..nbatch {
-        let vb = v.get_batch(b);
+        let vb = v.get_batch_bcast(b, nbatch);
         let mut yb = y.get_batch_mut(b);
         yb.set_index(
             0,
@@ -1503,8 +1475,13 @@ fn exponential_decay_two_root_jac<M: Matrix>(
     v: &M::V,
     y: &mut M::V,
 ) {
-    y.set_index(0, v.get_index(0));
-    y.set_index(1, v.get_index(0));
+    let nbatch = y.context().nbatch();
+    for b in 0..nbatch {
+        let v0 = v.get_batch_bcast(b, nbatch).get_index(0);
+        let mut yb = y.get_batch_mut(b);
+        yb.set_index(0, v0);
+        yb.set_index(1, v0);
+    }
 }
 
 fn exponential_decay_two_root_sens<M: Matrix>(
@@ -1542,11 +1519,11 @@ pub fn exponential_decay_with_constant_reset_problem_sens<M: MatrixHost + 'stati
         .rhs_sens_implicit(
             exponential_decay::<M>,
             exponential_decay_jacobian::<M>,
-            exponential_decay_sens::<M>,
+            exponential_decay_sens_batched::<M>,
         )
         .init_sens(
             exponential_decay_init::<M>,
-            exponential_decay_init_sens::<M>,
+            exponential_decay_init_sens_batched::<M>,
             2,
         )
         .root_sens_implicit(
@@ -1785,7 +1762,7 @@ mod tests {
 
         // check the adjoint jacobian
         let mut y_check = NalgebraVec::zeros(2, *ctx);
-        exponential_decay_jacobian_adjoint::<NalgebraMat<f64>>(&x, &p, t, &v, &mut y_check);
+        exponential_decay_jacobian_adjoint_batched::<NalgebraMat<f64>>(&x, &p, t, &v, &mut y_check);
         let mut y = NalgebraVec::zeros(2, *ctx);
         for _i in 0..2 {
             problem
@@ -1797,7 +1774,7 @@ mod tests {
 
         // check the sens jacobian
         let mut y_check = NalgebraVec::zeros(2, *ctx);
-        exponential_decay_sens::<NalgebraMat<f64>>(&x, &p, t, &v, &mut y_check);
+        exponential_decay_sens_batched::<NalgebraMat<f64>>(&x, &p, t, &v, &mut y_check);
         let mut y = NalgebraVec::zeros(2, *ctx);
         for _i in 0..2 {
             problem.eqn().rhs().sens_mul_inplace(&x, t, &v, &mut y);
@@ -1806,7 +1783,7 @@ mod tests {
 
         // check the sens adjoint jacobian
         let mut y_check = NalgebraVec::zeros(2, *ctx);
-        exponential_decay_sens_transpose::<NalgebraMat<f64>>(&x, &p, t, &v, &mut y_check);
+        exponential_decay_sens_transpose_batched::<NalgebraMat<f64>>(&x, &p, t, &v, &mut y_check);
         let mut y = NalgebraVec::zeros(2, *ctx);
         for _i in 0..2 {
             problem
@@ -1818,7 +1795,7 @@ mod tests {
 
         // check the set_u0 sens adjoint jacobian
         let mut y_check = NalgebraVec::zeros(2, *ctx);
-        exponential_decay_init_sens_adjoint::<NalgebraMat<f64>>(&p, t, &v, &mut y_check);
+        exponential_decay_init_sens_adjoint_batched::<NalgebraMat<f64>>(&p, t, &v, &mut y_check);
         let mut y = NalgebraVec::zeros(2, *ctx);
         for _i in 0..2 {
             problem
@@ -1830,7 +1807,7 @@ mod tests {
 
         // check the set_u0 sens jacobian
         let mut y_check = NalgebraVec::zeros(2, *ctx);
-        exponential_decay_init_sens::<NalgebraMat<f64>>(&p, t, &v, &mut y_check);
+        exponential_decay_init_sens_batched::<NalgebraMat<f64>>(&p, t, &v, &mut y_check);
         let mut y = NalgebraVec::zeros(2, *ctx);
         for _i in 0..2 {
             problem.eqn().init().sens_mul_inplace(t, &v, &mut y);
@@ -1839,7 +1816,7 @@ mod tests {
 
         // check the calc_out jacobian
         let mut y_check = NalgebraVec::zeros(2, *ctx);
-        exponential_decay_out_jac_mul::<NalgebraMat<f64>>(&x, &p, t, &v, &mut y_check);
+        exponential_decay_out_jac_mul_batched::<NalgebraMat<f64>>(&x, &p, t, &v, &mut y_check);
         let mut y = NalgebraVec::zeros(2, *ctx);
         for _i in 0..2 {
             problem
@@ -1852,7 +1829,7 @@ mod tests {
 
         // check the calc_out adjoint jacobian
         let mut y_check = NalgebraVec::zeros(2, *ctx);
-        exponential_decay_out_adj_mul::<NalgebraMat<f64>>(&x, &p, t, &v, &mut y_check);
+        exponential_decay_out_adj_mul_batched::<NalgebraMat<f64>>(&x, &p, t, &v, &mut y_check);
         let mut y = NalgebraVec::zeros(2, *ctx);
         for _i in 0..2 {
             problem
@@ -1865,7 +1842,7 @@ mod tests {
 
         // check the calc_out sens adjoint jacobian
         let mut y_check = NalgebraVec::zeros(2, *ctx);
-        exponential_decay_out_sens_adj::<NalgebraMat<f64>>(&x, &p, t, &v, &mut y_check);
+        exponential_decay_out_sens_adj_batched::<NalgebraMat<f64>>(&x, &p, t, &v, &mut y_check);
         let mut y = NalgebraVec::zeros(2, *ctx);
         for _i in 0..2 {
             problem

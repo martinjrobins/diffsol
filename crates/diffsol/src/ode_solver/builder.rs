@@ -3,10 +3,11 @@ use crate::{
     matrix::dense_nalgebra_serial::NalgebraMat,
     ode_solver_error,
     op::{linear_closure_with_adjoint::LinearClosureWithAdjoint, BuilderOp},
-    Closure, ClosureNoJac, ClosureWithAdjoint, ClosureWithSens, ConstantClosure,
-    ConstantClosureWithAdjoint, ConstantClosureWithSens, ConstantOp, InitialConditionSolverOptions,
-    LinearClosure, LinearOp, Matrix, NonLinearOp, OdeEquations, OdeSolverOptions, OdeSolverProblem,
-    Op, ParameterisedOp, Scalar, UnitCallable, Vector,
+    scale, Closure, ClosureNoJac, ClosureWithAdjoint, ClosureWithSens, ConstantClosure,
+    ConstantClosureWithAdjoint, ConstantClosureWithSens, ConstantOp, Context,
+    InitialConditionSolverOptions, LinearClosure, LinearOp, Matrix, NonLinearOp, OdeEquations,
+    OdeSolverOptions, OdeSolverProblem, Op, ParameterisedOp, Scalar, UnitCallable, Vector,
+    VectorViewMut,
 };
 
 #[cfg(feature = "autodiff")]
@@ -1659,7 +1660,7 @@ where
         nout: Option<usize>,
         nparam: usize,
         ctx: M::C,
-    ) -> Result<(M::V, Option<Vec<M::V>>, Option<M::V>, Option<M::V>), DiffsolError> {
+    ) -> Result<(M::V, Option<M::V>, Option<M::V>, Option<M::V>), DiffsolError> {
         let atol = Self::build_atol(atol, nstates, "states", ctx.clone())?;
         let out_atol = match out_atol {
             Some(out_atol) => Some(Self::build_atol(
@@ -1679,9 +1680,14 @@ where
             )?),
             None => None,
         };
+        // The sensitivity tolerances are laid out the way the augmented state is: one batch lane
+        // per (problem batch, parameter), lane `b * nparam + p` holding this parameter's
+        // tolerance, so the whole augmented state is error-controlled in one norm. Each parameter
+        // gets the given tolerance divided by its scale (see [`OdeBuilder::param_scales`]), which
+        // is why the lanes cannot simply broadcast a narrower vector.
         let sens_atol = match sens_atol {
-            Some(sens_atol) => {
-                let sens_atol = Self::build_atol(sens_atol, nstates, "sensitivity", ctx.clone())?;
+            Some(sens_atol) if nparam > 0 => {
+                let base = Self::build_atol(sens_atol, nstates, "sensitivity", ctx.clone())?;
                 let param_scales = param_scales.unwrap_or_else(|| vec![M::T::one(); nparam]);
                 if param_scales.len() != nparam {
                     return Err(ode_solver_error!(
@@ -1693,26 +1699,27 @@ where
                         )
                     ));
                 }
-                let mut scaled_atols = Vec::with_capacity(nparam);
-                for scale in param_scales {
-                    let scale_f64 = scale.to_f64().unwrap();
+                for param_scale in &param_scales {
+                    let scale_f64 = param_scale.to_f64().unwrap();
                     if !scale_f64.is_finite() || scale_f64 == 0.0 {
                         return Err(ode_solver_error!(
                             BuilderError,
                             "Parameter scales must be finite and non-zero."
                         ));
                     }
-                    let mut scaled_atol = M::V::zeros(nstates, ctx.clone());
-                    scaled_atol.axpy(
-                        M::T::one() / num_traits::abs(scale),
-                        &sens_atol,
-                        M::T::zero(),
-                    );
-                    scaled_atols.push(scaled_atol);
+                }
+                let nbatch = ctx.nbatch();
+                let aug_ctx = ctx.clone_with_nbatch(nbatch * nparam)?;
+                let mut scaled_atols = M::V::zeros(nstates, aug_ctx);
+                for lane in 0..nbatch * nparam {
+                    let param_scale = param_scales[lane % nparam];
+                    let mut lane_atol = scaled_atols.get_batch_mut(lane);
+                    lane_atol.copy_from_view(&base.get_batch(lane / nparam));
+                    lane_atol *= scale(M::T::one() / num_traits::abs(param_scale));
                 }
                 Some(scaled_atols)
             }
-            None => None,
+            _ => None,
         };
         Ok((atol, sens_atol, out_atol, param_atol))
     }
@@ -1854,6 +1861,18 @@ where
             if let Some(ref mut mass) = mass {
                 mass.calculate_sparsity(&y0, self.t0, &p);
             }
+            // the sensitivity equations hold each of these operators' parameter Jacobians as a
+            // matrix, which a sparse matrix type cannot allocate without a pattern
+            init.calculate_augmented_sparsity(&y0, self.t0, &p);
+            if let Some(ref mut out) = out {
+                out.calculate_augmented_sparsity(&y0, self.t0, &p);
+            }
+            if let Some(ref mut root) = root {
+                root.calculate_augmented_sparsity(&y0, self.t0, &p);
+            }
+            if let Some(ref mut reset) = reset {
+                reset.calculate_augmented_sparsity(&y0, self.t0, &p);
+            }
         }
         let nout = out.as_ref().map(|out| out.nout());
         let eqn = OdeSolverEquations::new(rhs, init, mass, root, out, reset, p);
@@ -1985,6 +2004,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::OdeBuilder;
+    use crate::{Context, VectorView};
 
     #[cfg(feature = "autodiff")]
     #[test]
@@ -2006,9 +2026,9 @@ mod tests {
             .unwrap();
     }
 
-    #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
-    use crate::{Context, OdeEquations, Op};
     use crate::{NalgebraMat, Vector};
+    #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
+    use crate::{OdeEquations, Op};
     #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
     use diffsl::execution::{
         module::{CodegenModuleCompile, CodegenModuleJit},
@@ -2119,8 +2139,10 @@ mod tests {
         )
         .unwrap();
         let sens_atol = sens_atol.unwrap();
-        assert_eq!(sens_atol[0].get_index(0), 4.0);
-        assert_eq!(sens_atol[1].get_index(0), 2.0);
+        // one lane per parameter (nbatch == 1), each scaled by its own parameter scale
+        assert_eq!(sens_atol.context().nbatch(), 2);
+        assert_eq!(sens_atol.get_batch(0).get_index(0), 4.0);
+        assert_eq!(sens_atol.get_batch(1).get_index(0), 2.0);
     }
 
     #[test]
@@ -2139,8 +2161,9 @@ mod tests {
         )
         .unwrap();
         let sens_atol = sens_atol.unwrap();
-        assert_eq!(sens_atol[0].get_index(0), 8.0);
-        assert_eq!(sens_atol[1].get_index(0), 8.0);
+        assert_eq!(sens_atol.context().nbatch(), 2);
+        assert_eq!(sens_atol.get_batch(0).get_index(0), 8.0);
+        assert_eq!(sens_atol.get_batch(1).get_index(0), 8.0);
     }
 
     #[test]

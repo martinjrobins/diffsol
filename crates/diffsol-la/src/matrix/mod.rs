@@ -176,6 +176,10 @@ pub trait Matrix:
     /// Add a column of this matrix to a vector: v += self[:, j]
     fn add_column_to_vector(&self, j: IndexType, v: &mut Self::V);
 
+    /// Add every column of this matrix to the matching batch lane of `v`: lane `b * ncols() + j`
+    /// receives column `j` of this matrix's batch `b`.
+    fn add_columns_to_batched_vector(&self, v: &mut Self::V);
+
     /// Assign the values in the `data` vector to this matrix at the indices in `dst_indices`
     /// from the indices in `src_indices`.
     ///
@@ -2180,6 +2184,44 @@ pub(crate) mod tests {
     }
 
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_batched_add_columns_to_batched_vector_m<M: Matrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
+        let values = vec![
+            f::<M>(1.0),
+            f::<M>(2.0),
+            f::<M>(3.0),
+            f::<M>(4.0),
+            f::<M>(5.0),
+            f::<M>(6.0),
+            f::<M>(7.0),
+            f::<M>(8.0),
+        ];
+        let mat = M::try_from_triplets(2, 2, indices, values, ctx.clone()).unwrap();
+        // one lane per (batch, column): lane `b * ncols + j` gets column `j` of batch `b`
+        let ctx4 = ctx.clone_with_nbatch(4).unwrap();
+        let mut v = M::V::zeros(2, ctx4);
+        mat.add_columns_to_batched_vector(&mut v);
+        assert_eq!(
+            v.clone_as_vec(),
+            vec![
+                f::<M>(1.0),
+                f::<M>(2.0),
+                f::<M>(3.0),
+                f::<M>(4.0),
+                f::<M>(5.0),
+                f::<M>(6.0),
+                f::<M>(7.0),
+                f::<M>(8.0)
+            ]
+        );
+        // it accumulates, like its single-column sibling
+        mat.add_columns_to_batched_vector(&mut v);
+        assert_eq!(v.clone_as_vec()[0], f::<M>(2.0));
+        assert_eq!(v.clone_as_vec()[7], f::<M>(16.0));
+    }
+
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_set_data_with_indices_m<M: Matrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
@@ -2471,6 +2513,10 @@ macro_rules! generate_matrix_tests_batched {
             #[test]
             fn [<test_batched_add_column_to_vector_ $suffix>]() {
                 $crate::matrix::tests::test_batched_add_column_to_vector_m::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_add_columns_to_batched_vector_ $suffix>]() {
+                $crate::matrix::tests::test_batched_add_columns_to_batched_vector_m::<$M>($ctx2);
             }
             #[test]
             fn [<test_batched_set_data_with_indices_ $suffix>]() {

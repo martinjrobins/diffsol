@@ -349,6 +349,17 @@ impl<T: NalgebraScalar> Matrix for NalgebraMat<T> {
             );
         }
     }
+    fn add_columns_to_batched_vector(&self, v: &mut NalgebraVec<T>) {
+        assert_eq!(v.len(), self.nrows(), "row count mismatch");
+        assert_eq!(
+            v.context.nbatch(),
+            self.context.nbatch() * self.ncols(),
+            "batch count mismatch: the destination holds one lane per (batch, column)"
+        );
+        // batch `b` column `j` lives at physical column `b * ncols + j`, which is exactly the
+        // destination lane, so the two buffers are congruent
+        v.data += &self.data;
+    }
     fn triplet_iter(
         &self,
     ) -> (

@@ -14,14 +14,6 @@ use std::ops::MulAssign;
 // dy/dt = -ay
 // 0 = z - y
 // remove warning about unused mut
-#[allow(unused_mut)]
-fn exponential_decay_with_algebraic<M: MatrixHost>(x: &M::V, p: &M::V, _t: M::T, mut y: &mut M::V) {
-    y.copy_from(x);
-    y.mul_assign(scale(-p[0]));
-    let nstates = y.len();
-    y[nstates - 1] = x[nstates - 1] - x[nstates - 2];
-}
-
 // J = | -y[0] |
 //     | -y[1] |
 //     | 0    |
@@ -36,10 +28,15 @@ fn exponential_decay_with_algebraic_sens<M: MatrixHost>(
     v: &M::V,
     mut y: &mut M::V,
 ) {
-    y.copy_from(x);
-    y.mul_assign(scale(-v[0]));
     let nstates = y.len();
-    y[nstates - 1] = M::T::zero();
+    let nbatch = y.context().nbatch();
+    y.copy_from(x);
+    for b in 0..nbatch {
+        let vb = v.get_batch_bcast(b, nbatch);
+        let mut yb = y.get_batch_mut(b);
+        yb.mul_assign(scale(-vb.get_index(0)));
+        yb.set_index(nstates - 1, M::T::zero());
+    }
 }
 
 // -J^Tv = | y[0]v[0] + y[1]v[1] + 0 |
@@ -51,7 +48,15 @@ fn exponential_decay_with_algebraic_sens_adjoint<M: MatrixHost>(
     v: &M::V,
     mut y: &mut M::V,
 ) {
-    y[0] = x[0] * v[0] + x[1] * v[1];
+    let nbatch = y.context().nbatch();
+    for b in 0..nbatch {
+        let xb = x.get_batch_bcast(b, nbatch);
+        let vb = v.get_batch_bcast(b, nbatch);
+        y.get_batch_mut(b).set_index(
+            0,
+            xb.get_index(0) * vb.get_index(0) + xb.get_index(1) * vb.get_index(1),
+        );
+    }
 }
 
 // J = | -a, 0, 0 |
@@ -60,20 +65,6 @@ fn exponential_decay_with_algebraic_sens_adjoint<M: MatrixHost>(
 // Jv = | -av[0] |
 //      | -av[1] |
 //      | v[2] - v[1] |
-#[allow(unused_mut)]
-fn exponential_decay_with_algebraic_jacobian<M: MatrixHost>(
-    _x: &M::V,
-    p: &M::V,
-    _t: M::T,
-    v: &M::V,
-    mut y: &mut M::V,
-) {
-    y.copy_from(v);
-    y.mul_assign(scale(-p[0]));
-    let nstates = y.len();
-    y[nstates - 1] = v[nstates - 1] - v[nstates - 2];
-}
-
 // -J^T v = | av[0] |
 //          | av[1] + v[2] |
 //          |  -v[2]    |
@@ -84,26 +75,19 @@ fn exponential_decay_with_algebraic_adjoint<M: MatrixHost>(
     v: &M::V,
     y: &mut M::V,
 ) {
-    y[0] = p[0] * v[0];
-    y[1] = p[0] * v[1] + v[2];
-    y[2] = -v[2];
+    let nbatch = y.context().nbatch();
+    for b in 0..nbatch {
+        let pb = p.get_batch_bcast(b, nbatch);
+        let vb = v.get_batch_bcast(b, nbatch);
+        let mut yb = y.get_batch_mut(b);
+        yb.set_index(0, pb.get_index(0) * vb.get_index(0));
+        yb.set_index(1, pb.get_index(0) * vb.get_index(1) + vb.get_index(2));
+        yb.set_index(2, -vb.get_index(2));
+    }
 }
 
 // y = Mx + beta * y = | 1 0 | | x[0] | + beta | y[0] |
 //                     | 0 0 | | x[1] |         | y[1] |
-fn exponential_decay_with_algebraic_mass<M: MatrixHost>(
-    x: &M::V,
-    _p: &M::V,
-    _t: M::T,
-    beta: M::T,
-    y: &mut M::V,
-) {
-    let nstates = y.len();
-    let yn = beta * y[nstates - 1];
-    y.axpy(M::T::one(), x, beta);
-    y[nstates - 1] = yn;
-}
-
 // y = M^T x + beta * y = | 1 0 | | x[0] | + beta | y[0] |
 //                        | 0 0 | | x[1] |         | y[1] |
 fn exponential_decay_with_algebraic_mass_transpose<M: MatrixHost>(
@@ -114,15 +98,24 @@ fn exponential_decay_with_algebraic_mass_transpose<M: MatrixHost>(
     y: &mut M::V,
 ) {
     let nstates = y.len();
-    let yn = beta * y[nstates - 1];
+    let nbatch = y.context().nbatch();
+    let yn = (0..nbatch)
+        .map(|b| beta * y.get_batch(b).get_index(nstates - 1))
+        .collect::<Vec<_>>();
     y.axpy(M::T::one(), x, beta);
-    y[nstates - 1] = yn;
+    for (b, yn_b) in yn.iter().enumerate() {
+        y.get_batch_mut(b).set_index(nstates - 1, *yn_b);
+    }
 }
 
 fn exponential_decay_with_algebraic_init<M: MatrixHost>(_p: &M::V, _t: M::T, y: &mut M::V) {
-    y[0] = M::T::one();
-    y[1] = M::T::one();
-    y[2] = M::T::zero();
+    let nbatch = y.context().nbatch();
+    for b in 0..nbatch {
+        let mut yb = y.get_batch_mut(b);
+        yb.set_index(0, M::T::one());
+        yb.set_index(1, M::T::one());
+        yb.set_index(2, M::T::zero());
+    }
 }
 
 fn exponential_decay_with_algebraic_init_sens<M: Matrix>(
@@ -145,7 +138,13 @@ fn exponential_decay_with_algebraic_init_sens_adjoint<M: Matrix>(
 
 // out(x) = | a * x[2] |
 fn exponential_decay_with_algebraic_out<M: MatrixHost>(x: &M::V, p: &M::V, _t: M::T, y: &mut M::V) {
-    y[0] = p[0] * x[2];
+    let nbatch = y.context().nbatch();
+    for b in 0..nbatch {
+        let pb = p.get_batch_bcast(b, nbatch);
+        let xb = x.get_batch_bcast(b, nbatch);
+        y.get_batch_mut(b)
+            .set_index(0, pb.get_index(0) * xb.get_index(2));
+    }
 }
 
 // J = | 0 0 a |
@@ -157,7 +156,13 @@ fn exponential_decay_with_algebraic_out_jac_mul<M: MatrixHost>(
     v: &M::V,
     y: &mut M::V,
 ) {
-    y[0] = p[0] * v[2];
+    let nbatch = y.context().nbatch();
+    for b in 0..nbatch {
+        let pb = p.get_batch_bcast(b, nbatch);
+        let vb = v.get_batch_bcast(b, nbatch);
+        y.get_batch_mut(b)
+            .set_index(0, pb.get_index(0) * vb.get_index(2));
+    }
 }
 
 // J = | 0 0 a |
@@ -172,7 +177,13 @@ fn exponential_decay_with_algebraic_out_jac_adj_mul<M: MatrixHost>(
     y: &mut M::V,
 ) {
     y.fill(M::T::zero());
-    y[2] = -p[0] * v[0];
+    let nbatch = y.context().nbatch();
+    for b in 0..nbatch {
+        let pb = p.get_batch_bcast(b, nbatch);
+        let vb = v.get_batch_bcast(b, nbatch);
+        y.get_batch_mut(b)
+            .set_index(2, -pb.get_index(0) * vb.get_index(0));
+    }
 }
 
 // J = | x[2] |
@@ -195,7 +206,13 @@ fn exponential_decay_with_algebraic_out_sens_adj<M: MatrixHost>(
     v: &M::V,
     y: &mut M::V,
 ) {
-    y[0] = -x[2] * v[0];
+    let nbatch = y.context().nbatch();
+    for b in 0..nbatch {
+        let xb = x.get_batch_bcast(b, nbatch);
+        let vb = v.get_batch_bcast(b, nbatch);
+        y.get_batch_mut(b)
+            .set_index(0, -xb.get_index(2) * vb.get_index(0));
+    }
 }
 
 #[allow(unused_mut)]
@@ -209,8 +226,8 @@ pub fn exponential_decay_with_algebraic_batched<M: Matrix>(
     let nstates = y.len();
     let nbatch = y.context().nbatch();
     for b in 0..nbatch {
-        let pb = p.get_batch(b);
-        let xb = x.get_batch(b);
+        let pb = p.get_batch_bcast(b, nbatch);
+        let xb = x.get_batch_bcast(b, nbatch);
         let mut yb = y.get_batch_mut(b);
         yb.mul_assign(scale(-pb.get_index(0)));
         yb.set_index(
@@ -232,8 +249,8 @@ pub fn exponential_decay_with_algebraic_jacobian_batched<M: Matrix>(
     let nstates = y.len();
     let nbatch = y.context().nbatch();
     for b in 0..nbatch {
-        let pb = p.get_batch(b);
-        let vb = v.get_batch(b);
+        let pb = p.get_batch_bcast(b, nbatch);
+        let vb = v.get_batch_bcast(b, nbatch);
         let mut yb = y.get_batch_mut(b);
         yb.mul_assign(scale(-pb.get_index(0)));
         yb.set_index(
@@ -255,7 +272,7 @@ pub fn exponential_decay_with_algebraic_mass_batched<M: Matrix>(
     let nbatch = y.context().nbatch();
     let mut saved_yz = Vec::with_capacity(nbatch);
     for b in 0..nbatch {
-        let yb = y.get_batch(b);
+        let yb = y.get_batch_bcast(b, nbatch);
         saved_yz.push(beta * yb.get_index(nstates - 1));
     }
     y.axpy(M::T::one(), x, beta);
@@ -285,10 +302,10 @@ pub fn exponential_decay_with_algebraic_problem<M: MatrixHost + 'static>(
         .p([0.1])
         .use_coloring(use_coloring)
         .rhs_implicit(
-            exponential_decay_with_algebraic::<M>,
-            exponential_decay_with_algebraic_jacobian::<M>,
+            exponential_decay_with_algebraic_batched::<M>,
+            exponential_decay_with_algebraic_jacobian_batched::<M>,
         )
-        .mass(exponential_decay_with_algebraic_mass::<M>)
+        .mass(exponential_decay_with_algebraic_mass_batched::<M>)
         .init(exponential_decay_with_algebraic_init::<M>, 3)
         .build()
         .unwrap();
@@ -363,8 +380,8 @@ pub fn exponential_decay_with_algebraic_adjoint_problem<M: MatrixHost + 'static>
             .param_rtol(1e-6)
             .param_atol([1e-6])
             .rhs_adjoint_implicit(
-                exponential_decay_with_algebraic::<M>,
-                exponential_decay_with_algebraic_jacobian::<M>,
+                exponential_decay_with_algebraic_batched::<M>,
+                exponential_decay_with_algebraic_jacobian_batched::<M>,
                 exponential_decay_with_algebraic_adjoint::<M>,
                 exponential_decay_with_algebraic_sens_adjoint::<M>,
             )
@@ -374,7 +391,7 @@ pub fn exponential_decay_with_algebraic_adjoint_problem<M: MatrixHost + 'static>
                 3,
             )
             .mass_adjoint(
-                exponential_decay_with_algebraic_mass::<M>,
+                exponential_decay_with_algebraic_mass_batched::<M>,
                 exponential_decay_with_algebraic_mass_transpose::<M>,
             )
             .out_adjoint_implicit(
@@ -425,8 +442,8 @@ pub fn exponential_decay_with_algebraic_problem_sens<M: MatrixHost + 'static>() 
         .sens_rtol(1e-6)
         .sens_atol([1e-6, 1e-6, 1e-6])
         .rhs_sens_implicit(
-            exponential_decay_with_algebraic::<M>,
-            exponential_decay_with_algebraic_jacobian::<M>,
+            exponential_decay_with_algebraic_batched::<M>,
+            exponential_decay_with_algebraic_jacobian_batched::<M>,
             exponential_decay_with_algebraic_sens::<M>,
         )
         .init_sens(
@@ -434,7 +451,7 @@ pub fn exponential_decay_with_algebraic_problem_sens<M: MatrixHost + 'static>() 
             exponential_decay_with_algebraic_init_sens::<M>,
             3,
         )
-        .mass(exponential_decay_with_algebraic_mass::<M>)
+        .mass(exponential_decay_with_algebraic_mass_batched::<M>)
         .build()
         .unwrap();
 
@@ -508,7 +525,15 @@ fn exponential_decay_with_algebraic_reset_init_sens<M: Matrix>(
     v: &M::V,
     y: &mut M::V,
 ) {
-    y.fill(v.get_index(1));
+    let nstates = y.len();
+    let nbatch = y.context().nbatch();
+    for b in 0..nbatch {
+        let v1 = v.get_batch_bcast(b, nbatch).get_index(1);
+        let mut yb = y.get_batch_mut(b);
+        for i in 0..nstates {
+            yb.set_index(i, v1);
+        }
+    }
 }
 
 #[allow(clippy::type_complexity)]
@@ -540,8 +565,8 @@ pub fn exponential_decay_with_algebraic_with_reset_problem_sens<M: MatrixHost + 
         .sens_rtol(1e-6)
         .sens_atol([1e-6, 1e-6, 1e-6])
         .rhs_sens_implicit(
-            exponential_decay_with_algebraic::<M>,
-            exponential_decay_with_algebraic_jacobian::<M>,
+            exponential_decay_with_algebraic_batched::<M>,
+            exponential_decay_with_algebraic_jacobian_batched::<M>,
             exponential_decay_with_algebraic_sens::<M>,
         )
         .init_sens(
@@ -549,7 +574,7 @@ pub fn exponential_decay_with_algebraic_with_reset_problem_sens<M: MatrixHost + 
             exponential_decay_with_algebraic_reset_init_sens::<M>,
             3,
         )
-        .mass(exponential_decay_with_algebraic_mass::<M>)
+        .mass(exponential_decay_with_algebraic_mass_batched::<M>)
         .root_sens_implicit(
             exponential_decay_root_0_6_and_2_0::<M>,
             exponential_decay_root_0_6_and_2_0_jac::<M>,

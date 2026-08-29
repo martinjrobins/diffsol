@@ -1,7 +1,7 @@
 use crate::{
-    ode_solver_error, DefaultDenseMatrix, DenseMatrix, DiffsolError, Matrix, MatrixCommon,
-    OdeEquations, OdeEquationsImplicitSens, OdeSolverProblem, OdeSolverStopReason, Scalar,
-    StateRef,
+    ode_solver_error, Context, DefaultDenseMatrix, DenseMatrix, DiffsolError, Matrix, MatrixCommon,
+    NonLinearOpSens, OdeEquations, OdeEquationsImplicitSens, OdeSolverProblem, OdeSolverStopReason,
+    Scalar, StateRef,
 };
 
 pub(crate) enum SolutionMode<T: Scalar> {
@@ -73,9 +73,10 @@ pub struct Solution<V: DefaultDenseMatrix> {
     pub y_sens: Vec<<V as DefaultDenseMatrix>::M>,
     pub stop_reason: Option<OdeSolverStopReason<V::T>>,
     pub(crate) tmp_nout: V,
-    pub(crate) tmp_nparams: V,
     pub(crate) tmp_nstates: V,
-    pub(crate) tmp_nsens: Vec<V>,
+    /// sensitivity scratch, one parameter per batch lane
+    pub(crate) tmp_nsens: V,
+    pub(crate) tmp_nsens_out: V,
     pub(crate) mode: SolutionMode<V::T>,
 }
 
@@ -135,6 +136,14 @@ impl<V: DefaultDenseMatrix> Solution<V> {
         Eqn: OdeEquationsImplicitSens<T = V::T, V = V, C = V::C>,
     {
         if let Some(OdeSolverStopReason::RootFound(t_root, _)) = self.stop_reason {
+            // the output operator's parameter Jacobian; `Solution` cannot name the equations'
+            // matrix type, so it is allocated here (once, at a root)
+            let mut out_sens = Eqn::M::new_from_sparsity(
+                problem.eqn.nout(),
+                problem.eqn.nparams(),
+                problem.eqn.out().and_then(|out| out.sens_sparsity()),
+                problem.context().clone(),
+            );
             let ncols = match self.mode {
                 SolutionMode::Tevals(col) if col < self.ts.len() => {
                     crate::ode_solver::method::write_state_out(
@@ -150,7 +159,8 @@ impl<V: DefaultDenseMatrix> Solution<V> {
                         &mut self.y_sens,
                         col,
                         &mut self.tmp_nout,
-                        &mut self.tmp_nparams,
+                        &mut self.tmp_nsens_out,
+                        &mut out_sens,
                     );
                     self.ts[col] = state.t;
                     col + 1
@@ -181,9 +191,9 @@ impl<V: DefaultDenseMatrix> Solution<V> {
             y_sens: Vec::new(),
             stop_reason: None,
             tmp_nout: V::zeros(0, ctx.clone()),
-            tmp_nparams: V::zeros(0, ctx.clone()),
             tmp_nstates: V::zeros(0, ctx.clone()),
-            tmp_nsens: Vec::new(),
+            tmp_nsens: V::zeros(0, ctx.clone()),
+            tmp_nsens_out: V::zeros(0, ctx.clone()),
             mode: SolutionMode::Tfinal(t_final),
         }
     }
@@ -200,9 +210,9 @@ impl<V: DefaultDenseMatrix> Solution<V> {
             y_sens: Vec::new(),
             stop_reason: None,
             tmp_nout: V::zeros(0, ctx.clone()),
-            tmp_nparams: V::zeros(0, ctx.clone()),
             tmp_nstates: V::zeros(0, ctx.clone()),
-            tmp_nsens: Vec::new(),
+            tmp_nsens: V::zeros(0, ctx.clone()),
+            tmp_nsens_out: V::zeros(0, ctx.clone()),
             mode: SolutionMode::Tevals(0),
         })
     }
@@ -276,7 +286,6 @@ impl<V: DefaultDenseMatrix> Solution<V> {
         ctx: &V::C,
         nrows: usize,
         nout: usize,
-        nout_params: usize,
         nstates: usize,
         nparams: usize,
     ) -> Result<(), DiffsolError> {
@@ -300,19 +309,15 @@ impl<V: DefaultDenseMatrix> Solution<V> {
             ));
         }
 
-        if self.tmp_nparams.len() == 0 {
-            self.tmp_nparams = V::zeros(nout_params, ctx.clone());
-        } else if self.tmp_nparams.len() != nout_params {
-            return Err(ode_solver_error!(
-                Other,
-                "Solution is incompatible with the current equations: output sensitivity size changed"
-            ));
-        }
+        // the sensitivity scratch holds one parameter per batch lane
+        let aug_ctx = ctx.clone_with_nbatch(ctx.nbatch() * nparams)?;
 
-        if self.tmp_nsens.is_empty() {
-            self.tmp_nsens = vec![V::zeros(nstates, ctx.clone()); nparams];
-        } else if self.tmp_nsens.len() != nparams
-            || self.tmp_nsens.iter().any(|v| v.len() != nstates)
+        if self.tmp_nsens.len() == 0 {
+            self.tmp_nsens = V::zeros(nstates, aug_ctx.clone());
+            // holds g_y * S, so it is output-sized
+            self.tmp_nsens_out = V::zeros(nout, aug_ctx);
+        } else if self.tmp_nsens.len() != nstates
+            || self.tmp_nsens.context().nbatch() != aug_ctx.nbatch()
         {
             return Err(ode_solver_error!(
                 Other,

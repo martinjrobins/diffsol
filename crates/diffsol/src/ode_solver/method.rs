@@ -139,25 +139,24 @@ where
     /// Interpolate the integral of the output function at a given time and place in `g`. This time should be between the current time and the last solver time step
     fn interpolate_out_inplace(&self, t: Eqn::T, g: &mut Eqn::V) -> Result<(), DiffsolError>;
 
-    /// Interpolate the sensitivity vectors at a given time. This time should be between the current time and the last solver time step
-    fn interpolate_sens(&self, t: Eqn::T) -> Result<Vec<Eqn::V>, DiffsolError> {
-        let nsens = self.state().s.len();
-        if nsens == 0 {
-            return Ok(Vec::new());
-        }
-        let mut sens = Vec::with_capacity(nsens);
-        for _ in 0..nsens {
-            sens.push(Eqn::V::zeros(
-                self.problem().eqn.rhs().nstates(),
-                self.problem().context().clone(),
-            ));
-        }
+    /// Interpolate the sensitivity vectors at a given time. This time should be between the
+    /// current time and the last solver time step.
+    ///
+    /// The returned vector holds one sensitivity per augmented channel in its batch lanes, laid
+    /// out as `lane = b * nchannels + i` (see [`crate::AugmentedOdeEquations`]); for forward
+    /// sensitivities the channels are the parameters, so batch `b`'s sensitivity wrt parameter
+    /// `i` is `sens.get_batch(b * nparams + i)`.
+    fn interpolate_sens(&self, t: Eqn::T) -> Result<Eqn::V, DiffsolError> {
+        let state = self.state();
+        let mut sens = Eqn::V::zeros(state.s.len(), state.s.context().clone());
         self.interpolate_sens_inplace(t, &mut sens)?;
         Ok(sens)
     }
 
-    /// Interpolate the sensitivity vectors at a given time and place in `sens`. This time should be between the current time and the last solver time step
-    fn interpolate_sens_inplace(&self, t: Eqn::T, sens: &mut [Eqn::V]) -> Result<(), DiffsolError>;
+    /// Interpolate the sensitivity vectors at a given time and place in `sens`. This time should
+    /// be between the current time and the last solver time step. See [`Self::interpolate_sens`]
+    /// for the batch layout of `sens`.
+    fn interpolate_sens_inplace(&self, t: Eqn::T, sens: &mut Eqn::V) -> Result<(), DiffsolError>;
 
     /// Move the solver state back to time `t` by interpolating `y`, `dy`, and (if
     /// `integrate_out` is set) `g` to that time and writing them into the current state.
@@ -1227,7 +1226,12 @@ mod test {
                 let sens_i = sens[j].column(i).into_owned();
                 sens_i.assert_eq_norm(
                     &soln_pt.state,
-                    &problem.sens_atol.as_ref().unwrap()[j],
+                    &problem
+                        .sens_atol
+                        .as_ref()
+                        .unwrap()
+                        .get_batch(j)
+                        .into_owned(),
                     problem.sens_rtol.unwrap(),
                     15.0,
                 );
@@ -1252,7 +1256,12 @@ mod test {
                 let sens_i = sens[j].column(i).into_owned();
                 sens_i.assert_eq_norm(
                     &soln_pt.state,
-                    &problem.sens_atol.as_ref().unwrap()[j],
+                    &problem
+                        .sens_atol
+                        .as_ref()
+                        .unwrap()
+                        .get_batch(j)
+                        .into_owned(),
                     problem.sens_rtol.unwrap(),
                     15.0,
                 );
@@ -1288,7 +1297,12 @@ mod test {
                 let sens_i = dense_soln.y_sens[j].column(i).into_owned();
                 sens_i.assert_eq_norm(
                     &soln_pt.state,
-                    &problem.sens_atol.as_ref().unwrap()[j],
+                    &problem
+                        .sens_atol
+                        .as_ref()
+                        .unwrap()
+                        .get_batch(j)
+                        .into_owned(),
                     problem.sens_rtol.unwrap(),
                     15.0,
                 );
@@ -1331,13 +1345,23 @@ mod test {
         let s_y0 = NalgebraVec::from_vec(vec![decay; 2], *problem.context());
         dense_soln.y_sens[0].column(0).into_owned().assert_eq_norm(
             &s_k,
-            &problem.sens_atol.as_ref().unwrap()[0],
+            &problem
+                .sens_atol
+                .as_ref()
+                .unwrap()
+                .get_batch(0)
+                .into_owned(),
             problem.sens_rtol.unwrap(),
             15.0,
         );
         dense_soln.y_sens[1].column(0).into_owned().assert_eq_norm(
             &s_y0,
-            &problem.sens_atol.as_ref().unwrap()[1],
+            &problem
+                .sens_atol
+                .as_ref()
+                .unwrap()
+                .get_batch(1)
+                .into_owned(),
             problem.sens_rtol.unwrap(),
             15.0,
         );
@@ -1422,8 +1446,12 @@ mod test {
             .unwrap();
 
         let gs_adj = state.sg;
-        for (j, soln_pts) in soln.sens_solution_points.unwrap().iter().enumerate() {
-            gs_adj[j].assert_eq_norm(
+        let sens_solution_points = soln.sens_solution_points.unwrap();
+        let nchannels = sens_solution_points.len();
+        let mut g_adj = NalgebraVec::zeros(gs_adj.len(), *problem.context());
+        for (j, soln_pts) in sens_solution_points.iter().enumerate() {
+            crate::ode_equations::augmented_channel(&gs_adj, nchannels, j, &mut g_adj);
+            g_adj.assert_eq_norm(
                 &soln_pts[0].state,
                 problem.out_atol.as_ref().unwrap(),
                 problem.out_rtol.unwrap(),

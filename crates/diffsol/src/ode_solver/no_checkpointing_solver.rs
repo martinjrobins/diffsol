@@ -128,11 +128,7 @@ where
         panic!("checkpoint replay solver is unavailable")
     }
 
-    fn interpolate_sens_inplace(
-        &self,
-        _t: Eqn::T,
-        _sens: &mut [Eqn::V],
-    ) -> Result<(), DiffsolError> {
+    fn interpolate_sens_inplace(&self, _t: Eqn::T, _sens: &mut Eqn::V) -> Result<(), DiffsolError> {
         panic!("checkpoint replay solver is unavailable")
     }
 
@@ -295,7 +291,7 @@ mod tests {
         let mut y = problem.eqn.init().call(problem.t0);
         let mut dy = y.clone();
         let mut g = y.clone();
-        let mut sens = vec![y.clone(), y.clone()];
+        let mut sens = y.clone();
 
         assert_panics_with!(
             {

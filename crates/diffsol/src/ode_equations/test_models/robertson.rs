@@ -1,6 +1,7 @@
 use crate::{
-    matrix::Matrix, ode_solver::problem::OdeSolverSolution, MatrixHost, OdeBuilder,
-    OdeEquationsImplicit, OdeEquationsImplicitSens, OdeSolverProblem, Op, Vector,
+    matrix::Matrix, ode_solver::problem::OdeSolverSolution, Context, MatrixHost, OdeBuilder,
+    OdeEquationsImplicit, OdeEquationsImplicitSens, OdeSolverProblem, Op, Vector, VectorView,
+    VectorViewMut,
 };
 use num_traits::{FromPrimitive, One, Zero};
 
@@ -62,12 +63,22 @@ fn robertson_rhs<M: MatrixHost>(x: &M::V, p: &M::V, _t: M::T, y: &mut M::V) {
     y[2] = x[0] + x[1] + x[2] - M::T::one();
 }
 fn robertson_jac_mul<M: MatrixHost>(x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
-    y[0] = -p[0] * v[0] + p[1] * v[1] * x[2] + p[1] * x[1] * v[2];
-    y[1] = p[0] * v[0]
-        - p[1] * v[1] * x[2]
-        - p[1] * x[1] * v[2]
-        - M::T::from_f64(2.0).unwrap() * p[2] * x[1] * v[1];
-    y[2] = v[0] + v[1] + v[2];
+    let nbatch = y.context().nbatch();
+    for b in 0..nbatch {
+        let pb = p.get_batch_bcast(b, nbatch);
+        let xb = x.get_batch_bcast(b, nbatch);
+        let vb = v.get_batch_bcast(b, nbatch);
+        let (p0, p1, p2) = (pb.get_index(0), pb.get_index(1), pb.get_index(2));
+        let (x1, x2) = (xb.get_index(1), xb.get_index(2));
+        let (v0, v1, v2) = (vb.get_index(0), vb.get_index(1), vb.get_index(2));
+        let mut yb = y.get_batch_mut(b);
+        yb.set_index(0, -p0 * v0 + p1 * v1 * x2 + p1 * x1 * v2);
+        yb.set_index(
+            1,
+            p0 * v0 - p1 * v1 * x2 - p1 * x1 * v2 - M::T::from_f64(2.0).unwrap() * p2 * x1 * v1,
+        );
+        yb.set_index(2, v0 + v1 + v2);
+    }
 }
 
 fn robertson_sens_mul<M: MatrixHost>(x: &M::V, _p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
@@ -77,9 +88,19 @@ fn robertson_sens_mul<M: MatrixHost>(x: &M::V, _p: &M::V, _t: M::T, v: &M::V, y:
 }
 
 fn robertson_mass<M: MatrixHost>(x: &M::V, _p: &M::V, _t: M::T, beta: M::T, y: &mut M::V) {
-    y[0] = x[0] + beta * y[0];
-    y[1] = x[1] + beta * y[1];
-    y[2] = beta * y[2];
+    let nbatch = y.context().nbatch();
+    for b in 0..nbatch {
+        let xb = x.get_batch_bcast(b, nbatch);
+        let (x0, x1) = (xb.get_index(0), xb.get_index(1));
+        let (y0, y1, y2) = {
+            let yb = y.get_batch(b);
+            (yb.get_index(0), yb.get_index(1), yb.get_index(2))
+        };
+        let mut yb = y.get_batch_mut(b);
+        yb.set_index(0, x0 + beta * y0);
+        yb.set_index(1, x1 + beta * y1);
+        yb.set_index(2, beta * y2);
+    }
 }
 
 fn robertson_init<M: MatrixHost>(_p: &M::V, _t: M::T, y: &mut M::V) {

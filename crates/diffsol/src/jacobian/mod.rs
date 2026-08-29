@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 
 use crate::{
-    LinearOp, LinearOpTranspose, Matrix, MatrixSparsity, NonLinearOp, NonLinearOpAdjoint,
-    NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, Scalar, Vector, VectorIndex,
-    VectorView,
+    ConstantOpSens, LinearOp, LinearOpTranspose, Matrix, MatrixSparsity, NonLinearOp,
+    NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, Scalar,
+    Vector, VectorIndex, VectorView,
 };
 use num_traits::{One, Zero};
 
@@ -65,7 +65,9 @@ gen_find_non_zeros_nonlinear!(
     find_sens_non_zeros,
     sens_mul_inplace,
     NonLinearOpSens,
-    nstates,
+    // `sens_mul_inplace` writes one entry per output: the same as `nstates` for the rhs, but not
+    // for an out or root operator
+    nout,
     nparams
 );
 gen_find_non_zeros_nonlinear!(
@@ -73,8 +75,39 @@ gen_find_non_zeros_nonlinear!(
     sens_transpose_mul_inplace,
     NonLinearOpSensAdjoint,
     nparams,
-    nstates
+    // the probe vector holds one entry per output: the same as `nstates` for the rhs, but not for
+    // an out operator
+    nout
 );
+
+/// Find the non-zero entries of the parameter Jacobian of a constant operator.
+///
+/// The constant-operator sibling of [`find_sens_non_zeros`]: same probe, but a [`ConstantOpSens`]
+/// has no state to evaluate at.
+pub fn find_constant_sens_non_zeros<F: ConstantOpSens + ?Sized>(
+    op: &F,
+    t: F::T,
+) -> Vec<(usize, usize)> {
+    let mut v = F::V::zeros(op.nparams(), op.context().clone());
+    let mut col = F::V::zeros(op.nout(), op.context().clone());
+    let mut triplets = Vec::with_capacity(op.nout());
+    for j in 0..op.nparams() {
+        v.set_index(j, F::T::NAN);
+        op.sens_mul_inplace(t, &v, &mut col);
+        {
+            // assume that every batch has the same non-zeros
+            let col_b0 = col.get_batch(0);
+            for i in 0..op.nout() {
+                if col_b0.get_index(i).is_nan() {
+                    triplets.push((i, j));
+                }
+            }
+        }
+        col.fill(F::T::zero());
+        v.set_index(j, F::T::zero());
+    }
+    triplets
+}
 
 macro_rules! gen_find_non_zeros_linear {
     ($name:ident, $op_fn:ident $(, $op_trait:tt )?) => {
@@ -278,6 +311,28 @@ impl<M: Matrix> JacobianColoring<M> {
             let src_indices = &self.src_indices_per_color[c];
             v.assign_at_indices(input, F::T::one());
             op.sens_mul_inplace(x, t, &v, &mut col);
+            y.set_data_with_indices(dst_indices, src_indices, &col);
+            v.assign_at_indices(input, F::T::zero());
+        }
+    }
+
+    /// Compute the parameter Jacobian of a constant operator in-place using the coloring scheme.
+    ///
+    /// The constant-operator sibling of [`Self::sens_inplace`].
+    pub fn constant_sens_inplace<F: ConstantOpSens<M = M, V = M::V, T = M::T, C = M::C>>(
+        &self,
+        op: &F,
+        t: F::T,
+        y: &mut F::M,
+    ) {
+        let mut v = self.scratch_v.borrow_mut();
+        let mut col = self.scratch_col.borrow_mut();
+        for c in 0..self.dst_indices_per_color.len() {
+            let input = &self.input_indices_per_color[c];
+            let dst_indices = &self.dst_indices_per_color[c];
+            let src_indices = &self.src_indices_per_color[c];
+            v.assign_at_indices(input, F::T::one());
+            op.sens_mul_inplace(t, &v, &mut col);
             y.set_data_with_indices(dst_indices, src_indices, &col);
             v.assign_at_indices(input, F::T::zero());
         }

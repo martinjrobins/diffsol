@@ -107,6 +107,10 @@ where
         self.calculate_jacobian_sparsity(y0, t0, p);
         self.calculate_sens_sparsity(y0, t0, p);
     }
+
+    fn calculate_augmented_sparsity(&mut self, y0: &Self::V, t0: Self::T, p: &Self::V) {
+        ClosureWithSens::calculate_sens_sparsity(self, y0, t0, p);
+    }
 }
 
 impl<M, F, G, H> Op for ClosureWithSens<M, F, G, H>

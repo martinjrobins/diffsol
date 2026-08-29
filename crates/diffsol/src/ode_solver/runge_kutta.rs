@@ -9,7 +9,7 @@ use crate::RkState;
 use crate::RootFinder;
 use crate::Tableau;
 use crate::{
-    ode_solver_error, AugmentedOdeEquations, Convergence, DefaultDenseMatrix, DenseMatrix,
+    ode_solver_error, AugmentedOdeEquations, Context, Convergence, DefaultDenseMatrix, DenseMatrix,
     NonLinearOp, NonLinearSolver, OdeEquations, OdeSolverProblem, OdeSolverState, Op, Scalar,
     Vector, VectorViewMut,
 };
@@ -44,8 +44,10 @@ where
     root_finder: Option<RootFinder<Eqn::V>>,
     tstop: Option<Eqn::T>,
     diff: M,
-    sdiff: Vec<M>,
-    sgdiff: Vec<M>,
+    /// stage derivatives of the augmented state, one channel per batch lane
+    sdiff: M,
+    /// stage derivatives of the augmented output, one channel per batch lane
+    sgdiff: M,
     gdiff: M,
     // boxed so that swapping state/old_state each accepted step (see `step_accepted`)
     // is a pointer swap instead of a memcpy of the whole (large) RkState struct
@@ -56,6 +58,8 @@ where
     out_error: Option<Eqn::V>,
     sens_error: Option<Eqn::V>,
     sens_out_error: Option<Eqn::V>,
+    /// residual scratch for the augmented stage solve, one channel per batch lane
+    sens_residual: Eqn::V,
 
     prev_error_norm: Option<Eqn::T>,
 }
@@ -84,6 +88,7 @@ where
             problem: self.problem,
             state: self.state.clone(),
             statistics: self.statistics.clone(),
+            sens_residual: self.sens_residual.clone(),
             root_finder: self.root_finder.clone(),
             tstop: self.tstop,
             is_state_mutated: self.is_state_mutated,
@@ -174,12 +179,13 @@ where
             is_state_mutated: false,
             diff,
             gdiff,
-            sdiff: vec![],
-            sgdiff: vec![],
+            sdiff: M::zeros(0, 0, ctx.clone()),
+            sgdiff: M::zeros(0, 0, ctx.clone()),
             error,
             out_error,
             sens_error: None,
             sens_out_error: None,
+            sens_residual: <Eqn::V as Vector>::zeros(0, ctx.clone()),
             prev_error_norm: None,
         })
     }
@@ -193,24 +199,26 @@ where
         state.check_sens_consistent_with_problem(problem, augmented_eqn)?;
         let integrate_main_eqn = augmented_eqn.integrate_main_eqn();
         let mut ret = Self::_new(problem, state, tableau, integrate_main_eqn)?;
-        let naug = augmented_eqn.max_index();
         let nstates = augmented_eqn.rhs().nstates();
         let order = ret.tableau.s();
-        let ctx = problem.eqn.context();
-        ret.sdiff = vec![M::zeros(nstates, order, ctx.clone()); naug];
-        if let Some(out) = augmented_eqn.out() {
-            ret.sgdiff = vec![M::zeros(out.nout(), order, ctx.clone()); naug];
-        }
+        // one batch lane per augmented channel
+        let aug_ctx = augmented_eqn.aug_context().clone();
+        ret.sdiff = M::zeros(nstates, order, aug_ctx.clone());
+        ret.sens_residual = <Eqn::V as Vector>::zeros(nstates, aug_ctx.clone());
+        // always `order` columns, so the stage loops can write column `i` even when there are no
+        // output sensitivities to integrate
+        let nout_sens = augmented_eqn.out().map(|out| out.nout()).unwrap_or(0);
+        ret.sgdiff = M::zeros(nout_sens, order, aug_ctx.clone());
         if augmented_eqn.include_in_error_control() {
             ret.sens_error = Some(<Eqn::V as Vector>::zeros(
                 augmented_eqn.rhs().nstates(),
-                ctx.clone(),
+                aug_ctx.clone(),
             ))
         };
         if augmented_eqn.include_out_in_error_control() {
             ret.sens_out_error = Some(<Eqn::V as Vector>::zeros(
                 augmented_eqn.out().unwrap().nout(),
-                ctx.clone(),
+                aug_ctx,
             ));
         };
         if !integrate_main_eqn {
@@ -403,13 +411,12 @@ where
         } else {
             None
         };
-        let nparams = self.state.s.len();
-        let s_interp: Vec<Eqn::V> = if nparams > 0 {
-            let mut s = vec![Eqn::V::zeros(nstates, ctx); nparams];
+        let s_interp = if self.state.s.len() > 0 {
+            let mut s = Eqn::V::zeros(nstates, self.state.s.context().clone());
             self.interpolate_sens_inplace(t, &mut s)?;
-            s
+            Some(s)
         } else {
-            vec![]
+            None
         };
         let state = self.state_mut();
         state.y.copy_from(&y);
@@ -418,8 +425,8 @@ where
         if let Some(g) = g.as_ref() {
             state.g.copy_from(g);
         }
-        for (j, s_j) in s_interp.iter().enumerate() {
-            state.s[j].copy_from(s_j);
+        if let Some(s) = s_interp.as_ref() {
+            state.s.copy_from(s);
         }
         Ok(())
     }
@@ -508,12 +515,12 @@ where
 
             // sensitivities too
             if augmented_eqn.is_some() {
-                for (sdiff, ds) in self.sdiff.iter_mut().zip(self.state.ds.iter()) {
-                    sdiff.column_mut(0).axpy(h, ds, Eqn::T::zero());
-                }
-                for (sgdiff, sdg) in self.sgdiff.iter_mut().zip(self.state.dsg.iter()) {
-                    sgdiff.column_mut(0).axpy(h, sdg, Eqn::T::zero());
-                }
+                self.sdiff
+                    .column_mut(0)
+                    .axpy(h, &self.state.ds, Eqn::T::zero());
+                self.sgdiff
+                    .column_mut(0)
+                    .axpy(h, &self.state.dsg, Eqn::T::zero());
             }
 
             // output function
@@ -571,33 +578,30 @@ where
         // calculate sensitivities
         if let Some(aug_eqn) = augmented_eqn {
             (*aug_eqn).update_rhs_out_state(&self.old_state.y, &self.old_state.dy, t);
-            for j in 0..self.sdiff.len() {
-                aug_eqn.set_index(j);
-                self.old_state.s[j].copy_from(&self.state.s[j]);
-                self.sdiff[j].gemv_cols(
-                    0,
-                    i,
-                    Eqn::T::one(),
-                    self.tableau.stage_coeffs(i),
-                    Eqn::T::one(),
-                    &mut self.old_state.s[j],
-                );
+            self.old_state.s.copy_from(&self.state.s);
+            self.sdiff.gemv_cols(
+                0,
+                i,
+                Eqn::T::one(),
+                self.tableau.stage_coeffs(i),
+                Eqn::T::one(),
+                &mut self.old_state.s,
+            );
 
-                aug_eqn
-                    .rhs()
-                    .call_inplace(&self.old_state.s[j], t, &mut self.old_state.ds[j]);
+            aug_eqn
+                .rhs()
+                .call_inplace(&self.old_state.s, t, &mut self.old_state.ds);
 
-                self.sdiff[j]
+            self.sdiff
+                .column_mut(i)
+                .axpy(h, &self.old_state.ds, Eqn::T::zero());
+
+            // calculate sdg and store in sgdiff
+            if let Some(out) = aug_eqn.out() {
+                out.call_inplace(&self.old_state.s, t, &mut self.old_state.dsg);
+                self.sgdiff
                     .column_mut(i)
-                    .axpy(h, &self.old_state.ds[j], Eqn::T::zero());
-
-                // calculate sdg and store in sgdiff
-                if let Some(out) = aug_eqn.out() {
-                    out.call_inplace(&self.old_state.s[j], t, &mut self.old_state.dsg[j]);
-                    self.sgdiff[j]
-                        .column_mut(i)
-                        .axpy(h, &self.old_state.dsg[j], Eqn::T::zero());
-                }
+                    .axpy(h, &self.old_state.dsg, Eqn::T::zero());
             }
         }
     }
@@ -690,57 +694,51 @@ where
             op.eqn_mut()
                 .update_rhs_out_state(&self.old_state.y, &self.old_state.dy, t);
 
-            // solve for sensitivities equations discretised using sdirk equation
-            for j in 0..self.sdiff.len() {
-                op.set_phi(
-                    Eqn::T::one(),
-                    &self.sdiff[j],
-                    i,
-                    &self.state.s[j],
-                    self.tableau.stage_coeffs(i),
-                );
-                op.eqn_mut().set_index(j);
-                Self::predict_stage_sdirk(
-                    i,
-                    h,
-                    &self.state.ds[j],
-                    &self.sdiff[j],
-                    &mut self.old_state.ds[j],
-                    &self.tableau,
-                );
+            // solve for the sensitivity equations discretised using the sdirk equation, every
+            // channel at once
+            op.set_phi(
+                Eqn::T::one(),
+                &self.sdiff,
+                i,
+                &self.state.s,
+                self.tableau.stage_coeffs(i),
+            );
+            Self::predict_stage_sdirk(
+                i,
+                h,
+                &self.state.ds,
+                &self.sdiff,
+                &mut self.old_state.ds,
+                &self.tableau,
+            );
 
-                if !nonlinear_solver.is_jacobian_set() {
-                    nonlinear_solver.reset_jacobian::<SdirkCallable<AugEqn>>(
-                        op,
-                        &self.old_state.s[j],
-                        t,
-                    );
-                    self.statistics
-                        .record_linear_solver_setup(SolverState::Checkpoint);
-                }
+            if !nonlinear_solver.is_jacobian_set() {
+                nonlinear_solver.reset_jacobian::<SdirkCallable<AugEqn>>(op, &self.old_state.s, t);
+                self.statistics
+                    .record_linear_solver_setup(SolverState::Checkpoint);
+            }
 
-                // solve
-                let solver_result = nonlinear_solver.solve_in_place(
-                    *op,
-                    &mut self.old_state.ds[j],
-                    t,
-                    &self.state.s[j],
-                    //&self.sdiff[j].column(0).into_owned(),
-                    convergence,
-                );
-                self.statistics.number_of_nonlinear_solver_iterations += convergence.niter();
-                solver_result?;
+            // solve every channel at once against the already-factorised Jacobian, which is
+            // shared by all channels
+            let solver_result = nonlinear_solver.solve_in_place(
+                *op,
+                &mut self.old_state.ds,
+                t,
+                &self.state.s,
+                convergence,
+            );
+            self.statistics.number_of_nonlinear_solver_iterations += convergence.niter();
+            solver_result?;
 
-                op.get_f_eval(&self.old_state.ds[j], &mut self.old_state.s[j]);
-                self.sdiff[j].column_mut(i).copy_from(&self.old_state.ds[j]);
+            op.get_f_eval(&self.old_state.ds, &mut self.old_state.s);
+            self.sdiff.column_mut(i).copy_from(&self.old_state.ds);
 
-                // calculate sdg and store in sgdiff
-                if let Some(out) = op.eqn().out() {
-                    out.call_inplace(&self.old_state.s[j], t, &mut self.old_state.dsg[j]);
-                    self.sgdiff[j]
-                        .column_mut(i)
-                        .axpy(h, &self.old_state.dsg[j], Eqn::T::zero());
-                }
+            // calculate sdg and store in sgdiff
+            if let Some(out) = op.eqn().out() {
+                out.call_inplace(&self.old_state.s, t, &mut self.old_state.dsg);
+                self.sgdiff
+                    .column_mut(i)
+                    .axpy(h, &self.old_state.dsg, Eqn::T::zero());
             }
         }
         Ok(())
@@ -819,23 +817,21 @@ where
             error_norm = error_norm.max(out_error_norm);
         }
 
-        // sensitivity errors
+        // sensitivity errors: the batched norm reduces by taking the maximum over the channels
         if let Some(sens_error) = self.sens_error.as_mut() {
             let aug_eqn = augmented_eqn.as_ref().unwrap();
             let rtol = aug_eqn.rtol().unwrap();
-            for i in 0..self.sdiff.len() {
-                self.sdiff[i].gemv_cols(
-                    0,
-                    s,
-                    Eqn::T::one(),
-                    self.tableau.d().as_slice(),
-                    Eqn::T::zero(),
-                    sens_error,
-                );
-                let atol = aug_eqn.atol(i).unwrap();
-                let err = sens_error.squared_norm(&self.state.s[i], atol, rtol);
-                error_norm = error_norm.max(err);
-            }
+            self.sdiff.gemv_cols(
+                0,
+                s,
+                Eqn::T::one(),
+                self.tableau.d().as_slice(),
+                Eqn::T::zero(),
+                sens_error,
+            );
+            let atol = aug_eqn.atol().unwrap();
+            let err = sens_error.squared_norm(&self.state.s, atol, rtol);
+            error_norm = error_norm.max(err);
         }
 
         // sensitivity output errors
@@ -843,18 +839,16 @@ where
             let aug_eqn = augmented_eqn.as_ref().unwrap();
             let atol = aug_eqn.out_atol().unwrap();
             let rtol = aug_eqn.out_rtol().unwrap();
-            for i in 0..self.sgdiff.len() {
-                self.sgdiff[i].gemv_cols(
-                    0,
-                    s,
-                    Eqn::T::one(),
-                    self.tableau.d().as_slice(),
-                    Eqn::T::zero(),
-                    sens_out_error,
-                );
-                let err = sens_out_error.squared_norm(&self.state.sg[i], atol, rtol);
-                error_norm = error_norm.max(err);
-            }
+            self.sgdiff.gemv_cols(
+                0,
+                s,
+                Eqn::T::one(),
+                self.tableau.d().as_slice(),
+                Eqn::T::zero(),
+                sens_out_error,
+            );
+            let err = sens_out_error.squared_norm(&self.state.sg, atol, rtol);
+            error_norm = error_norm.max(err);
         }
         Ok(error_norm)
     }
@@ -930,15 +924,15 @@ where
             );
         }
 
-        for i in 0..self.sgdiff.len() {
-            self.old_state.sg[i].copy_from(&self.state.sg[i]);
-            self.sgdiff[i].gemv_cols(
+        if self.sgdiff.nrows() > 0 {
+            self.old_state.sg.copy_from(&self.state.sg);
+            self.sgdiff.gemv_cols(
                 0,
                 s,
                 Eqn::T::one(),
                 self.tableau.b().as_slice(),
                 Eqn::T::one(),
-                &mut self.old_state.sg[i],
+                &mut self.old_state.sg,
             );
         }
 
@@ -947,9 +941,7 @@ where
         self.old_state.h = new_h;
         if rescale_dy {
             self.old_state.dy *= scale(Eqn::T::one() / h);
-            for ds in self.old_state.ds.iter_mut() {
-                ds.mul_assign(scale(Eqn::T::one() / h));
-            }
+            self.old_state.ds.mul_assign(scale(Eqn::T::one() / h));
         }
         std::mem::swap(&mut self.old_state, &mut self.state);
 
@@ -1280,31 +1272,31 @@ where
     pub(crate) fn interpolate_sens_inplace(
         &self,
         t: Eqn::T,
-        ret: &mut [M::V],
+        ret: &mut M::V,
     ) -> Result<(), DiffsolError> {
-        if ret.len() != self.state.s.len() {
+        if ret.context().nbatch() != self.state.s.context().nbatch() {
             return Err(DiffsolError::from(
                 OdeSolverError::SensitivityCountMismatch {
+                    expected: self.state.s.context().nbatch(),
+                    found: ret.context().nbatch(),
+                },
+            ));
+        }
+        if ret.len() != self.state.s.len() {
+            return Err(DiffsolError::from(
+                OdeSolverError::InterpolationVectorWrongSize {
                     expected: self.state.s.len(),
                     found: ret.len(),
                 },
             ));
         }
-        for s in ret.iter() {
-            if s.len() != self.state.s[0].len() {
-                return Err(DiffsolError::from(
-                    OdeSolverError::InterpolationVectorWrongSize {
-                        expected: self.state.s[0].len(),
-                        found: s.len(),
-                    },
-                ));
-            }
+        // no sensitivities to interpolate
+        if self.state.s.len() == 0 {
+            return Ok(());
         }
         if self.is_state_mutated {
             if t == self.state.t {
-                for (r, s) in ret.iter_mut().zip(self.state.s.iter()) {
-                    r.copy_from(s);
-                }
+                ret.copy_from(&self.state.s);
                 return Ok(());
             } else {
                 return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
@@ -1328,25 +1320,16 @@ where
         let scale_diff = Eqn::T::one();
         if let Some(beta_t) = self.tableau.beta_t() {
             let beta_f = Self::interpolate_beta_weights(theta, beta_t, scale_diff);
-            for ((y, diff), r) in self
-                .old_state
-                .s
-                .iter()
-                .zip(self.sdiff.iter())
-                .zip(ret.iter_mut())
-            {
-                Self::interpolate_from_diff(y, beta_f.as_slice(), diff, r);
-            }
+            Self::interpolate_from_diff(&self.old_state.s, beta_f.as_slice(), &self.sdiff, ret);
         } else {
-            for ((s0, s1), (diff, r)) in self
-                .old_state
-                .s
-                .iter()
-                .zip(self.state.s.iter())
-                .zip(self.sdiff.iter().zip(ret.iter_mut()))
-            {
-                Self::interpolate_hermite(scale_diff, theta, s0, s1, diff, r);
-            }
+            Self::interpolate_hermite(
+                scale_diff,
+                theta,
+                &self.old_state.s,
+                &self.state.s,
+                &self.sdiff,
+                ret,
+            );
         }
         Ok(())
     }

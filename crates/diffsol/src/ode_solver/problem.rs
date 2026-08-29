@@ -3,7 +3,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     error::DiffsolError, vector::Vector, AdjointContext, AdjointEquations, AugmentedOdeEquations,
-    AugmentedOdeEquationsImplicit, Bdf, BdfState, CheckpointingPath, DefaultDenseMatrix,
+    AugmentedOdeEquationsImplicit, Bdf, BdfState, CheckpointingPath, Context, DefaultDenseMatrix,
     DenseMatrix, ExplicitRk, LinearSolver, MatrixRef, NewtonNonlinearSolver, NoLineSearch,
     OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
     OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverState, RkState, Scalar, Sdirk,
@@ -177,7 +177,10 @@ where
     /// Relative tolerance for the forward sensitivity equations. If `None`, sensitivities are not included in error control.
     pub sens_rtol: Option<Eqn::T>,
     /// Absolute tolerances for the forward sensitivity equations, one vector per parameter. If `None`, sensitivities are not included in error control.
-    pub sens_atol: Option<Vec<Eqn::V>>,
+    /// Absolute tolerances for the forward sensitivities, one batch lane per (problem batch,
+    /// parameter): lane `b * nparams + p` holds parameter `p`'s tolerance, matching the layout of
+    /// the augmented state (see [`crate::AugmentedOdeEquations`]).
+    pub sens_atol: Option<Eqn::V>,
     /// Relative tolerance for output equations, if outputs are being integrated and used in error control.
     pub out_rtol: Option<Eqn::T>,
     /// Absolute tolerance for output equations, if outputs are being integrated and used in error control.
@@ -520,7 +523,7 @@ where
         rtol: Eqn::T,
         atol: Eqn::V,
         sens_rtol: Option<Eqn::T>,
-        sens_atol: Option<Vec<Eqn::V>>,
+        sens_atol: Option<Eqn::V>,
         out_rtol: Option<Eqn::T>,
         out_atol: Option<Eqn::V>,
         param_rtol: Option<Eqn::T>,
@@ -572,16 +575,21 @@ where
         checkpointer: CheckpointingPath<Eqn, S::State>,
         solver: Option<S>,
         nout_override: Option<usize>,
-    ) -> AdjointEquations<'a, Eqn, S> {
+    ) -> Result<AdjointEquations<'a, Eqn, S>, DiffsolError> {
         let nout = nout_override.unwrap_or_else(|| self.eqn.nout());
+        // the adjoint state holds one channel per output in its batch lanes
+        let aug_ctx = self
+            .context()
+            .clone_with_nbatch(self.context().nbatch() * nout)?;
         let context = Rc::new(RefCell::new(AdjointContext::new(
             &self.eqn,
             self.t0,
             checkpointer,
             solver,
             nout,
+            aug_ctx,
         )));
-        AdjointEquations::new(self, context, self.integrate_out)
+        Ok(AdjointEquations::new(self, context, self.integrate_out))
     }
 }
 
@@ -711,7 +719,9 @@ where
         let rtol = self.rtol;
         state
             .as_mut()
-            .set_step_size(h, atol, rtol, augmented_eqn, 1);
+            // the heuristic works on the main state and the main tolerances, so it is the main
+            // equations that are evaluated (the augmented rhs writes one channel per batch lane)
+            .set_step_size(h, atol, rtol, &self.eqn, 1);
 
         Ok(state)
     }
@@ -772,7 +782,7 @@ where
     where
         Eqn: OdeEquationsImplicitAdjoint,
     {
-        let mut augmented_eqn = self.adjoint_equations(checkpointer, solver, nout_override);
+        let mut augmented_eqn = self.adjoint_equations(checkpointer, solver, nout_override)?;
         let state = self.bdf_state_adjoint::<LS, _>(&mut augmented_eqn)?;
         self.bdf_solver_adjoint_from_state::<LS, _>(state, augmented_eqn)
     }
@@ -801,7 +811,7 @@ where
     where
         Eqn: OdeEquationsImplicitSens,
     {
-        let sens_eqn = SensEquations::new(self);
+        let sens_eqn = SensEquations::new(self)?;
         self.bdf_solver_aug(state, sens_eqn)
     }
 
@@ -940,7 +950,7 @@ where
     where
         Eqn: OdeEquationsImplicitAdjoint,
     {
-        let mut augmented_eqn = self.adjoint_equations(checkpointer, solver, nout_override);
+        let mut augmented_eqn = self.adjoint_equations(checkpointer, solver, nout_override)?;
         let state = self.sdirk_state_adjoint::<LS, _>(tableau, &mut augmented_eqn)?;
         self.sdirk_solver_adjoint_from_state::<LS, DM, _>(tableau, state, augmented_eqn)
     }
@@ -970,7 +980,8 @@ where
         let rtol = self.rtol;
         state
             .as_mut()
-            .set_step_size(h, atol, rtol, augmented_eqn, tableau.order());
+            // see the comment in `bdf_state_adjoint_from_state`
+            .set_step_size(h, atol, rtol, &self.eqn, tableau.order());
         Ok(state)
     }
 
@@ -1023,7 +1034,7 @@ where
     where
         Eqn: OdeEquationsImplicitSens,
     {
-        let sens_eqn = SensEquations::new(self);
+        let sens_eqn = SensEquations::new(self)?;
         self.sdirk_solver_aug::<LS, DM, _>(state, tableau, sens_eqn)
     }
 
@@ -1102,7 +1113,7 @@ where
     where
         Eqn: OdeEquationsAdjoint,
     {
-        let mut augmented_eqn = self.adjoint_equations(checkpointer, solver, nout_override);
+        let mut augmented_eqn = self.adjoint_equations(checkpointer, solver, nout_override)?;
         let state = self.explicit_rk_state_adjoint(tableau, &mut augmented_eqn)?;
         self.explicit_rk_solver_adjoint_from_state(tableau, state, augmented_eqn)
     }
@@ -1128,7 +1139,8 @@ where
         let rtol = self.rtol;
         state
             .as_mut()
-            .set_step_size(h, atol, rtol, augmented_eqn, tableau.order());
+            // see the comment in `bdf_state_adjoint_from_state`
+            .set_step_size(h, atol, rtol, &self.eqn, tableau.order());
         Ok(state)
     }
 
@@ -1170,7 +1182,7 @@ where
     where
         Eqn: OdeEquationsImplicitSens,
     {
-        let sens_eqn = SensEquations::new(self);
+        let sens_eqn = SensEquations::new(self)?;
         self.explicit_rk_solver_aug::<DM, _>(state, tableau, sens_eqn)
     }
 

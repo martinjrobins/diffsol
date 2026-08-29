@@ -24,7 +24,7 @@ use diffsol::OdeBuilder;
 use diffsol::{
     error::DiffsolError,
     matrix::{MatrixHost, MatrixRef},
-    CodegenModule, ConstantOp, DefaultDenseMatrix, DefaultSolver, DenseMatrix, DiffSl,
+    CodegenModule, ConstantOp, Context, DefaultDenseMatrix, DefaultSolver, DenseMatrix, DiffSl,
     MatrixCommon, NonLinearOp, NonLinearOpJacobian, OdeEquations, OdeSolverProblem, Op, Vector,
     VectorCommon, VectorHost, VectorRef,
 };
@@ -649,24 +649,27 @@ where
     }
 
     fn set_sens_atol(&mut self, sens_atol: Option<f64>) {
+        // one batch lane per (problem batch, parameter), as the augmented state is laid out
         self.problem.sens_atol = sens_atol.map(|value| {
-            (0..self.problem.eqn.nparams())
-                .map(|_| {
-                    M::V::from_element(
-                        self.problem.eqn.nstates(),
-                        M::T::from_f64(value).unwrap(),
-                        M::C::default(),
-                    )
-                })
-                .collect()
+            let nparams = self.problem.eqn.nparams();
+            let ctx = self.problem.context();
+            let aug_ctx = ctx
+                .clone_with_nbatch(ctx.nbatch() * nparams)
+                .expect("failed to create the augmented context");
+            M::V::from_element(
+                self.problem.eqn.nstates(),
+                M::T::from_f64(value).unwrap(),
+                aug_ctx,
+            )
         });
     }
 
     fn sens_atol(&self) -> Option<f64> {
+        // every lane holds the same value unless parameter scales were set, which this API
+        // cannot express, so reporting the first is exact for anything it can have set
         self.problem
             .sens_atol
             .as_ref()
-            .and_then(|values| values.first())
             .and_then(|value| (value.len() > 0).then(|| value.get_index(0).to_f64().unwrap()))
     }
 

@@ -1,10 +1,10 @@
 use crate::{
     error::{DiffsolError, OdeSolverError},
     ode_solver_error, AdjointEquations, AugmentedOdeEquations, AugmentedOdeSolverMethod,
-    CheckpointingPath, DefaultDenseMatrix, DefaultSolver, DenseMatrix, LinearSolver, Matrix,
-    MatrixCommon, MatrixOp, NonLinearOpAdjoint, NonLinearOpSensAdjoint, OdeEquations,
+    CheckpointingPath, Context, DefaultDenseMatrix, DefaultSolver, DenseMatrix, LinearSolver,
+    Matrix, MatrixCommon, MatrixOp, NonLinearOpAdjoint, NonLinearOpSensAdjoint, OdeEquations,
     OdeEquationsImplicitAdjoint, OdeSolverMethod, OdeSolverState, OdeSolverStopReason, Op,
-    StateRef, Vector, VectorIndex,
+    StateRef, Vector, VectorIndex, VectorView, VectorViewMut,
 };
 
 use num_traits::{One, Zero};
@@ -81,8 +81,9 @@ where
         let have_neqn = validate_adjoint_backwards_inputs(&self, t_eval, dgdu_eval)?;
 
         let mut integrate_delta_g = if have_neqn > 0 && !dgdu_eval.is_empty() {
+            let aug_ctx = self.augmented_eqn().unwrap().aug_context().clone();
             let integrate_delta_g =
-                IntegrateDeltaG::<_, <Eqn::M as DefaultSolver>::LS>::new(&self)?;
+                IntegrateDeltaG::<_, <Eqn::M as DefaultSolver>::LS>::new(&self, aug_ctx)?;
             Some(integrate_delta_g)
         } else {
             None
@@ -515,7 +516,11 @@ where
     M: Matrix,
     LS: LinearSolver<M>,
 {
-    fn new<'a, Eqn, Solver>(solver: &Solver) -> Result<Self, DiffsolError>
+    /// `aug_ctx` is the augmented context: one batch lane per adjoint channel, used for every
+    /// scratch buffer that holds per-channel data (all of them except the interpolated forward
+    /// state). The block solvers stay at the problem's batch count and their factorisations are
+    /// broadcast over the channels.
+    fn new<'a, Eqn, Solver>(solver: &Solver, aug_ctx: M::C) -> Result<Self, DiffsolError>
     where
         Eqn: OdeEquations<M = M, V = M::V, T = M::T, C = M::C> + 'a,
         Solver: OdeSolverMethod<'a, Eqn>,
@@ -568,17 +573,17 @@ where
         let nstates = eqn.rhs().nstates();
         let nout = eqn.out().map(|o| o.nout()).unwrap_or(nstates);
         let tmp_nstates = M::V::zeros(nstates, ctx.clone());
-        let tmp_nstates2 = M::V::zeros(nstates, ctx.clone());
-        let tmp_nparams = M::V::zeros(nparams, ctx.clone());
-        let tmp_nout = M::V::zeros(nout, ctx.clone());
+        let tmp_nstates2 = M::V::zeros(nstates, aug_ctx.clone());
+        let tmp_nparams = M::V::zeros(nparams, aug_ctx.clone());
+        let tmp_nout = M::V::zeros(nout, aug_ctx.clone());
         let nalgebraic = partition
             .as_ref()
             .map(|p| p.algebraic_indices.len())
             .unwrap_or(0);
         let ndifferential = nstates - nalgebraic;
-        let tmp_algebraic = M::V::zeros(nalgebraic, ctx.clone());
-        let tmp_differential = M::V::zeros(ndifferential, ctx.clone());
-        let tmp_differential2 = M::V::zeros(ndifferential, ctx.clone());
+        let tmp_algebraic = M::V::zeros(nalgebraic, aug_ctx.clone());
+        let tmp_differential = M::V::zeros(ndifferential, aug_ctx.clone());
+        let tmp_differential2 = M::V::zeros(ndifferential, aug_ctx);
         Ok(Self {
             rhs_jac_aa,
             rhs_jac_ad,
@@ -652,14 +657,22 @@ where
 
         let out = solver.augmented_eqn().unwrap().eqn().out();
         let fwd_rhs = solver.augmented_eqn().unwrap().eqn().rhs();
+        let nchannels = solver.augmented_eqn().unwrap().max_index();
         let state_mut = solver.state_mut();
-        for ((s_i, sg_i), dgdu) in state_mut
-            .s
-            .iter_mut()
-            .zip(state_mut.sg.iter_mut())
-            .zip(dgdus)
+        // gather the per-channel cost gradients into the channel lanes, then apply the jump to
+        // every channel in one pass
+        let nbatch = self.tmp_nout.context().nbatch() / nchannels;
+        for (i, dgdu) in dgdus.enumerate() {
+            let dgdu = dgdu.into_owned();
+            for b in 0..nbatch {
+                self.tmp_nout
+                    .get_batch_mut(b * nchannels + i)
+                    .copy_from_view(&dgdu.get_batch(b));
+            }
+        }
         {
-            self.tmp_nout.copy_from_view(&dgdu);
+            let s_i = &mut *state_mut.s;
+            let sg_i = &mut *state_mut.sg;
 
             let mut buf = DeltaGBuf {
                 tmp_nstates: &self.tmp_nstates,

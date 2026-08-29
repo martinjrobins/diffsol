@@ -148,9 +148,10 @@ pub trait NonLinearOpAdjoint: NonLinearOp {
 
     /// Default implementation of the Adjoint computation (this is the default for [Self::adjoint_inplace]).
     fn _default_adjoint_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
-        let mut v = Self::V::zeros(self.nstates(), self.context().clone());
-        let mut col = Self::V::zeros(self.nout(), self.context().clone());
-        for j in 0..self.nstates() {
+        // one column per output, each of them a state vector
+        let mut v = Self::V::zeros(self.nout(), self.context().clone());
+        let mut col = Self::V::zeros(self.nstates(), self.context().clone());
+        for j in 0..self.nout() {
             v.set_index(j, Self::T::one());
             self.jac_transpose_mul_inplace(x, t, &v, &mut col);
             y.set_column(j, &col);
@@ -161,9 +162,13 @@ pub trait NonLinearOpAdjoint: NonLinearOp {
     /// Compute the Adjoint matrix `-J^T(x, t)` of the operator and return it.
     /// See [Self::adjoint_inplace] for a non-allocating version.
     fn adjoint(&self, x: &Self::V, t: Self::T) -> Self::M {
-        let n = self.nstates();
-        let mut y =
-            Self::M::new_from_sparsity(n, n, self.adjoint_sparsity(), self.context().clone());
+        // `-J^T` maps outputs to states: square for the rhs, but not for an out operator
+        let mut y = Self::M::new_from_sparsity(
+            self.nstates(),
+            self.nout(),
+            self.adjoint_sparsity(),
+            self.context().clone(),
+        );
         self.adjoint_inplace(x, t, &mut y);
         y
     }

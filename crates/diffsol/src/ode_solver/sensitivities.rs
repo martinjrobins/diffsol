@@ -1,14 +1,13 @@
 use crate::{
     error::DiffsolError,
+    ode_equations::augmented_channel,
     ode_solver::method::write_state_out,
     ode_solver::solution::{Solution, SolutionMode},
     ode_solver_error, AugmentedOdeSolverMethod, Context, DefaultDenseMatrix, DefaultSolver,
-    DenseMatrix, MatrixCommon, NonLinearOp, NonLinearOpJacobian, NonLinearOpSens,
+    DenseMatrix, Matrix, MatrixCommon, NonLinearOp, NonLinearOpJacobian, NonLinearOpSens,
     OdeEquationsImplicitSens, OdeSolverProblem, OdeSolverStopReason, Op, SensEquations, StateRef,
     Vector, VectorViewMut,
 };
-use num_traits::{One, Zero};
-use std::ops::AddAssign;
 
 pub trait SensitivitiesOdeSolverMethod<'a, Eqn>:
     AugmentedOdeSolverMethod<'a, Eqn, SensEquations<'a, Eqn>>
@@ -52,22 +51,26 @@ where
         let nstates = self.problem().eqn.rhs().nstates();
         let nparams = self.problem().eqn.rhs().nparams();
         let nout = self.problem().eqn.out().map(|out| out.nout()).unwrap_or(0);
-        let nout_params = self
-            .problem()
-            .eqn
-            .out()
-            .map(|out| out.nparams())
-            .unwrap_or(0);
-        soln.ensure_sens_allocation(&ctx, nrows, nout, nout_params, nstates, nparams)?;
+        soln.ensure_sens_allocation(&ctx, nrows, nout, nstates, nparams)?;
+
+        // the output operator's parameter Jacobian, at the problem's own batch count; `Solution`
+        // cannot name the equations' matrix type, so it is owned here
+        let mut out_sens = <Eqn as Op>::M::new_from_sparsity(
+            nout,
+            nparams,
+            self.problem().eqn.out().and_then(|out| out.sens_sparsity()),
+            ctx,
+        );
 
         let (stop_reason, col) = solve_dense_sensitivities(
             &mut soln.ys,
             &mut soln.y_sens,
             &soln.ts,
             &mut soln.tmp_nout,
-            &mut soln.tmp_nparams,
             &mut soln.tmp_nstates,
             &mut soln.tmp_nsens,
+            &mut soln.tmp_nsens_out,
+            &mut out_sens,
             &mut self,
             start_col,
         )?;
@@ -149,16 +152,22 @@ where
             self.problem().eqn.out().map(|out| out.nout()).unwrap_or(0),
             ctx.clone(),
         );
-        let mut tmp_nparams = Eqn::V::zeros(
-            self.problem()
-                .eqn
-                .out()
-                .map(|out| out.nparams())
-                .unwrap_or(0),
-            ctx.clone(),
-        );
         let mut tmp_nstates = Eqn::V::zeros(nstates, ctx.clone());
-        let mut tmp_nsens = vec![Eqn::V::zeros(nstates, ctx); nparams];
+        // the augmented scratch holds one parameter per batch lane
+        let aug_ctx = ctx.clone_with_nbatch(ctx.nbatch() * nparams)?;
+        let mut tmp_nsens = Eqn::V::zeros(nstates, aug_ctx.clone());
+        let mut tmp_nsens_out = Eqn::V::zeros(
+            self.problem().eqn.out().map(|out| out.nout()).unwrap_or(0),
+            aug_ctx.clone(),
+        );
+        // the output operator's parameter Jacobian, at the problem's own batch count
+        let nout_sens = self.problem().eqn.out().map(|out| out.nout()).unwrap_or(0);
+        let mut tmp_out_sens = <Eqn as Op>::M::new_from_sparsity(
+            nout_sens,
+            nparams,
+            self.problem().eqn.out().and_then(|out| out.sens_sparsity()),
+            ctx,
+        );
 
         // check t_eval is increasing and all values are >= the current time
         let t0 = self.state().t;
@@ -171,9 +180,10 @@ where
             &mut ret_sens,
             t_eval,
             &mut tmp_nout,
-            &mut tmp_nparams,
             &mut tmp_nstates,
             &mut tmp_nsens,
+            &mut tmp_nsens_out,
+            &mut tmp_out_sens,
             self,
             0,
         )?;
@@ -187,7 +197,8 @@ where
                     &mut ret_sens,
                     col,
                     &mut tmp_nout,
-                    &mut tmp_nparams,
+                    &mut tmp_nsens_out,
+                    &mut tmp_out_sens,
                 );
                 if col + 1 < ret.ncols() {
                     ret.resize_cols(col + 1);
@@ -207,9 +218,11 @@ fn solve_dense_sensitivities<'a, Eqn, S>(
     ret_sens: &mut [<Eqn::V as DefaultDenseMatrix>::M],
     t_eval: &[Eqn::T],
     tmp_nout: &mut Eqn::V,
-    tmp_nparams: &mut Eqn::V,
     tmp_nstates: &mut Eqn::V,
-    tmp_nsens: &mut [Eqn::V],
+    tmp_nsens: &mut Eqn::V,
+    tmp_nsens_out: &mut Eqn::V,
+    // `tmp_out_sens` holds the output operator's parameter Jacobian `g_p`
+    tmp_out_sens: &mut <Eqn as Op>::M,
     s: &mut S,
     start_col: usize,
 ) -> Result<(OdeSolverStopReason<Eqn::T>, usize), DiffsolError>
@@ -236,9 +249,10 @@ where
                 t_eval[col],
                 col,
                 tmp_nout,
-                tmp_nparams,
                 tmp_nstates,
                 tmp_nsens,
+                tmp_nsens_out,
+                tmp_out_sens,
             )?;
             col += 1;
         }
@@ -266,9 +280,11 @@ fn solve_dense_sensitivities_auto_reset<'a, Eqn, S>(
     ret_sens: &mut [<Eqn::V as DefaultDenseMatrix>::M],
     t_eval: &[Eqn::T],
     tmp_nout: &mut Eqn::V,
-    tmp_nparams: &mut Eqn::V,
     tmp_nstates: &mut Eqn::V,
-    tmp_nsens: &mut [Eqn::V],
+    tmp_nsens: &mut Eqn::V,
+    tmp_nsens_out: &mut Eqn::V,
+    // `tmp_out_sens` holds the output operator's parameter Jacobian `g_p`
+    tmp_out_sens: &mut <Eqn as Op>::M,
     s: &mut S,
     start_col: usize,
 ) -> Result<(OdeSolverStopReason<Eqn::T>, usize), DiffsolError>
@@ -294,9 +310,10 @@ where
                         t_eval[col],
                         col,
                         tmp_nout,
-                        tmp_nparams,
                         tmp_nstates,
                         tmp_nsens,
+                        tmp_nsens_out,
+                        tmp_out_sens,
                     )?;
                     col += 1;
                 }
@@ -310,9 +327,10 @@ where
                         t_eval[col],
                         col,
                         tmp_nout,
-                        tmp_nparams,
                         tmp_nstates,
                         tmp_nsens,
+                        tmp_nsens_out,
+                        tmp_out_sens,
                     )?;
                     col += 1;
                 }
@@ -331,9 +349,10 @@ where
                         t_eval[col],
                         col,
                         tmp_nout,
-                        tmp_nparams,
                         tmp_nstates,
                         tmp_nsens,
+                        tmp_nsens_out,
+                        tmp_out_sens,
                     )?;
                     col += 1;
                 }
@@ -364,9 +383,10 @@ fn dense_write_out_sensitivities<'a, Eqn, S>(
     t: Eqn::T,
     col: usize,
     tmp_nout: &mut Eqn::V,
-    tmp_nparams: &mut Eqn::V,
     tmp_nstates: &mut Eqn::V,
-    tmp_nsens: &mut [Eqn::V],
+    tmp_nsens: &mut Eqn::V,
+    tmp_nsens_out: &mut Eqn::V,
+    tmp_out_sens: &mut <Eqn as Op>::M,
 ) -> Result<(), DiffsolError>
 where
     Eqn: OdeEquationsImplicitSens + 'a,
@@ -375,22 +395,24 @@ where
 {
     s.interpolate_inplace(t, tmp_nstates)?;
     s.interpolate_sens_inplace(t, tmp_nsens)?;
+    let nparams = ret_sens.len();
     if let Some(out) = s.problem().eqn.out() {
         out.call_inplace(tmp_nstates, t, tmp_nout);
         ret.column_mut(col).copy_from(tmp_nout);
-        for (j, s_j) in tmp_nsens.iter().enumerate() {
-            let mut col_v = ret_sens[j].column_mut(col);
-            tmp_nparams.set_index(j, Eqn::T::one());
-            out.jac_mul_inplace(tmp_nstates, t, s_j, tmp_nout);
-            col_v.copy_from(&*tmp_nout);
-            out.sens_mul_inplace(tmp_nstates, t, tmp_nparams, tmp_nout);
-            col_v.add_assign(&*tmp_nout);
-            tmp_nparams.set_index(j, Eqn::T::zero());
+        // dg/dp = g_y * S + g_p: the first term is batched over the parameter lanes, the second is
+        // a matrix whose column `j` is this parameter's own contribution
+        out.jac_mul_inplace(tmp_nstates, t, tmp_nsens, tmp_nsens_out);
+        out.sens_inplace(tmp_nstates, t, tmp_out_sens);
+        for (j, sens) in ret_sens.iter_mut().enumerate() {
+            augmented_channel(tmp_nsens_out, nparams, j, tmp_nout);
+            tmp_out_sens.add_column_to_vector(j, tmp_nout);
+            sens.column_mut(col).copy_from(&*tmp_nout);
         }
     } else {
         ret.column_mut(col).copy_from(tmp_nstates);
-        for (j, s_j) in tmp_nsens.iter().enumerate() {
-            ret_sens[j].column_mut(col).copy_from(s_j);
+        for (j, sens) in ret_sens.iter_mut().enumerate() {
+            augmented_channel(tmp_nsens, nparams, j, tmp_nstates);
+            sens.column_mut(col).copy_from(&*tmp_nstates);
         }
     }
     Ok(())
@@ -402,27 +424,27 @@ pub(crate) fn write_state_sens_out<Eqn>(
     ret_sens: &mut [<Eqn::V as DefaultDenseMatrix>::M],
     col: usize,
     tmp_nout: &mut Eqn::V,
-    tmp_nparams: &mut Eqn::V,
+    tmp_nsens_out: &mut Eqn::V,
+    tmp_out_sens: &mut <Eqn as Op>::M,
 ) where
     Eqn: OdeEquationsImplicitSens,
     Eqn::V: DefaultDenseMatrix,
 {
+    let nparams = ret_sens.len();
     if let Some(out) = problem.eqn.out() {
-        for (j, state_sens) in state.s.iter().enumerate() {
-            if j >= ret_sens.len() {
-                break;
-            }
-            let mut col_v = ret_sens[j].column_mut(col);
-            tmp_nparams.set_index(j, Eqn::T::one());
-            out.jac_mul_inplace(state.y, state.t, state_sens, tmp_nout);
-            col_v.copy_from(&*tmp_nout);
-            out.sens_mul_inplace(state.y, state.t, tmp_nparams, tmp_nout);
-            col_v.add_assign(&*tmp_nout);
-            tmp_nparams.set_index(j, Eqn::T::zero());
+        // dg/dp = g_y * S + g_p, see `dense_write_out_sensitivities`
+        out.jac_mul_inplace(state.y, state.t, state.s, tmp_nsens_out);
+        out.sens_inplace(state.y, state.t, tmp_out_sens);
+        for (j, sens) in ret_sens.iter_mut().enumerate() {
+            augmented_channel(tmp_nsens_out, nparams, j, tmp_nout);
+            tmp_out_sens.add_column_to_vector(j, tmp_nout);
+            sens.column_mut(col).copy_from(&*tmp_nout);
         }
     } else {
-        for (sens, state_sens) in ret_sens.iter_mut().zip(state.s.iter()) {
-            sens.column_mut(col).copy_from(state_sens);
+        let mut tmp = Eqn::V::zeros(state.s.len(), problem.context().clone());
+        for (j, sens) in ret_sens.iter_mut().enumerate() {
+            augmented_channel(state.s, nparams, j, &mut tmp);
+            sens.column_mut(col).copy_from(&tmp);
         }
     }
 }

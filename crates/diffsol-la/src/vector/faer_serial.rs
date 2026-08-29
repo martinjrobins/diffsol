@@ -842,6 +842,13 @@ impl<T: FaerScalar> VectorHost for FaerVec<T> {
         assert_eq!(self.context.nbatch(), 1);
         self.data.col_as_slice_mut(0)
     }
+    fn batch_as_slice(&self, batch: usize) -> &[T] {
+        // batches are the columns of the backing matrix
+        self.data.col_as_slice(batch)
+    }
+    fn batch_as_mut_slice(&mut self, batch: usize) -> &mut [T] {
+        self.data.col_as_slice_mut(batch)
+    }
 }
 #[cfg(test)]
 mod tests {

@@ -1,3 +1,4 @@
+use crate::context::broadcast_batch;
 use crate::matrix::DenseMatrix;
 use crate::scalar::Scale;
 use crate::{Context, IndexType, Scalar};
@@ -238,6 +239,17 @@ pub trait Vector:
     /// Get a mutable view of a single batch (with nbatch=1 context).
     fn get_batch_mut(&mut self, batch: usize) -> Self::ViewMut<'_>;
 
+    /// Get an immutable view of the batch of `self` that feeds destination batch `dest` of
+    /// `dest_nbatch`, following the same grouped broadcast as every batched operation (see
+    /// [`Context::assert_broadcastable_into`]).
+    ///
+    /// Use this instead of [`Self::get_batch`] in any operator that reads a per-batch value from an
+    /// operand that may hold fewer batches than the operand being written, e.g. reading parameters
+    /// (`nbatch == B`) while writing sensitivities (`nbatch == B * nparams`).
+    fn get_batch_bcast(&self, dest: usize, dest_nbatch: usize) -> Self::View<'_> {
+        self.get_batch(broadcast_batch(dest, self.context().nbatch(), dest_nbatch))
+    }
+
     /// Copy all values from `other` into this vector.
     fn copy_from(&mut self, other: &Self);
 
@@ -381,11 +393,26 @@ pub trait Vector:
 pub trait VectorHost:
     Vector + Index<IndexType, Output = Self::T> + IndexMut<IndexType, Output = Self::T>
 {
-    /// Get the vector data as an immutable slice.
+    /// Get the vector data as an immutable slice. Panics unless `nbatch == 1`; for a batched
+    /// vector use [`Self::batch_as_slice`].
     fn as_slice(&self) -> &[Self::T];
 
-    /// Get the vector data as a mutable slice.
+    /// Get the vector data as a mutable slice. Panics unless `nbatch == 1`; for a batched vector
+    /// use [`Self::batch_as_mut_slice`].
     fn as_mut_slice(&mut self) -> &mut [Self::T];
+
+    /// Get one batch of the vector data as an immutable slice.
+    fn batch_as_slice(&self, batch: usize) -> &[Self::T];
+
+    /// Get one batch of the vector data as a mutable slice.
+    fn batch_as_mut_slice(&mut self, batch: usize) -> &mut [Self::T];
+
+    /// Get the batch of `self` feeding destination batch `dest` of `dest_nbatch` as an immutable
+    /// slice, following the same grouped broadcast as every batched operation (see
+    /// [`Self::get_batch_bcast`]).
+    fn batch_as_slice_bcast(&self, dest: usize, dest_nbatch: usize) -> &[Self::T] {
+        self.batch_as_slice(broadcast_batch(dest, self.context().nbatch(), dest_nbatch))
+    }
 }
 
 /// Marker trait for vectors that have a default associated dense matrix type.
@@ -707,6 +734,10 @@ macro_rules! generate_vector_tests_batched {
             #[test]
             fn [<test_batched_get_batch_mut_ $suffix>]() {
                 $crate::vector::tests::test_batched_get_batch_mut::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_get_batch_bcast_ $suffix>]() {
+                $crate::vector::tests::test_batched_get_batch_bcast::<$V>($ctx2);
             }
             #[test]
             fn [<test_batched_axpy_v_ $suffix>]() {
@@ -1716,6 +1747,30 @@ pub(crate) mod tests {
             v.clone_as_vec(),
             fv::<V>(&[1.0, 99.0, 3.0, 10.0, 20.0, 30.0])
         );
+    }
+
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_batched_get_batch_bcast<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let v = V::from_vec(fv::<V>(&[1.0, 2.0, 10.0, 20.0]), ctx);
+        // equal batch counts: the identity
+        for b in 0..2 {
+            let batch = v.get_batch_bcast(b, 2);
+            assert_eq!(batch.get_index(0), v.get_batch(b).get_index(0));
+        }
+        // grouped broadcast into 3 * 2 = 6 batches: each source batch covers three
+        // contiguous destinations
+        let expect = [1.0, 1.0, 1.0, 10.0, 10.0, 10.0];
+        for (dest, e) in expect.iter().enumerate() {
+            let batch = v.get_batch_bcast(dest, 6);
+            assert_eq!(batch.get_index(0), f::<V>(*e));
+        }
+        // an unbatched operand feeds every destination
+        let ctx1 = v.context().clone_with_nbatch(1).unwrap();
+        let single = V::from_vec(fv::<V>(&[7.0, 8.0]), ctx1);
+        for dest in 0..6 {
+            assert_eq!(single.get_batch_bcast(dest, 6).get_index(0), f::<V>(7.0));
+        }
     }
 
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
