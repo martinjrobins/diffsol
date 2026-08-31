@@ -1,11 +1,11 @@
 use crate::{
-    ode_solver::problem::OdeSolverSolution, Context, MatrixHost, OdeBuilder,
-    OdeEquationsImplicitSens, OdeSolverProblem, Vector, VectorView, VectorViewMut,
+    ode_solver::problem::OdeSolverSolution, Matrix, OdeBuilder, OdeEquationsImplicitSens,
+    OdeSolverProblem, Vector,
 };
 use num_traits::{FromPrimitive, One, Zero};
 
 #[allow(clippy::type_complexity)]
-pub fn robertson_ode_with_sens<M: MatrixHost + 'static>(
+pub fn robertson_ode_with_sens<M: Matrix + 'static>(
     use_coloring: bool,
 ) -> (
     OdeSolverProblem<impl OdeEquationsImplicitSens<M = M, V = M::V, T = M::T, C = M::C>>,
@@ -23,41 +23,39 @@ pub fn robertson_ode_with_sens<M: MatrixHost + 'static>(
             //*    dy2/dt = .04*y1 - 1.e4*y2*y3 - 3.e7*(y2)^2
             //*    dy3/dt = 3.e7*(y2)^2
             |x: &M::V, p: &M::V, _t: M::T, y: &mut M::V| {
-                y[0] = -p[0] * x[0] + p[1] * x[1] * x[2];
-                y[1] = p[0] * x[0] - p[1] * x[1] * x[2] - p[2] * x[1] * x[1];
-                y[2] = p[2] * x[1] * x[1];
+                y.for_each_batch([x, p], |y, [x, p], _| {
+                    y[0] = -p[0] * x[0] + p[1] * x[1] * x[2];
+                    y[1] = p[0] * x[0] - p[1] * x[1] * x[2] - p[2] * x[1] * x[1];
+                    y[2] = p[2] * x[1] * x[1];
+                });
             },
             // J * v, applied to the batched sensitivities (one parameter per batch lane)
             |x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V| {
-                let nbatch = y.context().nbatch();
-                for b in 0..nbatch {
-                    let pb = p.get_batch_bcast(b, nbatch);
-                    let xb = x.get_batch_bcast(b, nbatch);
-                    let vb = v.get_batch_bcast(b, nbatch);
-                    let (p0, p1, p2) = (pb.get_index(0), pb.get_index(1), pb.get_index(2));
-                    let (x1, x2) = (xb.get_index(1), xb.get_index(2));
-                    let (v0, v1, v2) = (vb.get_index(0), vb.get_index(1), vb.get_index(2));
+                y.for_each_batch([x, p, v], |y, [x, p, v], _| {
                     let two = M::T::from_f64(2.0).unwrap();
-                    let mut yb = y.get_batch_mut(b);
-                    yb.set_index(0, -p0 * v0 + p1 * v1 * x2 + p1 * x1 * v2);
-                    yb.set_index(
-                        1,
-                        p0 * v0 - p1 * v1 * x2 - p1 * x1 * v2 - two * p2 * x1 * v1,
-                    );
-                    yb.set_index(2, two * p2 * x1 * v1);
-                }
+                    y[0] = -p[0] * v[0] + p[1] * v[1] * x[2] + p[1] * x[1] * v[2];
+                    y[1] = p[0] * v[0]
+                        - p[1] * v[1] * x[2]
+                        - p[1] * x[1] * v[2]
+                        - two * p[2] * x[1] * v[1];
+                    y[2] = two * p[2] * x[1] * v[1];
+                });
             },
             |x: &M::V, _p: &M::V, _t: M::T, v: &M::V, y: &mut M::V| {
-                y[0] = -v[0] * x[0] + v[1] * x[1] * x[2];
-                y[1] = v[0] * x[0] - v[1] * x[1] * x[2] - v[2] * x[1] * x[1];
-                y[2] = v[2] * x[1] * x[1];
+                y.for_each_batch([x, v], |y, [x, v], _| {
+                    y[0] = -v[0] * x[0] + v[1] * x[1] * x[2];
+                    y[1] = v[0] * x[0] - v[1] * x[1] * x[2] - v[2] * x[1] * x[1];
+                    y[2] = v[2] * x[1] * x[1];
+                });
             },
         )
         .init_sens(
             |_p: &M::V, _t: M::T, y: &mut M::V| {
-                y[0] = M::T::one();
-                y[1] = M::T::zero();
-                y[2] = M::T::zero();
+                y.for_each_batch([], |y, _, _| {
+                    y[0] = M::T::one();
+                    y[1] = M::T::zero();
+                    y[2] = M::T::zero();
+                });
             },
             |_p: &M::V, _t: M::T, _v: &M::V, y: &mut M::V| y.fill(M::T::zero()),
             3,

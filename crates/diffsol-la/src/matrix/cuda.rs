@@ -450,6 +450,11 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
     }
 
     fn get_index(&self, i: IndexType, j: IndexType) -> Self::T {
+        assert_eq!(
+            self.context.nbatch(),
+            1,
+            "get_index not supported for batched matrices"
+        );
         self.get_index(i, j)
     }
 
@@ -465,6 +470,11 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
     }
 
     fn set_index(&mut self, i: IndexType, j: IndexType, value: Self::T) {
+        assert_eq!(
+            self.context.nbatch(),
+            1,
+            "set_index not supported for batched matrices"
+        );
         self.set_index(i, j, value);
     }
 

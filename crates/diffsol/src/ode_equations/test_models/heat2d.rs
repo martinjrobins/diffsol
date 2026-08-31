@@ -7,7 +7,7 @@
 //while for each boundary point, it is res_i = u_i.
 
 use crate::{
-    ode_solver::problem::OdeSolverSolution, scalar::Scalar, Matrix, MatrixHost, OdeBuilder,
+    ode_solver::problem::OdeSolverSolution, scalar::Scalar, Matrix, OdeBuilder,
     OdeEquationsImplicit, OdeSolverProblem, Vector,
 };
 use num_traits::{FromPrimitive, One, Zero};
@@ -18,21 +18,20 @@ use crate::{ConstantOp, LinearOp, NonLinearOpJacobian, OdeEquations};
 #[cfg(feature = "diffsl")]
 #[allow(clippy::type_complexity)]
 pub fn heat2d_diffsl_problem<
-    M: MatrixHost<T = f64>,
+    M: Matrix<T = f64>,
     CG: crate::CodegenModuleJit + crate::CodegenModuleCompile,
     const MGRID: usize,
 >() -> (
     OdeSolverProblem<impl crate::OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
-    use crate::VectorHost;
     let (problem, _soln) = head2d_problem::<M, MGRID>();
     let u0 = problem.eqn.init().call(0.0);
     let jac = problem.eqn.rhs().jacobian(&u0, 0.0);
     let mass = problem.eqn.mass().unwrap().matrix(0.0);
     let init = problem.eqn.init().call(0.0);
     let init_diffsl = init
-        .as_slice()
+        .clone_as_vec()
         .iter()
         .map(|v| format!("            {}", *v))
         .collect::<Vec<_>>()
@@ -99,110 +98,119 @@ pub fn heat2d_diffsl_problem<
     (problem, soln)
 }
 
-fn heat2d_rhs<M: MatrixHost, const MGRID: usize>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
-    // Initialize y to x, to take care of boundary equations.
-    y.copy_from(x);
-    let mm = M::T::from_f64(MGRID as f64).unwrap();
-    let four = M::T::from_f64(4.0).unwrap();
+fn heat2d_rhs<M: Matrix, const MGRID: usize>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
+    y.for_each_batch([x], |y, [x], _| {
+        // Initialize y to x, to take care of boundary equations.
+        y.copy_from_slice(x);
+        let mm = M::T::from_f64(MGRID as f64).unwrap();
+        let four = M::T::from_f64(4.0).unwrap();
 
-    let dx = M::T::one() / (mm - M::T::one());
-    let coeff = M::T::one() / (dx * dx);
+        let dx = M::T::one() / (mm - M::T::one());
+        let coeff = M::T::one() / (dx * dx);
 
-    // Loop over interior points; set y = (central difference).
-    for j in 1..MGRID - 1 {
-        let offset = MGRID * j;
-        for i in 1..MGRID - 1 {
-            let loc = offset + i;
-            y[loc] =
-                coeff * (x[loc - 1] + x[loc + 1] + x[loc - MGRID] + x[loc + MGRID] - four * x[loc]);
+        // Loop over interior points; set y = (central difference).
+        for j in 1..MGRID - 1 {
+            let offset = MGRID * j;
+            for i in 1..MGRID - 1 {
+                let loc = offset + i;
+                y[loc] = coeff
+                    * (x[loc - 1] + x[loc + 1] + x[loc - MGRID] + x[loc + MGRID] - four * x[loc]);
+            }
         }
-    }
+    });
 }
 
-fn heat2d_jac_mul<M: MatrixHost, const MGRID: usize>(
+fn heat2d_jac_mul<M: Matrix, const MGRID: usize>(
     _x: &M::V,
     _p: &M::V,
     _t: M::T,
     v: &M::V,
     y: &mut M::V,
 ) {
-    // Initialize y to x, to take care of boundary equations.
-    y.copy_from(v);
-    let mm = M::T::from_f64(MGRID as f64).unwrap();
-    let four = M::T::from_f64(4.0).unwrap();
+    y.for_each_batch([v], |y, [v], _| {
+        // Initialize y to v, to take care of boundary equations.
+        y.copy_from_slice(v);
+        let mm = M::T::from_f64(MGRID as f64).unwrap();
+        let four = M::T::from_f64(4.0).unwrap();
 
-    let dx = M::T::one() / (mm - M::T::one());
-    let coeff = M::T::one() / (dx * dx);
+        let dx = M::T::one() / (mm - M::T::one());
+        let coeff = M::T::one() / (dx * dx);
 
-    // Loop over interior points; set y = (central difference).
-    for j in 1..MGRID - 1 {
-        let offset = MGRID * j;
-        for i in 1..MGRID - 1 {
-            let loc = offset + i;
-            y[loc] =
-                coeff * (v[loc - 1] + v[loc + 1] + v[loc - MGRID] + v[loc + MGRID] - four * v[loc]);
-        }
-    }
-}
-
-fn heat2d_init<M: MatrixHost, const MGRID: usize>(_p: &M::V, _t: M::T, uu: &mut M::V) {
-    let mm = M::T::from_f64(MGRID as f64).unwrap();
-    let bval = M::T::zero();
-    let one = M::T::one();
-    let dx = one / (mm - one);
-    let mm1 = MGRID - 1;
-    let sixteen = M::T::from_f64(16.0).unwrap();
-
-    /* Initialize uu on all grid points. */
-    for j in 0..MGRID {
-        let yfact = dx * M::T::from_f64(j as f64).unwrap();
-        let offset = MGRID * j;
-        for i in 0..MGRID {
-            let xfact = dx * M::T::from_f64(i as f64).unwrap();
-            let loc = offset + i;
-            uu[loc] = sixteen * xfact * (one - xfact) * yfact * (one - yfact);
-        }
-    }
-
-    /* Finally, set values of u at boundary points. */
-    for j in 0..MGRID {
-        let offset = MGRID * j;
-        for i in 0..MGRID {
-            let loc = offset + i;
-            if j == 0 || j == mm1 || i == 0 || i == mm1 {
-                uu[loc] = bval;
+        // Loop over interior points; set y = (central difference).
+        for j in 1..MGRID - 1 {
+            let offset = MGRID * j;
+            for i in 1..MGRID - 1 {
+                let loc = offset + i;
+                y[loc] = coeff
+                    * (v[loc - 1] + v[loc + 1] + v[loc - MGRID] + v[loc + MGRID] - four * v[loc]);
             }
         }
-    }
+    });
 }
 
-fn heat2d_mass<M: MatrixHost, const MGRID: usize>(
+fn heat2d_init<M: Matrix, const MGRID: usize>(_p: &M::V, _t: M::T, uu: &mut M::V) {
+    uu.for_each_batch([], |uu, _, _| {
+        let mm = M::T::from_f64(MGRID as f64).unwrap();
+        let bval = M::T::zero();
+        let one = M::T::one();
+        let dx = one / (mm - one);
+        let mm1 = MGRID - 1;
+        let sixteen = M::T::from_f64(16.0).unwrap();
+
+        /* Initialize uu on all grid points. */
+        for j in 0..MGRID {
+            let yfact = dx * M::T::from_f64(j as f64).unwrap();
+            let offset = MGRID * j;
+            for i in 0..MGRID {
+                let xfact = dx * M::T::from_f64(i as f64).unwrap();
+                let loc = offset + i;
+                uu[loc] = sixteen * xfact * (one - xfact) * yfact * (one - yfact);
+            }
+        }
+
+        /* Finally, set values of u at boundary points. */
+        for j in 0..MGRID {
+            let offset = MGRID * j;
+            for i in 0..MGRID {
+                let loc = offset + i;
+                if j == 0 || j == mm1 || i == 0 || i == mm1 {
+                    uu[loc] = bval;
+                }
+            }
+        }
+    });
+}
+
+fn heat2d_mass<M: Matrix, const MGRID: usize>(
     x: &M::V,
     _p: &M::V,
     _t: M::T,
     beta: M::T,
     y: &mut M::V,
 ) {
-    let mm = MGRID;
-    let mm1 = mm - 1;
-    for j in 0..mm {
-        let offset = mm * j;
-        for i in 0..mm {
-            let loc = offset + i;
-            if j == 0 || j == mm1 || i == 0 || i == mm1 {
-                y[loc] *= beta;
-            } else {
-                y[loc] = x[loc] + beta * y[loc];
+    y.for_each_batch([x], |y, [x], _| {
+        let mm = MGRID;
+        let mm1 = mm - 1;
+        for j in 0..mm {
+            let offset = mm * j;
+            for i in 0..mm {
+                let loc = offset + i;
+                if j == 0 || j == mm1 || i == 0 || i == mm1 {
+                    y[loc] *= beta;
+                } else {
+                    y[loc] = x[loc] + beta * y[loc];
+                }
             }
         }
-    }
+    });
 }
 
-fn heat2d_out<M: MatrixHost, const MGRID: usize>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
-    let dx = M::T::one() / (M::T::from_f64(MGRID as f64).unwrap() - M::T::one());
-    let norm = x.norm(2);
-    let scaled_norm = norm * dx;
-    y[0] = scaled_norm * scaled_norm;
+fn heat2d_out<M: Matrix, const MGRID: usize>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
+    y.for_each_batch([x], |y, [x], _| {
+        let dx = M::T::one() / (M::T::from_f64(MGRID as f64).unwrap() - M::T::one());
+        let squared_norm = x.iter().fold(M::T::zero(), |acc, xi| acc + *xi * *xi);
+        y[0] = squared_norm * dx * dx;
+    });
 }
 
 fn heat2d_out_jac_mul<M: Matrix, const MGRID: usize>(
@@ -248,7 +256,7 @@ fn _pde_solution<T: Scalar>(x: T, y: T, t: T, max_terms: usize) -> T {
 }
 
 #[allow(clippy::type_complexity)]
-pub fn head2d_problem<M: MatrixHost + 'static, const MGRID: usize>() -> (
+pub fn head2d_problem<M: Matrix + 'static, const MGRID: usize>() -> (
     OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {

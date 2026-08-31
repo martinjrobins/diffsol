@@ -3,7 +3,6 @@ use std::ops::{Add, AddAssign, Mul, Sub, SubAssign};
 
 use crate::error::LaError;
 use crate::scalar::Scale;
-use crate::vector::VectorHost;
 use crate::{Context, IndexType, Scalar, Vector, VectorIndex};
 
 use extract_block::combine;
@@ -291,14 +290,6 @@ pub trait Matrix:
     ) -> Result<Self, LaError>;
 }
 
-/// A host matrix is a matrix type whose vector type is hosted on the CPU.
-///
-/// This trait extends `Matrix` to ensure the associated vector type implements `VectorHost`,
-/// enabling direct CPU-side access to data. GPU matrices typically do not implement this trait.
-pub trait MatrixHost: Matrix<V: VectorHost> {}
-
-impl<T: Matrix<V: VectorHost>> MatrixHost for T {}
-
 /// Largest column range the small-coefficient kernels accept — [`DenseMatrix::mul_cols_by`] and
 /// [`DenseMatrix::gemv_cols`].
 ///
@@ -390,12 +381,14 @@ pub trait DenseMatrix:
 
     /// Set the value at the given row and column indices.
     ///
-    /// For batched matrices the value is written to every batch.
+    /// Scalar access is single-system, as it is for [`Vector::set_index`]: panics unless
+    /// `nbatch == 1`. So does `IndexMut`.
     fn set_index(&mut self, i: IndexType, j: IndexType, value: Self::T);
 
     /// Get the value at the given row and column indices.
     ///
-    /// For batched matrices this reads batch 0, as does `Index`/`IndexMut`.
+    /// Scalar access is single-system, as it is for [`Vector::get_index`]: panics unless
+    /// `nbatch == 1`. So does `Index`.
     fn get_index(&self, i: IndexType, j: IndexType) -> Self::T;
 
     /// Resize the number of columns in the matrix, preserving existing data.
@@ -423,6 +416,12 @@ pub(crate) mod tests {
 
     fn f<M: Matrix>(x: f64) -> M::T {
         M::T::from_f64(x).unwrap()
+    }
+
+    /// Read one element of one batch. `get_index` is single-system, so a batched matrix is read a
+    /// column at a time.
+    fn at<M: DenseMatrix>(a: &M, batch: usize, i: IndexType, j: IndexType) -> M::T {
+        a.column(j).into_owned().get_batch(batch).get_index(i)
     }
 
     pub(crate) fn triplet_values<M: Matrix>(m: &M) -> Vec<M::T> {
@@ -1852,10 +1851,14 @@ pub(crate) mod tests {
         );
         assert_eq!(a.nrows(), 2);
         assert_eq!(a.ncols(), 2);
-        assert_eq!(a.get_index(0, 0), f::<M>(1.0));
-        assert_eq!(a.get_index(1, 0), f::<M>(3.0));
-        assert_eq!(a.get_index(0, 1), f::<M>(2.0));
-        assert_eq!(a.get_index(1, 1), f::<M>(4.0));
+        assert_eq!(at(&a, 0, 0, 0), f::<M>(1.0));
+        assert_eq!(at(&a, 0, 1, 0), f::<M>(3.0));
+        assert_eq!(at(&a, 0, 0, 1), f::<M>(2.0));
+        assert_eq!(at(&a, 0, 1, 1), f::<M>(4.0));
+        assert_eq!(at(&a, 1, 0, 0), f::<M>(5.0));
+        assert_eq!(at(&a, 1, 1, 0), f::<M>(7.0));
+        assert_eq!(at(&a, 1, 0, 1), f::<M>(6.0));
+        assert_eq!(at(&a, 1, 1, 1), f::<M>(8.0));
     }
 
     // --- Broadcasting tests ---
@@ -1931,13 +1934,19 @@ pub(crate) mod tests {
         assert_eq!(a.ncols(), 3);
         assert_eq!(a.nrows(), 2);
         // existing data preserved per batch
-        assert_eq!(a.get_index(0, 0), f::<M>(1.0));
-        assert_eq!(a.get_index(1, 0), f::<M>(3.0));
-        assert_eq!(a.get_index(0, 1), f::<M>(2.0));
-        assert_eq!(a.get_index(1, 1), f::<M>(4.0));
-        // new column is zero
-        assert_eq!(a.get_index(0, 2), f::<M>(0.0));
-        assert_eq!(a.get_index(1, 2), f::<M>(0.0));
+        assert_eq!(at(&a, 0, 0, 0), f::<M>(1.0));
+        assert_eq!(at(&a, 0, 1, 0), f::<M>(3.0));
+        assert_eq!(at(&a, 0, 0, 1), f::<M>(2.0));
+        assert_eq!(at(&a, 0, 1, 1), f::<M>(4.0));
+        assert_eq!(at(&a, 1, 0, 0), f::<M>(5.0));
+        assert_eq!(at(&a, 1, 1, 0), f::<M>(7.0));
+        assert_eq!(at(&a, 1, 0, 1), f::<M>(6.0));
+        assert_eq!(at(&a, 1, 1, 1), f::<M>(8.0));
+        // new column is zero in every batch
+        assert_eq!(at(&a, 0, 0, 2), f::<M>(0.0));
+        assert_eq!(at(&a, 0, 1, 2), f::<M>(0.0));
+        assert_eq!(at(&a, 1, 0, 2), f::<M>(0.0));
+        assert_eq!(at(&a, 1, 1, 2), f::<M>(0.0));
         // verify via gemv that batch 1 data is intact
         let x = M::V::from_vec(
             vec![
@@ -1962,8 +1971,10 @@ pub(crate) mod tests {
         // shrink to 1 column
         a.resize_cols(1);
         assert_eq!(a.ncols(), 1);
-        assert_eq!(a.get_index(0, 0), f::<M>(1.0));
-        assert_eq!(a.get_index(1, 0), f::<M>(3.0));
+        assert_eq!(at(&a, 0, 0, 0), f::<M>(1.0));
+        assert_eq!(at(&a, 0, 1, 0), f::<M>(3.0));
+        assert_eq!(at(&a, 1, 0, 0), f::<M>(5.0));
+        assert_eq!(at(&a, 1, 1, 0), f::<M>(7.0));
         // verify batch1 col0 via gemv
         let x2 = M::V::from_vec(vec![f::<M>(1.0), f::<M>(1.0)], ctx.clone());
         let mut y2 = M::V::zeros(2, ctx);
@@ -2432,10 +2443,14 @@ pub(crate) mod tests {
         let a = M::from_diagonal(&v);
         assert_eq!(a.nrows(), 2);
         assert_eq!(a.ncols(), 2);
-        assert_eq!(a.get_index(0, 0), f::<M>(2.0));
-        assert_eq!(a.get_index(1, 1), f::<M>(3.0));
-        assert_eq!(a.get_index(0, 1), f::<M>(0.0));
-        assert_eq!(a.get_index(1, 0), f::<M>(0.0));
+        assert_eq!(at(&a, 0, 0, 0), f::<M>(2.0));
+        assert_eq!(at(&a, 0, 1, 1), f::<M>(3.0));
+        assert_eq!(at(&a, 0, 0, 1), f::<M>(0.0));
+        assert_eq!(at(&a, 0, 1, 0), f::<M>(0.0));
+        assert_eq!(at(&a, 1, 0, 0), f::<M>(4.0));
+        assert_eq!(at(&a, 1, 1, 1), f::<M>(5.0));
+        assert_eq!(at(&a, 1, 0, 1), f::<M>(0.0));
+        assert_eq!(at(&a, 1, 1, 0), f::<M>(0.0));
     }
 
     pub fn test_try_from_triplets_wrong_length<M: Matrix>() {

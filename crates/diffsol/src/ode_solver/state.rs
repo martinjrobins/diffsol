@@ -12,7 +12,7 @@ use crate::{
     NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint,
     NonLinearOpTimePartial, OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit,
     OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeSolverProblem, Op, SensEquations,
-    Vector, VectorIndex, VectorView, VectorViewMut,
+    Vector, VectorIndex, VectorView,
 };
 use crate::{non_linear_solver_error, BacktrackingLineSearch, NoLineSearch};
 
@@ -366,10 +366,10 @@ impl<V: Vector> StateRefMut<'_, V> {
         // The parameter Jacobians are evaluated as matrices at the problem's own batch count and
         // reshaped onto the lanes: column `p` belongs in lane `b * nparams + p`.
         let aug_ctx = s_before.context().clone();
-        let nlanes = aug_ctx.nbatch();
         let mut reset_sens = V::zeros(nstates, aug_ctx.clone());
         let mut root_jac_s = V::zeros(nroots, aug_ctx.clone());
         let mut root_sens = V::zeros(nroots, aug_ctx.clone());
+        let mut tau_p = V::zeros(1, aug_ctx.clone());
         let mut s_plus = V::zeros(nstates, aug_ctx);
         let mut reset_sens_mat =
             Eqn::M::new_from_sparsity(nstates, nparams, reset_op.sens_sparsity(), ctx.clone());
@@ -385,14 +385,13 @@ impl<V: Vector> StateRefMut<'_, V> {
         root_op.sens_inplace(&y_before, t, &mut root_sens_mat);
         root_sens_mat.add_columns_to_batched_vector(&mut root_sens);
 
-        let mut tau_p = Vec::with_capacity(nlanes);
-        for lane in 0..nlanes {
-            let denom = root_flow.get_batch_bcast(lane, nlanes).get_index(root_idx)
-                + root_t.get_batch_bcast(lane, nlanes).get_index(root_idx);
-            let num = root_jac_s.get_batch(lane).get_index(root_idx)
-                + root_sens.get_batch(lane).get_index(root_idx);
-            tau_p.push(-num / denom);
-        }
+        // tau = -(r_x s + r_p) / d, one scalar per parameter lane
+        tau_p.for_each_batch(
+            [&root_flow, &root_t, &root_jac_s, &root_sens],
+            |tau, [rflow, rt, rjac, rsens], _| {
+                tau[0] = -(rjac[root_idx] + rsens[root_idx]) / (rflow[root_idx] + rt[root_idx]);
+            },
+        );
         s_plus.batched_axpy(&tau_p, &correction_dir, V::T::one());
         self.s.copy_from(&s_plus);
 
@@ -470,10 +469,10 @@ impl<V: Vector> StateRefMut<'_, V> {
         // The parameter Jacobians are evaluated as matrices at the problem's own batch count and
         // reshaped onto the lanes: column `p` belongs in lane `b * nparams + p`.
         let aug_ctx = s_before.context().clone();
-        let nlanes = aug_ctx.nbatch();
         let mut reset_sens = V::zeros(nstates, aug_ctx.clone());
         let mut root_jac_s = V::zeros(nroots, aug_ctx.clone());
         let mut root_sens = V::zeros(nroots, aug_ctx.clone());
+        let mut tau_p = V::zeros(1, aug_ctx.clone());
         let mut s_plus = V::zeros(nstates, aug_ctx);
         let mut reset_sens_mat =
             Eqn::M::new_from_sparsity(nstates, nparams, reset_op.sens_sparsity(), ctx.clone());
@@ -489,14 +488,13 @@ impl<V: Vector> StateRefMut<'_, V> {
         root_op.sens_inplace(&y_before, t, &mut root_sens_mat);
         root_sens_mat.add_columns_to_batched_vector(&mut root_sens);
 
-        let mut tau_p = Vec::with_capacity(nlanes);
-        for lane in 0..nlanes {
-            let denom = root_flow.get_batch_bcast(lane, nlanes).get_index(root_idx)
-                + root_t.get_batch_bcast(lane, nlanes).get_index(root_idx);
-            let num = root_jac_s.get_batch(lane).get_index(root_idx)
-                + root_sens.get_batch(lane).get_index(root_idx);
-            tau_p.push(-num / denom);
-        }
+        // tau = -(r_x s + r_p) / d, one scalar per parameter lane
+        tau_p.for_each_batch(
+            [&root_flow, &root_t, &root_jac_s, &root_sens],
+            |tau, [rflow, rt, rjac, rsens], _| {
+                tau[0] = -(rjac[root_idx] + rsens[root_idx]) / (rflow[root_idx] + rt[root_idx]);
+            },
+        );
         s_plus.batched_axpy(&tau_p, &correction_dir, V::T::one());
         self.s.copy_from(&s_plus);
 
@@ -631,26 +629,41 @@ impl<V: Vector> StateRefMut<'_, V> {
         let mut reset_sens_adj = V::zeros(nparams, aug_ctx.clone());
         let mut root_sens_adj = V::zeros(nparams, aug_ctx);
 
-        for lane in 0..nlanes {
-            let i = lane % nchannels;
-            let mut alpha_num = {
-                let lambda_i = self.s.get_batch(lane);
-                let cdir_b = correction_dir.get_batch_bcast(lane, nlanes);
-                let mut s = V::T::zero();
-                for j in 0..nstates {
-                    s += lambda_i.get_index(j) * cdir_b.get_index(j);
-                }
-                s
-            };
-            if let (Some(l_minus), Some(l_plus)) = (&l_minus, &l_plus) {
-                alpha_num += l_minus.get_batch_bcast(lane, nlanes).get_index(i)
-                    - l_plus.get_batch_bcast(lane, nlanes).get_index(i);
-            }
-            let denom = root_flow.get_batch_bcast(lane, nlanes).get_index(root_idx)
-                + root_t.get_batch_bcast(lane, nlanes).get_index(root_idx);
-            root_basis
-                .get_batch_mut(lane)
-                .set_index(root_idx, alpha_num / denom);
+        // alpha = (lambda^+ · c + l^- - l^+) / d. The running-cost jump is only there when outputs
+        // are being integrated, and that is what picks the operand count -- the array length is a
+        // const, so it cannot be decided inside the closure. `lane % nchannels` is this lane's
+        // output channel.
+        match (&l_minus, &l_plus) {
+            (Some(l_minus), Some(l_plus)) => root_basis.for_each_batch(
+                [
+                    self.s,
+                    &correction_dir,
+                    &root_flow,
+                    &root_t,
+                    l_minus,
+                    l_plus,
+                ],
+                |basis, [lambda, cdir, rflow, rt, l_minus, l_plus], lane| {
+                    let i = lane % nchannels;
+                    let alpha_num = lambda
+                        .iter()
+                        .zip(cdir.iter())
+                        .fold(V::T::zero(), |acc, (l, c)| acc + *l * *c)
+                        + l_minus[i]
+                        - l_plus[i];
+                    basis[root_idx] = alpha_num / (rflow[root_idx] + rt[root_idx]);
+                },
+            ),
+            _ => root_basis.for_each_batch(
+                [self.s, &correction_dir, &root_flow, &root_t],
+                |basis, [lambda, cdir, rflow, rt], _| {
+                    let alpha_num = lambda
+                        .iter()
+                        .zip(cdir.iter())
+                        .fold(V::T::zero(), |acc, (l, c)| acc + *l * *c);
+                    basis[root_idx] = alpha_num / (rflow[root_idx] + rt[root_idx]);
+                },
+            ),
         }
 
         reset_op.jac_transpose_mul_inplace(y_minus, t_event, self.s, &mut reset_adj);
@@ -748,18 +761,17 @@ impl<V: Vector> StateRefMut<'_, V> {
         let nstates = eqn.rhs().nstates();
         let nparams = eqn.rhs().nparams();
         let aug_ctx = self.s.context().clone();
-        let nlanes = aug_ctx.nbatch();
         let mut root_basis = V::zeros(nroots, aug_ctx.clone());
         let mut lambda_corr = V::zeros(nstates, aug_ctx.clone());
         let mut q_corr = V::zeros(nparams, aug_ctx);
         // one output component per lane, so the whole terminal contribution is two batched
         // transpose products
-        for lane in 0..nlanes {
-            let denom = root_flow.get_batch_bcast(lane, nlanes).get_index(root_idx)
-                + root_t.get_batch_bcast(lane, nlanes).get_index(root_idx);
-            let val = out.get_batch_bcast(lane, nlanes).get_index(lane % nout) / denom;
-            root_basis.get_batch_mut(lane).set_index(root_idx, val);
-        }
+        root_basis.for_each_batch(
+            [&out, &root_flow, &root_t],
+            |basis, [out, rflow, rt], lane| {
+                basis[root_idx] = out[lane % nout] / (rflow[root_idx] + rt[root_idx]);
+            },
+        );
         root_op.jac_transpose_mul_inplace(forward.y, forward.t, &root_basis, &mut lambda_corr);
         root_op.sens_transpose_mul_inplace(forward.y, forward.t, &root_basis, &mut q_corr);
         *self.s += &lambda_corr;
@@ -1242,7 +1254,7 @@ mod test {
         },
         op::closure_with_sens::ClosureWithSens,
         BdfState, Context, LinearSolver, Matrix, NalgebraLU, NonLinearOp, NonLinearOpTimePartial,
-        OdeBuilder, OdeEquations, OdeSolverState, ParameterisedOp, Vector, VectorHost, VectorView,
+        OdeBuilder, OdeEquations, OdeSolverState, ParameterisedOp, Vector, VectorView,
         VectorViewMut,
     };
     use num_traits::FromPrimitive;
@@ -1279,11 +1291,7 @@ mod test {
         test_consistent_initialisation::<M, crate::RkState<V>, LS>();
     }
 
-    fn test_consistent_initialisation<
-        M: Matrix<V: VectorHost>,
-        S: OdeSolverState<M::V>,
-        LS: LinearSolver<M>,
-    >() {
+    fn test_consistent_initialisation<M: Matrix, S: OdeSolverState<M::V>, LS: LinearSolver<M>>() {
         let (mut problem, soln) = exponential_decay_with_algebraic_problem_sens::<M>();
 
         for line_search in [false, true] {
@@ -1341,8 +1349,8 @@ mod test {
         type V = crate::NalgebraVec<f64>;
 
         let problem = OdeBuilder::<M>::new()
-            .rhs(|_x, _p, _t, y| y[0] = 0.0)
-            .init(|_p, _t, y| y[0] = 0.0, 1)
+            .rhs(|_x, _p, _t, y| y.for_each_batch([], |y, _, _| y[0] = 0.0))
+            .init(|_p, _t, y| y.for_each_batch([], |y, _, _| y[0] = 0.0), 1)
             .build()
             .unwrap();
         let mut state = BdfState::<V>::new_without_initialise(&problem).unwrap();
@@ -1371,11 +1379,15 @@ mod test {
         OdeBuilder::<TestMat>::new()
             .p([1.0, -2.0])
             .rhs_sens_implicit(
-                move |x, _p, _t, y| y[0] = lambda * x[0],
-                move |_x, _p, _t, v, y| y[0] = lambda * v[0],
-                |_x, _p, _t, _v, y| y[0] = 0.0,
+                move |x, _p, _t, y| y.for_each_batch([x], |y, [x], _| y[0] = lambda * x[0]),
+                move |_x, _p, _t, v, y| y.for_each_batch([v], |y, [v], _| y[0] = lambda * v[0]),
+                |_x, _p, _t, _v, y| y.for_each_batch([], |y, _, _| y[0] = 0.0),
             )
-            .init_sens(|_p, _t, y| y[0] = 0.0, |_p, _t, _v, y| y[0] = 0.0, 1)
+            .init_sens(
+                |_p, _t, y| y.for_each_batch([], |y, _, _| y[0] = 0.0),
+                |_p, _t, _v, y| y.for_each_batch([], |y, _, _| y[0] = 0.0),
+                1,
+            )
             .build()
             .unwrap()
     }
@@ -1395,26 +1407,36 @@ mod test {
             .p([1.0, -2.0])
             .integrate_out(true)
             .rhs_adjoint_implicit(
-                move |x, _p, _t, y| y[0] = lambda * x[0],
-                move |_x, _p, _t, v, y| lane_map(v, y, |v, out| out[0] = lambda * v[0]),
-                move |_x, _p, _t, v, y| lane_map(v, y, |v, out| out[0] = -lambda * v[0]),
+                move |x, _p, _t, y| y.for_each_batch([x], |y, [x], _| y[0] = lambda * x[0]),
+                move |_x, _p, _t, v, y| y.for_each_batch([v], |out, [v], _| out[0] = lambda * v[0]),
+                move |_x, _p, _t, v, y| {
+                    y.for_each_batch([v], |out, [v], _| out[0] = -lambda * v[0])
+                },
                 |_x, _p, _t, _v, y| y.fill(0.0),
             )
-            .init_adjoint(|_p, _t, y| y[0] = 0.0, |_p, _t, _v, y| y.fill(0.0), 1)
+            .init_adjoint(
+                |_p, _t, y| y.for_each_batch([], |y, _, _| y[0] = 0.0),
+                |_p, _t, _v, y| y.fill(0.0),
+                1,
+            )
             .out_adjoint_implicit(
                 |x, _p, _t, y| {
-                    y[0] = x[0];
-                    y[1] = 2.0 * x[0];
+                    y.for_each_batch([x], |y, [x], _| {
+                        y[0] = x[0];
+                        y[1] = 2.0 * x[0];
+                    });
                 },
                 |_x, _p, _t, v, y| {
-                    lane_map(v, y, |v, out| {
+                    y.for_each_batch([v], |out, [v], _| {
                         out[0] = v[0];
                         out[1] = 2.0 * v[0];
                     })
                 },
-                |_x, _p, _t, v, y| lane_map(v, y, |v, out| out[0] = -(v[0] + 2.0 * v[1])),
                 |_x, _p, _t, v, y| {
-                    lane_map(v, y, |v, out| {
+                    y.for_each_batch([v], |out, [v], _| out[0] = -(v[0] + 2.0 * v[1]))
+                },
+                |_x, _p, _t, v, y| {
+                    y.for_each_batch([v], |out, [v], _| {
                         out[0] = 0.5 * v[0] - 0.25 * v[1];
                         out[1] = -0.75 * v[0] + 0.5 * v[1];
                     })
@@ -1433,11 +1455,11 @@ mod test {
         OdeBuilder::<TestMat>::new()
             .p([1.0, -2.0])
             .rhs_implicit(
-                move |x, _p, _t, y| y[0] = lambda * x[0],
-                move |_x, _p, _t, v, y| y[0] = lambda * v[0],
+                move |x, _p, _t, y| y.for_each_batch([x], |y, [x], _| y[0] = lambda * x[0]),
+                move |_x, _p, _t, v, y| y.for_each_batch([v], |y, [v], _| y[0] = lambda * v[0]),
             )
             .mass(|v, _p, _t, beta, y| y.axpy(1.0, v, beta))
-            .init(|_p, _t, y| y[0] = 0.0, 1)
+            .init(|_p, _t, y| y.for_each_batch([], |y, _, _| y[0] = 0.0), 1)
             .build()
             .unwrap()
     }
@@ -1457,30 +1479,40 @@ mod test {
             .p([1.0, -2.0])
             .integrate_out(true)
             .rhs_adjoint_implicit(
-                move |x, _p, _t, y| y[0] = lambda * x[0],
-                move |_x, _p, _t, v, y| lane_map(v, y, |v, out| out[0] = lambda * v[0]),
-                move |_x, _p, _t, v, y| lane_map(v, y, |v, out| out[0] = -lambda * v[0]),
+                move |x, _p, _t, y| y.for_each_batch([x], |y, [x], _| y[0] = lambda * x[0]),
+                move |_x, _p, _t, v, y| y.for_each_batch([v], |out, [v], _| out[0] = lambda * v[0]),
+                move |_x, _p, _t, v, y| {
+                    y.for_each_batch([v], |out, [v], _| out[0] = -lambda * v[0])
+                },
                 |_x, _p, _t, _v, y| y.fill(0.0),
             )
             .mass_adjoint(
                 |v, _p, _t, beta, y| y.axpy(1.0, v, beta),
                 |v, _p, _t, beta, y| y.axpy(1.0, v, beta),
             )
-            .init_adjoint(|_p, _t, y| y[0] = 0.0, |_p, _t, _v, y| y.fill(0.0), 1)
+            .init_adjoint(
+                |_p, _t, y| y.for_each_batch([], |y, _, _| y[0] = 0.0),
+                |_p, _t, _v, y| y.fill(0.0),
+                1,
+            )
             .out_adjoint_implicit(
                 |x, _p, _t, y| {
-                    y[0] = x[0];
-                    y[1] = 2.0 * x[0];
+                    y.for_each_batch([x], |y, [x], _| {
+                        y[0] = x[0];
+                        y[1] = 2.0 * x[0];
+                    });
                 },
                 |_x, _p, _t, v, y| {
-                    lane_map(v, y, |v, out| {
+                    y.for_each_batch([v], |out, [v], _| {
                         out[0] = v[0];
                         out[1] = 2.0 * v[0];
                     })
                 },
-                |_x, _p, _t, v, y| lane_map(v, y, |v, out| out[0] = -(v[0] + 2.0 * v[1])),
                 |_x, _p, _t, v, y| {
-                    lane_map(v, y, |v, out| {
+                    y.for_each_batch([v], |out, [v], _| out[0] = -(v[0] + 2.0 * v[1]))
+                },
+                |_x, _p, _t, v, y| {
+                    y.for_each_batch([v], |out, [v], _| {
                         out[0] = 0.5 * v[0] - 0.25 * v[1];
                         out[1] = -0.75 * v[0] + 0.5 * v[1];
                     })
@@ -1494,23 +1526,6 @@ mod test {
     /// Apply a per-lane closure over every batch lane of `y`, reading `v`'s corresponding
     /// (broadcast) lane. Test operators are written scalar-wise, but the augmented state holds
     /// one channel per batch lane, so they have to run once per lane.
-    fn lane_map(v: &TestVec, y: &mut TestVec, f: impl Fn(&[f64], &mut [f64])) {
-        let nbatch = y.context().nbatch();
-        let (nv, ny) = (v.len(), y.len());
-        for b in 0..nbatch {
-            let vin: Vec<f64> = {
-                let vb = v.get_batch_bcast(b, nbatch);
-                (0..nv).map(|i| vb.get_index(i)).collect()
-            };
-            let mut vout = vec![0.0; ny];
-            f(&vin, &mut vout);
-            let mut yb = y.get_batch_mut(b);
-            for (i, val) in vout.iter().enumerate() {
-                yb.set_index(i, *val);
-            }
-        }
-    }
-
     #[allow(clippy::too_many_arguments)]
     fn scalar_problem_adjoint_with_reset_root<RF, RJ, RA, RSA, GF, GJ, GA, GSA>(
         lambda: f64,
@@ -1545,26 +1560,36 @@ mod test {
             .p([1.0, -2.0])
             .integrate_out(true)
             .rhs_adjoint_implicit(
-                move |x, _p, _t, y| y[0] = lambda * x[0],
-                move |_x, _p, _t, v, y| lane_map(v, y, |v, out| out[0] = lambda * v[0]),
-                move |_x, _p, _t, v, y| lane_map(v, y, |v, out| out[0] = -lambda * v[0]),
+                move |x, _p, _t, y| y.for_each_batch([x], |y, [x], _| y[0] = lambda * x[0]),
+                move |_x, _p, _t, v, y| y.for_each_batch([v], |out, [v], _| out[0] = lambda * v[0]),
+                move |_x, _p, _t, v, y| {
+                    y.for_each_batch([v], |out, [v], _| out[0] = -lambda * v[0])
+                },
                 |_x, _p, _t, _v, y| y.fill(0.0),
             )
-            .init_adjoint(|_p, _t, y| y[0] = 0.0, |_p, _t, _v, y| y.fill(0.0), 1)
+            .init_adjoint(
+                |_p, _t, y| y.for_each_batch([], |y, _, _| y[0] = 0.0),
+                |_p, _t, _v, y| y.fill(0.0),
+                1,
+            )
             .out_adjoint_implicit(
                 |x, _p, _t, y| {
-                    y[0] = x[0];
-                    y[1] = 2.0 * x[0];
+                    y.for_each_batch([x], |y, [x], _| {
+                        y[0] = x[0];
+                        y[1] = 2.0 * x[0];
+                    });
                 },
                 |_x, _p, _t, v, y| {
-                    lane_map(v, y, |v, out| {
+                    y.for_each_batch([v], |out, [v], _| {
                         out[0] = v[0];
                         out[1] = 2.0 * v[0];
                     })
                 },
-                |_x, _p, _t, v, y| lane_map(v, y, |v, out| out[0] = -(v[0] + 2.0 * v[1])),
                 |_x, _p, _t, v, y| {
-                    lane_map(v, y, |v, out| {
+                    y.for_each_batch([v], |out, [v], _| out[0] = -(v[0] + 2.0 * v[1]))
+                },
+                |_x, _p, _t, v, y| {
+                    y.for_each_batch([v], |out, [v], _| {
                         out[0] = 0.5 * v[0] - 0.25 * v[1];
                         out[1] = -0.75 * v[0] + 0.5 * v[1];
                     })
@@ -1803,25 +1828,37 @@ mod test {
         let problem = OdeBuilder::<TestMat>::new()
             .p([1.0, -2.0])
             .rhs_sens_implicit(
-                |x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| y[0] = 0.0 * x[0],
-                |_x: &TestVec, _p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| y[0] = 0.0,
-                |_x: &TestVec, _p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| y[0] = 0.0,
+                |x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| {
+                    y.for_each_batch([x], |y, [x], _| y[0] = 0.0 * x[0])
+                },
+                |_x: &TestVec, _p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| {
+                    y.for_each_batch([], |y, _, _| y[0] = 0.0)
+                },
+                |_x: &TestVec, _p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| {
+                    y.for_each_batch([], |y, _, _| y[0] = 0.0)
+                },
             )
             .init_sens(
-                |_p: &TestVec, _t, y: &mut TestVec| y[0] = 0.0,
-                |_p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| y[0] = 0.0,
+                |_p: &TestVec, _t, y: &mut TestVec| y.for_each_batch([], |y, _, _| y[0] = 0.0),
+                |_p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| {
+                    y.for_each_batch([], |y, _, _| y[0] = 0.0)
+                },
                 1,
             )
             .root_sens_implicit(
                 |x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| y[0] = x[0],
                 |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = v[0],
-                |_x: &TestVec, _p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| y[0] = 0.0,
+                |_x: &TestVec, _p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| {
+                    y.for_each_batch([], |y, _, _| y[0] = 0.0)
+                },
                 1,
             )
             .reset_sens_implicit(
                 |x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| y[0] = x[0],
                 |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = v[0],
-                |_x: &TestVec, _p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| y[0] = 0.0,
+                |_x: &TestVec, _p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| {
+                    y.for_each_batch([], |y, _, _| y[0] = 0.0)
+                },
             )
             .build()
             .unwrap();
@@ -1885,13 +1922,13 @@ mod test {
                 y[0] = 1.5 * x[0] + 0.2 * p[0] - 0.1 * p[1]
             },
             |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                lane_map(v, y, |v, out| out[0] = 1.5 * v[0])
+                y.for_each_batch([v], |out, [v], _| out[0] = 1.5 * v[0])
             },
             |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                lane_map(v, y, |v, out| out[0] = -1.5 * v[0])
+                y.for_each_batch([v], |out, [v], _| out[0] = -1.5 * v[0])
             },
             |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                lane_map(v, y, |v, out| {
+                y.for_each_batch([v], |out, [v], _| {
                     out[0] = -0.2 * v[0];
                     out[1] = 0.1 * v[0];
                 })
@@ -1901,16 +1938,16 @@ mod test {
                 y[1] = 0.0;
             },
             |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                lane_map(v, y, |v, out| {
+                y.for_each_batch([v], |out, [v], _| {
                     out[0] = 3.0 * v[0];
                     out[1] = -2.0 * v[0];
                 })
             },
             |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                lane_map(v, y, |v, out| out[0] = -(3.0 * v[0] - 2.0 * v[1]))
+                y.for_each_batch([v], |out, [v], _| out[0] = -(3.0 * v[0] - 2.0 * v[1]))
             },
             |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                lane_map(v, y, |v, out| {
+                y.for_each_batch([v], |out, [v], _| {
                     out[0] = -(0.8 * v[0] + 0.5 * v[1]);
                     out[1] = -(-1.5 * v[1]);
                 })
@@ -1965,13 +2002,13 @@ mod test {
                 y[0] = 1.5 * x[0] + 0.2 * p[0] - 0.1 * p[1]
             },
             |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                lane_map(v, y, |v, out| out[0] = 1.5 * v[0])
+                y.for_each_batch([v], |out, [v], _| out[0] = 1.5 * v[0])
             },
             |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                lane_map(v, y, |v, out| out[0] = -1.5 * v[0])
+                y.for_each_batch([v], |out, [v], _| out[0] = -1.5 * v[0])
             },
             |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                lane_map(v, y, |v, out| {
+                y.for_each_batch([v], |out, [v], _| {
                     out[0] = -0.2 * v[0];
                     out[1] = 0.1 * v[0];
                 })
@@ -1981,16 +2018,16 @@ mod test {
                 y[1] = 0.0;
             },
             |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                lane_map(v, y, |v, out| {
+                y.for_each_batch([v], |out, [v], _| {
                     out[0] = 3.0 * v[0];
                     out[1] = -2.0 * v[0];
                 })
             },
             |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                lane_map(v, y, |v, out| out[0] = -(3.0 * v[0] - 2.0 * v[1]))
+                y.for_each_batch([v], |out, [v], _| out[0] = -(3.0 * v[0] - 2.0 * v[1]))
             },
             |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                lane_map(v, y, |v, out| {
+                y.for_each_batch([v], |out, [v], _| {
                     out[0] = -(0.8 * v[0] + 0.5 * v[1]);
                     out[1] = -(-1.5 * v[1]);
                 })
@@ -2052,13 +2089,13 @@ mod test {
                 y[0] = 1.2 * x[0] + 0.4 * p[0] - 0.3 * p[1] + 0.8 * t
             },
             |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                lane_map(v, y, |v, out| out[0] = 1.2 * v[0])
+                y.for_each_batch([v], |out, [v], _| out[0] = 1.2 * v[0])
             },
             |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                lane_map(v, y, |v, out| out[0] = -1.2 * v[0])
+                y.for_each_batch([v], |out, [v], _| out[0] = -1.2 * v[0])
             },
             |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                lane_map(v, y, |v, out| {
+                y.for_each_batch([v], |out, [v], _| {
                     out[0] = -0.4 * v[0];
                     out[1] = 0.3 * v[0];
                 })
@@ -2067,13 +2104,13 @@ mod test {
                 y[0] = 0.5 * x[0] - 0.7 * p[0] + 1.1 * p[1] - 0.2 * t
             },
             |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                lane_map(v, y, |v, out| out[0] = 0.5 * v[0])
+                y.for_each_batch([v], |out, [v], _| out[0] = 0.5 * v[0])
             },
             |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                lane_map(v, y, |v, out| out[0] = -(0.5 * v[0]))
+                y.for_each_batch([v], |out, [v], _| out[0] = -(0.5 * v[0]))
             },
             |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                lane_map(v, y, |v, out| {
+                y.for_each_batch([v], |out, [v], _| {
                     out[0] = 0.7 * v[0];
                     out[1] = -1.1 * v[0];
                 })
@@ -2227,21 +2264,29 @@ mod test {
                 |v, _p, _t, beta, y| y.axpy(1.0, v, beta),
                 |v, _p, _t, beta, y| y.axpy(1.0, v, beta),
             )
-            .init_adjoint(|_p, _t, y| y[0] = 0.0, |_p, _t, _v, y| y.fill(0.0), 1)
+            .init_adjoint(
+                |_p, _t, y| y.for_each_batch([], |y, _, _| y[0] = 0.0),
+                |_p, _t, _v, y| y.fill(0.0),
+                1,
+            )
             .out_adjoint_implicit(
                 |x, _p, _t, y| {
-                    y[0] = x[0];
-                    y[1] = 2.0 * x[0];
+                    y.for_each_batch([x], |y, [x], _| {
+                        y[0] = x[0];
+                        y[1] = 2.0 * x[0];
+                    });
                 },
                 |_x, _p, _t, v, y| {
-                    lane_map(v, y, |v, out| {
+                    y.for_each_batch([v], |out, [v], _| {
                         out[0] = v[0];
                         out[1] = 2.0 * v[0];
                     })
                 },
-                |_x, _p, _t, v, y| lane_map(v, y, |v, out| out[0] = -(v[0] + 2.0 * v[1])),
                 |_x, _p, _t, v, y| {
-                    lane_map(v, y, |v, out| {
+                    y.for_each_batch([v], |out, [v], _| out[0] = -(v[0] + 2.0 * v[1]))
+                },
+                |_x, _p, _t, v, y| {
+                    y.for_each_batch([v], |out, [v], _| {
                         out[0] = 0.5 * v[0] - 0.25 * v[1];
                         out[1] = -0.75 * v[0] + 0.5 * v[1];
                     })

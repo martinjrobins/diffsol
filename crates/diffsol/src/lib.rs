@@ -393,9 +393,9 @@ pub use diffsol_la::DefaultDenseMatrix;
 pub use diffsol_la::{FaerScalar, IndexType, NalgebraScalar, Scalar, Scale};
 pub use diffsol_la::{
     FaerVec, FaerVecIndex, FaerVecMut, FaerVecRef, NalgebraVec, NalgebraVecMut, NalgebraVecRef,
-    Vector, VectorCommon, VectorHost, VectorIndex, VectorRef, VectorView, VectorViewMut,
+    Vector, VectorCommon, VectorIndex, VectorRef, VectorView, VectorViewMut,
 };
-use diffsol_la::{MatrixHost, MatrixRef, MatrixSparsity, MatrixSparsityRef};
+use diffsol_la::{MatrixRef, MatrixSparsity, MatrixSparsityRef};
 use nonlinear_solver::{convergence::Convergence, root::RootFinder};
 pub use nonlinear_solver::{
     line_search::{BacktrackingLineSearch, LineSearch, NoLineSearch},

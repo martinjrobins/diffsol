@@ -1021,7 +1021,7 @@ mod tests {
     }
 
     #[cfg(feature = "diffsl-cranelift")]
-    pub fn test_ball_bounce_problem<M: crate::MatrixHost<T = f64>>(
+    pub fn test_ball_bounce_problem<M: crate::Matrix<T = f64>>(
     ) -> OdeSolverProblem<crate::DiffSl<M, crate::CraneliftJitModule>> {
         crate::OdeBuilder::<M>::new()
             .build_from_diffsl(
@@ -1046,7 +1046,7 @@ mod tests {
     #[cfg(feature = "diffsl-cranelift")]
     pub fn test_ball_bounce<'a, M, Method>(mut solver: Method) -> (Vec<f64>, Vec<f64>, Vec<f64>)
     where
-        M: crate::MatrixHost<T = f64>,
+        M: crate::Matrix<T = f64>,
         M: DefaultSolver<T = f64>,
         M::V: DefaultDenseMatrix<T = f64>,
         Method: OdeSolverMethod<'a, crate::DiffSl<M, crate::CraneliftJitModule>>,

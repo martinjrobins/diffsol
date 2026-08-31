@@ -29,10 +29,10 @@ pub trait ConstantOpSens: ConstantOp {
         let mut v = Self::V::zeros(self.nparams(), self.context().clone());
         let mut col = Self::V::zeros(self.nout(), self.context().clone());
         for j in 0..self.nparams() {
-            v.set_index(j, Self::T::one());
+            v.fill_index(j, Self::T::one());
             self.sens_mul_inplace(t, &v, &mut col);
             y.set_column(j, &col);
-            v.set_index(j, Self::T::zero());
+            v.fill_index(j, Self::T::zero());
         }
     }
 
@@ -78,10 +78,10 @@ pub trait ConstantOpSensAdjoint: ConstantOp {
         let mut v = Self::V::zeros(self.nstates(), self.context().clone());
         let mut col = Self::V::zeros(self.nout(), self.context().clone());
         for j in 0..self.nstates() {
-            v.set_index(j, Self::T::one());
+            v.fill_index(j, Self::T::one());
             self.sens_transpose_mul_inplace(t, &v, &mut col);
             y.set_column(j, &col);
-            v.set_index(j, Self::T::zero());
+            v.fill_index(j, Self::T::zero());
         }
     }
 

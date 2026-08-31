@@ -1932,7 +1932,7 @@ where
         code: &str,
     ) -> Result<OdeSolverProblem<crate::DiffSl<M, CG>>, DiffsolError>
     where
-        M: Matrix<V: crate::VectorHost, T: DiffSlScalar>,
+        M: Matrix<T: DiffSlScalar>,
     {
         #[cfg(feature = "diffsl-cranelift")]
         let include_sensitivities = M::is_sparse()
@@ -2052,7 +2052,7 @@ mod tests {
     fn build_from_diffsl_resizes_empty_params<CG, M>()
     where
         CG: CodegenModuleJit + CodegenModuleCompile,
-        M: crate::Matrix<V: crate::VectorHost, T: DiffSlScalar>,
+        M: crate::Matrix<T: DiffSlScalar>,
     {
         let problem = OdeBuilder::<M>::new()
             .build_from_diffsl::<CG>(logistic_diffsl_code())

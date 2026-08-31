@@ -23,10 +23,10 @@ use diffsol::ObjectModule;
 use diffsol::OdeBuilder;
 use diffsol::{
     error::DiffsolError,
-    matrix::{MatrixHost, MatrixRef},
+    matrix::{Matrix, MatrixRef},
     CodegenModule, ConstantOp, Context, DefaultDenseMatrix, DefaultSolver, DenseMatrix, DiffSl,
     MatrixCommon, NonLinearOp, NonLinearOpJacobian, OdeEquations, OdeSolverProblem, Op, Vector,
-    VectorCommon, VectorHost, VectorRef,
+    VectorCommon, VectorRef,
 };
 #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
 use diffsol::{CodegenModuleCompile, CodegenModuleJit};
@@ -447,8 +447,8 @@ pub(crate) fn solve_factory_from_serialized_diffsl(
 
 pub(crate) struct GenericSolve<M, CG>
 where
-    M: MatrixHost<T: Scalar>,
-    M::V: Vector + VectorHost,
+    M: Matrix<T: Scalar>,
+    M::V: Vector,
     CG: CodegenModule,
 {
     problem: OdeSolverProblem<DiffSl<M, CG>>,
@@ -456,8 +456,8 @@ where
 
 impl<M, CG> GenericSolve<M, CG>
 where
-    M: MatrixHost<T: Scalar>,
-    M::V: Vector + VectorHost + DefaultDenseMatrix,
+    M: Matrix<T: Scalar>,
+    M::V: Vector + DefaultDenseMatrix,
     CG: CodegenModule,
 {
     fn from_eqn(eqn: DiffSl<M, CG>) -> Result<Self, DiffsolRtError> {
@@ -499,8 +499,8 @@ where
 #[cfg(feature = "external")]
 impl<M> GenericSolve<M, diffsl::ExternalModule<M::T>>
 where
-    M: MatrixHost<T: ExternalScalar>,
-    M::V: Vector + VectorHost + DefaultDenseMatrix,
+    M: Matrix<T: ExternalScalar>,
+    M::V: Vector + DefaultDenseMatrix,
 {
     pub fn from_external(
         rhs_state_deps: Vec<(usize, usize)>,
@@ -522,8 +522,8 @@ where
 #[cfg(feature = "diffsl-external-dynamic")]
 impl<M> GenericSolve<M, diffsl::ExternalDynModule<M::T>>
 where
-    M: MatrixHost<T: Scalar>,
-    M::V: Vector + VectorHost + DefaultDenseMatrix,
+    M: Matrix<T: Scalar>,
+    M::V: Vector + DefaultDenseMatrix,
 {
     pub fn from_external_dynamic(
         path: impl Into<PathBuf>,
@@ -546,8 +546,8 @@ where
 
 impl<M> GenericSolve<M, ObjectModule>
 where
-    M: MatrixHost<T: Scalar>,
-    M::V: Vector + VectorHost + DefaultDenseMatrix,
+    M: Matrix<T: Scalar>,
+    M::V: Vector + DefaultDenseMatrix,
 {
     pub fn from_serialized_diffsl(serialized_diffsl: &[u8]) -> Result<Self, DiffsolRtError> {
         let eqn = serde_json::from_slice::<DiffSl<M, ObjectModule>>(serialized_diffsl)
@@ -558,7 +558,7 @@ where
 
 impl<M, CG> Solve for GenericSolve<M, CG>
 where
-    M: MatrixHost<T: Scalar + ToPrimitive>
+    M: Matrix<T: Scalar + ToPrimitive>
         + DefaultSolver
         + LuValidator<M>
         + KluValidator<M>
@@ -566,7 +566,7 @@ where
     CG: CodegenModule,
     for<'b> <<M::V as DefaultDenseMatrix>::M as MatrixCommon>::Inner: ToHostArray<M::T> + Clone,
     for<'b> <M::V as VectorCommon>::Inner: ToHostArray<M::T> + Clone,
-    M::V: VectorHost + DefaultDenseMatrix + Send + Sync + 'static,
+    M::V: DefaultDenseMatrix + Send + Sync + 'static,
     <M::V as DefaultDenseMatrix>::M: Send + Sync,
     for<'b> &'b M::V: VectorRef<M::V>,
     for<'b> &'b M: MatrixRef<M>,
@@ -601,7 +601,7 @@ where
     }
 
     fn atol(&self) -> f64 {
-        self.problem.atol[0].to_f64().unwrap()
+        self.problem.atol.get_index(0).to_f64().unwrap()
     }
 
     fn serialized_diffsl(&self) -> Result<Vec<u8>, DiffsolRtError> {
@@ -1002,7 +1002,7 @@ fn host_array_to_dense_matrix<M>(
     array: HostArray,
 ) -> Result<<M::V as DefaultDenseMatrix>::M, DiffsolRtError>
 where
-    M: MatrixHost<T: Scalar>,
+    M: Matrix<T: Scalar>,
     M::V: DefaultDenseMatrix,
 {
     let view = array.as_array::<M::T>()?;
@@ -1050,7 +1050,7 @@ mod tests {
             + CodegenModuleJit
             + CodegenModuleCompile
             + SolveSerialization<diffsol::NalgebraMat<T>>,
-        diffsol::NalgebraMat<T>: diffsol::matrix::MatrixHost,
+        diffsol::NalgebraMat<T>: diffsol::matrix::Matrix,
         <diffsol::NalgebraMat<T> as MatrixCommon>::T: crate::scalar_type::Scalar,
         <diffsol::NalgebraMat<T> as MatrixCommon>::V: diffsol::DefaultDenseMatrix,
     {
@@ -1095,7 +1095,7 @@ mod tests {
             + CodegenModuleJit
             + CodegenModuleCompile
             + SolveSerialization<diffsol::NalgebraMat<T>>,
-        diffsol::NalgebraMat<T>: diffsol::matrix::MatrixHost,
+        diffsol::NalgebraMat<T>: diffsol::matrix::Matrix,
         <diffsol::NalgebraMat<T> as MatrixCommon>::T: crate::scalar_type::Scalar,
         <diffsol::NalgebraMat<T> as MatrixCommon>::V: diffsol::DefaultDenseMatrix,
         GenericSolve<diffsol::NalgebraMat<T>, CG>: Solve,
@@ -1169,7 +1169,7 @@ mod tests {
             + CodegenModuleJit
             + CodegenModuleCompile
             + SolveSerialization<diffsol::NalgebraMat<T>>,
-        diffsol::NalgebraMat<T>: diffsol::matrix::MatrixHost,
+        diffsol::NalgebraMat<T>: diffsol::matrix::Matrix,
         <diffsol::NalgebraMat<T> as MatrixCommon>::T: crate::scalar_type::Scalar,
         <diffsol::NalgebraMat<T> as MatrixCommon>::V: diffsol::DefaultDenseMatrix,
         GenericSolve<diffsol::NalgebraMat<T>, CG>: Solve,

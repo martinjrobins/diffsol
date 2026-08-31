@@ -28,7 +28,7 @@ macro_rules! gen_find_non_zeros_nonlinear {
             let mut col = F::V::zeros(op.$nrows(), op.context().clone());
             let mut triplets = Vec::with_capacity(op.nstates());
             for j in 0..op.$ncols() {
-                v.set_index(j, F::T::NAN);
+                v.fill_index(j, F::T::NAN);
                 op.$op_fn(x, t, &v, &mut col);
                 {
                     // assume that every batch has the same non-zeros
@@ -40,7 +40,7 @@ macro_rules! gen_find_non_zeros_nonlinear {
                     }
                 }
                 col.fill(F::T::zero());
-                v.set_index(j, F::T::zero());
+                v.fill_index(j, F::T::zero());
             }
             triplets
         }
@@ -92,7 +92,7 @@ pub fn find_constant_sens_non_zeros<F: ConstantOpSens + ?Sized>(
     let mut col = F::V::zeros(op.nout(), op.context().clone());
     let mut triplets = Vec::with_capacity(op.nout());
     for j in 0..op.nparams() {
-        v.set_index(j, F::T::NAN);
+        v.fill_index(j, F::T::NAN);
         op.sens_mul_inplace(t, &v, &mut col);
         {
             // assume that every batch has the same non-zeros
@@ -104,7 +104,7 @@ pub fn find_constant_sens_non_zeros<F: ConstantOpSens + ?Sized>(
             }
         }
         col.fill(F::T::zero());
-        v.set_index(j, F::T::zero());
+        v.fill_index(j, F::T::zero());
     }
     triplets
 }
@@ -120,7 +120,7 @@ macro_rules! gen_find_non_zeros_linear {
             let mut col = F::V::zeros(op.nout(), op.context().clone());
             let mut triplets = Vec::with_capacity(op.nstates());
             for j in 0..op.nstates() {
-                v.set_index(j, F::T::NAN);
+                v.fill_index(j, F::T::NAN);
                 op.$op_fn(&v, t, &mut col);
                 {
                     // assume non-zeros are the same for all batches
@@ -132,7 +132,7 @@ macro_rules! gen_find_non_zeros_linear {
                     }
                 }
                 col.fill(F::T::zero());
-                v.set_index(j, F::T::zero());
+                v.fill_index(j, F::T::zero());
             }
             triplets
         }

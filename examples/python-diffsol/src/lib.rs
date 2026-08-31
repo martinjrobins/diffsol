@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use diffsol::{
     error::DiffsolError, NonLinearOp, OdeBuilder, OdeEquations, OdeSolverMethod, OdeSolverProblem,
-    Op, Vector, VectorHost,
+    Op, Vector,
 };
 use numpy::{
     ndarray::{s, Array2},
@@ -68,7 +68,7 @@ impl PyDiffsol {
             };
             sol.slice_mut(s![.., i])
                 .iter_mut()
-                .zip(out.as_slice().iter())
+                .zip(out.clone_as_vec().iter())
                 .for_each(|(a, b)| *a = *b);
         }
         Ok(sol.into_pyarray(py))

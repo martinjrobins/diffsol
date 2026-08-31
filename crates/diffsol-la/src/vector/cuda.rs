@@ -8,6 +8,7 @@ use cudarc::driver::{
     CudaFunction, CudaSlice, CudaView, CudaViewMut, DevicePtr, LaunchConfig, PushKernelArg,
 };
 
+use crate::context::broadcast_batch;
 use crate::{
     Context, CudaContext, CudaMat, CudaType, DefaultDenseMatrix, IndexType, ScalarCuda, Scale,
     Vector, VectorCommon,
@@ -700,6 +701,14 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
             .expect("Failed to copy data from device to host")[0]
     }
     fn set_index(&mut self, index: IndexType, value: Self::T) {
+        assert_eq!(
+            self.context.nbatch(),
+            1,
+            "set_index not supported for batched vectors, use fill_index"
+        );
+        self.fill_index(index, value);
+    }
+    fn fill_index(&mut self, index: IndexType, value: Self::T) {
         let nbatch = self.context.nbatch();
         let nstates = self.len();
         assert!(index < nstates, "Index out of bounds");
@@ -904,13 +913,18 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
             .arg(&x_nbatch_i32);
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
     }
-    fn batched_axpy(&mut self, alpha: &[Self::T], x: &Self, beta: Self::T) {
+    fn batched_axpy(&mut self, alpha: &Self, x: &Self, beta: Self::T) {
         let self_nbatch = self.context.nbatch();
         let x_nbatch = x.context.nbatch();
         assert_eq!(
             alpha.len(),
+            1,
+            "batched_axpy: alpha must be a batched scalar, with len() == 1"
+        );
+        assert_eq!(
+            alpha.context.nbatch(),
             self_nbatch,
-            "batched_axpy: alpha.len() must equal self.nbatch()"
+            "batched_axpy: alpha nbatch must equal self.nbatch()"
         );
         self.context
             .assert_broadcastable_into(x_nbatch, "batched_axpy");
@@ -920,17 +934,8 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
         }
         let x_nstates = x.len();
 
-        let mut alpha_dev = unsafe {
-            self.context
-                .stream
-                .alloc::<T>(self_nbatch)
-                .expect("Failed to allocate device memory for batched_axpy alpha")
-        };
-        self.context
-            .stream
-            .memcpy_htod(alpha, &mut alpha_dev)
-            .expect("Failed to copy alpha to device");
-
+        // `alpha` is already one contiguous value per lane on the device, which is exactly what
+        // the kernel reads -- no staging buffer needed
         let nstates_u32 = nstates as u32;
         let nbatch_u32 = self_nbatch as u32;
         let f = self.context.function::<T>("vec_batched_axpy");
@@ -942,7 +947,7 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
         build
             .arg(&mut self.data)
             .arg(&x.data)
-            .arg(&alpha_dev)
+            .arg(&alpha.data)
             .arg(&beta)
             .arg(&nstates_u32)
             .arg(&self_stride)
@@ -1233,6 +1238,34 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
             .arg(&other_nbatch_i32);
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
     }
+    /// The closure is host code, so need to copy back from device
+    /// TODO: investigate cuda-oxide so we can compile closure to device
+    fn for_each_batch<const N: usize>(
+        &mut self,
+        args: [&Self; N],
+        mut f: impl FnMut(&mut [Self::T], [&[Self::T]; N], usize),
+    ) {
+        let nbatch = self.context.nbatch();
+        for arg in args.iter() {
+            self.context
+                .assert_broadcastable_into(arg.context.nbatch(), "for_each_batch");
+        }
+        let mut host = self.clone_as_vec();
+        let arg_host: [Vec<Self::T>; N] = args.map(|a| a.clone_as_vec());
+        let nstates = self.len();
+        for b in 0..nbatch {
+            let ins = std::array::from_fn(|i| {
+                let n = args[i].len();
+                let ab = broadcast_batch(b, args[i].context.nbatch(), nbatch);
+                &arg_host[i][ab * n..(ab + 1) * n]
+            });
+            f(&mut host[b * nstates..(b + 1) * nstates], ins, b);
+        }
+        self.context
+            .stream
+            .memcpy_htod(&host, &mut self.data)
+            .expect("Failed to copy data from host to device");
+    }
     fn get_batch(&self, batch: usize) -> Self::View<'_> {
         let nbatch = self.context.nbatch();
         let nstates = self.len();
@@ -1403,6 +1436,14 @@ impl<'a, T: ScalarCuda> VectorViewMut<'a> for CudaVecMut<'a, T> {
         self.copy_from_ref(other);
     }
     fn set_index(&mut self, index: IndexType, value: Self::T) {
+        assert_eq!(
+            self.context.nbatch(),
+            1,
+            "set_index not supported for batched vectors, use fill_index"
+        );
+        self.fill_index(index, value);
+    }
+    fn fill_index(&mut self, index: IndexType, value: Self::T) {
         let nbatch = self.context.nbatch();
         assert!(index < self.nstates, "Index out of bounds");
         let data = vec![value];

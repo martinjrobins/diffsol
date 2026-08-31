@@ -44,9 +44,9 @@ pub trait StochOp: Op {
 
         for i in 0..self.nprocess() {
             if i != 0 {
-                d_w.set_index(i - 1, Self::T::one());
+                d_w.fill_index(i - 1, Self::T::one());
             }
-            d_w.set_index(i, Self::T::NAN);
+            d_w.fill_index(i, Self::T::NAN);
             self.process_inplace(&x, &d_w, t, &mut y);
 
             // if any of the y[j] j != i has nans, it is other

@@ -189,6 +189,11 @@ macro_rules! ind {
         impl<T: FaerScalar> Index<(usize, usize)> for $t {
             type Output = T;
             fn index(&self, x: (usize, usize)) -> &T {
+                assert_eq!(
+                    self.context.nbatch(),
+                    1,
+                    "indexing not supported for batched matrices"
+                );
                 &self.data[(x.0, self.col(0, x.1))]
             }
         }
@@ -197,6 +202,11 @@ macro_rules! ind {
 ind!(FaerMat<T>);
 impl<T: FaerScalar> IndexMut<(usize, usize)> for FaerMat<T> {
     fn index_mut(&mut self, x: (usize, usize)) -> &mut T {
+        assert_eq!(
+            self.context.nbatch(),
+            1,
+            "indexing not supported for batched matrices"
+        );
         let c = self.col(0, x.1);
         &mut self.data[(x.0, c)]
     }
@@ -485,6 +495,11 @@ impl<T: FaerScalar> DenseMatrix for FaerMat<T> {
         self.data = d
     }
     fn get_index(&self, i: usize, j: usize) -> T {
+        assert_eq!(
+            self.context.nbatch(),
+            1,
+            "get_index not supported for batched matrices"
+        );
         self.data[(i, self.col(0, j))]
     }
     fn gemv_cols(&self, start: usize, end: usize, alpha: T, x: &[T], beta: T, y: &mut FaerVec<T>) {
@@ -534,10 +549,13 @@ impl<T: FaerScalar> DenseMatrix for FaerMat<T> {
         }
     }
     fn set_index(&mut self, i: usize, j: usize, v: T) {
-        for b in 0..self.context.nbatch() {
-            let c = self.col(b, j);
-            self.data[(i, c)] = v;
-        }
+        assert_eq!(
+            self.context.nbatch(),
+            1,
+            "set_index not supported for batched matrices"
+        );
+        let c = self.col(0, j);
+        self.data[(i, c)] = v;
     }
     fn column(&self, i: usize) -> FaerVecRef<'_, T> {
         let nc = self.ncols();

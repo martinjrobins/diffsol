@@ -4,9 +4,7 @@ use crate::scalar_type::ExternalScalar;
 use crate::scalar_type::Scalar;
 use crate::solve::GenericSolve;
 use diffsol::ObjectModule;
-use diffsol::{
-    error::DiffsolError, matrix::MatrixHost, CodegenModule, DefaultDenseMatrix, Vector, VectorHost,
-};
+use diffsol::{error::DiffsolError, matrix::Matrix, CodegenModule, DefaultDenseMatrix, Vector};
 
 pub(crate) fn unsupported_serialization_error(message: &str) -> Result<Vec<u8>, DiffsolRtError> {
     Err(DiffsolError::Other(message.to_string()).into())
@@ -14,8 +12,8 @@ pub(crate) fn unsupported_serialization_error(message: &str) -> Result<Vec<u8>, 
 
 pub(crate) trait SolveSerialization<M>: CodegenModule
 where
-    M: MatrixHost<T: Scalar>,
-    M::V: Vector + VectorHost + DefaultDenseMatrix,
+    M: Matrix<T: Scalar>,
+    M::V: Vector + DefaultDenseMatrix,
 {
     fn serialized_diffsl(solve: &GenericSolve<M, Self>) -> Result<Vec<u8>, DiffsolRtError>
     where
@@ -25,8 +23,8 @@ where
 #[cfg(feature = "external")]
 impl<M> SolveSerialization<M> for diffsl::ExternalModule<M::T>
 where
-    M: MatrixHost<T: ExternalScalar>,
-    M::V: Vector + VectorHost + DefaultDenseMatrix,
+    M: Matrix<T: ExternalScalar>,
+    M::V: Vector + DefaultDenseMatrix,
 {
     fn serialized_diffsl(_solve: &GenericSolve<M, Self>) -> Result<Vec<u8>, DiffsolRtError> {
         unsupported_serialization_error(
@@ -38,8 +36,8 @@ where
 #[cfg(feature = "diffsl-external-dynamic")]
 impl<M> SolveSerialization<M> for diffsl::ExternalDynModule<M::T>
 where
-    M: MatrixHost<T: Scalar>,
-    M::V: Vector + VectorHost + DefaultDenseMatrix,
+    M: Matrix<T: Scalar>,
+    M::V: Vector + DefaultDenseMatrix,
 {
     fn serialized_diffsl(_solve: &GenericSolve<M, Self>) -> Result<Vec<u8>, DiffsolRtError> {
         unsupported_serialization_error(
@@ -51,8 +49,8 @@ where
 #[cfg(feature = "diffsl-llvm")]
 impl<M> SolveSerialization<M> for diffsol::LlvmModule
 where
-    M: MatrixHost<T: Scalar>,
-    M::V: Vector + VectorHost + DefaultDenseMatrix,
+    M: Matrix<T: Scalar>,
+    M::V: Vector + DefaultDenseMatrix,
 {
     fn serialized_diffsl(solve: &GenericSolve<M, Self>) -> Result<Vec<u8>, DiffsolRtError> {
         solve.serialize_eqn()
@@ -62,8 +60,8 @@ where
 #[cfg(feature = "diffsl-cranelift")]
 impl<M> SolveSerialization<M> for diffsol::CraneliftJitModule
 where
-    M: MatrixHost<T: Scalar>,
-    M::V: Vector + VectorHost + DefaultDenseMatrix,
+    M: Matrix<T: Scalar>,
+    M::V: Vector + DefaultDenseMatrix,
 {
     fn serialized_diffsl(_solve: &GenericSolve<M, Self>) -> Result<Vec<u8>, DiffsolRtError> {
         unsupported_serialization_error(
@@ -74,8 +72,8 @@ where
 
 impl<M> SolveSerialization<M> for ObjectModule
 where
-    M: MatrixHost<T: Scalar>,
-    M::V: Vector + VectorHost + DefaultDenseMatrix,
+    M: Matrix<T: Scalar>,
+    M::V: Vector + DefaultDenseMatrix,
 {
     fn serialized_diffsl(solve: &GenericSolve<M, Self>) -> Result<Vec<u8>, DiffsolRtError> {
         solve.serialize_eqn()

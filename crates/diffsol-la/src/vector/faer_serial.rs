@@ -4,7 +4,7 @@ use faer::reborrow::{Reborrow, ReborrowMut};
 use faer::{unzip, zip, Col, Mat, MatMut, MatRef};
 
 use crate::context::broadcast_batch;
-use crate::{scalar::Scale, Context, FaerContext, FaerScalar, IndexType, Vector, VectorHost};
+use crate::{scalar::Scale, Context, FaerContext, FaerScalar, IndexType, Vector};
 
 use crate::{FaerMat, VectorCommon, VectorIndex, VectorView, VectorViewMut};
 
@@ -378,6 +378,11 @@ macro_rules! impl_index {
         impl<T: FaerScalar> Index<IndexType> for $t {
             type Output = T;
             fn index(&self, i: IndexType) -> &T {
+                assert_eq!(
+                    self.context.nbatch(),
+                    1,
+                    "indexing not supported for batched vectors"
+                );
                 &self.data[(i, 0)]
             }
         }
@@ -387,6 +392,11 @@ impl_index!(FaerVec<T>);
 impl_index!(FaerVecRef<'_, T>);
 impl<T: FaerScalar> IndexMut<IndexType> for FaerVec<T> {
     fn index_mut(&mut self, i: IndexType) -> &mut T {
+        assert_eq!(
+            self.context.nbatch(),
+            1,
+            "indexing not supported for batched vectors"
+        );
         &mut self.data[(i, 0)]
     }
 }
@@ -575,6 +585,14 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
         self.data[(i, 0)]
     }
     fn set_index(&mut self, i: IndexType, v: T) {
+        assert_eq!(
+            self.context.nbatch(),
+            1,
+            "set_index not supported for batched vectors, use fill_index"
+        );
+        self.data[(i, 0)] = v;
+    }
+    fn fill_index(&mut self, i: IndexType, v: T) {
         if self.data.ncols() == 1 {
             self.data[(i, 0)] = v;
             return;
@@ -606,6 +624,21 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
         FaerVecMut {
             data: self.data.rb_mut().subcols_mut(b, 1),
             context: FaerContext::default(),
+        }
+    }
+    fn for_each_batch<const N: usize>(
+        &mut self,
+        args: [&Self; N],
+        mut f: impl FnMut(&mut [T], [&[T]; N], usize),
+    ) {
+        let nbatch = self.context.nbatch();
+        for arg in args.iter() {
+            self.context
+                .assert_broadcastable_into(arg.context.nbatch(), "for_each_batch");
+        }
+        for b in 0..nbatch {
+            let ins = std::array::from_fn(|i| args[i].data.col_as_slice(args[i].batch(b, nbatch)));
+            f(self.data.col_as_slice_mut(b), ins, b);
         }
     }
     fn copy_from(&mut self, o: &Self) {
@@ -660,13 +693,18 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
     fn axpy_v(&mut self, a: T, x: &Self::View<'_>, beta: T) {
         axpy_body!(self, x, beta, "axpy_v", |_batch| a)
     }
-    fn batched_axpy(&mut self, a: &[T], x: &Self, beta: T) {
+    fn batched_axpy(&mut self, a: &Self, x: &Self, beta: T) {
         assert_eq!(
             a.len(),
-            self.context.nbatch(),
-            "alpha.len() must equal nbatch"
+            1,
+            "alpha must be a batched scalar, with len() == 1"
         );
-        axpy_body!(self, x, beta, "batched_axpy", |batch| a[batch])
+        assert_eq!(
+            a.context.nbatch(),
+            self.context.nbatch(),
+            "alpha nbatch must equal nbatch"
+        );
+        axpy_body!(self, x, beta, "batched_axpy", |batch| a.data[(0, batch)])
     }
     fn component_div_assign(&mut self, o: &Self) {
         self.context
@@ -823,6 +861,14 @@ impl<'a, T: FaerScalar> VectorViewMut<'a> for FaerVecMut<'a, T> {
         copy_from_body!(self, o, "copy_from_view");
     }
     fn set_index(&mut self, i: IndexType, v: T) {
+        assert_eq!(
+            self.context.nbatch(),
+            1,
+            "set_index not supported for batched vectors, use fill_index"
+        );
+        self.data[(i, 0)] = v;
+    }
+    fn fill_index(&mut self, i: IndexType, v: T) {
         if self.data.ncols() == 1 {
             self.data[(i, 0)] = v;
             return;
@@ -831,23 +877,6 @@ impl<'a, T: FaerScalar> VectorViewMut<'a> for FaerVecMut<'a, T> {
     }
     fn axpy(&mut self, a: T, x: &Self::Owned, beta: T) {
         axpy_body!(self, x, beta, "axpy", |_batch| a)
-    }
-}
-impl<T: FaerScalar> VectorHost for FaerVec<T> {
-    fn as_slice(&self) -> &[T] {
-        assert_eq!(self.context.nbatch(), 1);
-        self.data.col_as_slice(0)
-    }
-    fn as_mut_slice(&mut self) -> &mut [T] {
-        assert_eq!(self.context.nbatch(), 1);
-        self.data.col_as_slice_mut(0)
-    }
-    fn batch_as_slice(&self, batch: usize) -> &[T] {
-        // batches are the columns of the backing matrix
-        self.data.col_as_slice(batch)
-    }
-    fn batch_as_mut_slice(&mut self, batch: usize) -> &mut [T] {
-        self.data.col_as_slice_mut(batch)
     }
 }
 #[cfg(test)]
