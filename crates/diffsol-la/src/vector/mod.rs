@@ -249,21 +249,51 @@ pub trait Vector:
     /// Get a mutable view of a single batch (with nbatch=1 context).
     fn get_batch_mut(&mut self, batch: usize) -> Self::ViewMut<'_>;
 
+    /// Run `f` once per batch lane, passing that lane of each vector in `mut_args` as a mutable
+    /// slice and that lane of each vector in `args` as an immutable slice.
+    ///
+    /// This is how an operator body reaches the raw data of a vector: write the maths for a single
+    /// system against plain slices and the batching is handled here. Use it over
+    /// [`Self::for_each_batch`] when the body needs more than one mutable vector, e.g. an output
+    /// plus a scratch buffer.
+    ///
+    /// The lane count is governed by `mut_args[0]`, the primary output. Every other operand,
+    /// mutable or not, broadcasts into it exactly as in every other batched operation (see
+    /// [`Context::assert_broadcastable_into`]), so an operand with `nbatch == B` can be used while
+    /// writing an output with `nbatch == B * nparams`. Panics if an operand's batch count is not
+    /// broadcastable into the output's, or if `mut_args` is empty.
+    ///
+    /// A broadcast *mutable* operand is written once per lane at its broadcast lane, so an
+    /// `nbatch == 1` scratch vector is shared by every lane of the output. That is what makes a
+    /// single scratch buffer usable from a batched body -- write it and read it back within one
+    /// call of `f`, never across lanes.
+    ///
+    /// The closure's last argument is the lane of the output being written, in
+    /// `0..mut_args[0].context().nbatch()`. It is the lane's identity, not a visit counter, so a
+    /// closure may use it to reach anything else keyed by lane -- a captured vector, a `Vec`, or a
+    /// channel index derived from the lane -- without depending on the order lanes are visited in.
+    ///
+    /// ```ignore
+    /// // y = A^T v, via a scratch buffer the backend requires to be mutable
+    /// V::for_each_batch_mut([y, &mut scratch], [x, v], |[y, scratch], [x, v], _lane| {
+    ///     scratch.copy_from_slice(v);
+    ///     op.transpose_mul(x, scratch, y);
+    /// });
+    /// ```
+    ///
+    /// Vectors that do not live on the host (e.g. CUDA) stage the data through host memory, so a
+    /// backend-native operation is still preferable in a hot loop.
+    fn for_each_batch_mut<const M: usize, const N: usize>(
+        mut_args: [&mut Self; M],
+        args: [&Self; N],
+        f: impl FnMut([&mut [Self::T]; M], [&[Self::T]; N], usize),
+    );
+
     /// Run `f` once per batch lane of `self`, passing that lane of `self` as a mutable slice and
     /// the corresponding lane of each operand in `args` as an immutable slice.
     ///
-    /// This is how an operator body reaches the raw data of a vector: write the maths for a single
-    /// system against plain slices and the batching is handled here.
-    ///
-    /// Operands broadcast exactly as in every other batched operation (see
-    /// [`Context::assert_broadcastable_into`]), so an operand with `nbatch == B` can be read while
-    /// writing a `self` with `nbatch == B * nparams`. Panics if an operand's batch count is not
-    /// broadcastable into `self`'s.
-    ///
-    /// The closure's last argument is the lane of `self` being written, in
-    /// `0..self.context().nbatch()`. It is the lane's identity, not a visit counter, so a closure
-    /// may use it to reach anything else keyed by lane -- a captured vector, a `Vec`, or a channel
-    /// index derived from the lane -- without depending on the order lanes are visited in.
+    /// The single-output case of [`Self::for_each_batch_mut`], which documents the broadcast rules
+    /// and the lane index.
     ///
     /// ```ignore
     /// // y_0 = x_0 v_0 + x_1 v_1, y_1 = 0, for every batch of y
@@ -272,14 +302,13 @@ pub trait Vector:
     ///     y[1] = T::zero();
     /// });
     /// ```
-    ///
-    /// Vectors that do not live on the host (e.g. CUDA) stage the data through host memory, so a
-    /// backend-native operation is still preferable in a hot loop.
     fn for_each_batch<const N: usize>(
         &mut self,
         args: [&Self; N],
-        f: impl FnMut(&mut [Self::T], [&[Self::T]; N], usize),
-    );
+        mut f: impl FnMut(&mut [Self::T], [&[Self::T]; N], usize),
+    ) {
+        Self::for_each_batch_mut([self], args, |[y], ins, lane| f(y, ins, lane));
+    }
 
     /// Copy all values from `other` into this vector.
     fn copy_from(&mut self, other: &Self);
@@ -471,6 +500,10 @@ macro_rules! generate_vector_tests_nonbatched {
             #[test]
             fn [<test_for_each_batch_index_ $suffix>]() {
                 $crate::vector::tests::test_for_each_batch_index::<$V>();
+            }
+            #[test]
+            fn [<test_for_each_batch_mut_ $suffix>]() {
+                $crate::vector::tests::test_for_each_batch_mut::<$V>();
             }
             #[test]
             fn [<test_set_index_ $suffix>]() {
@@ -676,6 +709,10 @@ macro_rules! generate_vector_tests_batched {
             #[test]
             fn [<test_batched_for_each_batch_index_ $suffix>]() {
                 $crate::vector::tests::test_batched_for_each_batch_index::<$V>($ctx3);
+            }
+            #[test]
+            fn [<test_batched_for_each_batch_mut_ $suffix>]() {
+                $crate::vector::tests::test_batched_for_each_batch_mut::<$V>($ctx2);
             }
             #[test]
             #[should_panic(expected = "for_each_batch")]
@@ -1580,6 +1617,41 @@ pub(crate) mod tests {
         let mut y4 = V::zeros(1, ctx4);
         y4.for_each_batch([&x], |y, [x], _| y[0] = x[0]);
         assert_eq!(y4.clone_as_vec(), fv::<V>(&[1.0, 1.0, 10.0, 10.0]));
+    }
+
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    /// `for_each_batch_mut` writes every mutable operand, not just the first.
+    pub fn test_for_each_batch_mut<V: Vector>() {
+        let x = V::from_vec(fv::<V>(&[1.0, 2.0]), V::C::default());
+        let mut y = V::zeros(2, V::C::default());
+        let mut scratch = V::zeros(2, V::C::default());
+
+        V::for_each_batch_mut([&mut y, &mut scratch], [&x], |[y, scratch], [x], _| {
+            scratch.copy_from_slice(x);
+            scratch[0] += f::<V>(1.0);
+            y[0] = scratch[0] * scratch[1];
+            y[1] = scratch[1];
+        });
+        assert_eq!(y.clone_as_vec(), fv::<V>(&[4.0, 2.0]));
+        assert_eq!(scratch.clone_as_vec(), fv::<V>(&[2.0, 2.0]));
+    }
+
+    /// An `nbatch == 1` scratch is shared by every lane of a batched output.
+    pub fn test_batched_for_each_batch_mut<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let x = V::from_vec(fv::<V>(&[1.0, 2.0, 10.0, 20.0]), ctx.clone());
+        let mut y = V::zeros(2, ctx.clone());
+        let mut scratch = V::zeros(2, V::C::default());
+
+        V::for_each_batch_mut([&mut y, &mut scratch], [&x], |[y, scratch], [x], lane| {
+            scratch.copy_from_slice(x);
+            scratch[1] += f::<V>(lane as f64);
+            y[0] = scratch[0];
+            y[1] = scratch[1];
+        });
+        assert_eq!(y.clone_as_vec(), fv::<V>(&[1.0, 2.0, 10.0, 21.0]));
+        // the scratch holds whatever the last lane left in it
+        assert_eq!(scratch.clone_as_vec(), fv::<V>(&[10.0, 21.0]));
     }
 
     /// The closure's last argument is the lane being written.

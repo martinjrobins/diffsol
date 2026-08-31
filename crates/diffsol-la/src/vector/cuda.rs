@@ -1240,31 +1240,50 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
     }
     /// The closure is host code, so need to copy back from device
     /// TODO: investigate cuda-oxide so we can compile closure to device
-    fn for_each_batch<const N: usize>(
-        &mut self,
+    fn for_each_batch_mut<const M: usize, const N: usize>(
+        mut mut_args: [&mut Self; M],
         args: [&Self; N],
-        mut f: impl FnMut(&mut [Self::T], [&[Self::T]; N], usize),
+        mut f: impl FnMut([&mut [Self::T]; M], [&[Self::T]; N], usize),
     ) {
-        let nbatch = self.context.nbatch();
-        for arg in args.iter() {
-            self.context
-                .assert_broadcastable_into(arg.context.nbatch(), "for_each_batch");
+        assert!(M > 0, "for_each_batch needs at least one mutable operand");
+        let nbatch = mut_args[0].context.nbatch();
+        {
+            let ctx = &mut_args[0].context;
+            for arg in mut_args.iter() {
+                ctx.assert_broadcastable_into(arg.context.nbatch(), "for_each_batch");
+            }
+            for arg in args.iter() {
+                ctx.assert_broadcastable_into(arg.context.nbatch(), "for_each_batch");
+            }
         }
-        let mut host = self.clone_as_vec();
+        // the closure is host code, so stage every operand through host memory. The mutable ones
+        // carry their own (nstates, nbatch) so the lane slices need no index into `mut_args`.
+        let mut host: [(Vec<Self::T>, usize, usize); M] = std::array::from_fn(|i| {
+            (
+                mut_args[i].clone_as_vec(),
+                mut_args[i].len(),
+                mut_args[i].context.nbatch(),
+            )
+        });
         let arg_host: [Vec<Self::T>; N] = args.map(|a| a.clone_as_vec());
-        let nstates = self.len();
         for b in 0..nbatch {
             let ins = std::array::from_fn(|i| {
                 let n = args[i].len();
                 let ab = broadcast_batch(b, args[i].context.nbatch(), nbatch);
                 &arg_host[i][ab * n..(ab + 1) * n]
             });
-            f(&mut host[b * nstates..(b + 1) * nstates], ins, b);
+            let outs = host.each_mut().map(|(h, n, arg_nbatch)| {
+                let mb = broadcast_batch(b, *arg_nbatch, nbatch);
+                &mut h[mb * *n..(mb + 1) * *n]
+            });
+            f(outs, ins, b);
         }
-        self.context
-            .stream
-            .memcpy_htod(&host, &mut self.data)
-            .expect("Failed to copy data from host to device");
+        for (v, (h, _, _)) in mut_args.iter_mut().zip(host.iter()) {
+            v.context
+                .stream
+                .memcpy_htod(h, &mut v.data)
+                .expect("Failed to copy data from host to device");
+        }
     }
     fn get_batch(&self, batch: usize) -> Self::View<'_> {
         let nbatch = self.context.nbatch();

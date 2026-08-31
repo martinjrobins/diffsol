@@ -626,19 +626,29 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
             context: FaerContext::default(),
         }
     }
-    fn for_each_batch<const N: usize>(
-        &mut self,
+    fn for_each_batch_mut<const M: usize, const N: usize>(
+        mut mut_args: [&mut Self; M],
         args: [&Self; N],
-        mut f: impl FnMut(&mut [T], [&[T]; N], usize),
+        mut f: impl FnMut([&mut [T]; M], [&[T]; N], usize),
     ) {
-        let nbatch = self.context.nbatch();
-        for arg in args.iter() {
-            self.context
-                .assert_broadcastable_into(arg.context.nbatch(), "for_each_batch");
+        assert!(M > 0, "for_each_batch needs at least one mutable operand");
+        let nbatch = mut_args[0].context.nbatch();
+        {
+            let ctx = &mut_args[0].context;
+            for arg in mut_args.iter() {
+                ctx.assert_broadcastable_into(arg.context.nbatch(), "for_each_batch");
+            }
+            for arg in args.iter() {
+                ctx.assert_broadcastable_into(arg.context.nbatch(), "for_each_batch");
+            }
         }
         for b in 0..nbatch {
             let ins = std::array::from_fn(|i| args[i].data.col_as_slice(args[i].batch(b, nbatch)));
-            f(self.data.col_as_slice_mut(b), ins, b);
+            let outs = mut_args.each_mut().map(|v| {
+                let vb = v.batch(b, nbatch);
+                v.data.col_as_slice_mut(vb)
+            });
+            f(outs, ins, b);
         }
     }
     fn copy_from(&mut self, o: &Self) {

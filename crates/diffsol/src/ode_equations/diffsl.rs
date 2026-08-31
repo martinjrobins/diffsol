@@ -26,7 +26,7 @@ use diffsl::{
 use crate::{
     error::DiffsolError, jacobian::JacobianColoring, matrix::sparsity::MatrixSparsity,
     op::nonlinear_op::NonLinearOpJacobian, ConstantOp, ConstantOpSens, ConstantOpSensAdjoint,
-    LinearOp, LinearOpTranspose, Matrix, NonLinearOp, NonLinearOpAdjoint, NonLinearOpSens,
+    Context, LinearOp, LinearOpTranspose, Matrix, NonLinearOp, NonLinearOpAdjoint, NonLinearOpSens,
     NonLinearOpSensAdjoint, OdeEquations, OdeEquationsRef, Op, Vector,
 };
 
@@ -38,12 +38,12 @@ pub struct DiffSlContext<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> {
     data: RefCell<Vec<M::T>>,
     ddata: RefCell<Vec<M::T>>,
     sens_data: RefCell<Vec<M::T>>,
-    tmp: RefCell<Vec<M::T>>,
-    tmp2: RefCell<Vec<M::T>>,
-    tmp_root: RefCell<Vec<M::T>>,
-    tmp2_root: RefCell<Vec<M::T>>,
-    tmp_out: RefCell<Vec<M::T>>,
-    tmp2_out: RefCell<Vec<M::T>>,
+    tmp: RefCell<M::V>,
+    tmp2: RefCell<M::V>,
+    tmp_root: RefCell<M::V>,
+    tmp2_root: RefCell<M::V>,
+    tmp_out: RefCell<M::V>,
+    tmp2_out: RefCell<M::V>,
     nstates: usize,
     nroots: usize,
     nparams: usize,
@@ -104,12 +104,15 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> DiffSlContext<M, CG> {
         let data = RefCell::new(compiler.get_new_data());
         let ddata = RefCell::new(compiler.get_new_data());
         let sens_data = RefCell::new(compiler.get_new_data());
-        let tmp = RefCell::new(vec![M::T::zero(); nstates]);
-        let tmp2 = RefCell::new(vec![M::T::zero(); nstates]);
-        let tmp_root = RefCell::new(vec![M::T::zero(); nroots]);
-        let tmp2_root = RefCell::new(vec![M::T::zero(); nroots]);
-        let tmp_out = RefCell::new(vec![M::T::zero(); nout]);
-        let tmp2_out = RefCell::new(vec![M::T::zero(); nout]);
+        // scratch buffers are unbatched, so they broadcast into whatever lane count an op is
+        // called at (a single buffer shared by every lane, written and read within one lane)
+        let ctx1 = ctx.clone_with_nbatch(1)?;
+        let tmp = RefCell::new(M::V::zeros(nstates, ctx1.clone()));
+        let tmp2 = RefCell::new(M::V::zeros(nstates, ctx1.clone()));
+        let tmp_root = RefCell::new(M::V::zeros(nroots, ctx1.clone()));
+        let tmp2_root = RefCell::new(M::V::zeros(nroots, ctx1.clone()));
+        let tmp_out = RefCell::new(M::V::zeros(nout, ctx1.clone()));
+        let tmp2_out = RefCell::new(M::V::zeros(nout, ctx1));
         let model_index = 0;
 
         Ok(Self {
@@ -736,14 +739,15 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> ConstantOp for DiffSlInit<'_
 
 impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> ConstantOpSens for DiffSlInit<'_, M, CG> {
     fn sens_mul_inplace(&self, _t: Self::T, v: &Self::V, y: &mut Self::V) {
-        y.for_each_batch([v], |y, [v], _| {
+        let tmp = self.0.context.tmp.borrow();
+        y.for_each_batch([v, &tmp], |y, [v, tmp], _| {
             self.0.context.compiler.set_inputs(
                 v,
                 self.0.context.sens_data.borrow_mut().as_mut_slice(),
                 self.0.context.model_index,
             );
             self.0.context.compiler.set_u0_sgrad(
-                self.0.context.tmp.borrow().as_slice(),
+                tmp,
                 y,
                 self.0.context.data.borrow_mut().as_mut_slice(),
                 self.0.context.sens_data.borrow_mut().as_mut_slice(),
@@ -756,27 +760,32 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> ConstantOpSensAdjoint
     for DiffSlInit<'_, M, CG>
 {
     fn sens_transpose_mul_inplace(&self, _t: Self::T, v: &Self::V, y: &mut Self::V) {
-        y.for_each_batch([v], |y, [v], _| {
-            // copy v to tmp2
-            let mut tmp2 = self.0.context.tmp2.borrow_mut();
-            tmp2.copy_from_slice(v);
-            // zero out sens_data
-            self.0.context.sens_data.borrow_mut().fill(M::T::zero());
-            self.0.context.compiler.set_u0_rgrad(
-                self.0.context.tmp.borrow().as_slice(),
-                tmp2.as_mut_slice(),
-                self.0.context.data.borrow().as_slice(),
-                self.0.context.sens_data.borrow_mut().as_mut_slice(),
-            );
-            self.0
-                .context
-                .compiler
-                .get_inputs(y, self.0.context.sens_data.borrow().as_slice());
-            // negate y
-            for yi in y.iter_mut() {
-                *yi = -*yi;
-            }
-        });
+        let tmp = self.0.context.tmp.borrow();
+        let mut tmp2 = self.0.context.tmp2.borrow_mut();
+        <M::V as Vector>::for_each_batch_mut(
+            [y, &mut tmp2],
+            [v, &tmp],
+            |[y, tmp2], [v, tmp], _| {
+                // copy v to tmp2
+                tmp2.copy_from_slice(v);
+                // zero out sens_data
+                self.0.context.sens_data.borrow_mut().fill(M::T::zero());
+                self.0.context.compiler.set_u0_rgrad(
+                    tmp,
+                    tmp2,
+                    self.0.context.data.borrow().as_slice(),
+                    self.0.context.sens_data.borrow_mut().as_mut_slice(),
+                );
+                self.0
+                    .context
+                    .compiler
+                    .get_inputs(y, self.0.context.sens_data.borrow().as_slice());
+                // negate y
+                for yi in y.iter_mut() {
+                    *yi = -*yi;
+                }
+            },
+        );
     }
 }
 
@@ -795,15 +804,15 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOp for DiffSlRoot<'
 
 impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpJacobian for DiffSlRoot<'_, M, CG> {
     fn jac_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
-        y.for_each_batch([x, v], |y, [x, v], _| {
-            let stop = self.0.context.tmp_root.borrow();
+        let stop = self.0.context.tmp_root.borrow();
+        y.for_each_batch([x, v, &stop], |y, [x, v, stop], _| {
             self.0.context.compiler.calc_stop_grad(
                 t,
                 x,
                 v,
                 self.0.context.data.borrow().as_slice(),
                 self.0.context.ddata.borrow_mut().as_mut_slice(),
-                stop.as_slice(),
+                stop,
                 y,
             );
         });
@@ -812,32 +821,36 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpJacobian for Diff
 
 impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpAdjoint for DiffSlRoot<'_, M, CG> {
     fn jac_transpose_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
-        y.for_each_batch([x, v], |y, [x, v], _| {
-            let stop = self.0.context.tmp_root.borrow();
-            let mut tmp2_root = self.0.context.tmp2_root.borrow_mut();
-            tmp2_root.copy_from_slice(v);
-            self.0.context.ddata.borrow_mut().fill(M::T::zero());
-            y.fill(M::T::zero());
-            self.0.context.compiler.calc_stop_rgrad(
-                t,
-                x,
-                y,
-                self.0.context.data.borrow().as_slice(),
-                self.0.context.ddata.borrow_mut().as_mut_slice(),
-                stop.as_slice(),
-                tmp2_root.as_mut_slice(),
-            );
-            for yi in y.iter_mut() {
-                *yi = -*yi;
-            }
-        });
+        let stop = self.0.context.tmp_root.borrow();
+        let mut tmp2_root = self.0.context.tmp2_root.borrow_mut();
+        <M::V as Vector>::for_each_batch_mut(
+            [y, &mut tmp2_root],
+            [x, v, &stop],
+            |[y, tmp2_root], [x, v, stop], _| {
+                tmp2_root.copy_from_slice(v);
+                self.0.context.ddata.borrow_mut().fill(M::T::zero());
+                y.fill(M::T::zero());
+                self.0.context.compiler.calc_stop_rgrad(
+                    t,
+                    x,
+                    y,
+                    self.0.context.data.borrow().as_slice(),
+                    self.0.context.ddata.borrow_mut().as_mut_slice(),
+                    stop,
+                    tmp2_root,
+                );
+                for yi in y.iter_mut() {
+                    *yi = -*yi;
+                }
+            },
+        );
     }
 }
 
 impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSens for DiffSlRoot<'_, M, CG> {
     fn sens_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
-        y.for_each_batch([x, v], |y, [x, v], _| {
-            let stop = self.0.context.tmp_root.borrow();
+        let stop = self.0.context.tmp_root.borrow();
+        y.for_each_batch([x, v, &stop], |y, [x, v, stop], _| {
             self.0.context.compiler.set_inputs(
                 v,
                 self.0.context.sens_data.borrow_mut().as_mut_slice(),
@@ -848,7 +861,7 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSens for DiffSlRo
                 x,
                 self.0.context.data.borrow().as_slice(),
                 self.0.context.sens_data.borrow_mut().as_mut_slice(),
-                stop.as_slice(),
+                stop,
                 y,
             );
         });
@@ -859,27 +872,31 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSensAdjoint
     for DiffSlRoot<'_, M, CG>
 {
     fn sens_transpose_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
-        y.for_each_batch([x, v], |y, [x, v], _| {
-            let stop = self.0.context.tmp_root.borrow();
-            let mut tmp2_root = self.0.context.tmp2_root.borrow_mut();
-            tmp2_root.copy_from_slice(v);
-            self.0.context.sens_data.borrow_mut().fill(M::T::zero());
-            self.0.context.compiler.calc_stop_srgrad(
-                t,
-                x,
-                self.0.context.data.borrow().as_slice(),
-                self.0.context.sens_data.borrow_mut().as_mut_slice(),
-                stop.as_slice(),
-                tmp2_root.as_mut_slice(),
-            );
-            self.0
-                .context
-                .compiler
-                .get_inputs(y, self.0.context.sens_data.borrow().as_slice());
-            for yi in y.iter_mut() {
-                *yi = -*yi;
-            }
-        });
+        let stop = self.0.context.tmp_root.borrow();
+        let mut tmp2_root = self.0.context.tmp2_root.borrow_mut();
+        <M::V as Vector>::for_each_batch_mut(
+            [y, &mut tmp2_root],
+            [x, v, &stop],
+            |[y, tmp2_root], [x, v, stop], _| {
+                tmp2_root.copy_from_slice(v);
+                self.0.context.sens_data.borrow_mut().fill(M::T::zero());
+                self.0.context.compiler.calc_stop_srgrad(
+                    t,
+                    x,
+                    self.0.context.data.borrow().as_slice(),
+                    self.0.context.sens_data.borrow_mut().as_mut_slice(),
+                    stop,
+                    tmp2_root,
+                );
+                self.0
+                    .context
+                    .compiler
+                    .get_inputs(y, self.0.context.sens_data.borrow().as_slice());
+                for yi in y.iter_mut() {
+                    *yi = -*yi;
+                }
+            },
+        );
     }
 }
 
@@ -896,16 +913,16 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOp for DiffSlReset<
 
 impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpJacobian for DiffSlReset<'_, M, CG> {
     fn jac_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
-        y.for_each_batch([x, v], |y, [x, v], _| {
+        let tmp = self.0.context.tmp.borrow();
+        y.for_each_batch([x, v, &tmp], |y, [x, v, tmp], _| {
             self.0.context.ddata.borrow_mut().fill(M::T::zero());
-            let tmp = self.0.context.tmp.borrow();
             self.0.context.compiler.reset_grad(
                 t,
                 x,
                 v,
                 self.0.context.data.borrow_mut().as_slice(),
                 self.0.context.ddata.borrow_mut().as_mut_slice(),
-                tmp.as_slice(),
+                tmp,
                 y,
             );
         });
@@ -914,35 +931,40 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpJacobian for Diff
 
 impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpAdjoint for DiffSlReset<'_, M, CG> {
     fn jac_transpose_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
-        y.for_each_batch([x, v], |y, [x, v], _| {
-            // copy v to tmp2
-            let mut tmp2 = self.0.context.tmp2.borrow_mut();
-            tmp2.copy_from_slice(v);
-            // zero out ddata
-            self.0.context.ddata.borrow_mut().fill(M::T::zero());
-            // zero y
-            y.fill(M::T::zero());
-            self.0.context.compiler.reset_rgrad(
-                t,
-                x,
-                y,
-                self.0.context.data.borrow().as_slice(),
-                self.0.context.ddata.borrow_mut().as_mut_slice(),
-                self.0.context.tmp.borrow().as_slice(),
-                tmp2.as_mut_slice(),
-            );
-            // negate y
-            for yi in y.iter_mut() {
-                *yi = -*yi;
-            }
-        });
+        let tmp = self.0.context.tmp.borrow();
+        let mut tmp2 = self.0.context.tmp2.borrow_mut();
+        <M::V as Vector>::for_each_batch_mut(
+            [y, &mut tmp2],
+            [x, v, &tmp],
+            |[y, tmp2], [x, v, tmp], _| {
+                // copy v to tmp2
+                tmp2.copy_from_slice(v);
+                // zero out ddata
+                self.0.context.ddata.borrow_mut().fill(M::T::zero());
+                // zero y
+                y.fill(M::T::zero());
+                self.0.context.compiler.reset_rgrad(
+                    t,
+                    x,
+                    y,
+                    self.0.context.data.borrow().as_slice(),
+                    self.0.context.ddata.borrow_mut().as_mut_slice(),
+                    tmp,
+                    tmp2,
+                );
+                // negate y
+                for yi in y.iter_mut() {
+                    *yi = -*yi;
+                }
+            },
+        );
     }
 }
 
 impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSens for DiffSlReset<'_, M, CG> {
     fn sens_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
-        y.for_each_batch([x, v], |y, [x, v], _| {
-            let tmp = self.0.context.tmp.borrow();
+        let tmp = self.0.context.tmp.borrow();
+        y.for_each_batch([x, v, &tmp], |y, [x, v, tmp], _| {
             self.0.context.compiler.set_inputs(
                 v,
                 self.0.context.sens_data.borrow_mut().as_mut_slice(),
@@ -953,7 +975,7 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSens for DiffSlRe
                 x,
                 self.0.context.data.borrow_mut().as_slice(),
                 self.0.context.sens_data.borrow_mut().as_mut_slice(),
-                tmp.as_slice(),
+                tmp,
                 y,
             );
         });
@@ -964,31 +986,35 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSensAdjoint
     for DiffSlReset<'_, M, CG>
 {
     fn sens_transpose_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
-        y.for_each_batch([x, v], |y, [x, v], _| {
-            let tmp = self.0.context.tmp.borrow();
-            // copy v to tmp2
-            let mut tmp2 = self.0.context.tmp2.borrow_mut();
-            tmp2.copy_from_slice(v);
-            // zero out sens_data
-            self.0.context.sens_data.borrow_mut().fill(M::T::zero());
-            self.0.context.compiler.reset_srgrad(
-                t,
-                x,
-                self.0.context.data.borrow_mut().as_mut_slice(),
-                self.0.context.sens_data.borrow_mut().as_mut_slice(),
-                tmp.as_slice(),
-                tmp2.as_mut_slice(),
-            );
-            // get inputs
-            self.0
-                .context
-                .compiler
-                .get_inputs(y, self.0.context.sens_data.borrow().as_slice());
-            // negate y
-            for yi in y.iter_mut() {
-                *yi = -*yi;
-            }
-        });
+        let tmp = self.0.context.tmp.borrow();
+        let mut tmp2 = self.0.context.tmp2.borrow_mut();
+        <M::V as Vector>::for_each_batch_mut(
+            [y, &mut tmp2],
+            [x, v, &tmp],
+            |[y, tmp2], [x, v, tmp], _| {
+                // copy v to tmp2
+                tmp2.copy_from_slice(v);
+                // zero out sens_data
+                self.0.context.sens_data.borrow_mut().fill(M::T::zero());
+                self.0.context.compiler.reset_srgrad(
+                    t,
+                    x,
+                    self.0.context.data.borrow_mut().as_mut_slice(),
+                    self.0.context.sens_data.borrow_mut().as_mut_slice(),
+                    tmp,
+                    tmp2,
+                );
+                // get inputs
+                self.0
+                    .context
+                    .compiler
+                    .get_inputs(y, self.0.context.sens_data.borrow().as_slice());
+                // negate y
+                for yi in y.iter_mut() {
+                    *yi = -*yi;
+                }
+            },
+        );
     }
 }
 
@@ -1007,7 +1033,8 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOp for DiffSlOut<'_
 
 impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpJacobian for DiffSlOut<'_, M, CG> {
     fn jac_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
-        y.for_each_batch([x, v], |y, [x, v], _| {
+        let tmp_out = self.0.context.tmp_out.borrow();
+        y.for_each_batch([x, v, &tmp_out], |y, [x, v, tmp_out], _| {
             // init ddata with all zero except for out
             let mut ddata = self.0.context.ddata.borrow_mut();
             ddata.fill(M::T::zero());
@@ -1017,7 +1044,7 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpJacobian for Diff
                 v,
                 self.0.context.data.borrow_mut().as_mut_slice(),
                 ddata.as_mut_slice(),
-                self.0.context.tmp_out.borrow().as_slice(),
+                tmp_out,
                 y,
             );
         });
@@ -1026,34 +1053,40 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpJacobian for Diff
 
 impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpAdjoint for DiffSlOut<'_, M, CG> {
     fn jac_transpose_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
-        y.for_each_batch([x, v], |y, [x, v], _| {
-            // init ddata with all zero except for out
-            let mut ddata = self.0.context.ddata.borrow_mut();
-            ddata.fill(M::T::zero());
-            let mut tmp2_out = self.0.context.tmp2_out.borrow_mut();
-            tmp2_out.copy_from_slice(v);
-            // zero y
-            y.fill(M::T::zero());
-            self.0.context.compiler.calc_out_rgrad(
-                t,
-                x,
-                y,
-                self.0.context.data.borrow_mut().as_slice(),
-                ddata.as_mut_slice(),
-                self.0.context.tmp_out.borrow().as_slice(),
-                tmp2_out.as_mut_slice(),
-            );
-            // negate y
-            for yi in y.iter_mut() {
-                *yi = -*yi;
-            }
-        });
+        let tmp_out = self.0.context.tmp_out.borrow();
+        let mut tmp2_out = self.0.context.tmp2_out.borrow_mut();
+        <M::V as Vector>::for_each_batch_mut(
+            [y, &mut tmp2_out],
+            [x, v, &tmp_out],
+            |[y, tmp2_out], [x, v, tmp_out], _| {
+                // init ddata with all zero except for out
+                let mut ddata = self.0.context.ddata.borrow_mut();
+                ddata.fill(M::T::zero());
+                tmp2_out.copy_from_slice(v);
+                // zero y
+                y.fill(M::T::zero());
+                self.0.context.compiler.calc_out_rgrad(
+                    t,
+                    x,
+                    y,
+                    self.0.context.data.borrow_mut().as_slice(),
+                    ddata.as_mut_slice(),
+                    tmp_out,
+                    tmp2_out,
+                );
+                // negate y
+                for yi in y.iter_mut() {
+                    *yi = -*yi;
+                }
+            },
+        );
     }
 }
 
 impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSens for DiffSlOut<'_, M, CG> {
     fn sens_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
-        y.for_each_batch([x, v], |y, [x, v], _| {
+        let tmp_out = self.0.context.tmp_out.borrow();
+        y.for_each_batch([x, v, &tmp_out], |y, [x, v, tmp_out], _| {
             // set inputs for sens_data
             self.0.context.compiler.set_inputs(
                 v,
@@ -1065,7 +1098,7 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSens for DiffSlOu
                 x,
                 self.0.context.data.borrow_mut().as_mut_slice(),
                 self.0.context.sens_data.borrow_mut().as_mut_slice(),
-                self.0.context.tmp_out.borrow().as_slice(),
+                tmp_out,
                 y,
             );
         });
@@ -1076,27 +1109,32 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSensAdjoint
     for DiffSlOut<'_, M, CG>
 {
     fn sens_transpose_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
-        y.for_each_batch([x, v], |y, [x, v], _| {
-            let mut sens_data = self.0.context.sens_data.borrow_mut();
-            // set outputs for sens_data (zero everything except for out)
-            sens_data.fill(M::T::zero());
-            let mut tmp2_out = self.0.context.tmp2_out.borrow_mut();
-            tmp2_out.copy_from_slice(v);
-            self.0.context.compiler.calc_out_srgrad(
-                t,
-                x,
-                self.0.context.data.borrow_mut().as_mut_slice(),
-                sens_data.as_mut_slice(),
-                self.0.context.tmp_out.borrow().as_slice(),
-                tmp2_out.as_mut_slice(),
-            );
-            // set y to the result in inputs
-            self.0.context.compiler.get_inputs(y, sens_data.as_slice());
-            // negate y
-            for yi in y.iter_mut() {
-                *yi = -*yi;
-            }
-        });
+        let tmp_out = self.0.context.tmp_out.borrow();
+        let mut tmp2_out = self.0.context.tmp2_out.borrow_mut();
+        <M::V as Vector>::for_each_batch_mut(
+            [y, &mut tmp2_out],
+            [x, v, &tmp_out],
+            |[y, tmp2_out], [x, v, tmp_out], _| {
+                let mut sens_data = self.0.context.sens_data.borrow_mut();
+                // set outputs for sens_data (zero everything except for out)
+                sens_data.fill(M::T::zero());
+                tmp2_out.copy_from_slice(v);
+                self.0.context.compiler.calc_out_srgrad(
+                    t,
+                    x,
+                    self.0.context.data.borrow_mut().as_mut_slice(),
+                    sens_data.as_mut_slice(),
+                    tmp_out,
+                    tmp2_out,
+                );
+                // set y to the result in inputs
+                self.0.context.compiler.get_inputs(y, sens_data.as_slice());
+                // negate y
+                for yi in y.iter_mut() {
+                    *yi = -*yi;
+                }
+            },
+        );
     }
 }
 
@@ -1113,16 +1151,16 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOp for DiffSlRhs<'_
 
 impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpJacobian for DiffSlRhs<'_, M, CG> {
     fn jac_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
-        y.for_each_batch([x, v], |y, [x, v], _| {
+        let tmp = self.0.context.tmp.borrow();
+        y.for_each_batch([x, v, &tmp], |y, [x, v, tmp], _| {
             self.0.context.ddata.borrow_mut().fill(M::T::zero());
-            let tmp = self.0.context.tmp.borrow();
             self.0.context.compiler.rhs_grad(
                 t,
                 x,
                 v,
                 self.0.context.data.borrow_mut().as_slice(),
                 self.0.context.ddata.borrow_mut().as_mut_slice(),
-                tmp.as_slice(),
+                tmp,
                 y,
             );
         });
@@ -1142,28 +1180,33 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpJacobian for Diff
 
 impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpAdjoint for DiffSlRhs<'_, M, CG> {
     fn jac_transpose_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
-        y.for_each_batch([x, v], |y, [x, v], _| {
-            // copy v to tmp2
-            let mut tmp2 = self.0.context.tmp2.borrow_mut();
-            tmp2.copy_from_slice(v);
-            // zero out ddata
-            self.0.context.ddata.borrow_mut().fill(M::T::zero());
-            // zero y
-            y.fill(M::T::zero());
-            self.0.context.compiler.rhs_rgrad(
-                t,
-                x,
-                y,
-                self.0.context.data.borrow().as_slice(),
-                self.0.context.ddata.borrow_mut().as_mut_slice(),
-                self.0.context.tmp.borrow().as_slice(),
-                tmp2.as_mut_slice(),
-            );
-            // negate y
-            for yi in y.iter_mut() {
-                *yi = -*yi;
-            }
-        });
+        let tmp = self.0.context.tmp.borrow();
+        let mut tmp2 = self.0.context.tmp2.borrow_mut();
+        <M::V as Vector>::for_each_batch_mut(
+            [y, &mut tmp2],
+            [x, v, &tmp],
+            |[y, tmp2], [x, v, tmp], _| {
+                // copy v to tmp2
+                tmp2.copy_from_slice(v);
+                // zero out ddata
+                self.0.context.ddata.borrow_mut().fill(M::T::zero());
+                // zero y
+                y.fill(M::T::zero());
+                self.0.context.compiler.rhs_rgrad(
+                    t,
+                    x,
+                    y,
+                    self.0.context.data.borrow().as_slice(),
+                    self.0.context.ddata.borrow_mut().as_mut_slice(),
+                    tmp,
+                    tmp2,
+                );
+                // negate y
+                for yi in y.iter_mut() {
+                    *yi = -*yi;
+                }
+            },
+        );
     }
     fn adjoint_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
         // if we have a rhs_coloring and no rhs_adjoint_coloring, user has not called prep_adjoint
@@ -1184,8 +1227,8 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpAdjoint for DiffS
 
 impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSens for DiffSlRhs<'_, M, CG> {
     fn sens_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
-        y.for_each_batch([x, v], |y, [x, v], _| {
-            let tmp = self.0.context.tmp.borrow();
+        let tmp = self.0.context.tmp.borrow();
+        y.for_each_batch([x, v, &tmp], |y, [x, v, tmp], _| {
             self.0.context.compiler.set_inputs(
                 v,
                 self.0.context.sens_data.borrow_mut().as_mut_slice(),
@@ -1196,7 +1239,7 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSens for DiffSlRh
                 x,
                 self.0.context.data.borrow_mut().as_slice(),
                 self.0.context.sens_data.borrow_mut().as_mut_slice(),
-                tmp.as_slice(),
+                tmp,
                 y,
             );
         });
@@ -1217,32 +1260,36 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSensAdjoint
     for DiffSlRhs<'_, M, CG>
 {
     fn sens_transpose_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
-        y.for_each_batch([x, v], |y, [x, v], _| {
-            // todo: would rhs_srgrad ever use rr? I don't think so, but need to check
-            let tmp = self.0.context.tmp.borrow();
-            // copy v to tmp2
-            let mut tmp2 = self.0.context.tmp2.borrow_mut();
-            tmp2.copy_from_slice(v);
-            // zero out sens_data
-            self.0.context.sens_data.borrow_mut().fill(M::T::zero());
-            self.0.context.compiler.rhs_srgrad(
-                t,
-                x,
-                self.0.context.data.borrow_mut().as_mut_slice(),
-                self.0.context.sens_data.borrow_mut().as_mut_slice(),
-                tmp.as_slice(),
-                tmp2.as_mut_slice(),
-            );
-            // get inputs
-            self.0
-                .context
-                .compiler
-                .get_inputs(y, self.0.context.sens_data.borrow().as_slice());
-            // negate y
-            for yi in y.iter_mut() {
-                *yi = -*yi;
-            }
-        });
+        // todo: would rhs_srgrad ever use rr? I don't think so, but need to check
+        let tmp = self.0.context.tmp.borrow();
+        let mut tmp2 = self.0.context.tmp2.borrow_mut();
+        <M::V as Vector>::for_each_batch_mut(
+            [y, &mut tmp2],
+            [x, v, &tmp],
+            |[y, tmp2], [x, v, tmp], _| {
+                // copy v to tmp2
+                tmp2.copy_from_slice(v);
+                // zero out sens_data
+                self.0.context.sens_data.borrow_mut().fill(M::T::zero());
+                self.0.context.compiler.rhs_srgrad(
+                    t,
+                    x,
+                    self.0.context.data.borrow_mut().as_mut_slice(),
+                    self.0.context.sens_data.borrow_mut().as_mut_slice(),
+                    tmp,
+                    tmp2,
+                );
+                // get inputs
+                self.0
+                    .context
+                    .compiler
+                    .get_inputs(y, self.0.context.sens_data.borrow().as_slice());
+                // negate y
+                for yi in y.iter_mut() {
+                    *yi = -*yi;
+                }
+            },
+        );
     }
     fn sens_adjoint_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
         if let Some(coloring) = &self.0.rhs_sens_adjoint_coloring {
@@ -1258,13 +1305,13 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSensAdjoint
 
 impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> LinearOp for DiffSlMass<'_, M, CG> {
     fn gemv_inplace(&self, x: &Self::V, t: Self::T, beta: Self::T, y: &mut Self::V) {
-        y.for_each_batch([x], |y, [x], _| {
-            let mut tmp = self.0.context.tmp.borrow_mut();
+        let mut tmp = self.0.context.tmp.borrow_mut();
+        <M::V as Vector>::for_each_batch_mut([y, &mut tmp], [x], |[y, tmp], [x], _| {
             self.0.context.compiler.mass(
                 t,
                 x,
                 self.0.context.data.borrow_mut().as_mut_slice(),
-                tmp.as_mut_slice(),
+                tmp,
             );
 
             // y = tmp + beta * y
@@ -1288,14 +1335,14 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> LinearOp for DiffSlMass<'_, 
 
 impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> LinearOpTranspose for DiffSlMass<'_, M, CG> {
     fn gemv_transpose_inplace(&self, x: &Self::V, t: Self::T, beta: Self::T, y: &mut Self::V) {
-        y.for_each_batch([x], |y, [x], _| {
+        let mut tmp = self.0.context.tmp.borrow_mut();
+        <M::V as Vector>::for_each_batch_mut([y, &mut tmp], [x], |[y, tmp], [x], _| {
             // scale y by beta
             for y in y.iter_mut() {
                 *y *= beta;
             }
 
             // copy x to tmp
-            let mut tmp = self.0.context.tmp.borrow_mut();
             tmp.copy_from_slice(x);
 
             // zero out ddata
@@ -1307,7 +1354,7 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> LinearOpTranspose for DiffSl
                 y,
                 self.0.context.data.borrow_mut().as_slice(),
                 self.0.context.ddata.borrow_mut().as_mut_slice(),
-                tmp.as_mut_slice(),
+                tmp,
             );
         });
     }
