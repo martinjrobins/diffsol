@@ -183,7 +183,7 @@ mod tests {
         };
         let p = V::zeros(0, ctx);
         let root_fn = ClosureNoJac::<M, _>::new(
-            |y: &V, _p: &V, _t: f64, g: &mut V| {
+            |y: &[f64], _p: &[f64], _t: f64, g: &mut [f64]| {
                 g[0] = y[0] - 0.4;
             },
             1,

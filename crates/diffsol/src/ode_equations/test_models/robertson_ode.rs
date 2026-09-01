@@ -68,42 +68,35 @@ pub fn robertson_ode<M: Matrix + 'static>(
             //     dy1/dt = -.04*y1 + 1.e4*y2*y3
             //*    dy2/dt = .04*y1 - 1.e4*y2*y3 - 3.e7*(y2)^2
             //*    dy3/dt = 3.e7*(y2)^2
-            move |x: &M::V, p: &M::V, _t: M::T, y: &mut M::V| {
-                y.for_each_batch([x, p], |y, [x, p], _| {
-                    for ig in 0..ngroups {
-                        let i = ig * N;
-                        y[i] = -p[0] * x[i] + p[1] * x[i + 1] * x[i + 2];
-                        y[i + 1] =
-                            p[0] * x[i] - p[1] * x[i + 1] * x[i + 2] - p[2] * x[i + 1] * x[i + 1];
-                        y[i + 2] = p[2] * x[i + 1] * x[i + 1];
-                    }
-                });
+            move |x: &[M::T], p: &[M::T], _t: M::T, y: &mut [M::T]| {
+                for ig in 0..ngroups {
+                    let i = ig * N;
+                    y[i] = -p[0] * x[i] + p[1] * x[i + 1] * x[i + 2];
+                    y[i + 1] =
+                        p[0] * x[i] - p[1] * x[i + 1] * x[i + 2] - p[2] * x[i + 1] * x[i + 1];
+                    y[i + 2] = p[2] * x[i + 1] * x[i + 1];
+                }
             },
-            move |x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V| {
-                y.for_each_batch([x, p, v], |y, [x, p, v], _| {
-                    for ig in 0..ngroups {
-                        let i = ig * N;
-                        y[i] =
-                            -p[0] * v[i] + p[1] * v[i + 1] * x[i + 2] + p[1] * x[i + 1] * v[i + 2];
-                        y[i + 1] = p[0] * v[i]
-                            - p[1] * v[i + 1] * x[i + 2]
-                            - p[1] * x[i + 1] * v[i + 2]
-                            - M::T::from_f64(2.0).unwrap() * p[2] * x[i + 1] * v[i + 1];
-                        y[i + 2] = M::T::from_f64(2.0).unwrap() * p[2] * x[i + 1] * v[i + 1];
-                    }
-                });
+            move |x: &[M::T], p: &[M::T], _t: M::T, v: &[M::T], y: &mut [M::T]| {
+                for ig in 0..ngroups {
+                    let i = ig * N;
+                    y[i] = -p[0] * v[i] + p[1] * v[i + 1] * x[i + 2] + p[1] * x[i + 1] * v[i + 2];
+                    y[i + 1] = p[0] * v[i]
+                        - p[1] * v[i + 1] * x[i + 2]
+                        - p[1] * x[i + 1] * v[i + 2]
+                        - M::T::from_f64(2.0).unwrap() * p[2] * x[i + 1] * v[i + 1];
+                    y[i + 2] = M::T::from_f64(2.0).unwrap() * p[2] * x[i + 1] * v[i + 1];
+                }
             },
         )
         .init(
-            move |_p: &M::V, _t: M::T, y: &mut M::V| {
-                y.for_each_batch([], |y, _, _| {
-                    for ig in 0..ngroups {
-                        let i = ig * N;
-                        y[i] = M::T::one();
-                        y[i + 1] = M::T::zero();
-                        y[i + 2] = M::T::zero();
-                    }
-                });
+            move |_p: &[M::T], _t: M::T, y: &mut [M::T]| {
+                for ig in 0..ngroups {
+                    let i = ig * N;
+                    y[i] = M::T::one();
+                    y[i + 1] = M::T::zero();
+                    y[i + 2] = M::T::zero();
+                }
             },
             nstates,
         )

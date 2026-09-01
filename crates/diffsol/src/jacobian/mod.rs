@@ -424,9 +424,8 @@ mod tests {
         op::closure::Closure,
         LinearOp, Op,
     };
-    use crate::{scale, FaerSparseMat, NonLinearOpJacobian};
+    use crate::{FaerSparseMat, NonLinearOpJacobian};
     use num_traits::{FromPrimitive, One, Zero};
-    use std::ops::MulAssign;
 
     #[allow(clippy::type_complexity)]
     fn helper_triplets2op_nonlinear<'a, M: Matrix + 'a>(
@@ -436,22 +435,22 @@ mod tests {
         ncols: usize,
     ) -> Closure<
         M,
-        impl Fn(&M::V, &M::V, M::T, &mut M::V) + use<'a, M>,
-        impl Fn(&M::V, &M::V, M::T, &M::V, &mut M::V) + use<'a, M>,
+        impl Fn(&[M::T], &[M::T], M::T, &mut [M::T]) + use<'a, M>,
+        impl Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]) + use<'a, M>,
     > {
         let nstates = ncols;
         let nout = nrows;
-        let f = move |x: &M::V, y: &mut M::V| {
+        let f = move |x: &[M::T], y: &mut [M::T]| {
             for (i, j, v) in triplets {
-                y.set_index(*i, y.get_index(*i) + x.get_index(*j) * *v);
+                y[*i] += x[*j] * *v;
             }
         };
         let mut ret = Closure::new(
-            move |x: &M::V, _p: &M::V, _t, y: &mut M::V| {
+            move |x: &[M::T], _p: &[M::T], _t, y: &mut [M::T]| {
                 y.fill(M::T::zero());
                 f(x, y);
             },
-            move |_x: &M::V, _p: &M::V, _t, v, y: &mut M::V| {
+            move |_x: &[M::T], _p: &[M::T], _t, v: &[M::T], y: &mut [M::T]| {
                 y.fill(M::T::zero());
                 f(v, y);
             },
@@ -472,17 +471,19 @@ mod tests {
         p: &'a M::V,
         nrows: usize,
         ncols: usize,
-    ) -> LinearClosure<M, impl Fn(&M::V, &M::V, M::T, M::T, &mut M::V) + use<'a, M>> {
+    ) -> LinearClosure<M, impl Fn(&[M::T], &[M::T], M::T, M::T, &mut [M::T]) + use<'a, M>> {
         let nstates = ncols;
         let nout = nrows;
-        let f = move |x: &M::V, y: &mut M::V| {
+        let f = move |x: &[M::T], y: &mut [M::T]| {
             for (i, j, v) in triplets {
-                y.set_index(*i, y.get_index(*i) + x.get_index(*j) * *v);
+                y[*i] += x[*j] * *v;
             }
         };
         let mut ret = LinearClosure::new(
-            move |x: &M::V, _p: &M::V, _t, beta, y: &mut M::V| {
-                y.mul_assign(scale(beta));
+            move |x: &[M::T], _p: &[M::T], _t, beta, y: &mut [M::T]| {
+                for y in y.iter_mut() {
+                    *y *= beta;
+                }
                 f(x, y);
             },
             nstates,

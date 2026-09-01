@@ -1349,8 +1349,8 @@ mod test {
         type V = crate::NalgebraVec<f64>;
 
         let problem = OdeBuilder::<M>::new()
-            .rhs(|_x, _p, _t, y| y.for_each_batch([], |y, _, _| y[0] = 0.0))
-            .init(|_p, _t, y| y.for_each_batch([], |y, _, _| y[0] = 0.0), 1)
+            .rhs(|_x, _p, _t, y| y[0] = 0.0)
+            .init(|_p, _t, y| y[0] = 0.0, 1)
             .build()
             .unwrap();
         let mut state = BdfState::<V>::new_without_initialise(&problem).unwrap();
@@ -1379,15 +1379,11 @@ mod test {
         OdeBuilder::<TestMat>::new()
             .p([1.0, -2.0])
             .rhs_sens_implicit(
-                move |x, _p, _t, y| y.for_each_batch([x], |y, [x], _| y[0] = lambda * x[0]),
-                move |_x, _p, _t, v, y| y.for_each_batch([v], |y, [v], _| y[0] = lambda * v[0]),
-                |_x, _p, _t, _v, y| y.for_each_batch([], |y, _, _| y[0] = 0.0),
+                move |x, _p, _t, y| y[0] = lambda * x[0],
+                move |_x, _p, _t, v, y| y[0] = lambda * v[0],
+                |_x, _p, _t, _v, y| y[0] = 0.0,
             )
-            .init_sens(
-                |_p, _t, y| y.for_each_batch([], |y, _, _| y[0] = 0.0),
-                |_p, _t, _v, y| y.for_each_batch([], |y, _, _| y[0] = 0.0),
-                1,
-            )
+            .init_sens(|_p, _t, y| y[0] = 0.0, |_p, _t, _v, y| y[0] = 0.0, 1)
             .build()
             .unwrap()
     }
@@ -1407,39 +1403,25 @@ mod test {
             .p([1.0, -2.0])
             .integrate_out(true)
             .rhs_adjoint_implicit(
-                move |x, _p, _t, y| y.for_each_batch([x], |y, [x], _| y[0] = lambda * x[0]),
-                move |_x, _p, _t, v, y| y.for_each_batch([v], |out, [v], _| out[0] = lambda * v[0]),
-                move |_x, _p, _t, v, y| {
-                    y.for_each_batch([v], |out, [v], _| out[0] = -lambda * v[0])
-                },
+                move |x, _p, _t, y| y[0] = lambda * x[0],
+                move |_x, _p, _t, v, y| y[0] = lambda * v[0],
+                move |_x, _p, _t, v, y| y[0] = -lambda * v[0],
                 |_x, _p, _t, _v, y| y.fill(0.0),
             )
-            .init_adjoint(
-                |_p, _t, y| y.for_each_batch([], |y, _, _| y[0] = 0.0),
-                |_p, _t, _v, y| y.fill(0.0),
-                1,
-            )
+            .init_adjoint(|_p, _t, y| y[0] = 0.0, |_p, _t, _v, y| y.fill(0.0), 1)
             .out_adjoint_implicit(
                 |x, _p, _t, y| {
-                    y.for_each_batch([x], |y, [x], _| {
-                        y[0] = x[0];
-                        y[1] = 2.0 * x[0];
-                    });
+                    y[0] = x[0];
+                    y[1] = 2.0 * x[0];
                 },
                 |_x, _p, _t, v, y| {
-                    y.for_each_batch([v], |out, [v], _| {
-                        out[0] = v[0];
-                        out[1] = 2.0 * v[0];
-                    })
+                    y[0] = v[0];
+                    y[1] = 2.0 * v[0];
                 },
+                |_x, _p, _t, v, y| y[0] = -(v[0] + 2.0 * v[1]),
                 |_x, _p, _t, v, y| {
-                    y.for_each_batch([v], |out, [v], _| out[0] = -(v[0] + 2.0 * v[1]))
-                },
-                |_x, _p, _t, v, y| {
-                    y.for_each_batch([v], |out, [v], _| {
-                        out[0] = 0.5 * v[0] - 0.25 * v[1];
-                        out[1] = -0.75 * v[0] + 0.5 * v[1];
-                    })
+                    y[0] = 0.5 * v[0] - 0.25 * v[1];
+                    y[1] = -0.75 * v[0] + 0.5 * v[1];
                 },
                 2,
             )
@@ -1455,11 +1437,15 @@ mod test {
         OdeBuilder::<TestMat>::new()
             .p([1.0, -2.0])
             .rhs_implicit(
-                move |x, _p, _t, y| y.for_each_batch([x], |y, [x], _| y[0] = lambda * x[0]),
-                move |_x, _p, _t, v, y| y.for_each_batch([v], |y, [v], _| y[0] = lambda * v[0]),
+                move |x, _p, _t, y| y[0] = lambda * x[0],
+                move |_x, _p, _t, v, y| y[0] = lambda * v[0],
             )
-            .mass(|v, _p, _t, beta, y| y.axpy(1.0, v, beta))
-            .init(|_p, _t, y| y.for_each_batch([], |y, _, _| y[0] = 0.0), 1)
+            .mass(|v: &[f64], _p: &[f64], _t, beta: f64, y: &mut [f64]| {
+                for (y, v) in y.iter_mut().zip(v.iter()) {
+                    *y = *v + beta * *y;
+                }
+            })
+            .init(|_p, _t, y| y[0] = 0.0, 1)
             .build()
             .unwrap()
     }
@@ -1479,43 +1465,37 @@ mod test {
             .p([1.0, -2.0])
             .integrate_out(true)
             .rhs_adjoint_implicit(
-                move |x, _p, _t, y| y.for_each_batch([x], |y, [x], _| y[0] = lambda * x[0]),
-                move |_x, _p, _t, v, y| y.for_each_batch([v], |out, [v], _| out[0] = lambda * v[0]),
-                move |_x, _p, _t, v, y| {
-                    y.for_each_batch([v], |out, [v], _| out[0] = -lambda * v[0])
-                },
+                move |x, _p, _t, y| y[0] = lambda * x[0],
+                move |_x, _p, _t, v, y| y[0] = lambda * v[0],
+                move |_x, _p, _t, v, y| y[0] = -lambda * v[0],
                 |_x, _p, _t, _v, y| y.fill(0.0),
             )
             .mass_adjoint(
-                |v, _p, _t, beta, y| y.axpy(1.0, v, beta),
-                |v, _p, _t, beta, y| y.axpy(1.0, v, beta),
+                |v: &[f64], _p: &[f64], _t, beta: f64, y: &mut [f64]| {
+                    for (y, v) in y.iter_mut().zip(v.iter()) {
+                        *y = *v + beta * *y;
+                    }
+                },
+                |v: &[f64], _p: &[f64], _t, beta: f64, y: &mut [f64]| {
+                    for (y, v) in y.iter_mut().zip(v.iter()) {
+                        *y = *v + beta * *y;
+                    }
+                },
             )
-            .init_adjoint(
-                |_p, _t, y| y.for_each_batch([], |y, _, _| y[0] = 0.0),
-                |_p, _t, _v, y| y.fill(0.0),
-                1,
-            )
+            .init_adjoint(|_p, _t, y| y[0] = 0.0, |_p, _t, _v, y| y.fill(0.0), 1)
             .out_adjoint_implicit(
                 |x, _p, _t, y| {
-                    y.for_each_batch([x], |y, [x], _| {
-                        y[0] = x[0];
-                        y[1] = 2.0 * x[0];
-                    });
+                    y[0] = x[0];
+                    y[1] = 2.0 * x[0];
                 },
                 |_x, _p, _t, v, y| {
-                    y.for_each_batch([v], |out, [v], _| {
-                        out[0] = v[0];
-                        out[1] = 2.0 * v[0];
-                    })
+                    y[0] = v[0];
+                    y[1] = 2.0 * v[0];
                 },
+                |_x, _p, _t, v, y| y[0] = -(v[0] + 2.0 * v[1]),
                 |_x, _p, _t, v, y| {
-                    y.for_each_batch([v], |out, [v], _| out[0] = -(v[0] + 2.0 * v[1]))
-                },
-                |_x, _p, _t, v, y| {
-                    y.for_each_batch([v], |out, [v], _| {
-                        out[0] = 0.5 * v[0] - 0.25 * v[1];
-                        out[1] = -0.75 * v[0] + 0.5 * v[1];
-                    })
+                    y[0] = 0.5 * v[0] - 0.25 * v[1];
+                    y[1] = -0.75 * v[0] + 0.5 * v[1];
                 },
                 2,
             )
@@ -1547,52 +1527,38 @@ mod test {
         >,
     >
     where
-        RF: Fn(&TestVec, &TestVec, f64, &mut TestVec),
-        RJ: Fn(&TestVec, &TestVec, f64, &TestVec, &mut TestVec),
-        RA: Fn(&TestVec, &TestVec, f64, &TestVec, &mut TestVec),
-        RSA: Fn(&TestVec, &TestVec, f64, &TestVec, &mut TestVec),
-        GF: Fn(&TestVec, &TestVec, f64, &mut TestVec),
-        GJ: Fn(&TestVec, &TestVec, f64, &TestVec, &mut TestVec),
-        GA: Fn(&TestVec, &TestVec, f64, &TestVec, &mut TestVec),
-        GSA: Fn(&TestVec, &TestVec, f64, &TestVec, &mut TestVec),
+        RF: Fn(&[f64], &[f64], f64, &mut [f64]),
+        RJ: Fn(&[f64], &[f64], f64, &[f64], &mut [f64]),
+        RA: Fn(&[f64], &[f64], f64, &[f64], &mut [f64]),
+        RSA: Fn(&[f64], &[f64], f64, &[f64], &mut [f64]),
+        GF: Fn(&[f64], &[f64], f64, &mut [f64]),
+        GJ: Fn(&[f64], &[f64], f64, &[f64], &mut [f64]),
+        GA: Fn(&[f64], &[f64], f64, &[f64], &mut [f64]),
+        GSA: Fn(&[f64], &[f64], f64, &[f64], &mut [f64]),
     {
         OdeBuilder::<TestMat>::new()
             .p([1.0, -2.0])
             .integrate_out(true)
             .rhs_adjoint_implicit(
-                move |x, _p, _t, y| y.for_each_batch([x], |y, [x], _| y[0] = lambda * x[0]),
-                move |_x, _p, _t, v, y| y.for_each_batch([v], |out, [v], _| out[0] = lambda * v[0]),
-                move |_x, _p, _t, v, y| {
-                    y.for_each_batch([v], |out, [v], _| out[0] = -lambda * v[0])
-                },
+                move |x, _p, _t, y| y[0] = lambda * x[0],
+                move |_x, _p, _t, v, y| y[0] = lambda * v[0],
+                move |_x, _p, _t, v, y| y[0] = -lambda * v[0],
                 |_x, _p, _t, _v, y| y.fill(0.0),
             )
-            .init_adjoint(
-                |_p, _t, y| y.for_each_batch([], |y, _, _| y[0] = 0.0),
-                |_p, _t, _v, y| y.fill(0.0),
-                1,
-            )
+            .init_adjoint(|_p, _t, y| y[0] = 0.0, |_p, _t, _v, y| y.fill(0.0), 1)
             .out_adjoint_implicit(
                 |x, _p, _t, y| {
-                    y.for_each_batch([x], |y, [x], _| {
-                        y[0] = x[0];
-                        y[1] = 2.0 * x[0];
-                    });
+                    y[0] = x[0];
+                    y[1] = 2.0 * x[0];
                 },
                 |_x, _p, _t, v, y| {
-                    y.for_each_batch([v], |out, [v], _| {
-                        out[0] = v[0];
-                        out[1] = 2.0 * v[0];
-                    })
+                    y[0] = v[0];
+                    y[1] = 2.0 * v[0];
                 },
+                |_x, _p, _t, v, y| y[0] = -(v[0] + 2.0 * v[1]),
                 |_x, _p, _t, v, y| {
-                    y.for_each_batch([v], |out, [v], _| out[0] = -(v[0] + 2.0 * v[1]))
-                },
-                |_x, _p, _t, v, y| {
-                    y.for_each_batch([v], |out, [v], _| {
-                        out[0] = 0.5 * v[0] - 0.25 * v[1];
-                        out[1] = -0.75 * v[0] + 0.5 * v[1];
-                    })
+                    y[0] = 0.5 * v[0] - 0.25 * v[1];
+                    y[1] = -0.75 * v[0] + 0.5 * v[1];
                 },
                 2,
             )
@@ -1739,26 +1705,30 @@ mod test {
         let problem = OdeBuilder::<TestMat>::new()
             .p([1.0])
             .rhs_sens_implicit(
-                |x: &TestVec, _p, _t, y: &mut TestVec| y[0] = -x[0],
-                |_x, _p, _t, v: &TestVec, y: &mut TestVec| y[0] = -v[0],
-                |_x, _p, _t, v: &TestVec, y: &mut TestVec| y[0] = -v[0],
+                |x: &[f64], _p, _t, y: &mut [f64]| y[0] = -x[0],
+                |_x, _p, _t, v: &[f64], y: &mut [f64]| y[0] = -v[0],
+                |_x, _p, _t, v: &[f64], y: &mut [f64]| y[0] = -v[0],
             )
-            .mass(|v, _p, _t, beta, y: &mut TestVec| y.axpy(1.0, v, beta))
+            .mass(|v: &[f64], _p: &[f64], _t, beta: f64, y: &mut [f64]| {
+                for (y, v) in y.iter_mut().zip(v.iter()) {
+                    *y = *v + beta * *y;
+                }
+            })
             .init_sens(
-                |_p, _t, y: &mut TestVec| y[0] = 1.0,
-                |_p, _t, _v, y: &mut TestVec| y[0] = 0.0,
+                |_p, _t, y: &mut [f64]| y[0] = 1.0,
+                |_p, _t, _v, y: &mut [f64]| y[0] = 0.0,
                 1,
             )
             .root_sens_implicit(
-                |x: &TestVec, _p, _t, y: &mut TestVec| y[0] = x[0] - 0.5,
-                |_x, _p, _t, v: &TestVec, y: &mut TestVec| y[0] = v[0],
-                |_x, _p, _t, _v, y: &mut TestVec| y[0] = 0.0,
+                |x: &[f64], _p, _t, y: &mut [f64]| y[0] = x[0] - 0.5,
+                |_x, _p, _t, v: &[f64], y: &mut [f64]| y[0] = v[0],
+                |_x, _p, _t, _v, y: &mut [f64]| y[0] = 0.0,
                 1,
             )
             .reset_sens_implicit(
-                |x: &TestVec, _p, _t, y: &mut TestVec| y[0] = x[0],
-                |_x, _p, _t, v: &TestVec, y: &mut TestVec| y[0] = v[0],
-                |_x, _p, _t, _v, y: &mut TestVec| y[0] = 0.0,
+                |x: &[f64], _p, _t, y: &mut [f64]| y[0] = x[0],
+                |_x, _p, _t, v: &[f64], y: &mut [f64]| y[0] = v[0],
+                |_x, _p, _t, _v, y: &mut [f64]| y[0] = 0.0,
             )
             .build()
             .unwrap();
@@ -1828,37 +1798,25 @@ mod test {
         let problem = OdeBuilder::<TestMat>::new()
             .p([1.0, -2.0])
             .rhs_sens_implicit(
-                |x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| {
-                    y.for_each_batch([x], |y, [x], _| y[0] = 0.0 * x[0])
-                },
-                |_x: &TestVec, _p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| {
-                    y.for_each_batch([], |y, _, _| y[0] = 0.0)
-                },
-                |_x: &TestVec, _p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| {
-                    y.for_each_batch([], |y, _, _| y[0] = 0.0)
-                },
+                |x: &[f64], _p: &[f64], _t, y: &mut [f64]| y[0] = 0.0 * x[0],
+                |_x: &[f64], _p: &[f64], _t, _v: &[f64], y: &mut [f64]| y[0] = 0.0,
+                |_x: &[f64], _p: &[f64], _t, _v: &[f64], y: &mut [f64]| y[0] = 0.0,
             )
             .init_sens(
-                |_p: &TestVec, _t, y: &mut TestVec| y.for_each_batch([], |y, _, _| y[0] = 0.0),
-                |_p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| {
-                    y.for_each_batch([], |y, _, _| y[0] = 0.0)
-                },
+                |_p: &[f64], _t, y: &mut [f64]| y[0] = 0.0,
+                |_p: &[f64], _t, _v: &[f64], y: &mut [f64]| y[0] = 0.0,
                 1,
             )
             .root_sens_implicit(
-                |x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| y[0] = x[0],
-                |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = v[0],
-                |_x: &TestVec, _p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| {
-                    y.for_each_batch([], |y, _, _| y[0] = 0.0)
-                },
+                |x: &[f64], _p: &[f64], _t, y: &mut [f64]| y[0] = x[0],
+                |_x: &[f64], _p: &[f64], _t, v: &[f64], y: &mut [f64]| y[0] = v[0],
+                |_x: &[f64], _p: &[f64], _t, _v: &[f64], y: &mut [f64]| y[0] = 0.0,
                 1,
             )
             .reset_sens_implicit(
-                |x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| y[0] = x[0],
-                |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = v[0],
-                |_x: &TestVec, _p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| {
-                    y.for_each_batch([], |y, _, _| y[0] = 0.0)
-                },
+                |x: &[f64], _p: &[f64], _t, y: &mut [f64]| y[0] = x[0],
+                |_x: &[f64], _p: &[f64], _t, v: &[f64], y: &mut [f64]| y[0] = v[0],
+                |_x: &[f64], _p: &[f64], _t, _v: &[f64], y: &mut [f64]| y[0] = 0.0,
             )
             .build()
             .unwrap();
@@ -1878,13 +1836,11 @@ mod test {
         let t = 3.0;
 
         let reset = ClosureWithSens::<TestMat, _, _, _>::new(
-            |x: &TestVec, p: &TestVec, t, y: &mut TestVec| {
+            |x: &[f64], p: &[f64], t, y: &mut [f64]| {
                 y[0] = 1.2 * x[0] + 0.4 * p[0] - 0.3 * p[1] + 0.8 * t
             },
-            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = 1.2 * v[0],
-            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                y[0] = 0.4 * v[0] - 0.3 * v[1]
-            },
+            |_x: &[f64], _p: &[f64], _t, v: &[f64], y: &mut [f64]| y[0] = 1.2 * v[0],
+            |_x: &[f64], _p: &[f64], _t, v: &[f64], y: &mut [f64]| y[0] = 0.4 * v[0] - 0.3 * v[1],
             1,
             2,
             1,
@@ -1893,13 +1849,11 @@ mod test {
         let reset = ParameterisedOp::new(&reset, &p);
 
         let root = ClosureWithSens::<TestMat, _, _, _>::new(
-            |x: &TestVec, p: &TestVec, t, y: &mut TestVec| {
+            |x: &[f64], p: &[f64], t, y: &mut [f64]| {
                 y[0] = 0.5 * x[0] - 0.7 * p[0] + 1.1 * p[1] - 0.2 * t
             },
-            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = 0.5 * v[0],
-            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                y[0] = -0.7 * v[0] + 1.1 * v[1]
-            },
+            |_x: &[f64], _p: &[f64], _t, v: &[f64], y: &mut [f64]| y[0] = 0.5 * v[0],
+            |_x: &[f64], _p: &[f64], _t, v: &[f64], y: &mut [f64]| y[0] = -0.7 * v[0] + 1.1 * v[1],
             1,
             2,
             1,
@@ -1918,39 +1872,27 @@ mod test {
     fn state_mut_op_with_adjoint_and_reset_matches_autonomous_formula() {
         let mut problem = scalar_problem_adjoint_with_reset_root(
             0.25,
-            |x: &TestVec, p: &TestVec, _t, y: &mut TestVec| {
-                y[0] = 1.5 * x[0] + 0.2 * p[0] - 0.1 * p[1]
+            |x: &[f64], p: &[f64], _t, y: &mut [f64]| y[0] = 1.5 * x[0] + 0.2 * p[0] - 0.1 * p[1],
+            |_x: &[f64], _p: &[f64], _t, v: &[f64], y: &mut [f64]| y[0] = 1.5 * v[0],
+            |_x: &[f64], _p: &[f64], _t, v: &[f64], y: &mut [f64]| y[0] = -1.5 * v[0],
+            |_x: &[f64], _p: &[f64], _t, v: &[f64], y: &mut [f64]| {
+                y[0] = -0.2 * v[0];
+                y[1] = 0.1 * v[0];
             },
-            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                y.for_each_batch([v], |out, [v], _| out[0] = 1.5 * v[0])
-            },
-            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                y.for_each_batch([v], |out, [v], _| out[0] = -1.5 * v[0])
-            },
-            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                y.for_each_batch([v], |out, [v], _| {
-                    out[0] = -0.2 * v[0];
-                    out[1] = 0.1 * v[0];
-                })
-            },
-            |_x: &TestVec, _p: &TestVec, t, y: &mut TestVec| {
+            |_x: &[f64], _p: &[f64], t, y: &mut [f64]| {
                 y[0] = 0.3 * t;
                 y[1] = 0.0;
             },
-            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                y.for_each_batch([v], |out, [v], _| {
-                    out[0] = 3.0 * v[0];
-                    out[1] = -2.0 * v[0];
-                })
+            |_x: &[f64], _p: &[f64], _t, v: &[f64], y: &mut [f64]| {
+                y[0] = 3.0 * v[0];
+                y[1] = -2.0 * v[0];
             },
-            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                y.for_each_batch([v], |out, [v], _| out[0] = -(3.0 * v[0] - 2.0 * v[1]))
+            |_x: &[f64], _p: &[f64], _t, v: &[f64], y: &mut [f64]| {
+                y[0] = -(3.0 * v[0] - 2.0 * v[1])
             },
-            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                y.for_each_batch([v], |out, [v], _| {
-                    out[0] = -(0.8 * v[0] + 0.5 * v[1]);
-                    out[1] = -(-1.5 * v[1]);
-                })
+            |_x: &[f64], _p: &[f64], _t, v: &[f64], y: &mut [f64]| {
+                y[0] = -(0.8 * v[0] + 0.5 * v[1]);
+                y[1] = -(-1.5 * v[1]);
             },
             2,
         );
@@ -1998,39 +1940,27 @@ mod test {
     fn state_mut_op_with_adjoint_and_reset_uses_selected_root_component() {
         let mut problem = scalar_problem_adjoint_with_reset_root(
             0.25,
-            |x: &TestVec, p: &TestVec, _t, y: &mut TestVec| {
-                y[0] = 1.5 * x[0] + 0.2 * p[0] - 0.1 * p[1]
+            |x: &[f64], p: &[f64], _t, y: &mut [f64]| y[0] = 1.5 * x[0] + 0.2 * p[0] - 0.1 * p[1],
+            |_x: &[f64], _p: &[f64], _t, v: &[f64], y: &mut [f64]| y[0] = 1.5 * v[0],
+            |_x: &[f64], _p: &[f64], _t, v: &[f64], y: &mut [f64]| y[0] = -1.5 * v[0],
+            |_x: &[f64], _p: &[f64], _t, v: &[f64], y: &mut [f64]| {
+                y[0] = -0.2 * v[0];
+                y[1] = 0.1 * v[0];
             },
-            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                y.for_each_batch([v], |out, [v], _| out[0] = 1.5 * v[0])
-            },
-            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                y.for_each_batch([v], |out, [v], _| out[0] = -1.5 * v[0])
-            },
-            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                y.for_each_batch([v], |out, [v], _| {
-                    out[0] = -0.2 * v[0];
-                    out[1] = 0.1 * v[0];
-                })
-            },
-            |_x: &TestVec, _p: &TestVec, t, y: &mut TestVec| {
+            |_x: &[f64], _p: &[f64], t, y: &mut [f64]| {
                 y[0] = 0.3 * t;
                 y[1] = 0.0;
             },
-            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                y.for_each_batch([v], |out, [v], _| {
-                    out[0] = 3.0 * v[0];
-                    out[1] = -2.0 * v[0];
-                })
+            |_x: &[f64], _p: &[f64], _t, v: &[f64], y: &mut [f64]| {
+                y[0] = 3.0 * v[0];
+                y[1] = -2.0 * v[0];
             },
-            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                y.for_each_batch([v], |out, [v], _| out[0] = -(3.0 * v[0] - 2.0 * v[1]))
+            |_x: &[f64], _p: &[f64], _t, v: &[f64], y: &mut [f64]| {
+                y[0] = -(3.0 * v[0] - 2.0 * v[1])
             },
-            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                y.for_each_batch([v], |out, [v], _| {
-                    out[0] = -(0.8 * v[0] + 0.5 * v[1]);
-                    out[1] = -(-1.5 * v[1]);
-                })
+            |_x: &[f64], _p: &[f64], _t, v: &[f64], y: &mut [f64]| {
+                y[0] = -(0.8 * v[0] + 0.5 * v[1]);
+                y[1] = -(-1.5 * v[1]);
             },
             2,
         );
@@ -2085,35 +2015,23 @@ mod test {
     fn state_mut_op_with_adjoint_and_reset_matches_time_dependent_formula() {
         let mut problem = scalar_problem_adjoint_with_reset_root(
             0.1,
-            |x: &TestVec, p: &TestVec, t, y: &mut TestVec| {
+            |x: &[f64], p: &[f64], t, y: &mut [f64]| {
                 y[0] = 1.2 * x[0] + 0.4 * p[0] - 0.3 * p[1] + 0.8 * t
             },
-            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                y.for_each_batch([v], |out, [v], _| out[0] = 1.2 * v[0])
+            |_x: &[f64], _p: &[f64], _t, v: &[f64], y: &mut [f64]| y[0] = 1.2 * v[0],
+            |_x: &[f64], _p: &[f64], _t, v: &[f64], y: &mut [f64]| y[0] = -1.2 * v[0],
+            |_x: &[f64], _p: &[f64], _t, v: &[f64], y: &mut [f64]| {
+                y[0] = -0.4 * v[0];
+                y[1] = 0.3 * v[0];
             },
-            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                y.for_each_batch([v], |out, [v], _| out[0] = -1.2 * v[0])
-            },
-            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                y.for_each_batch([v], |out, [v], _| {
-                    out[0] = -0.4 * v[0];
-                    out[1] = 0.3 * v[0];
-                })
-            },
-            |x: &TestVec, p: &TestVec, t, y: &mut TestVec| {
+            |x: &[f64], p: &[f64], t, y: &mut [f64]| {
                 y[0] = 0.5 * x[0] - 0.7 * p[0] + 1.1 * p[1] - 0.2 * t
             },
-            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                y.for_each_batch([v], |out, [v], _| out[0] = 0.5 * v[0])
-            },
-            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                y.for_each_batch([v], |out, [v], _| out[0] = -(0.5 * v[0]))
-            },
-            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
-                y.for_each_batch([v], |out, [v], _| {
-                    out[0] = 0.7 * v[0];
-                    out[1] = -1.1 * v[0];
-                })
+            |_x: &[f64], _p: &[f64], _t, v: &[f64], y: &mut [f64]| y[0] = 0.5 * v[0],
+            |_x: &[f64], _p: &[f64], _t, v: &[f64], y: &mut [f64]| y[0] = -(0.5 * v[0]),
+            |_x: &[f64], _p: &[f64], _t, v: &[f64], y: &mut [f64]| {
+                y[0] = 0.7 * v[0];
+                y[1] = -1.1 * v[0];
             },
             1,
         );
@@ -2161,22 +2079,22 @@ mod test {
     fn state_mut_op_with_adjoint_and_reset_rejects_invalid_root_index() {
         let mut problem = scalar_problem_adjoint_with_reset_root(
             0.25,
-            |x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| y[0] = x[0],
-            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = v[0],
-            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = -v[0],
-            |_x: &TestVec, _p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| y.fill(0.0),
-            |_x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| {
+            |x: &[f64], _p: &[f64], _t, y: &mut [f64]| y[0] = x[0],
+            |_x: &[f64], _p: &[f64], _t, v: &[f64], y: &mut [f64]| y[0] = v[0],
+            |_x: &[f64], _p: &[f64], _t, v: &[f64], y: &mut [f64]| y[0] = -v[0],
+            |_x: &[f64], _p: &[f64], _t, _v: &[f64], y: &mut [f64]| y.fill(0.0),
+            |_x: &[f64], _p: &[f64], _t, y: &mut [f64]| {
                 y[0] = 0.0;
                 y[1] = 0.0;
             },
-            |_x: &TestVec, _p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| {
+            |_x: &[f64], _p: &[f64], _t, _v: &[f64], y: &mut [f64]| {
                 y[0] = 1.0;
                 y[1] = 1.0;
             },
-            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
+            |_x: &[f64], _p: &[f64], _t, v: &[f64], y: &mut [f64]| {
                 y[0] = -(v[0] + v[1]);
             },
-            |_x: &TestVec, _p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| y.fill(0.0),
+            |_x: &[f64], _p: &[f64], _t, _v: &[f64], y: &mut [f64]| y.fill(0.0),
             2,
         );
         let forward_problem = scalar_problem(0.25);
@@ -2211,14 +2129,14 @@ mod test {
     fn state_mut_op_with_adjoint_and_reset_rejects_zero_event_denominator() {
         let mut problem = scalar_problem_adjoint_with_reset_root(
             0.0,
-            |x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| y[0] = x[0],
-            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = v[0],
-            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = -v[0],
-            |_x: &TestVec, _p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| y.fill(0.0),
-            |_x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| y[0] = 0.0,
-            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = v[0],
-            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = -v[0],
-            |_x: &TestVec, _p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| y.fill(0.0),
+            |x: &[f64], _p: &[f64], _t, y: &mut [f64]| y[0] = x[0],
+            |_x: &[f64], _p: &[f64], _t, v: &[f64], y: &mut [f64]| y[0] = v[0],
+            |_x: &[f64], _p: &[f64], _t, v: &[f64], y: &mut [f64]| y[0] = -v[0],
+            |_x: &[f64], _p: &[f64], _t, _v: &[f64], y: &mut [f64]| y.fill(0.0),
+            |_x: &[f64], _p: &[f64], _t, y: &mut [f64]| y[0] = 0.0,
+            |_x: &[f64], _p: &[f64], _t, v: &[f64], y: &mut [f64]| y[0] = v[0],
+            |_x: &[f64], _p: &[f64], _t, v: &[f64], y: &mut [f64]| y[0] = -v[0],
+            |_x: &[f64], _p: &[f64], _t, _v: &[f64], y: &mut [f64]| y.fill(0.0),
             1,
         );
         let forward_problem = scalar_problem(0.0);
@@ -2261,50 +2179,46 @@ mod test {
                 |_x, _p, _t, _v, y| y.fill(0.0),
             )
             .mass_adjoint(
-                |v, _p, _t, beta, y| y.axpy(1.0, v, beta),
-                |v, _p, _t, beta, y| y.axpy(1.0, v, beta),
+                |v: &[f64], _p: &[f64], _t, beta: f64, y: &mut [f64]| {
+                    for (y, v) in y.iter_mut().zip(v.iter()) {
+                        *y = *v + beta * *y;
+                    }
+                },
+                |v: &[f64], _p: &[f64], _t, beta: f64, y: &mut [f64]| {
+                    for (y, v) in y.iter_mut().zip(v.iter()) {
+                        *y = *v + beta * *y;
+                    }
+                },
             )
-            .init_adjoint(
-                |_p, _t, y| y.for_each_batch([], |y, _, _| y[0] = 0.0),
-                |_p, _t, _v, y| y.fill(0.0),
-                1,
-            )
+            .init_adjoint(|_p, _t, y| y[0] = 0.0, |_p, _t, _v, y| y.fill(0.0), 1)
             .out_adjoint_implicit(
                 |x, _p, _t, y| {
-                    y.for_each_batch([x], |y, [x], _| {
-                        y[0] = x[0];
-                        y[1] = 2.0 * x[0];
-                    });
+                    y[0] = x[0];
+                    y[1] = 2.0 * x[0];
                 },
                 |_x, _p, _t, v, y| {
-                    y.for_each_batch([v], |out, [v], _| {
-                        out[0] = v[0];
-                        out[1] = 2.0 * v[0];
-                    })
+                    y[0] = v[0];
+                    y[1] = 2.0 * v[0];
                 },
+                |_x, _p, _t, v, y| y[0] = -(v[0] + 2.0 * v[1]),
                 |_x, _p, _t, v, y| {
-                    y.for_each_batch([v], |out, [v], _| out[0] = -(v[0] + 2.0 * v[1]))
-                },
-                |_x, _p, _t, v, y| {
-                    y.for_each_batch([v], |out, [v], _| {
-                        out[0] = 0.5 * v[0] - 0.25 * v[1];
-                        out[1] = -0.75 * v[0] + 0.5 * v[1];
-                    })
+                    y[0] = 0.5 * v[0] - 0.25 * v[1];
+                    y[1] = -0.75 * v[0] + 0.5 * v[1];
                 },
                 2,
             )
             .root_adjoint_implicit(
-                |_x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| y[0] = 0.0,
-                |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = v[0],
-                |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = -v[0],
-                |_x: &TestVec, _p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| y.fill(0.0),
+                |_x: &[f64], _p: &[f64], _t, y: &mut [f64]| y[0] = 0.0,
+                |_x: &[f64], _p: &[f64], _t, v: &[f64], y: &mut [f64]| y[0] = v[0],
+                |_x: &[f64], _p: &[f64], _t, v: &[f64], y: &mut [f64]| y[0] = -v[0],
+                |_x: &[f64], _p: &[f64], _t, _v: &[f64], y: &mut [f64]| y.fill(0.0),
                 1,
             )
             .reset_adjoint_implicit(
-                |x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| y[0] = x[0],
-                |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = v[0],
-                |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = -v[0],
-                |_x: &TestVec, _p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| y.fill(0.0),
+                |x: &[f64], _p: &[f64], _t, y: &mut [f64]| y[0] = x[0],
+                |_x: &[f64], _p: &[f64], _t, v: &[f64], y: &mut [f64]| y[0] = v[0],
+                |_x: &[f64], _p: &[f64], _t, v: &[f64], y: &mut [f64]| y[0] = -v[0],
+                |_x: &[f64], _p: &[f64], _t, _v: &[f64], y: &mut [f64]| y.fill(0.0),
             )
             .build()
             .unwrap();

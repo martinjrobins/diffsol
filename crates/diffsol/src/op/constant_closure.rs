@@ -1,10 +1,10 @@
 use super::{BuilderOp, ParameterisedOp};
-use crate::{ConstantOp, Matrix, Op};
+use crate::{ConstantOp, Matrix, Op, Vector};
 
 pub struct ConstantClosure<M, I>
 where
     M: Matrix,
-    I: Fn(&M::V, M::T, &mut M::V),
+    I: Fn(&[M::T], M::T, &mut [M::T]),
 {
     func: I,
     nout: usize,
@@ -15,7 +15,7 @@ where
 impl<M, I> ConstantClosure<M, I>
 where
     M: Matrix,
-    I: Fn(&M::V, M::T, &mut M::V),
+    I: Fn(&[M::T], M::T, &mut [M::T]),
 {
     pub fn new(func: I, nout: usize, nparams: usize, ctx: M::C) -> Self {
         Self {
@@ -30,7 +30,7 @@ where
 impl<M, I> Op for ConstantClosure<M, I>
 where
     M: Matrix,
-    I: Fn(&M::V, M::T, &mut M::V),
+    I: Fn(&[M::T], M::T, &mut [M::T]),
 {
     type V = M::V;
     type T = M::T;
@@ -53,7 +53,7 @@ where
 impl<M, I> BuilderOp for ConstantClosure<M, I>
 where
     M: Matrix,
-    I: Fn(&M::V, M::T, &mut M::V),
+    I: Fn(&[M::T], M::T, &mut [M::T]),
 {
     fn calculate_sparsity(&mut self, _y0: &Self::V, _t0: Self::T, _p: &Self::V) {
         // do nothing
@@ -72,9 +72,9 @@ where
 impl<M, I> ConstantOp for ParameterisedOp<'_, ConstantClosure<M, I>>
 where
     M: Matrix,
-    I: Fn(&M::V, M::T, &mut M::V),
+    I: Fn(&[M::T], M::T, &mut [M::T]),
 {
     fn call_inplace(&self, t: Self::T, y: &mut Self::V) {
-        (self.op.func)(self.p, t, y)
+        y.for_each_batch([self.p], |y, [p], _| (self.op.func)(p, t, y));
     }
 }

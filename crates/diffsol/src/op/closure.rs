@@ -2,7 +2,7 @@ use std::cell::RefCell;
 
 use crate::{
     find_jacobian_non_zeros, jacobian::JacobianColoring, Matrix, MatrixSparsity, NonLinearOp,
-    NonLinearOpJacobian, Op,
+    NonLinearOpJacobian, Op, Vector,
 };
 
 use super::{BuilderOp, OpStatistics, ParameterisedOp};
@@ -10,8 +10,8 @@ use super::{BuilderOp, OpStatistics, ParameterisedOp};
 pub struct Closure<M, F, G>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
+    G: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
 {
     func: F,
     jacobian_action: G,
@@ -27,8 +27,8 @@ where
 impl<M, F, G> Closure<M, F, G>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
+    G: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
 {
     pub fn new(
         func: F,
@@ -68,8 +68,8 @@ where
 impl<M, F, G> BuilderOp for Closure<M, F, G>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
+    G: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
 {
     fn calculate_sparsity(&mut self, y0: &M::V, t0: M::T, p: &M::V) {
         self.calculate_sparsity(y0, t0, p);
@@ -89,8 +89,8 @@ where
 impl<M, F, G> Op for Closure<M, F, G>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
+    G: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
 {
     type V = M::V;
     type T = M::T;
@@ -118,24 +118,26 @@ where
 impl<M, F, G> NonLinearOp for ParameterisedOp<'_, Closure<M, F, G>>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
+    G: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
 {
     fn call_inplace(&self, x: &M::V, t: M::T, y: &mut M::V) {
         self.op.statistics.borrow_mut().increment_call();
-        (self.op.func)(x, self.p, t, y)
+        y.for_each_batch([x, self.p], |y, [x, p], _| (self.op.func)(x, p, t, y));
     }
 }
 
 impl<M, F, G> NonLinearOpJacobian for ParameterisedOp<'_, Closure<M, F, G>>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
+    G: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
 {
     fn jac_mul_inplace(&self, x: &M::V, t: M::T, v: &M::V, y: &mut M::V) {
         self.op.statistics.borrow_mut().increment_jac_mul();
-        (self.op.jacobian_action)(x, self.p, t, v, y)
+        y.for_each_batch([x, self.p, v], |y, [x, p, v], _| {
+            (self.op.jacobian_action)(x, p, t, v, y)
+        });
     }
     fn jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
         self.op.statistics.borrow_mut().increment_matrix();

@@ -56,49 +56,39 @@ pub fn robertson_diffsl_problem<
 //*      dy1/dt = -.04*y1 + 1.e4*y2*y3
 //*      dy2/dt = .04*y1 - 1.e4*y2*y3 - 3.e7*y2**2
 //*         0   = y1 + y2 + y3 - 1
-fn robertson_rhs<M: Matrix>(x: &M::V, p: &M::V, _t: M::T, y: &mut M::V) {
-    y.for_each_batch([x, p], |y, [x, p], _| {
-        y[0] = -p[0] * x[0] + p[1] * x[1] * x[2];
-        y[1] = p[0] * x[0] - p[1] * x[1] * x[2] - p[2] * x[1] * x[1];
-        y[2] = x[0] + x[1] + x[2] - M::T::one();
-    });
+fn robertson_rhs<M: Matrix>(x: &[M::T], p: &[M::T], _t: M::T, y: &mut [M::T]) {
+    y[0] = -p[0] * x[0] + p[1] * x[1] * x[2];
+    y[1] = p[0] * x[0] - p[1] * x[1] * x[2] - p[2] * x[1] * x[1];
+    y[2] = x[0] + x[1] + x[2] - M::T::one();
 }
-fn robertson_jac_mul<M: Matrix>(x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
-    y.for_each_batch([x, p, v], |y, [x, p, v], _| {
-        y[0] = -p[0] * v[0] + p[1] * v[1] * x[2] + p[1] * x[1] * v[2];
-        y[1] = p[0] * v[0]
-            - p[1] * v[1] * x[2]
-            - p[1] * x[1] * v[2]
-            - M::T::from_f64(2.0).unwrap() * p[2] * x[1] * v[1];
-        y[2] = v[0] + v[1] + v[2];
-    });
+fn robertson_jac_mul<M: Matrix>(x: &[M::T], p: &[M::T], _t: M::T, v: &[M::T], y: &mut [M::T]) {
+    y[0] = -p[0] * v[0] + p[1] * v[1] * x[2] + p[1] * x[1] * v[2];
+    y[1] = p[0] * v[0]
+        - p[1] * v[1] * x[2]
+        - p[1] * x[1] * v[2]
+        - M::T::from_f64(2.0).unwrap() * p[2] * x[1] * v[1];
+    y[2] = v[0] + v[1] + v[2];
 }
 
-fn robertson_sens_mul<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
-    y.for_each_batch([x, v], |y, [x, v], _| {
-        y[0] = -v[0] * x[0] + v[1] * x[1] * x[2];
-        y[1] = v[0] * x[0] - v[1] * x[1] * x[2] - v[2] * x[1] * x[1];
-        y[2] = M::T::zero();
-    });
+fn robertson_sens_mul<M: Matrix>(x: &[M::T], _p: &[M::T], _t: M::T, v: &[M::T], y: &mut [M::T]) {
+    y[0] = -v[0] * x[0] + v[1] * x[1] * x[2];
+    y[1] = v[0] * x[0] - v[1] * x[1] * x[2] - v[2] * x[1] * x[1];
+    y[2] = M::T::zero();
 }
 
-fn robertson_mass<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, beta: M::T, y: &mut M::V) {
-    y.for_each_batch([x], |y, [x], _| {
-        y[0] = x[0] + beta * y[0];
-        y[1] = x[1] + beta * y[1];
-        y[2] = beta * y[2];
-    });
+fn robertson_mass<M: Matrix>(x: &[M::T], _p: &[M::T], _t: M::T, beta: M::T, y: &mut [M::T]) {
+    y[0] = x[0] + beta * y[0];
+    y[1] = x[1] + beta * y[1];
+    y[2] = beta * y[2];
 }
 
-fn robertson_init<M: Matrix>(_p: &M::V, _t: M::T, y: &mut M::V) {
-    y.for_each_batch([], |y, _, _| {
-        y[0] = M::T::one();
-        y[1] = M::T::zero();
-        y[2] = M::T::zero();
-    });
+fn robertson_init<M: Matrix>(_p: &[M::T], _t: M::T, y: &mut [M::T]) {
+    y[0] = M::T::one();
+    y[1] = M::T::zero();
+    y[2] = M::T::zero();
 }
 
-fn robertson_init_sens<M: Matrix>(_p: &M::V, _t: M::T, _v: &M::V, y: &mut M::V) {
+fn robertson_init_sens<M: Matrix>(_p: &[M::T], _t: M::T, _v: &[M::T], y: &mut [M::T]) {
     y.fill(M::T::zero());
 }
 

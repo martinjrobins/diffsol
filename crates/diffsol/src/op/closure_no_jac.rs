@@ -1,13 +1,13 @@
 use std::cell::RefCell;
 
-use crate::{Matrix, NonLinearOp, Op};
+use crate::{Matrix, NonLinearOp, Op, Vector};
 
 use super::{BuilderOp, OpStatistics, ParameterisedOp};
 
 pub struct ClosureNoJac<M, F>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
+    F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
 {
     func: F,
     nstates: usize,
@@ -20,7 +20,7 @@ where
 impl<M, F> ClosureNoJac<M, F>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
+    F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
 {
     pub fn new(func: F, nstates: usize, nout: usize, nparams: usize, ctx: M::C) -> Self {
         Self {
@@ -37,7 +37,7 @@ where
 impl<M, F> BuilderOp for ClosureNoJac<M, F>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
+    F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
 {
     fn calculate_sparsity(&mut self, _y0: &Self::V, _t0: Self::T, _p: &Self::V) {
         // Do nothing
@@ -56,7 +56,7 @@ where
 impl<M, F> Op for ClosureNoJac<M, F>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
+    F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
 {
     type V = M::V;
     type T = M::T;
@@ -82,10 +82,10 @@ where
 impl<M, F> NonLinearOp for ParameterisedOp<'_, ClosureNoJac<M, F>>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
+    F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
 {
     fn call_inplace(&self, x: &M::V, t: M::T, y: &mut M::V) {
         self.op.statistics.borrow_mut().increment_call();
-        (self.op.func)(x, self.p, t, y)
+        y.for_each_batch([x, self.p], |y, [x, p], _| (self.op.func)(x, p, t, y));
     }
 }

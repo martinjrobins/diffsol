@@ -8,11 +8,11 @@ pub fn problem_autodiff(
 ) -> OdeSolverProblem<impl OdeEquationsImplicitAdjoint<M = M, V = V, T = T, C = C>> {
     OdeBuilder::<M>::new()
         .p([r, k, y0])
-        .rhs_autodiff(|x: &V, p: &V, _t, y: &mut V| {
+        .rhs_autodiff(|x: &[T], p: &[T], _t, y: &mut [T]| {
             y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]);
         })
         .init_autodiff(
-            |p: &V, _t, y: &mut V| {
+            |p: &[T], _t, y: &mut [T]| {
                 y[0] = p[2];
             },
             1,

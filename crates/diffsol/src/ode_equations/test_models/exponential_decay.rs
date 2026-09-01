@@ -6,21 +6,26 @@ use crate::{
     OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeSolverProblem, Op, Vector,
 };
 use num_traits::{FromPrimitive, One, Zero};
-use std::ops::MulAssign;
 
 // exponential decay problem
 // dy/dt = -ay (p = [a, y0])
-fn exponential_decay<M: Matrix>(x: &M::V, p: &M::V, _t: M::T, y: &mut M::V) {
-    y.for_each_batch([x, p], |y, [x, p], _| {
-        for (y, x) in y.iter_mut().zip(x.iter()) {
-            *y = -p[0] * *x;
-        }
-    });
+fn exponential_decay<M: Matrix>(x: &[M::T], p: &[M::T], _t: M::T, y: &mut [M::T]) {
+    for (y, x) in y.iter_mut().zip(x.iter()) {
+        *y = -p[0] * *x;
+    }
 }
 
 // mass matrix is identity
-fn exponential_decay_mass<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, beta: M::T, y: &mut M::V) {
-    y.axpy(M::T::one(), x, beta);
+fn exponential_decay_mass<M: Matrix>(
+    x: &[M::T],
+    _p: &[M::T],
+    _t: M::T,
+    beta: M::T,
+    y: &mut [M::T],
+) {
+    for (y, x) in y.iter_mut().zip(x.iter()) {
+        *y = *x + beta * *y;
+    }
 }
 
 // df/dp v = -yv (p = [a, y0])
@@ -33,17 +38,21 @@ fn exponential_decay_mass<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, beta: M::T, 
 // J = | -a  0 |
 //     | 0  -a |
 // Jv = -av
-fn exponential_decay_jacobian<M: Matrix>(_x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
-    y.for_each_batch([p, v], |y, [p, v], _| {
-        for (y, v) in y.iter_mut().zip(v.iter()) {
-            *y = -p[0] * *v;
-        }
-    });
+fn exponential_decay_jacobian<M: Matrix>(
+    _x: &[M::T],
+    p: &[M::T],
+    _t: M::T,
+    v: &[M::T],
+    y: &mut [M::T],
+) {
+    for (y, v) in y.iter_mut().zip(v.iter()) {
+        *y = -p[0] * *v;
+    }
 }
 
 // -J^Tv = av
-fn exponential_decay_init<M: Matrix>(p: &M::V, _t: M::T, y: &mut M::V) {
-    y.for_each_batch([p], |y, [p], _| y.fill(p[1]));
+fn exponential_decay_init<M: Matrix>(p: &[M::T], _t: M::T, y: &mut [M::T]) {
+    y.fill(p[1]);
 }
 
 // dy0/dp = | 0 1 |
@@ -52,8 +61,8 @@ fn exponential_decay_init<M: Matrix>(p: &M::V, _t: M::T, y: &mut M::V) {
 //            | 0 1 | |v_2|   |v_2|
 // dy0/dp^T v = | 0 0 | |v_1| = |0 |
 //              | 1 1 | |v_2|   |v_1 + v_2|
-fn exponential_decay_root<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
-    y.for_each_batch([x], |y, [x], _| y[0] = x[0] - M::T::from_f64(0.6).unwrap());
+fn exponential_decay_root<M: Matrix>(x: &[M::T], _p: &[M::T], _t: M::T, y: &mut [M::T]) {
+    y[0] = x[0] - M::T::from_f64(0.6).unwrap();
 }
 
 /// g_1 = 1 * x_1  +  2 * x_2
@@ -68,7 +77,13 @@ fn exponential_decay_root<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V
 ///         |-2 -4| |v_2|   |-2v_1 - 4v_2|
 /// J = |0 0|
 ///     |0 0|
-fn exponential_decay_out_sens<M: Matrix>(_x: &M::V, _p: &M::V, _t: M::T, _v: &M::V, y: &mut M::V) {
+fn exponential_decay_out_sens<M: Matrix>(
+    _x: &[M::T],
+    _p: &[M::T],
+    _t: M::T,
+    _v: &[M::T],
+    y: &mut [M::T],
+) {
     y.fill(M::T::zero());
 }
 
@@ -286,11 +301,11 @@ pub fn exponential_decay_problem_with_root<M: Matrix + 'static>(
 ) {
     let k = 0.1;
     let y0 = 1.0;
-    let out_fn = |_x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V| {
-        y.copy_from(_x);
+    let out_fn = |_x: &[M::T], _p: &[M::T], _t: M::T, y: &mut [M::T]| {
+        y.copy_from_slice(_x);
     };
-    let out_jac_fn = |_x: &M::V, _p: &M::V, _t: M::T, v: &M::V, y: &mut M::V| {
-        y.copy_from(v);
+    let out_jac_fn = |_x: &[M::T], _p: &[M::T], _t: M::T, v: &[M::T], y: &mut [M::T]| {
+        y.copy_from_slice(v);
     };
     let mut builder = OdeBuilder::<M>::new()
         .p([k, y0])
@@ -401,133 +416,131 @@ pub fn exponential_decay_problem_adjoint<M: Matrix>(
     (problem, soln)
 }
 
-fn exponential_decay_fixed_init<M: Matrix>(_p: &M::V, _t: M::T, y: &mut M::V) {
+fn exponential_decay_fixed_init<M: Matrix>(_p: &[M::T], _t: M::T, y: &mut [M::T]) {
     y.fill(M::T::one());
 }
 
 fn exponential_decay_fixed_init_sens_adjoint<M: Matrix>(
-    _p: &M::V,
+    _p: &[M::T],
     _t: M::T,
-    _v: &M::V,
-    y: &mut M::V,
+    _v: &[M::T],
+    y: &mut [M::T],
 ) {
     y.fill(M::T::zero());
 }
 
-fn exponential_decay_root_single_half<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
-    y.for_each_batch([x], |y, [x], _| y[0] = x[0] - M::T::from_f64(0.5).unwrap());
+fn exponential_decay_root_single_half<M: Matrix>(
+    x: &[M::T],
+    _p: &[M::T],
+    _t: M::T,
+    y: &mut [M::T],
+) {
+    y[0] = x[0] - M::T::from_f64(0.5).unwrap();
 }
 
 fn exponential_decay_root_single_half_jac<M: Matrix>(
-    _x: &M::V,
-    _p: &M::V,
+    _x: &[M::T],
+    _p: &[M::T],
     _t: M::T,
-    v: &M::V,
-    y: &mut M::V,
+    v: &[M::T],
+    y: &mut [M::T],
 ) {
-    y.for_each_batch([v], |y, [v], _| y[0] = v[0]);
+    y[0] = v[0];
 }
 
 fn exponential_decay_root_single_half_adj<M: Matrix>(
-    _x: &M::V,
-    _p: &M::V,
+    _x: &[M::T],
+    _p: &[M::T],
     _t: M::T,
-    v: &M::V,
-    y: &mut M::V,
+    v: &[M::T],
+    y: &mut [M::T],
 ) {
-    y.for_each_batch([v], |y, [v], _| {
-        y[0] = -v[0];
-        y[1] = M::T::zero();
-    });
+    y[0] = -v[0];
+    y[1] = M::T::zero();
 }
 
 fn exponential_decay_root_single_half_sens_adj<M: Matrix>(
-    _x: &M::V,
-    _p: &M::V,
+    _x: &[M::T],
+    _p: &[M::T],
     _t: M::T,
-    _v: &M::V,
-    y: &mut M::V,
+    _v: &[M::T],
+    y: &mut [M::T],
 ) {
     y.fill(M::T::zero());
 }
 
-fn exponential_decay_reset_y_plus_2r<M: Matrix>(x: &M::V, p: &M::V, _t: M::T, y: &mut M::V) {
-    y.for_each_batch([x, p], |y, [x, p], _| {
-        let increment = M::T::from_f64(2.0).unwrap() * p[1];
-        for (y, x) in y.iter_mut().zip(x.iter()) {
-            *y = *x + increment;
-        }
-    });
+fn exponential_decay_reset_y_plus_2r<M: Matrix>(x: &[M::T], p: &[M::T], _t: M::T, y: &mut [M::T]) {
+    let increment = M::T::from_f64(2.0).unwrap() * p[1];
+    for (y, x) in y.iter_mut().zip(x.iter()) {
+        *y = *x + increment;
+    }
 }
 
 fn exponential_decay_reset_y_plus_2r_jac<M: Matrix>(
-    _x: &M::V,
-    _p: &M::V,
+    _x: &[M::T],
+    _p: &[M::T],
     _t: M::T,
-    v: &M::V,
-    y: &mut M::V,
+    v: &[M::T],
+    y: &mut [M::T],
 ) {
-    y.copy_from(v);
+    y.copy_from_slice(v);
 }
 
 fn exponential_decay_reset_y_plus_2r_adj<M: Matrix>(
-    _x: &M::V,
-    _p: &M::V,
+    _x: &[M::T],
+    _p: &[M::T],
     _t: M::T,
-    v: &M::V,
-    y: &mut M::V,
+    v: &[M::T],
+    y: &mut [M::T],
 ) {
-    y.copy_from(v);
-    y.mul_assign(scale(-M::T::one()));
+    for (y, v) in y.iter_mut().zip(v.iter()) {
+        *y = -*v;
+    }
 }
 
 fn exponential_decay_reset_y_plus_2r_sens_adj<M: Matrix>(
-    _x: &M::V,
-    _p: &M::V,
+    _x: &[M::T],
+    _p: &[M::T],
     _t: M::T,
-    v: &M::V,
-    y: &mut M::V,
+    v: &[M::T],
+    y: &mut [M::T],
 ) {
-    y.for_each_batch([v], |y, [v], _| {
-        let two = M::T::from_f64(2.0).unwrap();
-        y[0] = M::T::zero();
-        y[1] = -(two * v[0] + two * v[1]);
-    });
+    let two = M::T::from_f64(2.0).unwrap();
+    y[0] = M::T::zero();
+    y[1] = -(two * v[0] + two * v[1]);
 }
 
-fn exponential_decay_out_first_state<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
-    y.for_each_batch([x], |y, [x], _| y[0] = x[0]);
+fn exponential_decay_out_first_state<M: Matrix>(x: &[M::T], _p: &[M::T], _t: M::T, y: &mut [M::T]) {
+    y[0] = x[0];
 }
 
 fn exponential_decay_out_first_state_jac<M: Matrix>(
-    _x: &M::V,
-    _p: &M::V,
+    _x: &[M::T],
+    _p: &[M::T],
     _t: M::T,
-    v: &M::V,
-    y: &mut M::V,
+    v: &[M::T],
+    y: &mut [M::T],
 ) {
-    y.for_each_batch([v], |y, [v], _| y[0] = v[0]);
+    y[0] = v[0];
 }
 
 fn exponential_decay_out_first_state_adj<M: Matrix>(
-    _x: &M::V,
-    _p: &M::V,
+    _x: &[M::T],
+    _p: &[M::T],
     _t: M::T,
-    v: &M::V,
-    y: &mut M::V,
+    v: &[M::T],
+    y: &mut [M::T],
 ) {
-    y.for_each_batch([v], |y, [v], _| {
-        y[0] = -v[0];
-        y[1] = M::T::zero();
-    });
+    y[0] = -v[0];
+    y[1] = M::T::zero();
 }
 
 fn exponential_decay_out_first_state_sens_adj<M: Matrix>(
-    _x: &M::V,
-    _p: &M::V,
+    _x: &[M::T],
+    _p: &[M::T],
     _t: M::T,
-    _v: &M::V,
-    y: &mut M::V,
+    _v: &[M::T],
+    y: &mut [M::T],
 ) {
     y.fill(M::T::zero());
 }
@@ -748,16 +761,14 @@ pub fn exponential_decay_problem_sens_with_out<M: Matrix + 'static>(
 // Reset:  y → [0.4, 0.4]
 // ------------------------------------------------------------------
 
-fn exponential_decay_two_root<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
-    y.for_each_batch([x], |y, [x], _| {
-        // index 0: reset trigger (x[0] = 0.6)
-        y[0] = x[0] - M::T::from_f64(0.6).unwrap();
-        // index 1: stopping condition (x[0] = 0.3)
-        y[1] = x[0] - M::T::from_f64(0.3).unwrap();
-    });
+fn exponential_decay_two_root<M: Matrix>(x: &[M::T], _p: &[M::T], _t: M::T, y: &mut [M::T]) {
+    // index 0: reset trigger (x[0] = 0.6)
+    y[0] = x[0] - M::T::from_f64(0.6).unwrap();
+    // index 1: stopping condition (x[0] = 0.3)
+    y[1] = x[0] - M::T::from_f64(0.3).unwrap();
 }
 
-fn exponential_decay_reset<M: Matrix>(_x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
+fn exponential_decay_reset<M: Matrix>(_x: &[M::T], _p: &[M::T], _t: M::T, y: &mut [M::T]) {
     // Reset state to 0.4 — below root-0 threshold (0.6) so root 0 won't fire
     // again, but above root-1 threshold (0.3) so root 1 can still fire.
     y.fill(M::T::from_f64(0.4).unwrap());
@@ -848,74 +859,68 @@ pub fn exponential_decay_with_two_roots_problem<M: Matrix + 'static>() -> (
 // ------------------------------------------------------------------
 
 pub(crate) fn exponential_decay_reset_y_plus_2<M: Matrix>(
-    x: &M::V,
-    _p: &M::V,
+    x: &[M::T],
+    _p: &[M::T],
     _t: M::T,
-    y: &mut M::V,
+    y: &mut [M::T],
 ) {
     // R(y) = y + 2  (component-wise)
-    y.for_each_batch([x], |y, [x], _| {
-        let two = M::T::from_f64(2.0).unwrap();
-        for (y, x) in y.iter_mut().zip(x.iter()) {
-            *y = *x + two;
-        }
-    });
+    let two = M::T::from_f64(2.0).unwrap();
+    for (y, x) in y.iter_mut().zip(x.iter()) {
+        *y = *x + two;
+    }
 }
 
 pub(crate) fn exponential_decay_reset_y_plus_2_jac<M: Matrix>(
-    _x: &M::V,
-    _p: &M::V,
+    _x: &[M::T],
+    _p: &[M::T],
     _t: M::T,
-    v: &M::V,
-    y: &mut M::V,
+    v: &[M::T],
+    y: &mut [M::T],
 ) {
     // J_R = I  →  J_R · v = v
-    y.copy_from(v);
+    y.copy_from_slice(v);
 }
 
 pub(crate) fn exponential_decay_root_0_6_and_2_0<M: Matrix>(
-    x: &M::V,
-    _p: &M::V,
+    x: &[M::T],
+    _p: &[M::T],
     _t: M::T,
-    y: &mut M::V,
+    y: &mut [M::T],
 ) {
-    y.for_each_batch([x], |y, [x], _| {
-        // Root 0: x[0] = 0.6  (reset trigger)
-        y[0] = x[0] - M::T::from_f64(0.6).unwrap();
-        // Root 1: x[0] = 2.0  (stop; fires after reset when y decays from 2.6 to 2.0)
-        y[1] = x[0] - M::T::from_f64(2.0).unwrap();
-    });
+    // Root 0: x[0] = 0.6  (reset trigger)
+    y[0] = x[0] - M::T::from_f64(0.6).unwrap();
+    // Root 1: x[0] = 2.0  (stop; fires after reset when y decays from 2.6 to 2.0)
+    y[1] = x[0] - M::T::from_f64(2.0).unwrap();
 }
 
 pub(crate) fn exponential_decay_root_0_6_and_2_0_jac<M: Matrix>(
-    _x: &M::V,
-    _p: &M::V,
+    _x: &[M::T],
+    _p: &[M::T],
     _t: M::T,
-    v: &M::V,
-    y: &mut M::V,
+    v: &[M::T],
+    y: &mut [M::T],
 ) {
-    y.for_each_batch([v], |y, [v], _| {
-        y[0] = v[0];
-        y[1] = v[0];
-    });
+    y[0] = v[0];
+    y[1] = v[0];
 }
 
 pub(crate) fn exponential_decay_root_0_6_and_2_0_sens<M: Matrix>(
-    _x: &M::V,
-    _p: &M::V,
+    _x: &[M::T],
+    _p: &[M::T],
     _t: M::T,
-    _v: &M::V,
-    y: &mut M::V,
+    _v: &[M::T],
+    y: &mut [M::T],
 ) {
     y.fill(M::T::zero());
 }
 
 pub(crate) fn exponential_decay_reset_y_plus_2_sens<M: Matrix>(
-    _x: &M::V,
-    _p: &M::V,
+    _x: &[M::T],
+    _p: &[M::T],
     _t: M::T,
-    _v: &M::V,
-    y: &mut M::V,
+    _v: &[M::T],
+    y: &mut [M::T],
 ) {
     y.fill(M::T::zero());
 }
@@ -1014,109 +1019,105 @@ pub fn exponential_decay_with_reset_problem_sens<M: Matrix + 'static>() -> (
 // via `get_batch`/`get_batch_mut` to support `nbatch > 1`.
 // ------------------------------------------------------------------
 
-fn exponential_decay_time_root_batched<M: Matrix>(_x: &M::V, _p: &M::V, t: M::T, y: &mut M::V) {
+fn exponential_decay_time_root_batched<M: Matrix>(
+    _x: &[M::T],
+    _p: &[M::T],
+    t: M::T,
+    y: &mut [M::T],
+) {
     y.fill(t - M::T::from_f64(5.0).unwrap());
 }
 
 fn exponential_decay_sens_batched<M: Matrix>(
-    x: &M::V,
-    _p: &M::V,
+    x: &[M::T],
+    _p: &[M::T],
     _t: M::T,
-    v: &M::V,
-    y: &mut M::V,
+    v: &[M::T],
+    y: &mut [M::T],
 ) {
-    y.for_each_batch([x, v], |y, [x, v], _| {
-        for (y, x) in y.iter_mut().zip(x.iter()) {
-            *y = -v[0] * *x;
-        }
-    });
+    for (y, x) in y.iter_mut().zip(x.iter()) {
+        *y = -v[0] * *x;
+    }
 }
 
-fn exponential_decay_init_sens_batched<M: Matrix>(_p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
-    y.for_each_batch([v], |y, [v], _| y.fill(v[1]));
+fn exponential_decay_init_sens_batched<M: Matrix>(
+    _p: &[M::T],
+    _t: M::T,
+    v: &[M::T],
+    y: &mut [M::T],
+) {
+    y.fill(v[1]);
 }
 
 fn exponential_decay_jacobian_adjoint_batched<M: Matrix>(
-    _x: &M::V,
-    p: &M::V,
+    _x: &[M::T],
+    p: &[M::T],
     _t: M::T,
-    v: &M::V,
-    y: &mut M::V,
+    v: &[M::T],
+    y: &mut [M::T],
 ) {
-    y.for_each_batch([p, v], |y, [p, v], _| {
-        for (y, v) in y.iter_mut().zip(v.iter()) {
-            *y = p[0] * *v;
-        }
-    });
+    for (y, v) in y.iter_mut().zip(v.iter()) {
+        *y = p[0] * *v;
+    }
 }
 
 fn exponential_decay_sens_transpose_batched<M: Matrix>(
-    x: &M::V,
-    _p: &M::V,
+    x: &[M::T],
+    _p: &[M::T],
     _t: M::T,
-    v: &M::V,
-    y: &mut M::V,
+    v: &[M::T],
+    y: &mut [M::T],
 ) {
-    y.for_each_batch([x, v], |y, [x, v], _| {
-        y[0] = x[0] * v[0] + x[1] * v[1];
-        y[1] = M::T::zero();
-    });
+    y[0] = x[0] * v[0] + x[1] * v[1];
+    y[1] = M::T::zero();
 }
 
 fn exponential_decay_init_sens_adjoint_batched<M: Matrix>(
-    _p: &M::V,
+    _p: &[M::T],
     _t: M::T,
-    v: &M::V,
-    y: &mut M::V,
+    v: &[M::T],
+    y: &mut [M::T],
 ) {
-    y.for_each_batch([v], |y, [v], _| {
-        y[0] = M::T::zero();
-        y[1] = -v[0] - v[1];
-    });
+    y[0] = M::T::zero();
+    y[1] = -v[0] - v[1];
 }
 
-fn exponential_decay_out_batched<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
-    y.for_each_batch([x], |y, [x], _| {
-        let f = |v: f64| M::T::from_f64(v).unwrap();
-        y[0] = x[0] + f(2.0) * x[1];
-        y[1] = f(3.0) * x[0] + f(4.0) * x[1];
-    });
+fn exponential_decay_out_batched<M: Matrix>(x: &[M::T], _p: &[M::T], _t: M::T, y: &mut [M::T]) {
+    let f = |v: f64| M::T::from_f64(v).unwrap();
+    y[0] = x[0] + f(2.0) * x[1];
+    y[1] = f(3.0) * x[0] + f(4.0) * x[1];
 }
 
 fn exponential_decay_out_jac_mul_batched<M: Matrix>(
-    _x: &M::V,
-    _p: &M::V,
+    _x: &[M::T],
+    _p: &[M::T],
     _t: M::T,
-    v: &M::V,
-    y: &mut M::V,
+    v: &[M::T],
+    y: &mut [M::T],
 ) {
-    y.for_each_batch([v], |y, [v], _| {
-        let f = |c: f64| M::T::from_f64(c).unwrap();
-        y[0] = v[0] + f(2.0) * v[1];
-        y[1] = f(3.0) * v[0] + f(4.0) * v[1];
-    });
+    let f = |c: f64| M::T::from_f64(c).unwrap();
+    y[0] = v[0] + f(2.0) * v[1];
+    y[1] = f(3.0) * v[0] + f(4.0) * v[1];
 }
 
 fn exponential_decay_out_adj_mul_batched<M: Matrix>(
-    _x: &M::V,
-    _p: &M::V,
+    _x: &[M::T],
+    _p: &[M::T],
     _t: M::T,
-    v: &M::V,
-    y: &mut M::V,
+    v: &[M::T],
+    y: &mut [M::T],
 ) {
-    y.for_each_batch([v], |y, [v], _| {
-        let f = |c: f64| M::T::from_f64(c).unwrap();
-        y[0] = -v[0] - f(3.0) * v[1];
-        y[1] = -f(2.0) * v[0] - f(4.0) * v[1];
-    });
+    let f = |c: f64| M::T::from_f64(c).unwrap();
+    y[0] = -v[0] - f(3.0) * v[1];
+    y[1] = -f(2.0) * v[0] - f(4.0) * v[1];
 }
 
 fn exponential_decay_out_sens_adj_batched<M: Matrix>(
-    _x: &M::V,
-    _p: &M::V,
+    _x: &[M::T],
+    _p: &[M::T],
     _t: M::T,
-    _v: &M::V,
-    y: &mut M::V,
+    _v: &[M::T],
+    y: &mut [M::T],
 ) {
     y.fill(M::T::zero());
 }
@@ -1304,104 +1305,102 @@ pub fn exponential_decay_problem_batched_adjoint<M: Matrix + 'static>(
 }
 
 fn exponential_decay_constant_reset_jac<M: Matrix>(
-    _x: &M::V,
-    _p: &M::V,
+    _x: &[M::T],
+    _p: &[M::T],
     _t: M::T,
-    _v: &M::V,
-    y: &mut M::V,
+    _v: &[M::T],
+    y: &mut [M::T],
 ) {
     y.fill(M::T::zero());
 }
 
 fn exponential_decay_constant_reset_sens<M: Matrix>(
-    _x: &M::V,
-    _p: &M::V,
+    _x: &[M::T],
+    _p: &[M::T],
     _t: M::T,
-    _v: &M::V,
-    y: &mut M::V,
+    _v: &[M::T],
+    y: &mut [M::T],
 ) {
     y.fill(M::T::zero());
 }
 
 fn exponential_decay_time_root_jac_batched<M: Matrix>(
-    _x: &M::V,
-    _p: &M::V,
+    _x: &[M::T],
+    _p: &[M::T],
     _t: M::T,
-    _v: &M::V,
-    y: &mut M::V,
+    _v: &[M::T],
+    y: &mut [M::T],
 ) {
     y.fill(M::T::zero());
 }
 
 fn exponential_decay_time_root_sens_batched<M: Matrix>(
-    _x: &M::V,
-    _p: &M::V,
+    _x: &[M::T],
+    _p: &[M::T],
     _t: M::T,
-    _v: &M::V,
-    y: &mut M::V,
+    _v: &[M::T],
+    y: &mut [M::T],
 ) {
     y.fill(M::T::zero());
 }
 
 fn exponential_decay_time_root_adj_batched<M: Matrix>(
-    _x: &M::V,
-    _p: &M::V,
+    _x: &[M::T],
+    _p: &[M::T],
     _t: M::T,
-    _v: &M::V,
-    y: &mut M::V,
+    _v: &[M::T],
+    y: &mut [M::T],
 ) {
     y.fill(M::T::zero());
 }
 
 fn exponential_decay_time_root_sens_adj_batched<M: Matrix>(
-    _x: &M::V,
-    _p: &M::V,
+    _x: &[M::T],
+    _p: &[M::T],
     _t: M::T,
-    _v: &M::V,
-    y: &mut M::V,
+    _v: &[M::T],
+    y: &mut [M::T],
 ) {
     y.fill(M::T::zero());
 }
 
 fn exponential_decay_constant_reset_adj_batched<M: Matrix>(
-    _x: &M::V,
-    _p: &M::V,
+    _x: &[M::T],
+    _p: &[M::T],
     _t: M::T,
-    _v: &M::V,
-    y: &mut M::V,
+    _v: &[M::T],
+    y: &mut [M::T],
 ) {
     y.fill(M::T::zero());
 }
 
 fn exponential_decay_constant_reset_sens_adj_batched<M: Matrix>(
-    _x: &M::V,
-    _p: &M::V,
+    _x: &[M::T],
+    _p: &[M::T],
     _t: M::T,
-    _v: &M::V,
-    y: &mut M::V,
+    _v: &[M::T],
+    y: &mut [M::T],
 ) {
     y.fill(M::T::zero());
 }
 
 fn exponential_decay_two_root_jac<M: Matrix>(
-    _x: &M::V,
-    _p: &M::V,
+    _x: &[M::T],
+    _p: &[M::T],
     _t: M::T,
-    v: &M::V,
-    y: &mut M::V,
+    v: &[M::T],
+    y: &mut [M::T],
 ) {
-    y.for_each_batch([v], |y, [v], _| {
-        y[0] = v[0];
-        y[1] = v[0];
-    });
+    y[0] = v[0];
+    y[1] = v[0];
 }
 
 fn exponential_decay_two_root_sens<M: Matrix>(
-    _x: &M::V,
-    _p: &M::V,
+    _x: &[M::T],
+    _p: &[M::T],
     _t: M::T,
-    _v: &M::V,
-    y: &mut M::V,
+    _v: &[M::T],
+    y: &mut [M::T],
 ) {
     y.fill(M::T::zero());
 }

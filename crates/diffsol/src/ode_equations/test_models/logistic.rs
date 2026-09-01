@@ -27,41 +27,31 @@ fn logistic_adjoint_problem<M: Matrix + 'static>(
         .param_rtol(1e-6)
         .param_atol([1e-6])
         .rhs_adjoint_implicit(
-            |x: &M::V, p: &M::V, _t: M::T, y: &mut M::V| {
-                y.for_each_batch([x, p], |y, [x, p], _| {
-                    let (r, k, u) = (p[0], p[1], x[0]);
-                    y[0] = r * u * (M::T::one() - u / k);
-                });
+            |x: &[M::T], p: &[M::T], _t: M::T, y: &mut [M::T]| {
+                let (r, k, u) = (p[0], p[1], x[0]);
+                y[0] = r * u * (M::T::one() - u / k);
             },
-            |x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V| {
-                y.for_each_batch([x, p, v], |out, [x, p, v], _| {
-                    let (r, k, u) = (p[0], p[1], x[0]);
-                    out[0] = r * (M::T::one() - M::T::from_f64(2.0).unwrap() * u / k) * v[0]
-                });
+            |x: &[M::T], p: &[M::T], _t: M::T, v: &[M::T], y: &mut [M::T]| {
+                let (r, k, u) = (p[0], p[1], x[0]);
+                y[0] = r * (M::T::one() - M::T::from_f64(2.0).unwrap() * u / k) * v[0];
             },
-            |x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V| {
-                y.for_each_batch([x, p, v], |out, [x, p, v], _| {
-                    let (r, k, u) = (p[0], p[1], x[0]);
-                    out[0] = -r * (M::T::one() - M::T::from_f64(2.0).unwrap() * u / k) * v[0]
-                });
+            |x: &[M::T], p: &[M::T], _t: M::T, v: &[M::T], y: &mut [M::T]| {
+                let (r, k, u) = (p[0], p[1], x[0]);
+                y[0] = -r * (M::T::one() - M::T::from_f64(2.0).unwrap() * u / k) * v[0];
             },
-            |x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V| {
-                y.for_each_batch([x, p, v], |out, [x, p, v], _| {
-                    let (r, k, u) = (p[0], p[1], x[0]);
-                    out[0] = -u * (M::T::one() - u / k) * v[0];
-                    out[1] = -(r * u * u / (k * k) * v[0]);
-                    out[2] = M::T::zero();
-                });
+            |x: &[M::T], p: &[M::T], _t: M::T, v: &[M::T], y: &mut [M::T]| {
+                let (r, k, u) = (p[0], p[1], x[0]);
+                y[0] = -u * (M::T::one() - u / k) * v[0];
+                y[1] = -(r * u * u / (k * k) * v[0]);
+                y[2] = M::T::zero();
             },
         )
         .init_adjoint(
-            |p: &M::V, _t: M::T, y: &mut M::V| y.for_each_batch([p], |y, [p], _| y[0] = p[2]),
-            |_p: &M::V, _t: M::T, v: &M::V, y: &mut M::V| {
-                y.for_each_batch([v], |out, [v], _| {
-                    out[0] = M::T::zero();
-                    out[1] = M::T::zero();
-                    out[2] = -v[0];
-                });
+            |p: &[M::T], _t: M::T, y: &mut [M::T]| y[0] = p[2],
+            |_p: &[M::T], _t: M::T, v: &[M::T], y: &mut [M::T]| {
+                y[0] = M::T::zero();
+                y[1] = M::T::zero();
+                y[2] = -v[0];
             },
             1,
         )

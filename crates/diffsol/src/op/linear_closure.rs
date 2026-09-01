@@ -2,7 +2,7 @@ use std::cell::RefCell;
 
 use crate::{
     find_matrix_non_zeros, jacobian::JacobianColoring, matrix::sparsity::MatrixSparsity, LinearOp,
-    Matrix, Op,
+    Matrix, Op, Vector,
 };
 
 use super::{BuilderOp, OpStatistics, ParameterisedOp};
@@ -10,7 +10,7 @@ use super::{BuilderOp, OpStatistics, ParameterisedOp};
 pub struct LinearClosure<M, F>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
+    F: Fn(&[M::T], &[M::T], M::T, M::T, &mut [M::T]),
 {
     func: F,
     nstates: usize,
@@ -25,7 +25,7 @@ where
 impl<M, F> LinearClosure<M, F>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
+    F: Fn(&[M::T], &[M::T], M::T, M::T, &mut [M::T]),
 {
     pub fn new(func: F, nstates: usize, nout: usize, nparams: usize, ctx: M::C) -> Self {
         Self {
@@ -58,7 +58,7 @@ where
 impl<M, F> Op for LinearClosure<M, F>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
+    F: Fn(&[M::T], &[M::T], M::T, M::T, &mut [M::T]),
 {
     type V = M::V;
     type T = M::T;
@@ -85,7 +85,7 @@ where
 impl<M, F> BuilderOp for LinearClosure<M, F>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
+    F: Fn(&[M::T], &[M::T], M::T, M::T, &mut [M::T]),
 {
     fn calculate_sparsity(&mut self, _y0: &Self::V, t0: Self::T, p: &Self::V) {
         self.calculate_sparsity(t0, p);
@@ -104,11 +104,11 @@ where
 impl<M, F> LinearOp for ParameterisedOp<'_, LinearClosure<M, F>>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
+    F: Fn(&[M::T], &[M::T], M::T, M::T, &mut [M::T]),
 {
     fn gemv_inplace(&self, x: &M::V, t: M::T, beta: M::T, y: &mut M::V) {
         self.op.statistics.borrow_mut().increment_call();
-        (self.op.func)(x, self.p, t, beta, y)
+        y.for_each_batch([x, self.p], |y, [x, p], _| (self.op.func)(x, p, t, beta, y));
     }
 
     fn matrix_inplace(&self, t: Self::T, y: &mut Self::M) {

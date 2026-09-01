@@ -185,20 +185,20 @@ impl<M: Matrix, S: NlNonLinearSolver<M>> NonLinearSolver<M> for S {
 pub mod tests {
     use crate::{
         linear_solver::nalgebra::lu::LU,
-        matrix::{dense_nalgebra_serial::NalgebraMat, MatrixCommon},
+        matrix::dense_nalgebra_serial::NalgebraMat,
         op::{closure::Closure, ParameterisedOp},
         scale, BacktrackingLineSearch, DenseMatrix, NalgebraVec, NoLineSearch, Op, Vector,
     };
 
     use super::*;
-    use num_traits::{FromPrimitive, One, Zero};
+    use num_traits::{FromPrimitive, Zero};
 
     #[allow(clippy::type_complexity)]
     pub fn get_square_problem<M>() -> (
         Closure<
             M,
-            impl Fn(&M::V, &M::V, M::T, &mut M::V),
-            impl Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+            impl Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
+            impl Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
         >,
         M::T,
         M::V,
@@ -207,32 +207,27 @@ pub mod tests {
     where
         M: DenseMatrix + 'static,
     {
-        let jac1 = M::from_diagonal(&M::V::from_vec(
-            vec![M::T::from_f64(2.0).unwrap(), M::T::from_f64(2.0).unwrap()],
-            Default::default(),
-        ));
-        let jac2 = jac1.clone();
-        let p = M::V::zeros(0, jac1.context().clone());
-        let eights = M::V::from_vec(
-            vec![M::T::from_f64(8.0).unwrap(), M::T::from_f64(8.0).unwrap()],
-            jac1.context().clone(),
-        );
+        let ctx = M::C::default();
+        let p = M::V::zeros(0, ctx.clone());
+        let two = M::T::from_f64(2.0).unwrap();
+        let eight = M::T::from_f64(8.0).unwrap();
         let op = Closure::new(
-            // 0 = J * x * x - 8
-            move |x: &<M as MatrixCommon>::V, _p: &<M as MatrixCommon>::V, _t, y| {
-                jac1.gemv(M::T::one(), x, M::T::zero(), y); // y = J * x
-                y.component_mul_assign(x);
-                y.axpy(-M::T::one(), &eights, M::T::one());
+            // 0 = 2 * x * x - 8
+            move |x: &[M::T], _p: &[M::T], _t, y: &mut [M::T]| {
+                for (y, x) in y.iter_mut().zip(x.iter()) {
+                    *y = two * *x * *x - eight;
+                }
             },
-            // J = 2 * J * x * dx
-            move |x: &<M as MatrixCommon>::V, _p: &<M as MatrixCommon>::V, _t, v, y| {
-                jac2.gemv(M::T::from_f64(2.0).unwrap(), x, M::T::zero(), y); // y = 2 * J * x
-                y.component_mul_assign(v);
+            // J v = 4 * x * v
+            move |x: &[M::T], _p: &[M::T], _t, v: &[M::T], y: &mut [M::T]| {
+                for ((y, x), v) in y.iter_mut().zip(x.iter()).zip(v.iter()) {
+                    *y = two * two * *x * *v;
+                }
             },
             2,
             2,
             p.len(),
-            p.context().clone(),
+            ctx,
         );
         let rtol = M::T::from_f64(1e-6).unwrap();
         let atol = M::V::from_vec(

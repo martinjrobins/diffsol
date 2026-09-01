@@ -2,10 +2,9 @@ use std::{cell::RefCell, marker::PhantomData};
 
 use crate::{
     Matrix, NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens,
-    NonLinearOpSensAdjoint, Op, Scale, Vector,
+    NonLinearOpSensAdjoint, Op, Vector,
 };
-use num_traits::{One, Zero};
-use std::ops::MulAssign;
+use num_traits::Zero;
 
 use super::{BuilderOp, OpStatistics, ParameterisedOp};
 
@@ -85,32 +84,36 @@ mod autodiff_impl {
     use crate::Vector;
     use std::autodiff::{autodiff_forward, autodiff_reverse};
 
-    impl<M: Matrix, F: Fn(&M::V, &M::V, M::T, &mut M::V)> ClosureAutodiff<M, F> {
+    impl<M: Matrix, F: Fn(&[M::T], &[M::T], M::T, &mut [M::T])> ClosureAutodiff<M, F> {
         #[autodiff_forward(call_jvp, Const, Dual, Const, Const, Dual)]
         #[autodiff_forward(call_sens_jvp, Const, Const, Dual, Const, Dual)]
         #[autodiff_reverse(call_vjp, Const, Duplicated, Const, Const, Duplicated)]
         #[autodiff_reverse(call_sens_vjp, Const, Const, Duplicated, Const, Duplicated)]
-        pub fn call_func(&self, x: &M::V, p: &M::V, t: M::T, y: &mut M::V) {
+        pub fn call_func(&self, x: &[M::T], p: &[M::T], t: M::T, y: &mut [M::T]) {
             (self.func)(x, p, t, y)
         }
     }
 
-    impl<M: Matrix, F: Fn(&M::V, &M::V, M::T, &mut M::V)> NonLinearOp
+    impl<M: Matrix, F: Fn(&[M::T], &[M::T], M::T, &mut [M::T])> NonLinearOp
         for ParameterisedOp<'_, ClosureAutodiff<M, F>>
     {
         fn call_inplace(&self, x: &M::V, t: M::T, y: &mut M::V) {
             self.op.statistics.borrow_mut().increment_call();
-            self.op.call_func(x, self.p, t, y);
+            y.for_each_batch([x, self.p], |y, [x, p], _| self.op.call_func(x, p, t, y));
         }
     }
 
-    impl<M: Matrix, F: Fn(&M::V, &M::V, M::T, &mut M::V)> NonLinearOpJacobian
+    impl<M: Matrix, F: Fn(&[M::T], &[M::T], M::T, &mut [M::T])> NonLinearOpJacobian
         for ParameterisedOp<'_, ClosureAutodiff<M, F>>
     {
         fn jac_mul_inplace(&self, x: &M::V, t: M::T, v: &M::V, y: &mut M::V) {
             self.op.statistics.borrow_mut().increment_jac_mul();
             let mut tmp_nstates = self.op.tmp_nstates.borrow_mut();
-            self.op.call_jvp(x, v, self.p, t, &mut tmp_nstates, y);
+            <M::V as Vector>::for_each_batch_mut(
+                [y, &mut tmp_nstates],
+                [x, v, self.p],
+                |[y, tmp_nstates], [x, v, p], _| self.op.call_jvp(x, v, p, t, tmp_nstates, y),
+            );
         }
         fn jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
             self.op.statistics.borrow_mut().increment_matrix();
@@ -121,27 +124,40 @@ mod autodiff_impl {
         }
     }
 
-    impl<M: Matrix, F: Fn(&M::V, &M::V, M::T, &mut M::V)> NonLinearOpSens
+    impl<M: Matrix, F: Fn(&[M::T], &[M::T], M::T, &mut [M::T])> NonLinearOpSens
         for ParameterisedOp<'_, ClosureAutodiff<M, F>>
     {
         fn sens_mul_inplace(&self, x: &M::V, t: M::T, v: &M::V, y: &mut M::V) {
             let mut tmp_nstates = self.op.tmp_nstates.borrow_mut();
-            self.op.call_sens_jvp(x, self.p, v, t, &mut tmp_nstates, y);
+            <M::V as Vector>::for_each_batch_mut(
+                [y, &mut tmp_nstates],
+                [x, self.p, v],
+                |[y, tmp_nstates], [x, p, v], _| self.op.call_sens_jvp(x, p, v, t, tmp_nstates, y),
+            );
         }
     }
 
-    impl<M: Matrix, F: Fn(&M::V, &M::V, M::T, &mut M::V)> NonLinearOpAdjoint
+    impl<M: Matrix, F: Fn(&[M::T], &[M::T], M::T, &mut [M::T])> NonLinearOpAdjoint
         for ParameterisedOp<'_, ClosureAutodiff<M, F>>
     {
         fn jac_transpose_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
             self.op.statistics.borrow_mut().increment_jac_adj_mul();
             let mut tmp_nstates = self.op.tmp_nstates.borrow_mut();
             let mut tmp_nstates2 = self.op.tmp_nstates2.borrow_mut();
-            tmp_nstates.copy_from(v);
-            y.fill(M::T::zero());
-            self.op
-                .call_vjp(x, y, self.p, t, &mut tmp_nstates2, &mut tmp_nstates);
-            y.mul_assign(Scale(-M::T::one()));
+            <M::V as Vector>::for_each_batch_mut(
+                [y, &mut tmp_nstates, &mut tmp_nstates2],
+                [x, v, self.p],
+                |[y, tmp_nstates, tmp_nstates2], [x, v, p], _| {
+                    // the reverse pass accumulates into `y`, so it starts at zero and the seed
+                    // goes in the output adjoint
+                    tmp_nstates.copy_from_slice(v);
+                    y.fill(M::T::zero());
+                    self.op.call_vjp(x, y, p, t, tmp_nstates2, tmp_nstates);
+                    for y in y.iter_mut() {
+                        *y = -*y;
+                    }
+                },
+            );
         }
         fn adjoint_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
             self._default_adjoint_inplace(x, t, y);
@@ -151,7 +167,7 @@ mod autodiff_impl {
         }
     }
 
-    impl<M: Matrix, F: Fn(&M::V, &M::V, M::T, &mut M::V)> NonLinearOpSensAdjoint
+    impl<M: Matrix, F: Fn(&[M::T], &[M::T], M::T, &mut [M::T])> NonLinearOpSensAdjoint
         for ParameterisedOp<'_, ClosureAutodiff<M, F>>
     {
         fn sens_transpose_mul_inplace(
@@ -163,11 +179,18 @@ mod autodiff_impl {
         ) {
             let mut tmp_nstates = self.op.tmp_nstates.borrow_mut();
             let mut tmp_nstates2 = self.op.tmp_nstates2.borrow_mut();
-            tmp_nstates.copy_from(&v);
-            y.fill(M::T::zero());
-            self.op
-                .call_sens_vjp(x, self.p, y, t, &mut tmp_nstates2, &mut tmp_nstates);
-            y.mul_assign(Scale(-M::T::one()));
+            <M::V as Vector>::for_each_batch_mut(
+                [y, &mut tmp_nstates, &mut tmp_nstates2],
+                [x, v, self.p],
+                |[y, tmp_nstates, tmp_nstates2], [x, v, p], _| {
+                    tmp_nstates.copy_from_slice(v);
+                    y.fill(M::T::zero());
+                    self.op.call_sens_vjp(x, p, y, t, tmp_nstates2, tmp_nstates);
+                    for y in y.iter_mut() {
+                        *y = -*y;
+                    }
+                },
+            );
         }
         fn sens_adjoint_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
             self._default_sens_adjoint_inplace(x, t, y);
@@ -191,7 +214,7 @@ mod tests {
     type M = NalgebraMat<f64>;
     type V = NalgebraVec<f64>;
 
-    fn nonlinear(x: &V, p: &V, t: f64, y: &mut V) {
+    fn nonlinear(x: &[f64], p: &[f64], t: f64, y: &mut [f64]) {
         y[0] = p[0] * x[0] * x[0] + 2.0 * x[1] + t;
         y[1] = 3.0 * x[0] + p[1] * x[1] - t;
     }

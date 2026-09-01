@@ -1,21 +1,22 @@
 use crate::{
-    ode_solver::problem::OdeSolverSolution, scalar::scale, Context, DenseMatrix, OdeBuilder,
-    OdeEquationsImplicit, OdeSolverProblem, Vector,
+    ode_solver::problem::OdeSolverSolution, Context, DenseMatrix, OdeBuilder, OdeEquationsImplicit,
+    OdeSolverProblem,
 };
 use num_traits::{FromPrimitive, One};
-use std::ops::MulAssign;
 
 // dy/dt = y^2
-fn rhs<M: DenseMatrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
-    y.copy_from(x);
-    y.component_mul_assign(x);
+fn rhs<M: DenseMatrix>(x: &[M::T], _p: &[M::T], _t: M::T, y: &mut [M::T]) {
+    for (y, x) in y.iter_mut().zip(x.iter()) {
+        *y = *x * *x;
+    }
 }
 
 // Jv = 2yv
-fn rhs_jac<M: DenseMatrix>(x: &M::V, _p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
-    y.copy_from(v);
-    y.component_mul_assign(x);
-    y.mul_assign(scale(M::T::from_f64(2.).unwrap()));
+fn rhs_jac<M: DenseMatrix>(x: &[M::T], _p: &[M::T], _t: M::T, v: &[M::T], y: &mut [M::T]) {
+    let two = M::T::from_f64(2.).unwrap();
+    for ((y, x), v) in y.iter_mut().zip(x.iter()).zip(v.iter()) {
+        *y = two * *x * *v;
+    }
 }
 
 #[allow(clippy::type_complexity)]
