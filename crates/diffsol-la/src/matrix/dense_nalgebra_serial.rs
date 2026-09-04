@@ -568,6 +568,10 @@ impl<T: NalgebraScalar> DenseMatrix for NalgebraMat<T> {
         let c = self.col(0, j);
         self.data[(i, c)] = v;
     }
+    fn set_index_batch(&mut self, batch: usize, i: usize, j: usize, value: T) {
+        let c = self.col(batch, j);
+        self.data[(i, c)] = value;
+    }
     fn column(&self, i: usize) -> NalgebraVecRef<'_, T> {
         if self.context.nbatch() == 1 {
             return NalgebraVecRef {

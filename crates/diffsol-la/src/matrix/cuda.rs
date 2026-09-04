@@ -478,6 +478,13 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
         self.set_index(i, j, value);
     }
 
+    fn set_index_batch(&mut self, batch: IndexType, i: IndexType, j: IndexType, value: Self::T) {
+        // batches are contiguous blocks of `ncols` columns, so batch `batch`'s column `j` is
+        // physical column `batch * ncols + j` (see `Matrix::zeros`)
+        let j = batch * self.ncols() + j;
+        self.set_index(i, j, value);
+    }
+
     fn column(&self, i: usize) -> <Self::V as Vector>::View<'_> {
         let nrows = self.nrows();
         CudaVecRef {

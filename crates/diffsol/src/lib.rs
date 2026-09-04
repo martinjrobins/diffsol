@@ -379,7 +379,7 @@ pub use diffsol_la::{Context, FaerContext, NalgebraContext};
 pub use linear_solver::KLU;
 
 #[cfg(feature = "diffsl")]
-pub use ode_equations::diffsl::{DiffSl, DiffSlContext};
+pub use ode_equations::diffsl::{DiffSl, DiffSlContext, DiffSlDeps};
 
 pub use diffsol_la::{
     DefaultSolver, DenseMatrix, FaerMat, FaerSparseMat, Matrix, MatrixCommon, NalgebraMat,

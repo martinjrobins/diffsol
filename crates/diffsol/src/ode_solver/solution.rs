@@ -138,12 +138,15 @@ impl<V: DefaultDenseMatrix> Solution<V> {
         if let Some(OdeSolverStopReason::RootFound(t_root, _)) = self.stop_reason {
             // the output operator's parameter Jacobian; `Solution` cannot name the equations'
             // matrix type, so it is allocated here (once, at a root)
-            let mut out_sens = Eqn::M::new_from_sparsity(
-                problem.eqn.nout(),
-                problem.eqn.nparams(),
-                problem.eqn.out().and_then(|out| out.sens_sparsity()),
-                problem.context().clone(),
-            );
+            let mut out_sens = match problem.eqn.out() {
+                Some(out) => Eqn::M::new_from_sparsity(
+                    problem.eqn.nout(),
+                    problem.eqn.nparams(),
+                    out.sens_sparsity(),
+                    problem.context().clone(),
+                ),
+                None => Eqn::M::zeros(0, 0, problem.context().clone()),
+            };
             let ncols = match self.mode {
                 SolutionMode::Tevals(col) if col < self.ts.len() => {
                     crate::ode_solver::method::write_state_out(

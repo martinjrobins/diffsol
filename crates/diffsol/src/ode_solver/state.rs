@@ -374,13 +374,13 @@ impl<V: Vector> StateRefMut<'_, V> {
             Eqn::M::new_from_sparsity(nroots, nparams, root_op.sens_sparsity(), ctx);
 
         reset_op.jac_mul_inplace(&y_before, t, &s_before, &mut s_plus);
+        // parameter Jacobians are evaluated as matrices at the problem's own batch count and
+        // reshaped onto the lanes: column `p` belongs in lane `b * nparams + p`.
         reset_op.sens_inplace(&y_before, t, &mut reset_sens_mat);
         reset_sens_mat.add_columns_to_batched_vector(&mut reset_sens);
         s_plus += &reset_sens;
 
         root_op.jac_mul_inplace(&y_before, t, &s_before, &mut root_jac_s);
-        // parameter jacobians are evaluated as matrices at the problem's own batch count and
-        // reshaped onto the lanes: column `p` belongs in lane `b * nparams + p`.
         root_op.sens_inplace(&y_before, t, &mut root_sens_mat);
         root_sens_mat.add_columns_to_batched_vector(&mut root_sens);
 

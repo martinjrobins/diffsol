@@ -55,12 +55,11 @@ where
 
         // the output operator's parameter Jacobian, at the problem's own batch count; `Solution`
         // cannot name the equations' matrix type, so it is owned here
-        let mut out_sens = <Eqn as Op>::M::new_from_sparsity(
-            nout,
-            nparams,
-            self.problem().eqn.out().and_then(|out| out.sens_sparsity()),
-            ctx,
-        );
+        // with no out operator there is no `g_p` term at all
+        let mut out_sens = match self.problem().eqn.out() {
+            Some(out) => <Eqn as Op>::M::new_from_sparsity(nout, nparams, out.sens_sparsity(), ctx),
+            None => <Eqn as Op>::M::zeros(0, 0, ctx),
+        };
 
         let (stop_reason, col) = solve_dense_sensitivities(
             &mut soln.ys,
@@ -161,12 +160,12 @@ where
         );
         // the output operator's parameter Jacobian
         let nout_sens = self.problem().eqn.out().map(|out| out.nout()).unwrap_or(0);
-        let mut tmp_out_sens = <Eqn as Op>::M::new_from_sparsity(
-            nout_sens,
-            nparams,
-            self.problem().eqn.out().and_then(|out| out.sens_sparsity()),
-            ctx,
-        );
+        let mut tmp_out_sens = match self.problem().eqn.out() {
+            Some(out) => {
+                <Eqn as Op>::M::new_from_sparsity(nout_sens, nparams, out.sens_sparsity(), ctx)
+            }
+            None => <Eqn as Op>::M::zeros(0, 0, ctx),
+        };
 
         // check t_eval is increasing and all values are >= the current time
         let t0 = self.state().t;

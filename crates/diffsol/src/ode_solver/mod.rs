@@ -224,11 +224,11 @@ mod tests {
         let nparams = problem.eqn.nparams();
         let nout = problem.eqn.nout();
         let ctx = problem.eqn.context();
-        let mut dgdp = <Eqn::V as DefaultDenseMatrix>::M::zeros(nparams, nout, ctx.clone());
         let final_time = soln.solution_points.last().unwrap().t;
         let mut p_0 = Eqn::V::zeros(nparams, ctx.clone());
         problem.eqn.get_params(&mut p_0);
         let nbatch = p_0.context().nbatch();
+        let mut dgdp = <Eqn::V as DefaultDenseMatrix>::M::zeros(nparams, nout, ctx.clone());
         let h_base = Eqn::T::from_f64(1e-6).unwrap();
         let mut h = Eqn::V::from_element(nparams, h_base, ctx.clone());
         h.axpy(h_base, &p_0, Eqn::T::one());
@@ -268,7 +268,7 @@ mod tests {
                 let denom = Eqn::T::from_f64(2.0).unwrap() * hb;
                 for j in 0..nout {
                     let delta_val = delta_full.get_batch(b).get_index(j) / denom;
-                    dgdp.set_index(i, b * nout + j, delta_val);
+                    dgdp.set_index_batch(b, i, j, delta_val);
                 }
             }
         }
@@ -345,11 +345,10 @@ mod tests {
         let nparams = problem.eqn.nparams();
         let nout = 2;
         let ctx = problem.eqn.context();
-        let mut dgdp = <Eqn::V as DefaultDenseMatrix>::M::zeros(nparams, nout, ctx.clone());
-
         let mut p_0 = ctx.vector_zeros(nparams);
         problem.eqn.get_params(&mut p_0);
         let nbatch = p_0.context().nbatch();
+        let mut dgdp = <Eqn::V as DefaultDenseMatrix>::M::zeros(nparams, nout, ctx.clone());
         let h_base = Eqn::T::from_f64(1e-6).unwrap();
         let mut h = Eqn::V::from_element(nparams, h_base, ctx.clone());
         h.axpy(h_base, &p_0, Eqn::T::one());
@@ -399,7 +398,7 @@ mod tests {
                 let denom = Eqn::T::from_f64(2.0).unwrap() * hb;
                 for j in 0..nout {
                     let delta_val = delta_full.get_batch(b).get_index(j) / denom;
-                    dgdp.set_index(i, b * nout + j, delta_val);
+                    dgdp.set_index_batch(b, i, j, delta_val);
                 }
             }
         }

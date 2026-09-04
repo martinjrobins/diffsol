@@ -391,6 +391,10 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
         ctx: Self::C,
     ) -> Result<Self, LaError> {
         assert_eq!(values.len(), indices.len() * ctx.nbatch());
+        if indices.is_empty() {
+            // `empty pattern is just a zero matrix
+            return Ok(Self::zeros(nrows, ncols, ctx));
+        }
         let data = values
             .chunks(indices.len())
             .map(|values| {

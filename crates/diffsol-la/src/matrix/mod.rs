@@ -385,6 +385,12 @@ pub trait DenseMatrix:
     /// `nbatch == 1`. So does `IndexMut`.
     fn set_index(&mut self, i: IndexType, j: IndexType, value: Self::T);
 
+    /// Set the value at the given row and column indices, in a single batch.
+    ///
+    /// The batch-aware counterpart to [`Self::set_index`]: `(i, j)` alone is ambiguous once
+    /// `nbatch > 1`, so the batch is named explicitly. Mirrors [`Vector::get_batch_mut`].
+    fn set_index_batch(&mut self, batch: IndexType, i: IndexType, j: IndexType, value: Self::T);
+
     /// Get the value at the given row and column indices.
     ///
     /// Scalar access is single-system, as it is for [`Vector::get_index`]: panics unless
@@ -1830,6 +1836,28 @@ pub(crate) mod tests {
     // --- Batched DenseMatrix-specific tests ---
 
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_batched_set_index_batch<M: DenseMatrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        // 2x2 matrix, nbatch=2: every (batch, row, col) gets a value that identifies it
+        let mut a = M::zeros(2, 2, ctx);
+        let val = |b: usize, i: usize, j: usize| f::<M>((100 * b + 10 * i + j) as f64);
+        for b in 0..2 {
+            for i in 0..2 {
+                for j in 0..2 {
+                    a.set_index_batch(b, i, j, val(b, i, j));
+                }
+            }
+        }
+        for b in 0..2 {
+            for i in 0..2 {
+                for j in 0..2 {
+                    assert_eq!(mat_at(&a, b, i, j), val(b, i, j), "batch {b}, ({i}, {j})");
+                }
+            }
+        }
+    }
+
     pub fn test_batched_from_vec<M: DenseMatrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         // 2x2 matrix, nbatch=2: physical is 2x4
@@ -2770,6 +2798,10 @@ macro_rules! generate_dense_matrix_tests_batched {
             #[test]
             fn [<test_batched_from_vec_ $suffix>]() {
                 $crate::matrix::tests::test_batched_from_vec::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_set_index_batch_ $suffix>]() {
+                $crate::matrix::tests::test_batched_set_index_batch::<$M>($ctx2);
             }
             #[test]
             fn [<test_batched_gemv_o_broadcast_x_ $suffix>]() {

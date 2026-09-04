@@ -1790,7 +1790,7 @@ mod test {
         number_of_linear_solver_setups: 14
         number_of_steps: 56
         number_of_error_test_failures: 1
-        number_of_nonlinear_solver_iterations: 175
+        number_of_nonlinear_solver_iterations: 118
         number_of_nonlinear_solver_fails: 0
         number_of_linear_solver_setups_from_checkpoint: 1
         number_of_linear_solver_setups_from_first_convergence_fail: 0

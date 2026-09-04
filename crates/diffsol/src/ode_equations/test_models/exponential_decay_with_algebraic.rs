@@ -552,10 +552,22 @@ mod tests {
         let v = NalgebraVec::from_vec(vec![2.0, 3.0, 4.0], *ctx);
         let v_in = NalgebraVec::from_vec(vec![5.0], *ctx);
         let p = NalgebraVec::from_vec(vec![0.1], *ctx);
+        let (xs, ps, vs, v_ins) = (
+            x.batch_as_slice(0),
+            p.batch_as_slice(0),
+            v.batch_as_slice(0),
+            v_in.batch_as_slice(0),
+        );
 
         // check the adjoint jacobian
         let mut y_check = NalgebraVec::zeros(3, *ctx);
-        exponential_decay_with_algebraic_adjoint::<NalgebraMat<f64>>(&x, &p, t, &v, &mut y_check);
+        exponential_decay_with_algebraic_adjoint::<NalgebraMat<f64>>(
+            xs,
+            ps,
+            t,
+            vs,
+            y_check.batch_as_mut_slice(0),
+        );
         let mut y = NalgebraVec::zeros(3, *ctx);
         for _i in 0..2 {
             problem
@@ -567,7 +579,13 @@ mod tests {
 
         // check the sens jacobian
         let mut y_check = NalgebraVec::zeros(3, *ctx);
-        exponential_decay_with_algebraic_sens::<NalgebraMat<f64>>(&x, &p, t, &v_in, &mut y_check);
+        exponential_decay_with_algebraic_sens::<NalgebraMat<f64>>(
+            xs,
+            ps,
+            t,
+            v_ins,
+            y_check.batch_as_mut_slice(0),
+        );
         let mut y = NalgebraVec::zeros(3, *ctx);
         for _i in 0..2 {
             problem.eqn().rhs().sens_mul_inplace(&x, t, &v_in, &mut y);
@@ -577,11 +595,11 @@ mod tests {
         // check the sens adjoint jacobian
         let mut y_check = NalgebraVec::zeros(1, *ctx);
         exponential_decay_with_algebraic_sens_adjoint::<NalgebraMat<f64>>(
-            &x,
-            &p,
+            xs,
+            ps,
             t,
-            &v,
-            &mut y_check,
+            vs,
+            y_check.batch_as_mut_slice(0),
         );
         let mut y = NalgebraVec::zeros(1, *ctx);
         for _i in 0..2 {
@@ -595,10 +613,10 @@ mod tests {
         // check the set_u0 sens adjoint jacobian
         let mut y_check = NalgebraVec::zeros(1, *ctx);
         exponential_decay_with_algebraic_init_sens_adjoint::<NalgebraMat<f64>>(
-            &p,
+            ps,
             t,
-            &v,
-            &mut y_check,
+            vs,
+            y_check.batch_as_mut_slice(0),
         );
         let mut y = NalgebraVec::zeros(1, *ctx);
         for _i in 0..2 {
@@ -611,7 +629,12 @@ mod tests {
 
         // check the set_u0 sens jacobian
         let mut y_check = NalgebraVec::zeros(3, *ctx);
-        exponential_decay_with_algebraic_init_sens::<NalgebraMat<f64>>(&p, t, &v_in, &mut y_check);
+        exponential_decay_with_algebraic_init_sens::<NalgebraMat<f64>>(
+            ps,
+            t,
+            v_ins,
+            y_check.batch_as_mut_slice(0),
+        );
         let mut y = NalgebraVec::zeros(3, *ctx);
         for _i in 0..2 {
             problem.eqn().init().sens_mul_inplace(t, &v_in, &mut y);
@@ -621,11 +644,11 @@ mod tests {
         // check the calc_out jacobian
         let mut y_check = NalgebraVec::zeros(1, *ctx);
         exponential_decay_with_algebraic_out_jac_mul::<NalgebraMat<f64>>(
-            &x,
-            &p,
+            xs,
+            ps,
             t,
-            &v,
-            &mut y_check,
+            vs,
+            y_check.batch_as_mut_slice(0),
         );
         let mut y = NalgebraVec::zeros(1, *ctx);
         for _i in 0..2 {
@@ -640,11 +663,11 @@ mod tests {
         // check the calc_out adjoint jacobian
         let mut y_check = NalgebraVec::zeros(3, *ctx);
         exponential_decay_with_algebraic_out_jac_adj_mul::<NalgebraMat<f64>>(
-            &x,
-            &p,
+            xs,
+            ps,
             t,
-            &v_in,
-            &mut y_check,
+            v_ins,
+            y_check.batch_as_mut_slice(0),
         );
         let mut y = NalgebraVec::zeros(3, *ctx);
         for _i in 0..2 {
@@ -659,11 +682,11 @@ mod tests {
         // check the calc_out sens adjoint jacobian
         let mut y_check = NalgebraVec::zeros(1, *ctx);
         exponential_decay_with_algebraic_out_sens_adj::<NalgebraMat<f64>>(
-            &x,
-            &p,
+            xs,
+            ps,
             t,
-            &v_in,
-            &mut y_check,
+            v_ins,
+            y_check.batch_as_mut_slice(0),
         );
         let mut y = NalgebraVec::zeros(1, *ctx);
         for _i in 0..2 {

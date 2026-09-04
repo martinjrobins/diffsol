@@ -54,18 +54,39 @@ pub struct DiffSlContext<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> {
     has_out: bool,
     nout: usize,
     ctx: M::C,
-    rhs_state_deps: Vec<(usize, usize)>,
-    rhs_input_deps: Vec<(usize, usize)>,
-    mass_state_deps: Vec<(usize, usize)>,
+    deps: DiffSlDeps,
+}
+
+/// The dependency lists the DiffSL compiler reports for a model, one per Jacobian block.
+///
+/// Each list holds the `(row, col)` indices of the structurally non-zero entries, and becomes the
+/// sparsity pattern of the corresponding operator's Jacobian. They are only used when `M` is
+/// sparse; a dense matrix ignores them, so an empty list is fine there.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct DiffSlDeps {
+    /// `df/dy`, the RHS Jacobian
+    pub rhs_state: Vec<(usize, usize)>,
+    /// `df/dp`, the RHS parameter Jacobian
+    pub rhs_input: Vec<(usize, usize)>,
+    /// `dM/dy`, the mass matrix
+    pub mass_state: Vec<(usize, usize)>,
+    /// `du0/dp`, the initial condition's parameter Jacobian
+    pub state0_input: Vec<(usize, usize)>,
+    /// `dg/dy`, the output Jacobian
+    pub out_state: Vec<(usize, usize)>,
+    /// `dg/dp`, the output's parameter Jacobian
+    pub out_input: Vec<(usize, usize)>,
+    /// `dreset/dp`, the reset operator's parameter Jacobian
+    pub reset_input: Vec<(usize, usize)>,
+    /// `dstop/dp`, the root operator's parameter Jacobian
+    pub stop_input: Vec<(usize, usize)>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct DiffSlExternalObject {
     scalar_type: DiffSlExternalScalarType,
     object: Vec<u8>,
-    rhs_state_deps: Vec<(usize, usize)>,
-    rhs_input_deps: Vec<(usize, usize)>,
-    mass_state_deps: Vec<(usize, usize)>,
+    deps: DiffSlDeps,
     include_sensitivities: bool,
 }
 
@@ -93,9 +114,7 @@ fn diffsl_external_scalar_type<T: DiffSlScalar>() -> Result<DiffSlExternalScalar
 impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> DiffSlContext<M, CG> {
     fn new_common(
         compiler: Compiler<CG, M::T>,
-        rhs_state_deps: Vec<(usize, usize)>,
-        rhs_input_deps: Vec<(usize, usize)>,
-        mass_state_deps: Vec<(usize, usize)>,
+        deps: DiffSlDeps,
         ctx: M::C,
     ) -> Result<Self, DiffsolError> {
         let (nstates, nparams, nout, _ndata, nroots, has_mass, has_reset) = compiler.get_dims();
@@ -135,9 +154,7 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> DiffSlContext<M, CG> {
             has_reset,
             has_out,
             ctx,
-            rhs_state_deps,
-            rhs_input_deps,
-            mass_state_deps,
+            deps,
             model_index,
         })
     }
@@ -148,9 +165,7 @@ impl<M: Matrix<T: DiffSlScalar>> DiffSlContext<M, ExternalDynModule<M::T>> {
     pub fn new_external_dynamic(
         path: impl Into<PathBuf>,
         nthreads: usize,
-        rhs_state_deps: Vec<(usize, usize)>,
-        rhs_input_deps: Vec<(usize, usize)>,
-        mass_state_deps: Vec<(usize, usize)>,
+        deps: DiffSlDeps,
         ctx: M::C,
     ) -> Result<Self, DiffsolError> {
         let mode = match nthreads {
@@ -163,13 +178,7 @@ impl<M: Matrix<T: DiffSlScalar>> DiffSlContext<M, ExternalDynModule<M::T>> {
         let compiler = Compiler::from_codegen_module(module, mode)
             .map_err(|e| DiffsolError::DiffslCompilerError(e.to_string()))?;
 
-        Self::new_common(
-            compiler,
-            rhs_state_deps,
-            rhs_input_deps,
-            mass_state_deps,
-            ctx,
-        )
+        Self::new_common(compiler, deps, ctx)
     }
 }
 
@@ -177,9 +186,7 @@ impl<M: Matrix<T: DiffSlScalar>> DiffSlContext<M, ExternalDynModule<M::T>> {
 impl<M: Matrix<T: DiffSlScalar + ExternSymbols>> DiffSlContext<M, ExternalModule<M::T>> {
     pub fn new_external(
         nthreads: usize,
-        rhs_state_deps: Vec<(usize, usize)>,
-        rhs_input_deps: Vec<(usize, usize)>,
-        mass_state_deps: Vec<(usize, usize)>,
+        deps: DiffSlDeps,
         ctx: M::C,
     ) -> Result<Self, DiffsolError> {
         let mode = match nthreads {
@@ -191,13 +198,7 @@ impl<M: Matrix<T: DiffSlScalar + ExternSymbols>> DiffSlContext<M, ExternalModule
         let compiler = Compiler::from_codegen_module(module, mode)
             .map_err(|e| DiffsolError::DiffslCompilerError(e.to_string()))?;
 
-        Self::new_common(
-            compiler,
-            rhs_state_deps,
-            rhs_input_deps,
-            mass_state_deps,
-            ctx,
-        )
+        Self::new_common(compiler, deps, ctx)
     }
 }
 
@@ -205,9 +206,7 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModuleLink + CodegenModuleJit> DiffS
     fn new_from_object(
         object: Vec<u8>,
         nthreads: usize,
-        rhs_state_deps: Vec<(usize, usize)>,
-        rhs_input_deps: Vec<(usize, usize)>,
-        mass_state_deps: Vec<(usize, usize)>,
+        deps: DiffSlDeps,
         ctx: M::C,
     ) -> Result<Self, DiffsolError> {
         let mode = match nthreads {
@@ -218,13 +217,7 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModuleLink + CodegenModuleJit> DiffS
         let compiler = Compiler::from_object_file(object.clone(), mode)
             .map_err(|e| DiffsolError::DiffslCompilerError(e.to_string()))?;
 
-        Self::new_common(
-            compiler,
-            rhs_state_deps,
-            rhs_input_deps,
-            mass_state_deps,
-            ctx,
-        )
+        Self::new_common(compiler, deps, ctx)
     }
 }
 
@@ -253,17 +246,18 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModuleCompile + CodegenModuleJit> Di
             .map_err(|e| DiffsolError::DiffslCompilerError(e.as_error_message(text)))?;
         let compiler = Compiler::from_discrete_model(&model, options, Some(text))
             .map_err(|e| DiffsolError::DiffslCompilerError(e.to_string()))?;
-        let rhs_state_deps = model.take_rhs_state_deps();
-        let rhs_input_deps = model.take_rhs_input_deps();
-        let mass_state_deps = model.take_mass_state_deps();
+        let deps = DiffSlDeps {
+            rhs_state: model.take_rhs_state_deps(),
+            rhs_input: model.take_rhs_input_deps(),
+            mass_state: model.take_mass_state_deps(),
+            state0_input: model.take_state0_input_deps(),
+            out_state: model.take_out_state_deps(),
+            out_input: model.take_out_input_deps(),
+            reset_input: model.take_reset_input_deps(),
+            stop_input: model.take_stop_input_deps(),
+        };
 
-        Self::new_common(
-            compiler,
-            rhs_state_deps,
-            rhs_input_deps,
-            mass_state_deps,
-            ctx,
-        )
+        Self::new_common(compiler, deps, ctx)
     }
 }
 
@@ -303,6 +297,12 @@ pub struct DiffSl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> {
     rhs_sens_coloring: Option<JacobianColoring<M>>,
     rhs_sens_adjoint_sparsity: Option<M::Sparsity>,
     rhs_sens_adjoint_coloring: Option<JacobianColoring<M>>,
+    init_sens_sparsity: Option<M::Sparsity>,
+    out_adjoint_sparsity: Option<M::Sparsity>,
+    out_sens_sparsity: Option<M::Sparsity>,
+    out_sens_adjoint_sparsity: Option<M::Sparsity>,
+    reset_sens_sparsity: Option<M::Sparsity>,
+    root_sens_sparsity: Option<M::Sparsity>,
 }
 
 impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> DiffSl<M, CG> {
@@ -342,6 +342,12 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> DiffSl<M, CG> {
             rhs_sens_sparsity: None,
             rhs_sens_adjoint_coloring: None,
             rhs_sens_adjoint_sparsity: None,
+            init_sens_sparsity: None,
+            out_adjoint_sparsity: None,
+            out_sens_sparsity: None,
+            out_sens_adjoint_sparsity: None,
+            reset_sens_sparsity: None,
+            root_sens_sparsity: None,
         };
         if M::is_sparse() {
             let op = ret.rhs();
@@ -349,7 +355,7 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> DiffSl<M, CG> {
             let n = op.nstates();
             let nparams = op.nparams();
 
-            let non_zeros = ret.context.rhs_state_deps.as_slice();
+            let non_zeros = ret.context.deps.rhs_state.as_slice();
 
             let sparsity = M::Sparsity::try_from_indices(n, n, non_zeros.to_vec())
                 .expect("invalid sparsity pattern");
@@ -365,7 +371,7 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> DiffSl<M, CG> {
             ret.rhs_adjoint_coloring = Some(coloring);
 
             if nparams > 0 && include_sensitivities {
-                let non_zeros = ret.context.rhs_input_deps.as_slice();
+                let non_zeros = ret.context.deps.rhs_input.as_slice();
 
                 let sparsity = M::Sparsity::try_from_indices(n, nparams, non_zeros.to_vec())
                     .expect("invalid sparsity pattern");
@@ -381,7 +387,7 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> DiffSl<M, CG> {
                 ret.rhs_sens_adjoint_coloring = Some(coloring);
             }
 
-            let non_zeros = ret.context.mass_state_deps.as_slice();
+            let non_zeros = ret.context.deps.mass_state.as_slice();
             if let Some(op) = ret.mass() {
                 let ctx = op.context().clone();
                 let sparsity = M::Sparsity::try_from_indices(n, n, non_zeros.to_vec())
@@ -396,6 +402,57 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> DiffSl<M, CG> {
                 let coloring = JacobianColoring::new(&sparsity, &non_zeros, ctx);
                 ret.mass_transpose_sparsity = Some(sparsity);
                 ret.mass_transpose_coloring = Some(coloring);
+            }
+
+            // The out and init operators build their Jacobians column by column rather than
+            // through a coloring, so they only need the pattern.
+            let nout = ret.context.nout;
+            if ret.context.has_out {
+                let non_zeros = ret.context.deps.out_state.as_slice();
+                let non_zeros = non_zeros.iter().map(|(i, j)| (*j, *i)).collect::<Vec<_>>();
+                ret.out_adjoint_sparsity = Some(
+                    M::Sparsity::try_from_indices(n, nout, non_zeros)
+                        .expect("invalid sparsity pattern"),
+                );
+            }
+
+            if nparams > 0 && include_sensitivities {
+                let non_zeros = ret.context.deps.state0_input.as_slice();
+                ret.init_sens_sparsity = Some(
+                    M::Sparsity::try_from_indices(n, nparams, non_zeros.to_vec())
+                        .expect("invalid sparsity pattern"),
+                );
+
+                if ret.context.has_out {
+                    let non_zeros = ret.context.deps.out_input.as_slice();
+                    ret.out_sens_sparsity = Some(
+                        M::Sparsity::try_from_indices(nout, nparams, non_zeros.to_vec())
+                            .expect("invalid sparsity pattern"),
+                    );
+
+                    let non_zeros = non_zeros.iter().map(|(i, j)| (*j, *i)).collect::<Vec<_>>();
+                    ret.out_sens_adjoint_sparsity = Some(
+                        M::Sparsity::try_from_indices(nparams, nout, non_zeros)
+                            .expect("invalid sparsity pattern"),
+                    );
+                }
+
+                if ret.context.has_reset {
+                    let non_zeros = ret.context.deps.reset_input.as_slice();
+                    ret.reset_sens_sparsity = Some(
+                        M::Sparsity::try_from_indices(n, nparams, non_zeros.to_vec())
+                            .expect("invalid sparsity pattern"),
+                    );
+                }
+
+                if ret.context.has_root {
+                    let nroots = ret.context.nroots;
+                    let non_zeros = ret.context.deps.stop_input.as_slice();
+                    ret.root_sens_sparsity = Some(
+                        M::Sparsity::try_from_indices(nroots, nparams, non_zeros.to_vec())
+                            .expect("invalid sparsity pattern"),
+                    );
+                }
             }
         }
         ret
@@ -427,9 +484,8 @@ impl<M: Matrix<T: DiffSlScalar>> DiffSl<M, ExternalDynModule<M::T>> {
     ///
     /// * `path` - The path to the external dynamic library
     /// * `ctx` - The computational context for vector and matrix operations (e.g., CPU, GPU)
-    /// * `rhs_state_deps` - Sparsity pattern for the RHS Jacobian (∂f/∂y) as pairs (row, col). Can be empty if M is dense.
-    /// * `rhs_input_deps` - Sparsity pattern for the RHS sensitivity matrix (∂f/∂p) as pairs (row, col). Can be empty if M is dense or if there are no parameters.
-    /// * `mass_state_deps` - Sparsity pattern for the mass matrix Jacobian (∂M/∂y) as pairs (row, col). Can be empty if there is no mass matrix or if M is dense.
+    /// * `deps` - Sparsity patterns for the operators' Jacobians, as `(row, col)` pairs. Every list
+    ///   can be left empty if M is dense; see [DiffSlDeps].
     /// * `include_sensitivities` - Whether to set up sparsity patterns for sensitivity computations.
     ///   If `true`, enables forward and adjoint sensitivity analysis. Set to `false` to skip
     ///   sensitivity setup for better memory efficiency when sensitivities are not needed.
@@ -441,19 +497,11 @@ impl<M: Matrix<T: DiffSlScalar>> DiffSl<M, ExternalDynModule<M::T>> {
     pub fn from_external_dynamic(
         path: impl Into<PathBuf>,
         ctx: M::C,
-        rhs_state_deps: Vec<(usize, usize)>,
-        rhs_input_deps: Vec<(usize, usize)>,
-        mass_state_deps: Vec<(usize, usize)>,
+        deps: DiffSlDeps,
         include_sensitivities: bool,
     ) -> Result<Self, DiffsolError> {
-        let context = DiffSlContext::<M, ExternalDynModule<M::T>>::new_external_dynamic(
-            path,
-            1,
-            rhs_state_deps,
-            rhs_input_deps,
-            mass_state_deps,
-            ctx,
-        )?;
+        let context =
+            DiffSlContext::<M, ExternalDynModule<M::T>>::new_external_dynamic(path, 1, deps, ctx)?;
         Ok(Self::from_context(context, include_sensitivities))
     }
 }
@@ -465,9 +513,8 @@ impl<M: Matrix<T: DiffSlScalar + ExternSymbols>> DiffSl<M, ExternalModule<M::T>>
     /// # Arguments
     ///
     /// * `ctx` - The computational context for vector and matrix operations (e.g., CPU, GPU)
-    /// * `rhs_state_deps` - Sparsity pattern for the RHS Jacobian (∂f/∂y) as pairs (row, col). Can be empty if M is dense.
-    /// * `rhs_input_deps` - Sparsity pattern for the RHS sensitivity matrix (∂f/∂p) as pairs (row, col). Can be empty if M is dense or if there are no parameters.
-    /// * `mass_state_deps` - Sparsity pattern for the mass matrix Jacobian (∂M/∂y) as pairs (row, col). Can be empty if there is no mass matrix or if M is dense.
+    /// * `deps` - Sparsity patterns for the operators' Jacobians, as `(row, col)` pairs. Every list
+    ///   can be left empty if M is dense; see [DiffSlDeps].
     /// * `include_sensitivities` - Whether to set up sparsity patterns for sensitivity computations.
     ///   If `true`, enables forward and adjoint sensitivity analysis. Set to `false` to skip
     ///   sensitivity setup for better memory efficiency when sensitivities are not needed.
@@ -478,18 +525,10 @@ impl<M: Matrix<T: DiffSlScalar + ExternSymbols>> DiffSl<M, ExternalModule<M::T>>
     /// or an error if the context creation fails.
     pub fn from_external(
         ctx: M::C,
-        rhs_state_deps: Vec<(usize, usize)>,
-        rhs_input_deps: Vec<(usize, usize)>,
-        mass_state_deps: Vec<(usize, usize)>,
+        deps: DiffSlDeps,
         include_sensitivities: bool,
     ) -> Result<Self, DiffsolError> {
-        let context = DiffSlContext::<M, ExternalModule<M::T>>::new_external(
-            1,
-            rhs_state_deps,
-            rhs_input_deps,
-            mass_state_deps,
-            ctx,
-        )?;
+        let context = DiffSlContext::<M, ExternalModule<M::T>>::new_external(1, deps, ctx)?;
         Ok(Self::from_context(context, include_sensitivities))
     }
 }
@@ -537,9 +576,7 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule + CodegenModuleEmit> DiffSl<M
         Ok(DiffSlExternalObject {
             scalar_type: diffsl_external_scalar_type::<M::T>()?,
             object,
-            rhs_state_deps: self.context.rhs_state_deps.clone(),
-            rhs_input_deps: self.context.rhs_input_deps.clone(),
-            mass_state_deps: self.context.mass_state_deps.clone(),
+            deps: self.context.deps.clone(),
             include_sensitivities: self.include_sensitivities,
         })
     }
@@ -563,9 +600,7 @@ where
         let context = DiffSlContext::<M, CG>::new_from_object(
             external_object.object,
             1,
-            external_object.rhs_state_deps,
-            external_object.rhs_input_deps,
-            external_object.mass_state_deps,
+            external_object.deps,
             ctx,
         )?;
         Ok(Self::from_context(
@@ -738,6 +773,10 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> ConstantOp for DiffSlInit<'_
 }
 
 impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> ConstantOpSens for DiffSlInit<'_, M, CG> {
+    fn sens_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        self.0.init_sens_sparsity.clone()
+    }
+
     fn sens_mul_inplace(&self, _t: Self::T, v: &Self::V, y: &mut Self::V) {
         let tmp = self.0.context.tmp.borrow();
         y.for_each_batch([v, &tmp], |y, [v, tmp], _| {
@@ -848,6 +887,10 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpAdjoint for DiffS
 }
 
 impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSens for DiffSlRoot<'_, M, CG> {
+    fn sens_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        self.0.root_sens_sparsity.clone()
+    }
+
     fn sens_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
         let stop = self.0.context.tmp_root.borrow();
         y.for_each_batch([x, v, &stop], |y, [x, v, stop], _| {
@@ -962,6 +1005,10 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpAdjoint for DiffS
 }
 
 impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSens for DiffSlReset<'_, M, CG> {
+    fn sens_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        self.0.reset_sens_sparsity.clone()
+    }
+
     fn sens_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
         let tmp = self.0.context.tmp.borrow();
         y.for_each_batch([x, v, &tmp], |y, [x, v, tmp], _| {
@@ -1052,6 +1099,10 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpJacobian for Diff
 }
 
 impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpAdjoint for DiffSlOut<'_, M, CG> {
+    fn adjoint_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        self.0.out_adjoint_sparsity.clone()
+    }
+
     fn jac_transpose_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
         let tmp_out = self.0.context.tmp_out.borrow();
         let mut tmp2_out = self.0.context.tmp2_out.borrow_mut();
@@ -1084,6 +1135,10 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpAdjoint for DiffS
 }
 
 impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSens for DiffSlOut<'_, M, CG> {
+    fn sens_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        self.0.out_sens_sparsity.clone()
+    }
+
     fn sens_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
         let tmp_out = self.0.context.tmp_out.borrow();
         y.for_each_batch([x, v, &tmp_out], |y, [x, v, tmp_out], _| {
@@ -1108,6 +1163,10 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSens for DiffSlOu
 impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSensAdjoint
     for DiffSlOut<'_, M, CG>
 {
+    fn sens_adjoint_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        self.0.out_sens_adjoint_sparsity.clone()
+    }
+
     fn sens_transpose_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
         let tmp_out = self.0.context.tmp_out.borrow();
         let mut tmp2_out = self.0.context.tmp2_out.borrow_mut();
@@ -2228,9 +2287,7 @@ mod tests {
         )
         .unwrap();
         compiled.set_params(&p);
-        let rhs_state_deps = compiled.context.rhs_state_deps.clone();
-        let rhs_input_deps = compiled.context.rhs_input_deps.clone();
-        let mass_state_deps = compiled.context.mass_state_deps.clone();
+        let deps = compiled.context.deps.clone();
 
         let t = M::T::zero();
         let x_compiled = compiled.init().call(t);
@@ -2266,9 +2323,14 @@ mod tests {
         let reset_imported = imported.reset().unwrap().call(&x_imported, t);
         reset_imported.assert_eq_st(&reset_compiled, M::T::from_f64(1e-10).unwrap());
 
-        assert_eq!(imported.context.rhs_state_deps, rhs_state_deps);
-        assert_eq!(imported.context.rhs_input_deps, rhs_input_deps);
-        assert_eq!(imported.context.mass_state_deps, mass_state_deps);
+        assert_eq!(imported.context.deps.rhs_state, deps.rhs_state);
+        assert_eq!(imported.context.deps.rhs_input, deps.rhs_input);
+        assert_eq!(imported.context.deps.mass_state, deps.mass_state);
+        assert_eq!(imported.context.deps.state0_input, deps.state0_input);
+        assert_eq!(imported.context.deps.out_state, deps.out_state);
+        assert_eq!(imported.context.deps.out_input, deps.out_input);
+        assert_eq!(imported.context.deps.reset_input, deps.reset_input);
+        assert_eq!(imported.context.deps.stop_input, deps.stop_input);
         assert_eq!(imported.include_sensitivities, include_sensitivities);
     }
 
@@ -2285,12 +2347,12 @@ mod tests {
         let compiled =
             DiffSl::<M, crate::LlvmModule>::compile(serialization_test_model(), ctx, true).unwrap();
         let external_object = compiled.to_external_object().unwrap();
-        let rhs_state_deps = external_object.rhs_state_deps.clone();
-        let mass_state_deps = external_object.mass_state_deps.clone();
+        let deps = external_object.deps.clone();
         let include_sensitivities = external_object.include_sensitivities;
 
-        assert!(!rhs_state_deps.is_empty());
-        assert!(!mass_state_deps.is_empty());
+        assert!(!deps.rhs_state.is_empty());
+        assert!(!deps.mass_state.is_empty());
+        assert!(!deps.out_state.is_empty());
         assert!(include_sensitivities);
 
         assert_object_roundtrip::<M>(include_sensitivities);
@@ -2305,6 +2367,10 @@ mod tests {
         assert!(imported.rhs().jacobian_sparsity().is_some());
         assert!(imported.mass().unwrap().sparsity().is_some());
         assert!(imported.rhs_sens_sparsity.is_some());
+        assert!(imported.init_sens_sparsity.is_some());
+        assert!(imported.out_adjoint_sparsity.is_some());
+        assert!(imported.out_sens_sparsity.is_some());
+        assert!(imported.out_sens_adjoint_sparsity.is_some());
     }
 
     #[cfg(feature = "diffsl-llvm")]
@@ -2333,9 +2399,7 @@ mod tests {
         let compiled =
             DiffSl::<M, crate::LlvmModule>::compile(serialization_test_model(), ctx, true).unwrap();
         let external_object = compiled.to_external_object().unwrap();
-        let rhs_state_deps = external_object.rhs_state_deps.clone();
-        let rhs_input_deps = external_object.rhs_input_deps.clone();
-        let mass_state_deps = external_object.mass_state_deps.clone();
+        let deps = external_object.deps.clone();
 
         let mut imported =
             DiffSl::<M, ObjectModule>::from_external_object(external_object, ctx).unwrap();
@@ -2354,9 +2418,14 @@ mod tests {
         let rhs_decoded = decoded.rhs().call(&x_decoded, t);
         rhs_decoded.assert_eq_st(&rhs_imported, 1e-10);
 
-        assert_eq!(decoded.context.rhs_state_deps, rhs_state_deps);
-        assert_eq!(decoded.context.rhs_input_deps, rhs_input_deps);
-        assert_eq!(decoded.context.mass_state_deps, mass_state_deps);
+        assert_eq!(decoded.context.deps.rhs_state, deps.rhs_state);
+        assert_eq!(decoded.context.deps.rhs_input, deps.rhs_input);
+        assert_eq!(decoded.context.deps.mass_state, deps.mass_state);
+        assert_eq!(decoded.context.deps.state0_input, deps.state0_input);
+        assert_eq!(decoded.context.deps.out_state, deps.out_state);
+        assert_eq!(decoded.context.deps.out_input, deps.out_input);
+        assert_eq!(decoded.context.deps.reset_input, deps.reset_input);
+        assert_eq!(decoded.context.deps.stop_input, deps.stop_input);
         assert!(decoded.rhs().jacobian_sparsity().is_some());
     }
 
@@ -2371,20 +2440,21 @@ mod tests {
             <M as crate::matrix::MatrixCommon>::C::default(),
         )
         .unwrap();
-        let expected_rhs_state_deps = context.rhs_state_deps.clone();
-        let expected_rhs_input_deps = context.rhs_input_deps.clone();
-        let expected_mass_state_deps = context.mass_state_deps.clone();
+        let expected = context.deps.clone();
         let eqn = DiffSl::from_context(context, true);
 
         let external_object = eqn.to_external_object().unwrap();
-        let rhs_state_deps = external_object.rhs_state_deps;
-        let rhs_input_deps = external_object.rhs_input_deps;
-        let mass_state_deps = external_object.mass_state_deps;
+        let deps = external_object.deps;
         let include_sensitivities = external_object.include_sensitivities;
 
-        assert_eq!(rhs_state_deps, expected_rhs_state_deps);
-        assert_eq!(rhs_input_deps, expected_rhs_input_deps);
-        assert_eq!(mass_state_deps, expected_mass_state_deps);
+        assert_eq!(deps.rhs_state, expected.rhs_state);
+        assert_eq!(deps.rhs_input, expected.rhs_input);
+        assert_eq!(deps.mass_state, expected.mass_state);
+        assert_eq!(deps.state0_input, expected.state0_input);
+        assert_eq!(deps.out_state, expected.out_state);
+        assert_eq!(deps.out_input, expected.out_input);
+        assert_eq!(deps.reset_input, expected.reset_input);
+        assert_eq!(deps.stop_input, expected.stop_input);
         assert!(include_sensitivities);
     }
 
