@@ -644,11 +644,11 @@ where
         }
     }
 
-    /// Set the mass matrix of the ODE for adjoint sensitivity analysis,
+    /// Set the mass matrix of the ODE for adjoint and forward sensitivity analysis,
     /// using automatic differentiation via `std::autodiff`.
     ///
-    /// The closure has the same signature as [`mass`](Self::mass). The transpose
-    /// mass-matrix product required by the adjoint solve is generated automatically.
+    /// The closure has the same signature as [`mass`](Self::mass). The gradients
+    /// required by the adjoint solve are generated automatically.
     #[cfg(feature = "autodiff")]
     pub fn mass_autodiff<F>(
         self,
@@ -792,7 +792,7 @@ where
         }
     }
 
-    /// Set a root equation for the ODE for adjoint sensitivity analysis,
+    /// Set a root equation for the ODE for adjoint and forward sensitivity analysis,
     /// using automatic differentiation via `std::autodiff`.
     ///
     /// The closure is automatically differentiated to generate the Jacobian
@@ -1004,7 +1004,7 @@ where
         }
     }
 
-    /// Set the reset function of the ODE for adjoint sensitivity analysis,
+    /// Set the reset function of the ODE for adjoint and forward sensitivity analysis,
     /// using automatic differentiation via `std::autodiff`.
     ///
     /// The closure is automatically differentiated to generate Jacobian and

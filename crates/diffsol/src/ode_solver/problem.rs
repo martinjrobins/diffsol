@@ -176,9 +176,8 @@ where
     pub integrate_out: bool,
     /// Relative tolerance for the forward sensitivity equations. If `None`, sensitivities are not included in error control.
     pub sens_rtol: Option<Eqn::T>,
-    /// Absolute tolerances for the forward sensitivity equations, one vector per parameter. If `None`, sensitivities are not included in error control.
     /// Absolute tolerances for the forward sensitivities, one batch lane per (problem batch,
-    /// parameter): lane `b * nparams + p` holds parameter `p`'s tolerance, matching the layout of
+    /// parameter): batch index `b * nparams + p` holds parameter `p`'s tolerance for problem batch `b`, matching the layout of
     /// the augmented state (see [`crate::AugmentedOdeEquations`]).
     pub sens_atol: Option<Eqn::V>,
     /// Relative tolerance for output equations, if outputs are being integrated and used in error control.

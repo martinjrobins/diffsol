@@ -9,7 +9,7 @@ use crate::RkState;
 use crate::RootFinder;
 use crate::Tableau;
 use crate::{
-    ode_solver_error, AugmentedOdeEquations, Context, Convergence, DefaultDenseMatrix, DenseMatrix,
+    ode_solver_error, AugmentedOdeEquations, Convergence, DefaultDenseMatrix, DenseMatrix,
     NonLinearOp, NonLinearSolver, OdeEquations, OdeSolverProblem, OdeSolverState, Op, Scalar,
     Vector, VectorViewMut,
 };
@@ -19,6 +19,7 @@ use log::trace;
 use num_traits::{abs, FromPrimitive, One, ToPrimitive, Zero};
 
 use super::jacobian_update::SolverState;
+use super::method::{check_interpolate_shape, check_interpolate_time};
 use super::pi_controller::pi_controller_raw;
 use super::OdeSolverStatistics;
 use std::ops::{MulAssign, SubAssign};
@@ -44,13 +45,9 @@ where
     root_finder: Option<RootFinder<Eqn::V>>,
     tstop: Option<Eqn::T>,
     diff: M,
-    /// stage derivatives of the augmented state, one channel per batch lane
     sdiff: M,
-    /// stage derivatives of the augmented output, one channel per batch lane
     sgdiff: M,
     gdiff: M,
-    // boxed so that swapping state/old_state each accepted step (see `step_accepted`)
-    // is a pointer swap instead of a memcpy of the whole (large) RkState struct
     old_state: Box<RkState<Eqn::V>>,
     is_state_mutated: bool,
 
@@ -58,8 +55,6 @@ where
     out_error: Option<Eqn::V>,
     sens_error: Option<Eqn::V>,
     sens_out_error: Option<Eqn::V>,
-    /// residual scratch for the augmented stage solve, one channel per batch lane
-    sens_residual: Eqn::V,
 
     prev_error_norm: Option<Eqn::T>,
 }
@@ -88,7 +83,6 @@ where
             problem: self.problem,
             state: self.state.clone(),
             statistics: self.statistics.clone(),
-            sens_residual: self.sens_residual.clone(),
             root_finder: self.root_finder.clone(),
             tstop: self.tstop,
             is_state_mutated: self.is_state_mutated,
@@ -185,7 +179,6 @@ where
             out_error,
             sens_error: None,
             sens_out_error: None,
-            sens_residual: <Eqn::V as Vector>::zeros(0, ctx.clone()),
             prev_error_norm: None,
         })
     }
@@ -201,12 +194,8 @@ where
         let mut ret = Self::_new(problem, state, tableau, integrate_main_eqn)?;
         let nstates = augmented_eqn.rhs().nstates();
         let order = ret.tableau.s();
-        // one batch lane per augmented channel
         let aug_ctx = augmented_eqn.aug_context().clone();
         ret.sdiff = M::zeros(nstates, order, aug_ctx.clone());
-        ret.sens_residual = <Eqn::V as Vector>::zeros(nstates, aug_ctx.clone());
-        // always `order` columns, so the stage loops can write column `i` even when there are no
-        // output sensitivities to integrate
         let nout_sens = augmented_eqn.out().map(|out| out.nout()).unwrap_or(0);
         ret.sgdiff = M::zeros(nout_sens, order, aug_ctx.clone());
         if augmented_eqn.include_in_error_control() {
@@ -1105,29 +1094,17 @@ where
     }
 
     pub(crate) fn interpolate_inplace(&self, t: M::T, ret: &mut M::V) -> Result<(), DiffsolError> {
-        if ret.len() != self.state.y.len() {
-            return Err(DiffsolError::from(
-                OdeSolverError::InterpolationVectorWrongSize {
-                    expected: self.state.y.len(),
-                    found: ret.len(),
-                },
-            ));
-        }
-        if self.is_state_mutated {
-            if t == self.state.t {
-                ret.copy_from(&self.state.y);
-                return Ok(());
-            } else {
-                return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
-            }
-        }
-
-        // check that t is within the current step depending on the direction
-        let is_forward = self.state.h > M::T::zero();
-        if (is_forward && (t > self.state.t || t < self.old_state.t))
-            || (!is_forward && (t < self.state.t || t > self.old_state.t))
-        {
-            return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
+        check_interpolate_shape(ret, &self.state.y)?;
+        if !check_interpolate_time(
+            t,
+            ret,
+            &self.state.y,
+            self.state.t,
+            self.state.h,
+            Some(self.old_state.t),
+            self.is_state_mutated,
+        )? {
+            return Ok(());
         }
 
         let dt = self.state.t - self.old_state.t;
@@ -1158,29 +1135,17 @@ where
         t: M::T,
         dy: &mut M::V,
     ) -> Result<(), DiffsolError> {
-        if dy.len() != self.state.y.len() {
-            return Err(DiffsolError::from(
-                OdeSolverError::InterpolationVectorWrongSize {
-                    expected: self.state.y.len(),
-                    found: dy.len(),
-                },
-            ));
-        }
-        if self.is_state_mutated {
-            if t == self.state.t {
-                dy.copy_from(&self.state.dy);
-                return Ok(());
-            } else {
-                return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
-            }
-        }
-
-        // check that t is within the current step depending on the direction
-        let is_forward = self.state.h > M::T::zero();
-        if (is_forward && (t > self.state.t || t < self.old_state.t))
-            || (!is_forward && (t < self.state.t || t > self.old_state.t))
-        {
-            return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
+        check_interpolate_shape(dy, &self.state.y)?;
+        if !check_interpolate_time(
+            t,
+            dy,
+            &self.state.dy,
+            self.state.t,
+            self.state.h,
+            Some(self.old_state.t),
+            self.is_state_mutated,
+        )? {
+            return Ok(());
         }
 
         let dt = self.state.t - self.old_state.t;
@@ -1221,29 +1186,17 @@ where
         t: M::T,
         g: &mut M::V,
     ) -> Result<(), DiffsolError> {
-        if g.len() != self.state.g.len() {
-            return Err(DiffsolError::from(
-                OdeSolverError::InterpolationVectorWrongSize {
-                    expected: self.state.g.len(),
-                    found: g.len(),
-                },
-            ));
-        }
-        if self.is_state_mutated {
-            if t == self.state.t {
-                g.copy_from(&self.state.g);
-                return Ok(());
-            } else {
-                return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
-            }
-        }
-
-        // check that t is within the current step depending on the direction
-        let is_forward = self.state.h > M::T::zero();
-        if (is_forward && (t > self.state.t || t < self.old_state.t))
-            || (!is_forward && (t < self.state.t || t > self.old_state.t))
-        {
-            return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
+        check_interpolate_shape(g, &self.state.g)?;
+        if !check_interpolate_time(
+            t,
+            g,
+            &self.state.g,
+            self.state.t,
+            self.state.h,
+            Some(self.old_state.t),
+            self.is_state_mutated,
+        )? {
+            return Ok(());
         }
 
         let dt = self.state.t - self.old_state.t;
@@ -1274,41 +1227,21 @@ where
         t: Eqn::T,
         ret: &mut M::V,
     ) -> Result<(), DiffsolError> {
-        if ret.context().nbatch() != self.state.s.context().nbatch() {
-            return Err(DiffsolError::from(
-                OdeSolverError::SensitivityCountMismatch {
-                    expected: self.state.s.context().nbatch(),
-                    found: ret.context().nbatch(),
-                },
-            ));
-        }
-        if ret.len() != self.state.s.len() {
-            return Err(DiffsolError::from(
-                OdeSolverError::InterpolationVectorWrongSize {
-                    expected: self.state.s.len(),
-                    found: ret.len(),
-                },
-            ));
-        }
+        check_interpolate_shape(ret, &self.state.s)?;
         // no sensitivities to interpolate
         if self.state.s.len() == 0 {
             return Ok(());
         }
-        if self.is_state_mutated {
-            if t == self.state.t {
-                ret.copy_from(&self.state.s);
-                return Ok(());
-            } else {
-                return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
-            }
-        }
-
-        // check that t is within the current step depending on the direction
-        let is_forward = self.state.h > M::T::zero();
-        if (is_forward && (t > self.state.t || t < self.old_state.t))
-            || (!is_forward && (t < self.state.t || t > self.old_state.t))
-        {
-            return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
+        if !check_interpolate_time(
+            t,
+            ret,
+            &self.state.s,
+            self.state.t,
+            self.state.h,
+            Some(self.old_state.t),
+            self.is_state_mutated,
+        )? {
+            return Ok(());
         }
 
         let dt = self.state.t - self.old_state.t;

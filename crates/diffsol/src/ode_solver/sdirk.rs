@@ -237,7 +237,6 @@ where
             SdirkConfig::new(&problem.ode_options),
         )?;
 
-        // the augmented callable's working vectors carry one batch lane per augmented channel
         let aug_ctx = augmented_eqn.aug_context().clone();
         ret.s_op = if integrate_main_eqn {
             ret.nonlinear_solver.set_problem(ret.op.as_ref().unwrap());

@@ -3,7 +3,7 @@ use std::cell::Ref;
 
 use crate::{
     error::{DiffsolError, OdeSolverError},
-    AugmentedOdeEquationsImplicit, Context, Convergence, DefaultDenseMatrix, LinearSolver,
+    AugmentedOdeEquationsImplicit, Convergence, DefaultDenseMatrix, LinearSolver,
     NewtonNonlinearSolver, NoAug, NoLineSearch, StateRef, StateRefMut,
 };
 
@@ -24,7 +24,7 @@ use crate::small::{SmallMat, SmallVec};
 
 use super::config::BdfConfig;
 use super::jacobian_update::SolverState;
-use super::method::AugmentedOdeSolverMethod;
+use super::method::{check_interpolate_shape, check_interpolate_time, AugmentedOdeSolverMethod};
 use super::pi_controller::pi_controller_raw;
 use super::sensitivities::SensitivitiesOdeSolverMethod;
 use super::OdeSolverStatistics;
@@ -335,10 +335,7 @@ where
         };
         let g_delta = <Eqn::V as Vector>::zeros(nout, ctx.clone());
 
-        // init U matrix
-        // R, U and R*U are at most 6x6 and are only ever consumed by `mul_cols_by`, which
-        // takes a host slice, so they live on the host and are sized once for the maximum
-        // order.
+        // init U matrix (deps only on order so need to update whenever order changes)
         let u = Self::_compute_r(state.order, Eqn::T::one());
         let is_state_modified = false;
 
@@ -408,7 +405,9 @@ where
 
         ret.state.set_augmented_problem(problem, &augmented_eqn)?;
 
-        // allocate internal state for sensitivities: one batch lane per augmented channel
+        // allocate internal state for augmented equations (sensitivities or adjoints).
+        // The augmented equations have B * C batches, where B is the number of batches
+        // and C is the number of channels per batch (C = nparams for sensitivities, C = nout for adjoints).
         let nstates = problem.eqn.rhs().nstates();
         let aug_ctx = augmented_eqn.aug_context().clone();
         ret.s_op = if integrate_main_eqn {
@@ -637,15 +636,13 @@ where
         //D^{j + 1} y_n = D^{j} y_n - D^{j} y_{n - 1}
         //
         //Combining these gives the following algorithm
+        //(see DenseMatrix::update_backward_diff)
         diff.update_backward_diff(order, d);
     }
 
     // predict forward to new step (eq 2 in [1])
     //
-    // The weights are all ones, so they are a constant. Rust has no generic `static` — `T::one()`
-    // is not a `const fn` — so the nearest equivalent is to materialise the fixed-size array
-    // here, where it is the only thing that reads it. It costs `COEFFS_LEN` stack stores that
-    // the optimiser is free to fold.
+    // This is a gemv over the columns [0..order] of diff
     fn _predict_using_diff(y_predict: &mut Eqn::V, diff: &M, order: usize) {
         let ones = [Eqn::T::one(); COEFFS_LEN];
         diff.gemv_cols(
@@ -720,6 +717,9 @@ where
     fn initialise_to_first_order(&mut self) {
         self.n_equal_steps = 0;
 
+        // NOTE: tried this but did not give an improvement in perf.
+        // keeping it for now just in case it is useful in the future.
+        //
         // scale step size h to account for reduction in order at order n error is O(h^{n+2}))
         // error_b = C * h_old^{n+2}
         // error_a = C * h_new^{3}
@@ -1068,82 +1068,54 @@ where
     }
 
     fn interpolate_inplace(&self, t: Eqn::T, y: &mut Eqn::V) -> Result<(), DiffsolError> {
-        if y.len() != self.state.y.len() {
-            return Err(DiffsolError::from(
-                OdeSolverError::InterpolationVectorWrongSize {
-                    expected: self.state.y.len(),
-                    found: y.len(),
-                },
-            ));
-        }
-        // state must be set
         let state = &self.state;
-        if self.is_state_modified {
-            if t == state.t {
-                y.copy_from(&state.y);
-                return Ok(());
-            } else {
-                return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
-            }
-        }
-        // check that t is before/after the current time depending on the direction
-        let is_forward = state.h > Eqn::T::zero();
-        if (is_forward && t > state.t) || (!is_forward && t < state.t) {
-            return Err(ode_solver_error!(InterpolationTimeAfterCurrentTime));
+        check_interpolate_shape(y, &state.y)?;
+        if !check_interpolate_time(
+            t,
+            y,
+            &state.y,
+            state.t,
+            state.h,
+            None,
+            self.is_state_modified,
+        )? {
+            return Ok(());
         }
         Self::interpolate_from_diff(t, &state.diff, state.t, state.h, state.order, y);
         Ok(())
     }
 
     fn interpolate_dy_inplace(&self, t: Eqn::T, dy: &mut Eqn::V) -> Result<(), DiffsolError> {
-        if dy.len() != self.state.y.len() {
-            return Err(DiffsolError::from(
-                OdeSolverError::InterpolationVectorWrongSize {
-                    expected: self.state.y.len(),
-                    found: dy.len(),
-                },
-            ));
-        }
         let state = &self.state;
-        if self.is_state_modified {
-            if t == state.t {
-                dy.copy_from(&state.dy);
-                return Ok(());
-            } else {
-                return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
-            }
-        }
-        let is_forward = state.h > Eqn::T::zero();
-        if (is_forward && t > state.t) || (!is_forward && t < state.t) {
-            return Err(ode_solver_error!(InterpolationTimeAfterCurrentTime));
+        check_interpolate_shape(dy, &state.y)?;
+        if !check_interpolate_time(
+            t,
+            dy,
+            &state.dy,
+            state.t,
+            state.h,
+            None,
+            self.is_state_modified,
+        )? {
+            return Ok(());
         }
         Self::interpolate_derivative_from_diff(t, &state.diff, state.t, state.h, state.order, dy);
         Ok(())
     }
 
     fn interpolate_out_inplace(&self, t: Eqn::T, g: &mut Eqn::V) -> Result<(), DiffsolError> {
-        if g.len() != self.state.g.len() {
-            return Err(DiffsolError::from(
-                OdeSolverError::InterpolationVectorWrongSize {
-                    expected: self.state.g.len(),
-                    found: g.len(),
-                },
-            ));
-        }
-        // state must be set
         let state = &self.state;
-        if self.is_state_modified {
-            if t == state.t {
-                g.copy_from(&state.g);
-                return Ok(());
-            } else {
-                return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
-            }
-        }
-        // check that t is before/after the current time depending on the direction
-        let is_forward = state.h > Eqn::T::zero();
-        if (is_forward && t > state.t) || (!is_forward && t < state.t) {
-            return Err(ode_solver_error!(InterpolationTimeAfterCurrentTime));
+        check_interpolate_shape(g, &state.g)?;
+        if !check_interpolate_time(
+            t,
+            g,
+            &state.g,
+            state.t,
+            state.h,
+            None,
+            self.is_state_modified,
+        )? {
+            return Ok(());
         }
         Self::interpolate_from_diff(t, &state.gdiff, state.t, state.h, state.order, g);
         Ok(())
@@ -1154,44 +1126,25 @@ where
         t: <Eqn as Op>::T,
         sens: &mut Eqn::V,
     ) -> Result<(), DiffsolError> {
-        if sens.context().nbatch() != self.state.s.context().nbatch() {
-            return Err(DiffsolError::from(
-                OdeSolverError::SensitivityCountMismatch {
-                    expected: self.state.s.context().nbatch(),
-                    found: sens.context().nbatch(),
-                },
-            ));
-        }
-        if sens.len() != self.state.s.len() {
-            return Err(DiffsolError::from(
-                OdeSolverError::InterpolationVectorWrongSize {
-                    expected: self.state.s.len(),
-                    found: sens.len(),
-                },
-            ));
-        }
+        let state = &self.state;
+        check_interpolate_shape(sens, &state.s)?;
 
         // no sensitivities to interpolate
-        if self.state.s.len() == 0 {
+        if state.s.len() == 0 {
             return Ok(());
         }
 
-        // state must be set
-        let state = &self.state;
-        if self.is_state_modified {
-            if t == state.t {
-                sens.copy_from(&state.s);
-                return Ok(());
-            } else {
-                return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
-            }
+        if !check_interpolate_time(
+            t,
+            sens,
+            &state.s,
+            state.t,
+            state.h,
+            None,
+            self.is_state_modified,
+        )? {
+            return Ok(());
         }
-        // check that t is before/after the current time depending on the direction
-        let is_forward = state.h > Eqn::T::zero();
-        if (is_forward && t > state.t) || (!is_forward && t < state.t) {
-            return Err(ode_solver_error!(InterpolationTimeAfterCurrentTime));
-        }
-
         Self::interpolate_from_diff(t, &state.sdiff, state.t, state.h, state.order, sens);
         Ok(())
     }

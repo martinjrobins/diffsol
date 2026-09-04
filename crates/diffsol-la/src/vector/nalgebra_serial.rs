@@ -608,8 +608,16 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
                 ctx.assert_broadcastable_into(arg.context.nbatch(), "for_each_batch");
             }
         }
+        // unbatched is the overwhelmingly common case, and every operand is then a single
+        // column: hand out the whole backing slice, with no lane index or subslicing at all
+        if nbatch == 1 {
+            let ins = args.map(|a| a.data.as_slice());
+            let outs = mut_args.map(|v| v.data.as_mut_slice());
+            f(outs, ins, 0);
+            return;
+        }
         for b in 0..nbatch {
-            let ins = std::array::from_fn(|i| args[i].batch_as_slice(args[i].batch(b, nbatch)));
+            let ins = args.map(|a| a.batch_as_slice(a.batch(b, nbatch)));
             let outs = mut_args.each_mut().map(|v| {
                 let vb = v.batch(b, nbatch);
                 v.batch_as_mut_slice(vb)

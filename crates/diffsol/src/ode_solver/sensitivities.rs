@@ -153,14 +153,13 @@ where
             ctx.clone(),
         );
         let mut tmp_nstates = Eqn::V::zeros(nstates, ctx.clone());
-        // the augmented scratch holds one parameter per batch lane
         let aug_ctx = ctx.clone_with_nbatch(ctx.nbatch() * nparams)?;
         let mut tmp_nsens = Eqn::V::zeros(nstates, aug_ctx.clone());
         let mut tmp_nsens_out = Eqn::V::zeros(
             self.problem().eqn.out().map(|out| out.nout()).unwrap_or(0),
             aug_ctx.clone(),
         );
-        // the output operator's parameter Jacobian, at the problem's own batch count
+        // the output operator's parameter Jacobian
         let nout_sens = self.problem().eqn.out().map(|out| out.nout()).unwrap_or(0);
         let mut tmp_out_sens = <Eqn as Op>::M::new_from_sparsity(
             nout_sens,

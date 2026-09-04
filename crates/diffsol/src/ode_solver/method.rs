@@ -1,7 +1,8 @@
+use num_traits::Zero;
 use std::{cell::Ref, marker::PhantomData};
 
 use crate::{
-    error::DiffsolError,
+    error::{DiffsolError, OdeSolverError},
     ode_equations::OdeEquationsImplicitSens,
     ode_solver::solution::{SolutionMode, INITIAL_NCOLS},
     ode_solver_error,
@@ -15,6 +16,72 @@ pub enum OdeSolverStopReason<T: Scalar> {
     InternalTimestep,
     RootFound(T, usize),
     TstopReached,
+}
+
+/// Check that a vector handed to one of the `interpolate_*_inplace` methods has the same shape
+/// (batch count and length) as the state vector it is interpolating.
+pub(crate) fn check_interpolate_shape<V: Vector>(
+    ret: &V,
+    state_val: &V,
+) -> Result<(), DiffsolError> {
+    if ret.context().nbatch() != state_val.context().nbatch() {
+        return Err(DiffsolError::from(OdeSolverError::BatchCountMismatch {
+            expected: state_val.context().nbatch(),
+            found: ret.context().nbatch(),
+        }));
+    }
+    if ret.len() != state_val.len() {
+        return Err(DiffsolError::from(
+            OdeSolverError::InterpolationVectorWrongSize {
+                expected: state_val.len(),
+                found: ret.len(),
+            },
+        ));
+    }
+    Ok(())
+}
+
+/// Check that `t` is a time the solver can interpolate at, and deal with the case where the state
+/// has been mutated since the last step (in which case only the current time can be served, by
+/// copying `state_val` straight into `ret`).
+///
+/// `old_t` is the start of the last step, for solvers whose interpolant is only valid within that
+/// step (Runge-Kutta). Pass `None` for solvers whose interpolant is valid arbitrarily far back
+/// (BDF), which only bounds `t` from above.
+///
+/// Returns `false` if `ret` has already been filled from `state_val` and the caller has nothing
+/// left to do, `true` if the caller should go on to interpolate.
+pub(crate) fn check_interpolate_time<V: Vector>(
+    t: V::T,
+    ret: &mut V,
+    state_val: &V,
+    state_t: V::T,
+    state_h: V::T,
+    old_t: Option<V::T>,
+    is_state_mutated: bool,
+) -> Result<bool, DiffsolError> {
+    if is_state_mutated {
+        if t == state_t {
+            ret.copy_from(state_val);
+            return Ok(false);
+        }
+        return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
+    }
+
+    // check that t is within the interpolable range, which depends on the direction of integration
+    let is_forward = state_h > V::T::zero();
+    if (is_forward && t > state_t) || (!is_forward && t < state_t) {
+        return Err(match old_t {
+            Some(_) => ode_solver_error!(InterpolationTimeOutsideCurrentStep),
+            None => ode_solver_error!(InterpolationTimeAfterCurrentTime),
+        });
+    }
+    if let Some(old_t) = old_t {
+        if (is_forward && t < old_t) || (!is_forward && t > old_t) {
+            return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
+        }
+    }
+    Ok(true)
 }
 
 /// Trait for ODE solver methods. This is the main user interface for the ODE solvers.

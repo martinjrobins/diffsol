@@ -74,7 +74,7 @@ pub struct Solution<V: DefaultDenseMatrix> {
     pub stop_reason: Option<OdeSolverStopReason<V::T>>,
     pub(crate) tmp_nout: V,
     pub(crate) tmp_nstates: V,
-    /// sensitivity scratch, one parameter per batch lane
+    /// sensitivity scratch, uses augmented equations context
     pub(crate) tmp_nsens: V,
     pub(crate) tmp_nsens_out: V,
     pub(crate) mode: SolutionMode<V::T>,

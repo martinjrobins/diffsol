@@ -642,8 +642,16 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
                 ctx.assert_broadcastable_into(arg.context.nbatch(), "for_each_batch");
             }
         }
+        // unbatched is the overwhelmingly common case, and every operand is then a single
+        // column: go straight to column 0, with no lane index arithmetic at all
+        if nbatch == 1 {
+            let ins = args.map(|a| a.data.col_as_slice(0));
+            let outs = mut_args.map(|v| v.data.col_as_slice_mut(0));
+            f(outs, ins, 0);
+            return;
+        }
         for b in 0..nbatch {
-            let ins = std::array::from_fn(|i| args[i].data.col_as_slice(args[i].batch(b, nbatch)));
+            let ins = args.map(|a| a.data.col_as_slice(a.batch(b, nbatch)));
             let outs = mut_args.each_mut().map(|v| {
                 let vb = v.batch(b, nbatch);
                 v.data.col_as_slice_mut(vb)

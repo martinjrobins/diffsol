@@ -17,10 +17,8 @@ where
 {
     pub(crate) order: usize,
     pub(crate) diff: M,
-    /// backward differences of the sensitivities, one channel per batch lane
     pub(crate) sdiff: M,
     pub(crate) gdiff: M,
-    /// backward differences of the output sensitivities, one channel per batch lane
     pub(crate) sgdiff: M,
     pub(crate) y: V,
     pub(crate) dy: V,
@@ -39,10 +37,6 @@ where
 }
 
 /// Highest BDF order.
-///
-/// Free-standing rather than an associated const of [`BdfState`]: an associated const of a
-/// generic type cannot size an array, and referring to one means spelling out the generic
-/// parameters at every use.
 pub(crate) const MAX_ORDER: IndexType = 5;
 
 impl<V, M> BdfState<V, M>

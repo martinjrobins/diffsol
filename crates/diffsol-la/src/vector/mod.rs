@@ -252,26 +252,18 @@ pub trait Vector:
     /// Run `f` once per batch lane, passing that lane of each vector in `mut_args` as a mutable
     /// slice and that lane of each vector in `args` as an immutable slice.
     ///
-    /// This is how an operator body reaches the raw data of a vector: write the maths for a single
-    /// system against plain slices and the batching is handled here. Use it over
-    /// [`Self::for_each_batch`] when the body needs more than one mutable vector, e.g. an output
-    /// plus a scratch buffer.
-    ///
-    /// The lane count is governed by `mut_args[0]`, the primary output. Every other operand,
-    /// mutable or not, broadcasts into it exactly as in every other batched operation (see
+    /// The lane count (i.e. number of batches) is governed by `mut_args[0]`, the primary output.
+    /// Every other operand, mutable or not, broadcasts into it exactly as in every other batched operation (see
     /// [`Context::assert_broadcastable_into`]), so an operand with `nbatch == B` can be used while
     /// writing an output with `nbatch == B * nparams`. Panics if an operand's batch count is not
     /// broadcastable into the output's, or if `mut_args` is empty.
     ///
-    /// A broadcast *mutable* operand is written once per lane at its broadcast lane, so an
-    /// `nbatch == 1` scratch vector is shared by every lane of the output. That is what makes a
-    /// single scratch buffer usable from a batched body -- write it and read it back within one
-    /// call of `f`, never across lanes.
+    /// If a mutable operand is written once per lane at its broadcast lane, so an
+    /// `nbatch == 1` scratch vector is shared by every lane of the output and overwritten by each
+    /// call to `f`.
     ///
     /// The closure's last argument is the lane of the output being written, in
-    /// `0..mut_args[0].context().nbatch()`. It is the lane's identity, not a visit counter, so a
-    /// closure may use it to reach anything else keyed by lane -- a captured vector, a `Vec`, or a
-    /// channel index derived from the lane -- without depending on the order lanes are visited in.
+    /// `0..mut_args[0].context().nbatch()`.
     ///
     /// ```ignore
     /// // y = A^T v, via a scratch buffer the backend requires to be mutable
@@ -280,9 +272,6 @@ pub trait Vector:
     ///     op.transpose_mul(x, scratch, y);
     /// });
     /// ```
-    ///
-    /// Vectors that do not live on the host (e.g. CUDA) stage the data through host memory, so a
-    /// backend-native operation is still preferable in a hot loop.
     fn for_each_batch_mut<const M: usize, const N: usize>(
         mut_args: [&mut Self; M],
         args: [&Self; N],
@@ -292,8 +281,7 @@ pub trait Vector:
     /// Run `f` once per batch lane of `self`, passing that lane of `self` as a mutable slice and
     /// the corresponding lane of each operand in `args` as an immutable slice.
     ///
-    /// The single-output case of [`Self::for_each_batch_mut`], which documents the broadcast rules
-    /// and the lane index.
+    /// The single-output case of [`Self::for_each_batch_mut`].
     ///
     /// ```ignore
     /// // y_0 = x_0 v_0 + x_1 v_1, y_1 = 0, for every batch of y

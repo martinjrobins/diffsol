@@ -165,9 +165,8 @@ impl<M: Matrix, Ls: LinearSolver<M>, Lsearch: LineSearch<M::V>> NonLinearSolver<
             };
             return Err(NlError::from(error));
         }
-        // the working vector has to match the solution's batch count: an augmented (sensitivity
-        // or adjoint) solve holds one channel per batch lane while the operator, its Jacobian and
-        // its factorisation stay at the problem's batch count
+        // the working vector has to match the solution's batch count.
+        // the operator, its Jacobian and its factorisation stay at the problem's batch count
         if self.tmp.context().nbatch() != xn.context().nbatch() {
             self.tmp = C::V::zeros(op.nstates(), xn.context().clone());
         }

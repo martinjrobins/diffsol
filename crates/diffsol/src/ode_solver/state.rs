@@ -361,10 +361,7 @@ impl<V: Vector> StateRefMut<'_, V> {
             }
         }
 
-        // every parameter channel at once: `aug_ctx` holds `nbatch * nparams` lanes, and the
-        // pre-event state, the reset/root Jacobians and `correction_dir` all broadcast over them.
-        // The parameter Jacobians are evaluated as matrices at the problem's own batch count and
-        // reshaped onto the lanes: column `p` belongs in lane `b * nparams + p`.
+        // apply reset to all sensitivitiy channels (shared reset/root Jacobians and `correction_dir`).
         let aug_ctx = s_before.context().clone();
         let mut reset_sens = V::zeros(nstates, aug_ctx.clone());
         let mut root_jac_s = V::zeros(nroots, aug_ctx.clone());
@@ -382,6 +379,8 @@ impl<V: Vector> StateRefMut<'_, V> {
         s_plus += &reset_sens;
 
         root_op.jac_mul_inplace(&y_before, t, &s_before, &mut root_jac_s);
+        // parameter jacobians are evaluated as matrices at the problem's own batch count and
+        // reshaped onto the lanes: column `p` belongs in lane `b * nparams + p`.
         root_op.sens_inplace(&y_before, t, &mut root_sens_mat);
         root_sens_mat.add_columns_to_batched_vector(&mut root_sens);
 
@@ -464,10 +463,7 @@ impl<V: Vector> StateRefMut<'_, V> {
             }
         }
 
-        // every parameter channel at once: `aug_ctx` holds `nbatch * nparams` lanes, and the
-        // pre-event state, the reset/root Jacobians and `correction_dir` all broadcast over them.
-        // The parameter Jacobians are evaluated as matrices at the problem's own batch count and
-        // reshaped onto the lanes: column `p` belongs in lane `b * nparams + p`.
+        // apply reset to all sensitivity channels (shared reset/root Jacobians and `correction_dir`).
         let aug_ctx = s_before.context().clone();
         let mut reset_sens = V::zeros(nstates, aug_ctx.clone());
         let mut root_jac_s = V::zeros(nroots, aug_ctx.clone());
@@ -480,6 +476,8 @@ impl<V: Vector> StateRefMut<'_, V> {
             Eqn::M::new_from_sparsity(nroots, nparams, root_op.sens_sparsity(), ctx);
 
         reset_op.jac_mul_inplace(&y_before, t, &s_before, &mut s_plus);
+        // parameter Jacobians are evaluated as matrices at the problem's own batch count and
+        // reshaped onto the lanes: column `p` belongs in lane `b * nparams + p`.
         reset_op.sens_inplace(&y_before, t, &mut reset_sens_mat);
         reset_sens_mat.add_columns_to_batched_vector(&mut reset_sens);
         s_plus += &reset_sens;
@@ -621,8 +619,6 @@ impl<V: Vector> StateRefMut<'_, V> {
             (None, None)
         };
 
-        // `alpha` is a scalar per (batch, channel) lane, so it is assembled lane by lane into the
-        // root basis; everything downstream of it is one batched operation over all channels
         let mut root_basis = V::zeros(nroots, aug_ctx.clone());
         let mut reset_adj = V::zeros(nstates, aug_ctx.clone());
         let mut root_adj = V::zeros(nstates, aug_ctx.clone());
@@ -630,9 +626,7 @@ impl<V: Vector> StateRefMut<'_, V> {
         let mut root_sens_adj = V::zeros(nparams, aug_ctx);
 
         // alpha = (lambda^+ · c + l^- - l^+) / d. The running-cost jump is only there when outputs
-        // are being integrated, and that is what picks the operand count -- the array length is a
-        // const, so it cannot be decided inside the closure. `lane % nchannels` is this lane's
-        // output channel.
+        // are being integrated.
         match (&l_minus, &l_plus) {
             (Some(l_minus), Some(l_plus)) => root_basis.for_each_batch(
                 [
@@ -644,6 +638,7 @@ impl<V: Vector> StateRefMut<'_, V> {
                     l_plus,
                 ],
                 |basis, [lambda, cdir, rflow, rt, l_minus, l_plus], lane| {
+                    //`lane % nchannels` is this lane's output channel.
                     let i = lane % nchannels;
                     let alpha_num = lambda
                         .iter()
@@ -765,7 +760,7 @@ impl<V: Vector> StateRefMut<'_, V> {
         let mut lambda_corr = V::zeros(nstates, aug_ctx.clone());
         let mut q_corr = V::zeros(nparams, aug_ctx);
         // one output component per lane, so the whole terminal contribution is two batched
-        // transpose products
+        // transpose products with the root basis vector
         root_basis.for_each_batch(
             [&out, &root_flow, &root_t],
             |basis, [out, rflow, rt], lane| {
