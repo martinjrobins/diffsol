@@ -1860,8 +1860,7 @@ where
             if let Some(ref mut mass) = mass {
                 mass.calculate_sparsity(&y0, self.t0, &p);
             }
-            // the sensitivity equations hold each of these operators' parameter Jacobians as a
-            // matrix, which a sparse matrix type cannot allocate without a pattern
+            // sparsities required for sensitivity and adjoint equations
             init.calculate_augmented_sparsity(&y0, self.t0, &p);
             if let Some(ref mut out) = out {
                 out.calculate_augmented_sparsity(&y0, self.t0, &p);

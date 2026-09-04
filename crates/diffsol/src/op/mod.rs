@@ -81,8 +81,7 @@ pub trait BuilderOp: Op {
     fn set_nout(&mut self, nout: usize);
     fn calculate_sparsity(&mut self, y0: &Self::V, t0: Self::T, p: &Self::V);
     /// Compute the sparsity of whichever transposed or parameter Jacobians this operator
-    /// supports — the patterns the augmented (sensitivity and adjoint) equations need to hold
-    /// those Jacobians as matrices.
+    /// supports i.e. for the  augmented (sensitivity and adjoint) equations.
     ///
     /// Unlike [`Self::calculate_sparsity`] this leaves the state Jacobian's pattern alone, so it
     /// is safe to call on operators whose state Jacobian is only ever used matrix-free.
