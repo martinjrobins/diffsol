@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0](https://github.com/martinjrobins/diffsol/compare/diffsol-c-v0.5.2...diffsol-c-v0.6.0) - 2026-09-05
+
+### Added
+
+- *(diffsol)* [**breaking**] sensitivity/adjoints calculated by batching ([#373](https://github.com/martinjrobins/diffsol/pull/373))
+
 ## [0.5.2](https://github.com/martinjrobins/diffsol/compare/diffsol-c-v0.5.1...diffsol-c-v0.5.2) - 2026-08-18
 
 ### Added
