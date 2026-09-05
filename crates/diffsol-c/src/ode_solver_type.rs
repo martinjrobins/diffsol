@@ -4,8 +4,8 @@
 use diffsol::error::DiffsolError;
 use diffsol::ode_equations::{OdeEquationsImplicit, OdeEquationsImplicitSens};
 use diffsol::{
-    matrix::MatrixRef, DefaultDenseMatrix, DenseMatrix, DiffSl, LinearSolver, Matrix,
-    OdeSolverProblem, OdeSolverState, VectorHost, VectorRef, VectorView,
+    matrix::MatrixRef, Context, DefaultDenseMatrix, DenseMatrix, DiffSl, LinearSolver, Matrix,
+    OdeSolverProblem, OdeSolverState, Vector, VectorRef, VectorView,
 };
 use diffsol::{
     ode_solver_error, AdjointOdeSolverMethod, CheckpointingPath, CodegenModule, DefaultSolver,
@@ -45,7 +45,7 @@ fn solve_with_tag<M, CG, LS, Tag>(
 where
     M: Matrix<T: Scalar> + DefaultSolver,
     CG: CodegenModule,
-    M::V: VectorHost + DefaultDenseMatrix,
+    M::V: DefaultDenseMatrix,
     LS: LinearSolver<M>,
     Tag: OdeSolverMethodTag<M, CG>,
     DiffSl<M, CG>: OdeEquationsImplicit<M = M, T = M::T, V = M::V, C = M::C>,
@@ -78,7 +78,7 @@ fn solve_fwd_sens_with_tag<M, CG, LS, Tag>(
 where
     M: Matrix<T: Scalar> + DefaultSolver,
     CG: CodegenModule,
-    M::V: VectorHost + DefaultDenseMatrix,
+    M::V: DefaultDenseMatrix,
     LS: LinearSolver<M>,
     Tag: OdeSolverMethodTag<M, CG>,
     DiffSl<M, CG>: OdeEquationsImplicitSens<M = M, T = M::T, V = M::V, C = M::C>,
@@ -115,7 +115,7 @@ fn solve_with_checkpointing_with_tag<M, CG, LS, Tag>(
 where
     M: Matrix<T: Scalar> + DefaultSolver,
     CG: CodegenModule,
-    M::V: VectorHost + DefaultDenseMatrix,
+    M::V: DefaultDenseMatrix,
     LS: LinearSolver<M>,
     Tag: OdeSolverMethodTag<M, CG>,
     DiffSl<M, CG>: OdeEquationsImplicit<M = M, T = M::T, V = M::V, C = M::C>,
@@ -166,7 +166,7 @@ fn solve_adjoint_fwd_with_tag<M, CG, LS, Tag>(
 where
     M: Matrix<T: Scalar> + DefaultSolver + 'static,
     CG: CodegenModule + 'static,
-    M::V: VectorHost + DefaultDenseMatrix,
+    M::V: DefaultDenseMatrix,
     LS: LinearSolver<M>,
     DiffSl<M, CG>: OdeEquationsImplicit<M = M, T = M::T, V = M::V, C = M::C>,
     Tag: OdeSolverMethodTag<M, CG> + 'static,
@@ -194,7 +194,7 @@ fn solve_continuous_adjoint_with_tag<M, CG, LS, Tag>(
 where
     M: Matrix<T: Scalar> + DefaultSolver + 'static,
     CG: CodegenModule + 'static,
-    M::V: VectorHost + DefaultDenseMatrix,
+    M::V: DefaultDenseMatrix,
     LS: LinearSolver<M>,
     Tag: OdeSolverMethodTag<M, CG> + 'static,
     DiffSl<M, CG>: OdeEquationsImplicitSens<M = M, T = M::T, V = M::V, C = M::C>
@@ -251,7 +251,7 @@ fn solve_adjoint_bkwds_with_fwd_tag<M, CG, FwdLS, BwdLS, Tag>(
 where
     M: Matrix<T: Scalar> + DefaultSolver + 'static,
     CG: CodegenModule + 'static,
-    M::V: VectorHost + DefaultDenseMatrix,
+    M::V: DefaultDenseMatrix,
     FwdLS: LinearSolver<M>,
     BwdLS: LinearSolver<M>,
     Tag: OdeSolverMethodTag<M, CG> + 'static,
@@ -313,7 +313,7 @@ fn solve_adjoint_bkwds_with_fwd_bkwd_tag<'solver, M, CG, FwdLS, BwdLS, FwdTag, B
 where
     M: Matrix<T: Scalar> + DefaultSolver + 'solver,
     CG: CodegenModule + 'solver,
-    M::V: VectorHost + DefaultDenseMatrix,
+    M::V: DefaultDenseMatrix,
     FwdLS: LinearSolver<M>,
     BwdLS: LinearSolver<M>,
     FwdTag: OdeSolverMethodTag<M, CG>,
@@ -360,7 +360,13 @@ where
         let (mut state, adjoint_checkpointing) =
             adjoint.solve_adjoint_backwards_pass(t_eval, dgdu_eval)?;
         let Some(previous_checkpointing) = checkpointing.pop() else {
-            return Ok(state.into_common().sg);
+            // the adjoint state holds one output channel per batch lane; the C API returns one
+            // gradient vector per channel
+            let sg = state.into_common().sg;
+            let nchannels = sg.context().nbatch();
+            return Ok((0..nchannels)
+                .map(|i| sg.get_batch(i).into_owned())
+                .collect());
         };
         let model_index = checkpointing
             .last()
@@ -391,7 +397,7 @@ where
             vec![previous_checkpointing],
             Some(fwd_solver),
             nout_override,
-        );
+        )?;
 
         adjoint = BwdTag::solver_adjoint_from_state::<BwdLS, _>(&*problem, state, adjoint_eqn)?;
     }
@@ -406,7 +412,7 @@ impl OdeSolverType {
     where
         M: Matrix<T: Scalar> + DefaultSolver,
         CG: CodegenModule,
-        M::V: VectorHost + DefaultDenseMatrix,
+        M::V: DefaultDenseMatrix,
         LS: LinearSolver<M>,
         for<'b> &'b M::V: VectorRef<M::V>,
         for<'b> &'b M: MatrixRef<M>,
@@ -436,7 +442,7 @@ impl OdeSolverType {
     where
         M: Matrix<T: Scalar> + DefaultSolver,
         CG: CodegenModule,
-        M::V: VectorHost + DefaultDenseMatrix,
+        M::V: DefaultDenseMatrix,
         LS: LinearSolver<M>,
         for<'b> &'b M::V: VectorRef<M::V>,
         for<'b> &'b M: MatrixRef<M>,
@@ -479,7 +485,7 @@ impl OdeSolverType {
     where
         M: Matrix<T: Scalar> + DefaultSolver,
         CG: CodegenModule,
-        M::V: VectorHost + DefaultDenseMatrix,
+        M::V: DefaultDenseMatrix,
         LS: LinearSolver<M>,
         for<'b> &'b M::V: VectorRef<M::V>,
         for<'b> &'b M: MatrixRef<M>,
@@ -510,7 +516,7 @@ impl OdeSolverType {
     where
         M: Matrix<T: Scalar> + DefaultSolver + 'static,
         CG: CodegenModule + 'static,
-        M::V: VectorHost + DefaultDenseMatrix,
+        M::V: DefaultDenseMatrix,
         LS: LinearSolver<M>,
         DiffSl<M, CG>: OdeEquationsImplicitSens<M = M, T = M::T, V = M::V, C = M::C>,
         for<'b> &'b M::V: VectorRef<M::V>,
@@ -557,7 +563,7 @@ impl OdeSolverType {
     where
         M: Matrix<T: Scalar> + DefaultSolver + 'static,
         CG: CodegenModule + 'static,
-        M::V: VectorHost + DefaultDenseMatrix,
+        M::V: DefaultDenseMatrix,
         LS: LinearSolver<M>,
         DiffSl<M, CG>: OdeEquationsImplicitSens<M = M, T = M::T, V = M::V, C = M::C>
             + diffsol::OdeEquationsImplicitAdjoint,
@@ -591,7 +597,7 @@ impl OdeSolverType {
     where
         M: Matrix<T: Scalar> + DefaultSolver + LuValidator<M> + KluValidator<M> + 'static,
         CG: CodegenModule + 'static,
-        M::V: VectorHost + DefaultDenseMatrix,
+        M::V: DefaultDenseMatrix,
         BwdLS: LinearSolver<M>,
         DiffSl<M, CG>: OdeEquationsImplicitSens<M = M, T = M::T, V = M::V, C = M::C>
             + diffsol::OdeEquationsImplicitAdjoint,

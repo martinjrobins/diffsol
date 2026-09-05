@@ -1,5 +1,5 @@
 use diffsol::{MatrixCommon, OdeBuilder};
-use diffsol::{NalgebraMat, OdeEquationsImplicit, OdeSolverProblem, Vector};
+use diffsol::{NalgebraMat, OdeEquationsImplicit, OdeSolverProblem};
 type M = NalgebraMat<f64>;
 type V = <M as MatrixCommon>::V;
 type C = <M as MatrixCommon>::C;

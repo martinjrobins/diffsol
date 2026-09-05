@@ -1,6 +1,6 @@
 use diffsol::{
     AdjointOdeSolverMethod, DenseMatrix, Matrix, NalgebraContext, NalgebraLU, NalgebraMat,
-    NalgebraVec, OdeBuilder, OdeSolverMethod, OdeSolverState, Op, VectorCommon,
+    NalgebraVec, OdeBuilder, OdeSolverMethod, OdeSolverState, Op, Vector, VectorCommon, VectorView,
 };
 
 type M = NalgebraMat<f64>;
@@ -35,8 +35,9 @@ pub fn main() {
         .solve_adjoint_backwards_pass(&[t_final], &[&dgdu])
         .unwrap();
 
-    let sg = final_state.as_ref();
-    let adjoint_grad = sg.sg[0].inner().as_slice();
+    // one output channel, so the adjoint parameter gradient is lane 0 of `sg`
+    let sg = final_state.as_ref().sg.get_batch(0).into_owned();
+    let adjoint_grad = sg.inner().as_slice();
     println!("\nGradient of y({}) w.r.t. parameters (adjoint):", t_final);
     println!("  dy/dr  = {:.6}", adjoint_grad[0]);
     println!("  dy/dk  = {:.6}", adjoint_grad[1]);
@@ -58,10 +59,10 @@ pub fn main() {
 fn solve_forward(r: f64, k: f64, y0: f64, t_final: f64) -> f64 {
     let p = OdeBuilder::<M>::new()
         .p([r, k, y0])
-        .rhs(|x: &V, p: &V, _t, y: &mut V| {
+        .rhs(|x: &[T], p: &[T], _t, y: &mut [T]| {
             y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]);
         })
-        .init(|p: &V, _t, y: &mut V| y[0] = p[2], 1)
+        .init(|p: &[T], _t, y: &mut [T]| y[0] = p[2], 1)
         .build()
         .unwrap();
     let mut solver = p.tsit45().unwrap();

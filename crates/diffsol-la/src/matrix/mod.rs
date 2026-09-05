@@ -3,7 +3,6 @@ use std::ops::{Add, AddAssign, Mul, Sub, SubAssign};
 
 use crate::error::LaError;
 use crate::scalar::Scale;
-use crate::vector::VectorHost;
 use crate::{Context, IndexType, Scalar, Vector, VectorIndex};
 
 use extract_block::combine;
@@ -176,6 +175,10 @@ pub trait Matrix:
     /// Add a column of this matrix to a vector: v += self[:, j]
     fn add_column_to_vector(&self, j: IndexType, v: &mut Self::V);
 
+    /// Add every column of this matrix to the matching batch lane of `v`: lane `b * ncols() + j`
+    /// receives column `j` of this matrix's batch `b`.
+    fn add_columns_to_batched_vector(&self, v: &mut Self::V);
+
     /// Assign the values in the `data` vector to this matrix at the indices in `dst_indices`
     /// from the indices in `src_indices`.
     ///
@@ -287,14 +290,6 @@ pub trait Matrix:
     ) -> Result<Self, LaError>;
 }
 
-/// A host matrix is a matrix type whose vector type is hosted on the CPU.
-///
-/// This trait extends `Matrix` to ensure the associated vector type implements `VectorHost`,
-/// enabling direct CPU-side access to data. GPU matrices typically do not implement this trait.
-pub trait MatrixHost: Matrix<V: VectorHost> {}
-
-impl<T: Matrix<V: VectorHost>> MatrixHost for T {}
-
 /// Largest column range the small-coefficient kernels accept — [`DenseMatrix::mul_cols_by`] and
 /// [`DenseMatrix::gemv_cols`].
 ///
@@ -386,12 +381,20 @@ pub trait DenseMatrix:
 
     /// Set the value at the given row and column indices.
     ///
-    /// For batched matrices the value is written to every batch.
+    /// Scalar access is single-system, as it is for [`Vector::set_index`]: panics unless
+    /// `nbatch == 1`. So does `IndexMut`.
     fn set_index(&mut self, i: IndexType, j: IndexType, value: Self::T);
+
+    /// Set the value at the given row and column indices, in a single batch.
+    ///
+    /// The batch-aware counterpart to [`Self::set_index`]: `(i, j)` alone is ambiguous once
+    /// `nbatch > 1`, so the batch is named explicitly. Mirrors [`Vector::get_batch_mut`].
+    fn set_index_batch(&mut self, batch: IndexType, i: IndexType, j: IndexType, value: Self::T);
 
     /// Get the value at the given row and column indices.
     ///
-    /// For batched matrices this reads batch 0, as does `Index`/`IndexMut`.
+    /// Scalar access is single-system, as it is for [`Vector::get_index`]: panics unless
+    /// `nbatch == 1`. So does `Index`.
     fn get_index(&self, i: IndexType, j: IndexType) -> Self::T;
 
     /// Resize the number of columns in the matrix, preserving existing data.
@@ -419,6 +422,12 @@ pub(crate) mod tests {
 
     fn f<M: Matrix>(x: f64) -> M::T {
         M::T::from_f64(x).unwrap()
+    }
+
+    /// Read one element of one batch. `get_index` is single-system, so a batched matrix is read a
+    /// column at a time.
+    fn at<M: DenseMatrix>(a: &M, batch: usize, i: IndexType, j: IndexType) -> M::T {
+        a.column(j).into_owned().get_batch(batch).get_index(i)
     }
 
     pub(crate) fn triplet_values<M: Matrix>(m: &M) -> Vec<M::T> {
@@ -1827,6 +1836,28 @@ pub(crate) mod tests {
     // --- Batched DenseMatrix-specific tests ---
 
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_batched_set_index_batch<M: DenseMatrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        // 2x2 matrix, nbatch=2: every (batch, row, col) gets a value that identifies it
+        let mut a = M::zeros(2, 2, ctx);
+        let val = |b: usize, i: usize, j: usize| f::<M>((100 * b + 10 * i + j) as f64);
+        for b in 0..2 {
+            for i in 0..2 {
+                for j in 0..2 {
+                    a.set_index_batch(b, i, j, val(b, i, j));
+                }
+            }
+        }
+        for b in 0..2 {
+            for i in 0..2 {
+                for j in 0..2 {
+                    assert_eq!(mat_at(&a, b, i, j), val(b, i, j), "batch {b}, ({i}, {j})");
+                }
+            }
+        }
+    }
+
     pub fn test_batched_from_vec<M: DenseMatrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         // 2x2 matrix, nbatch=2: physical is 2x4
@@ -1848,10 +1879,14 @@ pub(crate) mod tests {
         );
         assert_eq!(a.nrows(), 2);
         assert_eq!(a.ncols(), 2);
-        assert_eq!(a.get_index(0, 0), f::<M>(1.0));
-        assert_eq!(a.get_index(1, 0), f::<M>(3.0));
-        assert_eq!(a.get_index(0, 1), f::<M>(2.0));
-        assert_eq!(a.get_index(1, 1), f::<M>(4.0));
+        assert_eq!(at(&a, 0, 0, 0), f::<M>(1.0));
+        assert_eq!(at(&a, 0, 1, 0), f::<M>(3.0));
+        assert_eq!(at(&a, 0, 0, 1), f::<M>(2.0));
+        assert_eq!(at(&a, 0, 1, 1), f::<M>(4.0));
+        assert_eq!(at(&a, 1, 0, 0), f::<M>(5.0));
+        assert_eq!(at(&a, 1, 1, 0), f::<M>(7.0));
+        assert_eq!(at(&a, 1, 0, 1), f::<M>(6.0));
+        assert_eq!(at(&a, 1, 1, 1), f::<M>(8.0));
     }
 
     // --- Broadcasting tests ---
@@ -1927,13 +1962,19 @@ pub(crate) mod tests {
         assert_eq!(a.ncols(), 3);
         assert_eq!(a.nrows(), 2);
         // existing data preserved per batch
-        assert_eq!(a.get_index(0, 0), f::<M>(1.0));
-        assert_eq!(a.get_index(1, 0), f::<M>(3.0));
-        assert_eq!(a.get_index(0, 1), f::<M>(2.0));
-        assert_eq!(a.get_index(1, 1), f::<M>(4.0));
-        // new column is zero
-        assert_eq!(a.get_index(0, 2), f::<M>(0.0));
-        assert_eq!(a.get_index(1, 2), f::<M>(0.0));
+        assert_eq!(at(&a, 0, 0, 0), f::<M>(1.0));
+        assert_eq!(at(&a, 0, 1, 0), f::<M>(3.0));
+        assert_eq!(at(&a, 0, 0, 1), f::<M>(2.0));
+        assert_eq!(at(&a, 0, 1, 1), f::<M>(4.0));
+        assert_eq!(at(&a, 1, 0, 0), f::<M>(5.0));
+        assert_eq!(at(&a, 1, 1, 0), f::<M>(7.0));
+        assert_eq!(at(&a, 1, 0, 1), f::<M>(6.0));
+        assert_eq!(at(&a, 1, 1, 1), f::<M>(8.0));
+        // new column is zero in every batch
+        assert_eq!(at(&a, 0, 0, 2), f::<M>(0.0));
+        assert_eq!(at(&a, 0, 1, 2), f::<M>(0.0));
+        assert_eq!(at(&a, 1, 0, 2), f::<M>(0.0));
+        assert_eq!(at(&a, 1, 1, 2), f::<M>(0.0));
         // verify via gemv that batch 1 data is intact
         let x = M::V::from_vec(
             vec![
@@ -1958,8 +1999,10 @@ pub(crate) mod tests {
         // shrink to 1 column
         a.resize_cols(1);
         assert_eq!(a.ncols(), 1);
-        assert_eq!(a.get_index(0, 0), f::<M>(1.0));
-        assert_eq!(a.get_index(1, 0), f::<M>(3.0));
+        assert_eq!(at(&a, 0, 0, 0), f::<M>(1.0));
+        assert_eq!(at(&a, 0, 1, 0), f::<M>(3.0));
+        assert_eq!(at(&a, 1, 0, 0), f::<M>(5.0));
+        assert_eq!(at(&a, 1, 1, 0), f::<M>(7.0));
         // verify batch1 col0 via gemv
         let x2 = M::V::from_vec(vec![f::<M>(1.0), f::<M>(1.0)], ctx.clone());
         let mut y2 = M::V::zeros(2, ctx);
@@ -2180,6 +2223,44 @@ pub(crate) mod tests {
     }
 
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_batched_add_columns_to_batched_vector_m<M: Matrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
+        let values = vec![
+            f::<M>(1.0),
+            f::<M>(2.0),
+            f::<M>(3.0),
+            f::<M>(4.0),
+            f::<M>(5.0),
+            f::<M>(6.0),
+            f::<M>(7.0),
+            f::<M>(8.0),
+        ];
+        let mat = M::try_from_triplets(2, 2, indices, values, ctx.clone()).unwrap();
+        // one lane per (batch, column): lane `b * ncols + j` gets column `j` of batch `b`
+        let ctx4 = ctx.clone_with_nbatch(4).unwrap();
+        let mut v = M::V::zeros(2, ctx4);
+        mat.add_columns_to_batched_vector(&mut v);
+        assert_eq!(
+            v.clone_as_vec(),
+            vec![
+                f::<M>(1.0),
+                f::<M>(2.0),
+                f::<M>(3.0),
+                f::<M>(4.0),
+                f::<M>(5.0),
+                f::<M>(6.0),
+                f::<M>(7.0),
+                f::<M>(8.0)
+            ]
+        );
+        // it accumulates, like its single-column sibling
+        mat.add_columns_to_batched_vector(&mut v);
+        assert_eq!(v.clone_as_vec()[0], f::<M>(2.0));
+        assert_eq!(v.clone_as_vec()[7], f::<M>(16.0));
+    }
+
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_set_data_with_indices_m<M: Matrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         let indices = vec![(0, 0), (1, 0), (0, 1), (1, 1)];
@@ -2390,10 +2471,14 @@ pub(crate) mod tests {
         let a = M::from_diagonal(&v);
         assert_eq!(a.nrows(), 2);
         assert_eq!(a.ncols(), 2);
-        assert_eq!(a.get_index(0, 0), f::<M>(2.0));
-        assert_eq!(a.get_index(1, 1), f::<M>(3.0));
-        assert_eq!(a.get_index(0, 1), f::<M>(0.0));
-        assert_eq!(a.get_index(1, 0), f::<M>(0.0));
+        assert_eq!(at(&a, 0, 0, 0), f::<M>(2.0));
+        assert_eq!(at(&a, 0, 1, 1), f::<M>(3.0));
+        assert_eq!(at(&a, 0, 0, 1), f::<M>(0.0));
+        assert_eq!(at(&a, 0, 1, 0), f::<M>(0.0));
+        assert_eq!(at(&a, 1, 0, 0), f::<M>(4.0));
+        assert_eq!(at(&a, 1, 1, 1), f::<M>(5.0));
+        assert_eq!(at(&a, 1, 0, 1), f::<M>(0.0));
+        assert_eq!(at(&a, 1, 1, 0), f::<M>(0.0));
     }
 
     pub fn test_try_from_triplets_wrong_length<M: Matrix>() {
@@ -2471,6 +2556,10 @@ macro_rules! generate_matrix_tests_batched {
             #[test]
             fn [<test_batched_add_column_to_vector_ $suffix>]() {
                 $crate::matrix::tests::test_batched_add_column_to_vector_m::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_add_columns_to_batched_vector_ $suffix>]() {
+                $crate::matrix::tests::test_batched_add_columns_to_batched_vector_m::<$M>($ctx2);
             }
             #[test]
             fn [<test_batched_set_data_with_indices_ $suffix>]() {
@@ -2709,6 +2798,10 @@ macro_rules! generate_dense_matrix_tests_batched {
             #[test]
             fn [<test_batched_from_vec_ $suffix>]() {
                 $crate::matrix::tests::test_batched_from_vec::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_set_index_batch_ $suffix>]() {
+                $crate::matrix::tests::test_batched_set_index_batch::<$M>($ctx2);
             }
             #[test]
             fn [<test_batched_gemv_o_broadcast_x_ $suffix>]() {

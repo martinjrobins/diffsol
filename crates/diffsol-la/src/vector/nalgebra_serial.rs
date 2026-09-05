@@ -3,7 +3,7 @@ use std::ops::{Add, AddAssign, Div, Index, IndexMut, Mul, MulAssign, Sub, SubAss
 use nalgebra::{Const, DMatrix, DVector, Dyn, LpNorm, MatrixView, MatrixViewMut};
 
 use crate::context::broadcast_batch;
-use crate::{Context, IndexType, NalgebraContext, NalgebraMat, NalgebraScalar, Scale, VectorHost};
+use crate::{Context, IndexType, NalgebraContext, NalgebraMat, NalgebraScalar, Scale};
 
 use super::{DefaultDenseMatrix, Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
 
@@ -366,6 +366,11 @@ macro_rules! impl_index {
         impl<T: NalgebraScalar> Index<IndexType> for $t {
             type Output = T;
             fn index(&self, i: IndexType) -> &T {
+                assert_eq!(
+                    self.context.nbatch(),
+                    1,
+                    "indexing not supported for batched vectors"
+                );
                 &self.data[(i, 0)]
             }
         }
@@ -375,6 +380,11 @@ impl_index!(NalgebraVec<T>);
 impl_index!(NalgebraVecRef<'_, T>);
 impl<T: NalgebraScalar> IndexMut<IndexType> for NalgebraVec<T> {
     fn index_mut(&mut self, i: IndexType) -> &mut T {
+        assert_eq!(
+            self.context.nbatch(),
+            1,
+            "indexing not supported for batched vectors"
+        );
         &mut self.data[(i, 0)]
     }
 }
@@ -545,6 +555,14 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
         self.data[(i, 0)]
     }
     fn set_index(&mut self, i: IndexType, v: T) {
+        assert_eq!(
+            self.context.nbatch(),
+            1,
+            "set_index not supported for batched vectors, use fill_index"
+        );
+        self.data.row_mut(i).fill(v);
+    }
+    fn fill_index(&mut self, i: IndexType, v: T) {
         self.data.row_mut(i).fill(v);
     }
     fn squared_norm(&self, y: &Self, atol: &Self, rtol: T) -> T {
@@ -572,6 +590,39 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
         NalgebraVecMut {
             data: self.data.columns_mut(b, 1),
             context: NalgebraContext::default(),
+        }
+    }
+    fn for_each_batch_mut<const M: usize, const N: usize>(
+        mut mut_args: [&mut Self; M],
+        args: [&Self; N],
+        mut f: impl FnMut([&mut [T]; M], [&[T]; N], usize),
+    ) {
+        assert!(M > 0, "for_each_batch needs at least one mutable operand");
+        let nbatch = mut_args[0].context.nbatch();
+        {
+            let ctx = &mut_args[0].context;
+            for arg in mut_args.iter() {
+                ctx.assert_broadcastable_into(arg.context.nbatch(), "for_each_batch");
+            }
+            for arg in args.iter() {
+                ctx.assert_broadcastable_into(arg.context.nbatch(), "for_each_batch");
+            }
+        }
+        // unbatched is the overwhelmingly common case, and every operand is then a single
+        // column: hand out the whole backing slice, with no lane index or subslicing at all
+        if nbatch == 1 {
+            let ins = args.map(|a| a.data.as_slice());
+            let outs = mut_args.map(|v| v.data.as_mut_slice());
+            f(outs, ins, 0);
+            return;
+        }
+        for b in 0..nbatch {
+            let ins = args.map(|a| a.batch_as_slice(a.batch(b, nbatch)));
+            let outs = mut_args.each_mut().map(|v| {
+                let vb = v.batch(b, nbatch);
+                v.batch_as_mut_slice(vb)
+            });
+            f(outs, ins, b);
         }
     }
     fn copy_from(&mut self, o: &Self) {
@@ -617,13 +668,18 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
     fn axpy_v(&mut self, a: T, x: &Self::View<'_>, beta: T) {
         axpy_body!(self, x, beta, "axpy_v", |_batch| a)
     }
-    fn batched_axpy(&mut self, a: &[T], x: &Self, beta: T) {
+    fn batched_axpy(&mut self, a: &Self, x: &Self, beta: T) {
         assert_eq!(
             a.len(),
-            self.context.nbatch(),
-            "alpha.len() must equal nbatch"
+            1,
+            "alpha must be a batched scalar, with len() == 1"
         );
-        axpy_body!(self, x, beta, "batched_axpy", |batch| a[batch])
+        assert_eq!(
+            a.context.nbatch(),
+            self.context.nbatch(),
+            "alpha nbatch must equal nbatch"
+        );
+        axpy_body!(self, x, beta, "batched_axpy", |batch| a.data[(0, batch)])
     }
     fn component_div_assign(&mut self, o: &Self) {
         self.context
@@ -784,20 +840,32 @@ impl<'a, T: NalgebraScalar> VectorViewMut<'a> for NalgebraVecMut<'a, T> {
         copy_from_body!(self, o, "copy_from_view");
     }
     fn set_index(&mut self, i: IndexType, v: T) {
+        assert_eq!(
+            self.context.nbatch(),
+            1,
+            "set_index not supported for batched vectors, use fill_index"
+        );
+        self.data.row_mut(i).fill(v);
+    }
+    fn fill_index(&mut self, i: IndexType, v: T) {
         self.data.row_mut(i).fill(v);
     }
     fn axpy(&mut self, a: T, x: &Self::Owned, beta: T) {
         axpy_body!(self, x, beta, "axpy", |_batch| a)
     }
 }
-impl<T: NalgebraScalar> VectorHost for NalgebraVec<T> {
-    fn as_slice(&self) -> &[T] {
-        assert_eq!(self.context.nbatch(), 1);
-        self.data.as_slice()
+impl<T: NalgebraScalar> NalgebraVec<T> {
+    /// Get one batch of the vector data as an immutable slice.
+    ///
+    /// Batches are the columns of the backing matrix, and the storage is column-major.
+    pub fn batch_as_slice(&self, batch: usize) -> &[T] {
+        let n = self.data.nrows();
+        &self.data.as_slice()[batch * n..(batch + 1) * n]
     }
-    fn as_mut_slice(&mut self) -> &mut [T] {
-        assert_eq!(self.context.nbatch(), 1);
-        self.data.as_mut_slice()
+    /// Get one batch of the vector data as a mutable slice.
+    pub fn batch_as_mut_slice(&mut self, batch: usize) -> &mut [T] {
+        let n = self.data.nrows();
+        &mut self.data.as_mut_slice()[batch * n..(batch + 1) * n]
     }
 }
 #[cfg(test)]

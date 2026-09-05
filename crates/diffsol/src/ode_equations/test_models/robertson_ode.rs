@@ -1,5 +1,5 @@
 use crate::{
-    ode_solver::problem::OdeSolverSolution, MatrixHost, OdeBuilder, OdeEquationsImplicit,
+    ode_solver::problem::OdeSolverSolution, Matrix, OdeBuilder, OdeEquationsImplicit,
     OdeSolverProblem, Vector,
 };
 use num_traits::{FromPrimitive, One, Zero};
@@ -7,7 +7,7 @@ use num_traits::{FromPrimitive, One, Zero};
 #[cfg(feature = "diffsl")]
 #[allow(clippy::type_complexity)]
 pub fn robertson_ode_diffsl_problem<
-    M: MatrixHost<T = f64>,
+    M: Matrix<T = f64>,
     CG: crate::CodegenModuleJit + crate::CodegenModuleCompile,
 >() -> (
     OdeSolverProblem<impl crate::OdeEquationsImplicitAdjoint<M = M, V = M::V, T = M::T, C = M::C>>,
@@ -43,7 +43,7 @@ pub fn robertson_ode_diffsl_problem<
 }
 
 #[allow(clippy::type_complexity)]
-pub fn robertson_ode<M: MatrixHost + 'static>(
+pub fn robertson_ode<M: Matrix + 'static>(
     use_coloring: bool,
     ngroups: usize,
 ) -> (
@@ -68,7 +68,7 @@ pub fn robertson_ode<M: MatrixHost + 'static>(
             //     dy1/dt = -.04*y1 + 1.e4*y2*y3
             //*    dy2/dt = .04*y1 - 1.e4*y2*y3 - 3.e7*(y2)^2
             //*    dy3/dt = 3.e7*(y2)^2
-            move |x: &M::V, p: &M::V, _t: M::T, y: &mut M::V| {
+            move |x: &[M::T], p: &[M::T], _t: M::T, y: &mut [M::T]| {
                 for ig in 0..ngroups {
                     let i = ig * N;
                     y[i] = -p[0] * x[i] + p[1] * x[i + 1] * x[i + 2];
@@ -77,7 +77,7 @@ pub fn robertson_ode<M: MatrixHost + 'static>(
                     y[i + 2] = p[2] * x[i + 1] * x[i + 1];
                 }
             },
-            move |x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V| {
+            move |x: &[M::T], p: &[M::T], _t: M::T, v: &[M::T], y: &mut [M::T]| {
                 for ig in 0..ngroups {
                     let i = ig * N;
                     y[i] = -p[0] * v[i] + p[1] * v[i + 1] * x[i + 2] + p[1] * x[i + 1] * v[i + 2];
@@ -90,7 +90,7 @@ pub fn robertson_ode<M: MatrixHost + 'static>(
             },
         )
         .init(
-            move |_p: &M::V, _t: M::T, y: &mut M::V| {
+            move |_p: &[M::T], _t: M::T, y: &mut [M::T]| {
                 for ig in 0..ngroups {
                     let i = ig * N;
                     y[i] = M::T::one();

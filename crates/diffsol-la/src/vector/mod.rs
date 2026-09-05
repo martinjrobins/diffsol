@@ -3,7 +3,7 @@ use crate::scalar::Scale;
 use crate::{Context, IndexType, Scalar};
 use num_traits::Zero;
 use std::fmt::Debug;
-use std::ops::{Add, AddAssign, Div, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Div, Mul, MulAssign, Sub, SubAssign};
 
 #[cfg(feature = "faer")]
 pub mod faer_serial;
@@ -125,8 +125,11 @@ pub trait VectorViewMut<'a>:
     fn copy_from_view(&mut self, other: &Self::View);
     /// Compute the AXPY operation: self = alpha * x + beta * self
     fn axpy(&mut self, alpha: Self::T, x: &Self::Owned, beta: Self::T);
-    /// Set the value at the specified index (sets across all batches when nbatch > 1).
+    /// Set the value at the specified index. Panics unless `nbatch == 1`; to write the same value
+    /// into every batch use [`Self::fill_index`].
     fn set_index(&mut self, index: IndexType, value: Self::T);
+    /// Set the value at the specified index in **every** batch.
+    fn fill_index(&mut self, index: IndexType, value: Self::T);
 }
 
 /// A borrowed immutable view of a vector, supporting read-only arithmetic operations.
@@ -154,7 +157,7 @@ pub trait VectorView<'a>:
 
 /// A complete vector abstraction supporting arithmetic operations, norms, and index operations.
 ///
-/// This is the main vector trait used throughout diffsol. Implementing vectors can be hosted on CPU (see `VectorHost`) or GPU.
+/// This is the main vector trait used throughout diffsol. Implementing vectors can be hosted on CPU or GPU.
 /// Users typically do not need to implement this trait; use provided implementations like
 /// `NalgebraVec` or `FaerVec`.
 pub trait Vector:
@@ -186,10 +189,18 @@ pub trait Vector:
     /// Get a mutable reference to the inner representation of the vector.
     fn inner_mut(&mut self) -> &mut Self::Inner;
 
-    /// Set the value at the specified index to `value`.
+    /// Set the value at the specified index to `value`. Panics unless `nbatch == 1`; to write the
+    /// same value into every batch use [`Self::fill_index`].
     fn set_index(&mut self, index: IndexType, value: Self::T);
 
-    /// Get the value at the specified index.
+    /// Set the value at the specified index to `value` in **every** batch.
+    ///
+    /// This is what a basis or probe vector wants — the same scalar in every lane — and is the only
+    /// way to write a single index of a batched vector; [`Self::set_index`] panics on one.
+    fn fill_index(&mut self, index: IndexType, value: Self::T);
+
+    /// Get the value at the specified index. Panics unless `nbatch == 1`; for a batched vector read
+    /// one lane with [`Self::get_batch`].
     fn get_index(&self, index: IndexType) -> Self::T;
 
     /// Compute the $\ell_k$ norm: $(\sum_i |x_i|^k)^{1/k}$
@@ -238,6 +249,55 @@ pub trait Vector:
     /// Get a mutable view of a single batch (with nbatch=1 context).
     fn get_batch_mut(&mut self, batch: usize) -> Self::ViewMut<'_>;
 
+    /// Run `f` once per batch lane, passing that lane of each vector in `mut_args` as a mutable
+    /// slice and that lane of each vector in `args` as an immutable slice.
+    ///
+    /// The lane count (i.e. number of batches) is governed by `mut_args[0]`, the primary output.
+    /// Every other operand, mutable or not, broadcasts into it exactly as in every other batched operation (see
+    /// [`Context::assert_broadcastable_into`]), so an operand with `nbatch == B` can be used while
+    /// writing an output with `nbatch == B * nparams`. Panics if an operand's batch count is not
+    /// broadcastable into the output's, or if `mut_args` is empty.
+    ///
+    /// If a mutable operand is written once per lane at its broadcast lane, so an
+    /// `nbatch == 1` scratch vector is shared by every lane of the output and overwritten by each
+    /// call to `f`.
+    ///
+    /// The closure's last argument is the lane of the output being written, in
+    /// `0..mut_args[0].context().nbatch()`.
+    ///
+    /// ```ignore
+    /// // y = A^T v, via a scratch buffer the backend requires to be mutable
+    /// V::for_each_batch_mut([y, &mut scratch], [x, v], |[y, scratch], [x, v], _lane| {
+    ///     scratch.copy_from_slice(v);
+    ///     op.transpose_mul(x, scratch, y);
+    /// });
+    /// ```
+    fn for_each_batch_mut<const M: usize, const N: usize>(
+        mut_args: [&mut Self; M],
+        args: [&Self; N],
+        f: impl FnMut([&mut [Self::T]; M], [&[Self::T]; N], usize),
+    );
+
+    /// Run `f` once per batch lane of `self`, passing that lane of `self` as a mutable slice and
+    /// the corresponding lane of each operand in `args` as an immutable slice.
+    ///
+    /// The single-output case of [`Self::for_each_batch_mut`].
+    ///
+    /// ```ignore
+    /// // y_0 = x_0 v_0 + x_1 v_1, y_1 = 0, for every batch of y
+    /// y.for_each_batch([x, v], |y, [x, v], _lane| {
+    ///     y[0] = x[0] * v[0] + x[1] * v[1];
+    ///     y[1] = T::zero();
+    /// });
+    /// ```
+    fn for_each_batch<const N: usize>(
+        &mut self,
+        args: [&Self; N],
+        mut f: impl FnMut(&mut [Self::T], [&[Self::T]; N], usize),
+    ) {
+        Self::for_each_batch_mut([self], args, |[y], ins, lane| f(y, ins, lane));
+    }
+
     /// Copy all values from `other` into this vector.
     fn copy_from(&mut self, other: &Self);
 
@@ -261,12 +321,12 @@ pub trait Vector:
     /// Compute the AXPY operation with a vector view: self = alpha * x + beta * self
     fn axpy_v(&mut self, alpha: Self::T, x: &Self::View<'_>, beta: Self::T);
 
-    /// Per-batch AXPY: `self[i]_b = alpha[b] * x[i]_b + beta * self[i]_b`
+    /// Per-batch AXPY: `self[i]_b = alpha_b * x[i]_b + beta * self[i]_b`
     ///
-    /// `alpha` must have length equal to `self.context().nbatch()`.
-    /// Each batch uses its own scalar multiplier `alpha[b]`.
+    /// `alpha` is a *batched scalar*: one value per batch, so `alpha.len() == 1` and its batch
+    /// count equals `self`'s. A uniform multiplier is plain [`Self::axpy`] instead.
     /// The `x` operand may broadcast if its `nbatch == 1`.
-    fn batched_axpy(&mut self, alpha: &[Self::T], x: &Self, beta: Self::T);
+    fn batched_axpy(&mut self, alpha: &Self, x: &Self, beta: Self::T);
 
     /// Element-wise multiplication: self_i *= other_i
     fn component_mul_assign(&mut self, other: &Self);
@@ -373,21 +433,6 @@ pub trait Vector:
     }
 }
 
-/// A vector hosted on the CPU, supporting direct indexing and slice access.
-///
-/// This trait extends `Vector` with the ability to directly access vector elements via indexing
-/// (`v[i]`) and to get slices of the underlying data. This is useful for algorithms that need
-/// direct CPU-side access to vector data. GPU vectors typically do not implement this trait.
-pub trait VectorHost:
-    Vector + Index<IndexType, Output = Self::T> + IndexMut<IndexType, Output = Self::T>
-{
-    /// Get the vector data as an immutable slice.
-    fn as_slice(&self) -> &[Self::T];
-
-    /// Get the vector data as a mutable slice.
-    fn as_mut_slice(&mut self) -> &mut [Self::T];
-}
-
 /// Marker trait for vectors that have a default associated dense matrix type.
 ///
 /// This trait associates a vector type with its corresponding dense matrix representation,
@@ -435,6 +480,18 @@ macro_rules! generate_vector_tests_nonbatched {
             #[test]
             fn [<test_copy_from_via_view_mut_ $suffix>]() {
                 $crate::vector::tests::test_copy_from_via_view_mut::<$V>();
+            }
+            #[test]
+            fn [<test_for_each_batch_ $suffix>]() {
+                $crate::vector::tests::test_for_each_batch::<$V>();
+            }
+            #[test]
+            fn [<test_for_each_batch_index_ $suffix>]() {
+                $crate::vector::tests::test_for_each_batch_index::<$V>();
+            }
+            #[test]
+            fn [<test_for_each_batch_mut_ $suffix>]() {
+                $crate::vector::tests::test_for_each_batch_mut::<$V>();
             }
             #[test]
             fn [<test_set_index_ $suffix>]() {
@@ -599,13 +656,18 @@ macro_rules! generate_vector_tests_batched {
                 $crate::vector::tests::test_batched_squared_norm::<$V>($ctx2);
             }
             #[test]
-            fn [<test_batched_set_index_ $suffix>]() {
-                $crate::vector::tests::test_batched_set_index::<$V>($ctx3);
+            fn [<test_batched_fill_index_ $suffix>]() {
+                $crate::vector::tests::test_batched_fill_index::<$V>($ctx3);
             }
             #[test]
             #[should_panic(expected = "not supported for batched")]
             fn [<test_batched_get_index_panics_ $suffix>]() {
                 $crate::vector::tests::test_batched_get_index_panics::<$V>($ctx2);
+            }
+            #[test]
+            #[should_panic(expected = "not supported for batched")]
+            fn [<test_batched_set_index_panics_ $suffix>]() {
+                $crate::vector::tests::test_batched_set_index_panics::<$V>($ctx2);
             }
             #[test]
             fn [<test_batched_fill_ $suffix>]() {
@@ -627,6 +689,23 @@ macro_rules! generate_vector_tests_batched {
             #[should_panic(expected = "differ across batches")]
             fn [<test_batched_root_finding_inconsistent_ $suffix>]() {
                 $crate::vector::tests::test_batched_root_finding_inconsistent::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_for_each_batch_ $suffix>]() {
+                $crate::vector::tests::test_batched_for_each_batch::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_for_each_batch_index_ $suffix>]() {
+                $crate::vector::tests::test_batched_for_each_batch_index::<$V>($ctx3);
+            }
+            #[test]
+            fn [<test_batched_for_each_batch_mut_ $suffix>]() {
+                $crate::vector::tests::test_batched_for_each_batch_mut::<$V>($ctx2);
+            }
+            #[test]
+            #[should_panic(expected = "for_each_batch")]
+            fn [<test_batched_for_each_batch_bad_nbatch_ $suffix>]() {
+                $crate::vector::tests::test_batched_for_each_batch_bad_nbatch::<$V>($ctx2);
             }
             #[test]
             fn [<test_batched_axpy_broadcast_ $suffix>]() {
@@ -729,9 +808,14 @@ macro_rules! generate_vector_tests_batched {
                 $crate::vector::tests::test_batched_axpy_new_broadcast::<$V>($ctx2);
             }
             #[test]
-            #[should_panic(expected = "alpha.len() must equal")]
+            #[should_panic(expected = "alpha must be a batched scalar")]
             fn [<test_batched_axpy_new_bad_length_ $suffix>]() {
                 $crate::vector::tests::test_batched_axpy_new_bad_length::<$V>($ctx2);
+            }
+            #[test]
+            #[should_panic(expected = "alpha nbatch must equal")]
+            fn [<test_batched_axpy_new_bad_nbatch_ $suffix>]() {
+                $crate::vector::tests::test_batched_axpy_new_bad_nbatch::<$V>($ctx2);
             }
             #[test]
             fn [<test_batched_empty_ $suffix>]() {
@@ -877,8 +961,13 @@ macro_rules! generate_vector_tests_batched {
 
             // --- Strided view tests (batched, using $ctx2) ---
             #[test]
-            fn [<test_strided_view_set_index_ $suffix>]() {
-                $crate::vector::tests::test_strided_view_set_index::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
+            fn [<test_strided_view_fill_index_ $suffix>]() {
+                $crate::vector::tests::test_strided_view_fill_index::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
+            }
+            #[test]
+            #[should_panic(expected = "not supported for batched")]
+            fn [<test_strided_view_set_index_panics_ $suffix>]() {
+                $crate::vector::tests::test_strided_view_set_index_panics::<<$V as $crate::DefaultDenseMatrix>::M>($ctx2);
             }
             #[test]
             fn [<test_strided_view_mut_copy_from_ $suffix>]() {
@@ -962,12 +1051,14 @@ pub(crate) mod tests {
     use std::ops::{Add, Sub};
     use std::panic::{catch_unwind, AssertUnwindSafe};
 
-    use super::{Vector, VectorCommon, VectorHost, VectorIndex, VectorView, VectorViewMut};
+    use super::{Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
     use crate::context::nalgebra::NalgebraContext;
     use crate::scalar::Scale;
     use crate::vector::nalgebra_serial::NalgebraVec;
     use crate::Context;
+    use crate::IndexType;
     use num_traits::FromPrimitive;
+    use std::ops::{Index, IndexMut};
 
     fn f<V: Vector>(x: f64) -> V::T {
         V::T::from_f64(x).unwrap()
@@ -977,16 +1068,16 @@ pub(crate) mod tests {
         xs.iter().map(|&x| f::<V>(x)).collect()
     }
 
-    /// `Index`/`IndexMut` operator syntax and `as_slice`/`as_mut_slice`: only host vectors
-    /// implement `VectorHost`, so this isn't wired into the shared (CUDA-inclusive) macro suite.
-    pub fn test_host_only<V: VectorHost>() {
+    /// `Index`/`IndexMut` operator syntax: only the host backends offer it, so this isn't wired
+    /// into the shared (CUDA-inclusive) macro suite.
+    pub fn test_host_only<V>()
+    where
+        V: Vector + Index<IndexType, Output = V::T> + IndexMut<IndexType, Output = V::T>,
+    {
         let mut v = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0]), Default::default());
         assert_eq!(v[0], f::<V>(1.0));
         v[1] = f::<V>(20.0);
         assert_eq!(v.clone_as_vec(), fv::<V>(&[1.0, 20.0, 3.0]));
-        assert_eq!(v.as_slice(), fv::<V>(&[1.0, 20.0, 3.0]).as_slice());
-        v.as_mut_slice()[2] = f::<V>(30.0);
-        assert_eq!(v.clone_as_vec(), fv::<V>(&[1.0, 20.0, 30.0]));
     }
 
     pub fn test_root_finding<V: Vector>() {
@@ -1404,10 +1495,10 @@ pub(crate) mod tests {
     }
 
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
-    pub fn test_batched_set_index<V: Vector>(ctx: V::C) {
+    pub fn test_batched_fill_index<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 3);
         let mut v = V::zeros(2, ctx);
-        v.set_index(0, f::<V>(42.0));
+        v.fill_index(0, f::<V>(42.0));
         assert_eq!(
             v.clone_as_vec(),
             fv::<V>(&[42.0, 0.0, 42.0, 0.0, 42.0, 0.0])
@@ -1419,6 +1510,14 @@ pub(crate) mod tests {
         assert!(ctx.nbatch() > 1);
         let v = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0]), ctx);
         let _val = v.get_index(0);
+    }
+
+    /// Scalar writes are single-system too: a batched vector needs `fill_index` or a batch view.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_batched_set_index_panics<V: Vector>(ctx: V::C) {
+        assert!(ctx.nbatch() > 1);
+        let mut v = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0]), ctx);
+        v.set_index(0, f::<V>(5.0));
     }
 
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
@@ -1468,6 +1567,109 @@ pub(crate) mod tests {
     // --- Broadcasting tests ---
 
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    /// `for_each_batch` with 0, 1 and 2 operands on an unbatched vector.
+    pub fn test_for_each_batch<V: Vector>() {
+        let x = V::from_vec(fv::<V>(&[1.0, 2.0]), V::C::default());
+        let v = V::from_vec(fv::<V>(&[3.0, 4.0]), V::C::default());
+        let mut y = V::zeros(2, V::C::default());
+
+        y.for_each_batch([], |y, _, _| y[0] = f::<V>(7.0));
+        assert_eq!(y.clone_as_vec(), fv::<V>(&[7.0, 0.0]));
+
+        y.for_each_batch([&x], |y, [x], _| y[1] = x[1]);
+        assert_eq!(y.clone_as_vec(), fv::<V>(&[7.0, 2.0]));
+
+        y.for_each_batch([&x, &v], |y, [x, v], _| {
+            y[0] = x[0] * v[0] + x[1] * v[1];
+            y[1] = x[0] - v[0];
+        });
+        assert_eq!(y.clone_as_vec(), fv::<V>(&[11.0, -2.0]));
+    }
+
+    /// Each lane of `self` sees its own slice, and operands broadcast into it.
+    pub fn test_batched_for_each_batch<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        // operand with nbatch == 2 matches lane for lane
+        let x = V::from_vec(fv::<V>(&[1.0, 2.0, 10.0, 20.0]), ctx.clone());
+        // operand with nbatch == 1 broadcasts to every lane
+        let v = V::from_vec(fv::<V>(&[3.0, 4.0]), V::C::default());
+        let mut y = V::zeros(2, ctx.clone());
+        y.for_each_batch([&x, &v], |y, [x, v], _| {
+            y[0] = x[0] + v[0];
+            y[1] = x[1] * v[1];
+        });
+        assert_eq!(y.clone_as_vec(), fv::<V>(&[4.0, 8.0, 13.0, 80.0]));
+
+        // grouped broadcast: lanes 0,1 of a 4-lane destination read batch 0 of a 2-lane operand
+        let ctx4 = ctx.clone_with_nbatch(4).unwrap();
+        let mut y4 = V::zeros(1, ctx4);
+        y4.for_each_batch([&x], |y, [x], _| y[0] = x[0]);
+        assert_eq!(y4.clone_as_vec(), fv::<V>(&[1.0, 1.0, 10.0, 10.0]));
+    }
+
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    /// `for_each_batch_mut` writes every mutable operand, not just the first.
+    pub fn test_for_each_batch_mut<V: Vector>() {
+        let x = V::from_vec(fv::<V>(&[1.0, 2.0]), V::C::default());
+        let mut y = V::zeros(2, V::C::default());
+        let mut scratch = V::zeros(2, V::C::default());
+
+        V::for_each_batch_mut([&mut y, &mut scratch], [&x], |[y, scratch], [x], _| {
+            scratch.copy_from_slice(x);
+            scratch[0] += f::<V>(1.0);
+            y[0] = scratch[0] * scratch[1];
+            y[1] = scratch[1];
+        });
+        assert_eq!(y.clone_as_vec(), fv::<V>(&[4.0, 2.0]));
+        assert_eq!(scratch.clone_as_vec(), fv::<V>(&[2.0, 2.0]));
+    }
+
+    /// An `nbatch == 1` scratch is shared by every lane of a batched output.
+    pub fn test_batched_for_each_batch_mut<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let x = V::from_vec(fv::<V>(&[1.0, 2.0, 10.0, 20.0]), ctx.clone());
+        let mut y = V::zeros(2, ctx.clone());
+        let mut scratch = V::zeros(2, V::C::default());
+
+        V::for_each_batch_mut([&mut y, &mut scratch], [&x], |[y, scratch], [x], lane| {
+            scratch.copy_from_slice(x);
+            scratch[1] += f::<V>(lane as f64);
+            y[0] = scratch[0];
+            y[1] = scratch[1];
+        });
+        assert_eq!(y.clone_as_vec(), fv::<V>(&[1.0, 2.0, 10.0, 21.0]));
+        // the scratch holds whatever the last lane left in it
+        assert_eq!(scratch.clone_as_vec(), fv::<V>(&[10.0, 21.0]));
+    }
+
+    /// The closure's last argument is the lane being written.
+    pub fn test_for_each_batch_index<V: Vector>() {
+        let mut y = V::zeros(1, V::C::default());
+        y.for_each_batch([], |y, _, lane| y[0] = f::<V>(lane as f64));
+        assert_eq!(y.clone_as_vec(), fv::<V>(&[0.0]));
+    }
+
+    /// Every lane is visited exactly once, and gets its own index.
+    pub fn test_batched_for_each_batch_index<V: Vector>(ctx: V::C) {
+        let nbatch = ctx.nbatch();
+        assert!(nbatch > 1);
+        let mut y = V::zeros(2, ctx);
+        y.for_each_batch([], |y, _, lane| {
+            y[0] = f::<V>(lane as f64);
+            y[1] += f::<V>(1.0);
+        });
+        let expected: Vec<f64> = (0..nbatch).flat_map(|b| [b as f64, 1.0]).collect();
+        assert_eq!(y.clone_as_vec(), fv::<V>(&expected));
+    }
+
+    pub fn test_batched_for_each_batch_bad_nbatch<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let ctx3 = ctx.clone_with_nbatch(3).unwrap();
+        let x = V::zeros(1, ctx3);
+        let mut y = V::zeros(1, ctx);
+        y.for_each_batch([&x], |y, [x], _| y[0] = x[0]);
+    }
+
     pub fn test_batched_axpy_broadcast<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         // self has nbatch=2, x has nbatch=1
@@ -1752,8 +1954,10 @@ pub(crate) mod tests {
     pub fn test_batched_axpy_new<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
         let mut y = V::from_vec(fv::<V>(&[1.0, 2.0, 10.0, 20.0]), ctx.clone());
-        let x = V::from_vec(fv::<V>(&[3.0, 4.0, 30.0, 40.0]), ctx);
-        y.batched_axpy(&[f::<V>(2.0), f::<V>(0.5)], &x, f::<V>(1.0));
+        let x = V::from_vec(fv::<V>(&[3.0, 4.0, 30.0, 40.0]), ctx.clone());
+        // one value per lane: alpha_0 = 2, alpha_1 = 0.5
+        let alpha = V::from_vec(fv::<V>(&[2.0, 0.5]), ctx);
+        y.batched_axpy(&alpha, &x, f::<V>(1.0));
         // batch0: [1,2] + 2*[3,4] = [7,10]
         // batch1: [10,20] + 0.5*[30,40] = [25,40]
         assert_eq!(y.clone_as_vec(), fv::<V>(&[7.0, 10.0, 25.0, 40.0]));
@@ -1762,9 +1966,10 @@ pub(crate) mod tests {
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_axpy_new_broadcast<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
-        let mut y = V::from_vec(fv::<V>(&[1.0, 2.0, 10.0, 20.0]), ctx);
+        let mut y = V::from_vec(fv::<V>(&[1.0, 2.0, 10.0, 20.0]), ctx.clone());
         let x = V::from_vec(fv::<V>(&[3.0, 4.0]), V::C::default());
-        y.batched_axpy(&[f::<V>(2.0), f::<V>(0.5)], &x, f::<V>(1.0));
+        let alpha = V::from_vec(fv::<V>(&[2.0, 0.5]), ctx);
+        y.batched_axpy(&alpha, &x, f::<V>(1.0));
         // both batches: beta*y + alpha_b * x
         // batch0: [1,2] + 2*[3,4] = [7,10]
         // batch1: [10,20] + 0.5*[3,4] = [11.5,22]
@@ -1775,9 +1980,22 @@ pub(crate) mod tests {
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_axpy_new_bad_length<V: Vector>(ctx: V::C) {
         assert_eq!(ctx.nbatch(), 2);
+        let mut y = V::zeros(2, ctx.clone());
+        let x = V::zeros(2, V::C::default());
+        // alpha must be one value per lane, not one value per state
+        let alpha = V::zeros(2, ctx);
+        y.batched_axpy(&alpha, &x, f::<V>(0.0));
+    }
+
+    /// `alpha` carries one lane per batch of `self`, so a narrower alpha is a mistake rather than
+    /// something to broadcast -- a uniform multiplier is plain `axpy`.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_batched_axpy_new_bad_nbatch<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
         let mut y = V::zeros(2, ctx);
         let x = V::zeros(2, V::C::default());
-        y.batched_axpy(&[f::<V>(1.0)], &x, f::<V>(0.0));
+        let alpha = V::from_vec(fv::<V>(&[2.0]), V::C::default());
+        y.batched_axpy(&alpha, &x, f::<V>(0.0));
     }
 
     /// Every operand flavour of `+` and `-` (owned, reference, view, view reference on either
@@ -1857,7 +2075,11 @@ pub(crate) mod tests {
         a.axpy_v(f::<V>(2.0), &b.as_view(), f::<V>(1.0));
         a.component_mul_assign(&b);
         a.component_div_assign(&b);
-        a.batched_axpy(&[f::<V>(1.0), f::<V>(1.0)], &b, f::<V>(1.0));
+        a.batched_axpy(
+            &V::from_vec(fv::<V>(&[1.0, 1.0]), ctx.clone()),
+            &b,
+            f::<V>(1.0),
+        );
         a.copy_from(&b);
         a.copy_from_view(&b.as_view());
         a.fill(f::<V>(1.0));
@@ -2274,17 +2496,25 @@ pub(crate) mod tests {
     }
 
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
-    pub fn test_strided_view_set_index<M: DenseMatrix>(ctx: M::C) {
+    pub fn test_strided_view_fill_index<M: DenseMatrix>(ctx: M::C) {
         let mut matrix = make_strided_test_matrix::<M>(ctx.nbatch());
         {
             let mut col1 = matrix.column_mut(1);
-            col1.set_index(1, f::<M::V>(99.0));
+            col1.fill_index(1, f::<M::V>(99.0));
         }
         let owned = matrix.column(1).into_owned();
         let b0 = owned.get_batch(0);
         let b1 = owned.get_batch(1);
         assert_eq!(b0.get_index(1), f::<M::V>(99.0));
         assert_eq!(b1.get_index(1), f::<M::V>(99.0));
+    }
+
+    /// A column of a batched matrix is a batched view, so `set_index` must refuse it.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_strided_view_set_index_panics<M: DenseMatrix>(ctx: M::C) {
+        assert!(ctx.nbatch() > 1);
+        let mut matrix = make_strided_test_matrix::<M>(ctx.nbatch());
+        matrix.column_mut(1).set_index(1, f::<M::V>(99.0));
     }
 
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]

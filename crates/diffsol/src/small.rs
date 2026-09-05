@@ -1,16 +1,9 @@
-//! Fixed-capacity host-side containers for the solvers' small coefficient arrays.
+//! Fixed-capacity containers for the solvers' small coefficient arrays.
 //!
 //! Runge-Kutta tableaux and the BDF difference-table coefficients are only ever a handful of
-//! values, are computed from host scalars, and are consumed as plain `&[T]` slices by
-//! [`DenseMatrix::gemv_cols`] and [`DenseMatrix::mul_cols_by`]. Holding them in backend
-//! vectors costs an allocation and — on CUDA — a device-to-host copy per element read. These
-//! two types hold them inline instead, so they need no allocation and reading one is just an
-//! index.
+//! values so we defined a fixed capacity vector and matricx to store these
 //!
-//! Both are capacity-`N` with a runtime shape. That is deliberate rather than
-//! `SmallMat<T, ROWS, COLS>`: the interpolation `beta` matrix is not square (7x4 for `tsit45`),
-//! and the BDF `R`/`U` blocks are *packed at the current order*, so their column stride changes
-//! from step to step. A fixed-stride type could express neither.
+//! Both are capacity-`N` with a runtime shape (so SmallMat can have max `N` rows and `N` cols).
 
 use std::fmt::Debug;
 use std::ops::{Index, IndexMut};
@@ -71,9 +64,7 @@ impl<T: Scalar, const N: usize> SmallVec<T, N> {
 
 /// Panics if the index is past the live entries.
 ///
-/// Indexes `data` directly rather than going through [`as_slice`](SmallVec::as_slice): the
-/// bound is then the constant `N`, which the optimiser can discharge inside a loop, and the
-/// explicit check keeps the "only the live entries" contract.
+/// Indexes `data` directly.
 impl<T: Scalar, const N: usize> Index<usize> for SmallVec<T, N> {
     type Output = T;
 
@@ -95,8 +86,8 @@ impl<T: Scalar, const N: usize> IndexMut<usize> for SmallVec<T, N> {
 /// A fixed-capacity column-major matrix.
 ///
 /// Columns are densely packed with stride [`nrows`](SmallMat::nrows), so a column is a
-/// contiguous slice ([`as_col_slice`](SmallMat::as_col_slice)) and the logical shape can change
-/// without restriding. A *row* is therefore strided — code that needs contiguous rows should
+/// contiguous slice ([`as_col_slice`](SmallMat::as_col_slice)).
+/// A *row* is therefore strided — code that needs contiguous rows should
 /// store the transpose (see [`transposed`](SmallMat::transposed)).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SmallMat<T, const N: usize> {
@@ -186,14 +177,9 @@ impl<T: Scalar, const N: usize> SmallMat<T, N> {
         out
     }
 
-    /// `self * rhs`.
+    /// `self * rhs`, a column-major `gemm`.
     ///
-    /// Panics unless `self.ncols == rhs.nrows`, or if the result would exceed capacity.
-    /// Accumulates over the inner index for each output entry, matching a column-major `gemm`.
-    ///
-    /// The three shapes are read into locals up front: the loops then index flat slices at a
-    /// stride the optimiser can keep in a register, rather than re-loading `nrows` from the
-    /// struct on every element.
+    /// Panics unless `self.ncols == rhs.nrows`.
     #[inline]
     pub fn mat_mul(&self, rhs: &Self) -> Self {
         assert_eq!(
@@ -219,12 +205,7 @@ impl<T: Scalar, const N: usize> SmallMat<T, N> {
     }
 }
 
-/// Row-then-column indexing, `m[(i, j)]`, in the natural orientation regardless of the
-/// column-major storage. Panics if `(i, j)` is outside the live block.
-///
-/// Indexes `data` directly rather than reslicing a column, so the only bound left for the
-/// optimiser is the constant `N` — reslicing per element is what made the element-wise loops
-/// in the BDF coefficient blocks measurably slower than raw arrays.
+/// Row-then-column indexing, `m[(i, j)]`. Panics if `(i, j)` is outside the live block.
 impl<T: Scalar, const N: usize> Index<(usize, usize)> for SmallMat<T, N> {
     type Output = T;
 

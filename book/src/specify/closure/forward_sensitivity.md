@@ -38,5 +38,5 @@ Lets imagine we want to solve the sensitivity problem up to a time \\(t_o = 10\\
 ```
 
 We can then obtain the sensitivity vectors at time \\(t_o\\) using the `interpolate_sens` method on the `OdeSolverMethod` trait. 
-This method returns a `Vec<DVector<f64>>` where each element of the vector is the sensitivity vector for element \\(i\\) of the parameter vector at time \\(t_o\\).
+This method returns a single vector holding one sensitivity per parameter in its batch lanes: lane \\(b \\cdot n_p + i\\) is the sensitivity wrt parameter \\(i\\) for batch \\(b\\) of the problem, so for an unbatched problem `sens.get_batch(i)` is the sensitivity wrt parameter \\(i\\) at time \\(t_o\\).
 If we need the sensitivity at the current internal time step, we can get this from the `s` field of the [`OdeSolverState`](https://docs.rs/diffsol/latest/diffsol/ode_solver/method/struct.OdeSolverState.html) struct.

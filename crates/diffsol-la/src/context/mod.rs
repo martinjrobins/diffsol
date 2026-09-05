@@ -76,7 +76,8 @@ pub trait Context: Clone + Default {
     /// - operations with a fixed destination are governed by it: assignments, `copy_from`,
     ///   `axpy`, `gemv` into `y`, a linear solve in place.
     ///
-    /// The other operand is then broadcast into the governing count (see [`broadcast_batch`]).
+    /// The other operand is then broadcast into the governing count: each of its batches is
+    /// repeated across `dest_nbatch / src_nbatch` *contiguous* destination batches.
     #[inline]
     fn assert_broadcastable_into(&self, src_nbatch: usize, op: &str) {
         let nbatch = self.nbatch();

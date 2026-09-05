@@ -2,7 +2,7 @@ use std::cell::RefCell;
 
 use crate::{
     find_matrix_non_zeros, find_transpose_non_zeros, jacobian::JacobianColoring,
-    matrix::sparsity::MatrixSparsity, LinearOp, LinearOpTranspose, Matrix, Op,
+    matrix::sparsity::MatrixSparsity, LinearOp, LinearOpTranspose, Matrix, Op, Vector,
 };
 
 use super::{BuilderOp, OpStatistics, ParameterisedOp};
@@ -10,8 +10,8 @@ use super::{BuilderOp, OpStatistics, ParameterisedOp};
 pub struct LinearClosureWithAdjoint<M, F, G>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
+    F: Fn(&[M::T], &[M::T], M::T, M::T, &mut [M::T]),
+    G: Fn(&[M::T], &[M::T], M::T, M::T, &mut [M::T]),
 {
     func: F,
     func_adjoint: G,
@@ -29,8 +29,8 @@ where
 impl<M, F, G> LinearClosureWithAdjoint<M, F, G>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
+    F: Fn(&[M::T], &[M::T], M::T, M::T, &mut [M::T]),
+    G: Fn(&[M::T], &[M::T], M::T, M::T, &mut [M::T]),
 {
     pub fn new(
         func: F,
@@ -86,8 +86,8 @@ where
 impl<M, F, G> Op for LinearClosureWithAdjoint<M, F, G>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
+    F: Fn(&[M::T], &[M::T], M::T, M::T, &mut [M::T]),
+    G: Fn(&[M::T], &[M::T], M::T, M::T, &mut [M::T]),
 {
     type V = M::V;
     type T = M::T;
@@ -114,8 +114,8 @@ where
 impl<M, F, G> BuilderOp for LinearClosureWithAdjoint<M, F, G>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
+    F: Fn(&[M::T], &[M::T], M::T, M::T, &mut [M::T]),
+    G: Fn(&[M::T], &[M::T], M::T, M::T, &mut [M::T]),
 {
     fn calculate_sparsity(&mut self, _y0: &Self::V, t0: Self::T, p: &Self::V) {
         self.calculate_sparsity(t0, p);
@@ -135,12 +135,12 @@ where
 impl<M, F, G> LinearOp for ParameterisedOp<'_, LinearClosureWithAdjoint<M, F, G>>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
+    F: Fn(&[M::T], &[M::T], M::T, M::T, &mut [M::T]),
+    G: Fn(&[M::T], &[M::T], M::T, M::T, &mut [M::T]),
 {
     fn gemv_inplace(&self, x: &M::V, t: M::T, beta: M::T, y: &mut M::V) {
         self.op.statistics.borrow_mut().increment_call();
-        (self.op.func)(x, self.p, t, beta, y)
+        y.for_each_batch([x, self.p], |y, [x, p], _| (self.op.func)(x, p, t, beta, y));
     }
 
     fn matrix_inplace(&self, t: Self::T, y: &mut Self::M) {
@@ -159,11 +159,13 @@ where
 impl<M, F, G> LinearOpTranspose for ParameterisedOp<'_, LinearClosureWithAdjoint<M, F, G>>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
+    F: Fn(&[M::T], &[M::T], M::T, M::T, &mut [M::T]),
+    G: Fn(&[M::T], &[M::T], M::T, M::T, &mut [M::T]),
 {
     fn gemv_transpose_inplace(&self, x: &Self::V, t: Self::T, beta: Self::T, y: &mut Self::V) {
-        (self.op.func_adjoint)(x, self.p, t, beta, y)
+        y.for_each_batch([x, self.p], |y, [x, p], _| {
+            (self.op.func_adjoint)(x, p, t, beta, y)
+        });
     }
     fn transpose_inplace(&self, t: Self::T, y: &mut Self::M) {
         if let Some(coloring) = &self.op.coloring_adjoint {
@@ -190,29 +192,21 @@ mod tests {
     type M = NalgebraMat<f64>;
     type V = crate::NalgebraVec<f64>;
 
-    fn forward(x: &V, p: &V, _t: f64, beta: f64, y: &mut V) {
-        let out = V::from_vec(
-            vec![
-                p.get_index(0) * x.get_index(0),
-                x.get_index(0) + p.get_index(1) * x.get_index(1),
-            ],
-            NalgebraContext::default(),
-        );
-        y.axpy(1.0, &out, beta);
+    fn forward(x: &[f64], p: &[f64], _t: f64, beta: f64, y: &mut [f64]) {
+        let out = [p[0] * x[0], x[0] + p[1] * x[1]];
+        for (y, out) in y.iter_mut().zip(out.iter()) {
+            *y = *out + beta * *y;
+        }
     }
 
-    fn adjoint(x: &V, p: &V, _t: f64, beta: f64, y: &mut V) {
-        let out = V::from_vec(
-            vec![
-                p.get_index(0) * x.get_index(0) + x.get_index(1),
-                p.get_index(1) * x.get_index(1),
-            ],
-            NalgebraContext::default(),
-        );
-        y.axpy(1.0, &out, beta);
+    fn adjoint(x: &[f64], p: &[f64], _t: f64, beta: f64, y: &mut [f64]) {
+        let out = [p[0] * x[0] + x[1], p[1] * x[1]];
+        for (y, out) in y.iter_mut().zip(out.iter()) {
+            *y = *out + beta * *y;
+        }
     }
 
-    type TestFn = fn(&V, &V, f64, f64, &mut V);
+    type TestFn = fn(&[f64], &[f64], f64, f64, &mut [f64]);
 
     fn make_op() -> LinearClosureWithAdjoint<M, TestFn, TestFn> {
         LinearClosureWithAdjoint::new(forward, adjoint, 2, 2, 2, NalgebraContext::default())

@@ -7,7 +7,7 @@ use argmin_observer_slog::SlogLogger;
 use diffsol::{
     AdjointOdeSolverMethod, DenseMatrix, DiffSl, Matrix, MatrixCommon, NalgebraMat, NalgebraVec,
     OdeBuilder, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, Scale, Vector,
-    VectorCommon, VectorViewMut,
+    VectorView, VectorViewMut,
 };
 use std::cell::RefCell;
 
@@ -78,11 +78,7 @@ impl Gradient for Problem {
             .bdf_solver_adjoint::<LS, _>(c, Some(solver), Some(1))
             .unwrap();
         match adjoint_solver.solve_adjoint_backwards_pass(self.ts_data.as_slice(), &[&g_m]) {
-            Ok((soln, _)) => Ok(soln.as_ref().sg[0]
-                .inner()
-                .iter()
-                .copied()
-                .collect::<Vec<_>>()),
+            Ok((soln, _)) => Ok(soln.as_ref().sg.get_batch(0).into_owned().clone_as_vec()),
             Err(_) => Ok(vec![f64::MAX / 1000.; param.len()]),
         }
     }

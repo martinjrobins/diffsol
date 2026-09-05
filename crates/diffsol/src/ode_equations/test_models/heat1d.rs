@@ -1,10 +1,10 @@
 #[cfg(feature = "diffsl")]
-use crate::{ode_solver::problem::OdeSolverSolution, Matrix, MatrixHost, OdeSolverProblem, Vector};
+use crate::{ode_solver::problem::OdeSolverSolution, Matrix, OdeSolverProblem, Vector};
 
 #[cfg(feature = "diffsl")]
 #[allow(clippy::type_complexity)]
 pub fn heat1d_diffsl_problem<
-    M: MatrixHost<T = f64>,
+    M: Matrix<T = f64>,
     CG: crate::CodegenModuleJit + crate::CodegenModuleCompile,
     const MGRID: usize,
 >() -> (

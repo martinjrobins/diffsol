@@ -1,11 +1,11 @@
 use crate::{
-    ode_solver::problem::OdeSolverSolution, MatrixHost, OdeBuilder, OdeEquationsImplicitSens,
+    ode_solver::problem::OdeSolverSolution, Matrix, OdeBuilder, OdeEquationsImplicitSens,
     OdeSolverProblem, Vector,
 };
 use num_traits::{FromPrimitive, One, Zero};
 
 #[allow(clippy::type_complexity)]
-pub fn robertson_ode_with_sens<M: MatrixHost + 'static>(
+pub fn robertson_ode_with_sens<M: Matrix + 'static>(
     use_coloring: bool,
 ) -> (
     OdeSolverProblem<impl OdeEquationsImplicitSens<M = M, V = M::V, T = M::T, C = M::C>>,
@@ -22,32 +22,34 @@ pub fn robertson_ode_with_sens<M: MatrixHost + 'static>(
             //     dy1/dt = -.04*y1 + 1.e4*y2*y3
             //*    dy2/dt = .04*y1 - 1.e4*y2*y3 - 3.e7*(y2)^2
             //*    dy3/dt = 3.e7*(y2)^2
-            |x: &M::V, p: &M::V, _t: M::T, y: &mut M::V| {
+            |x: &[M::T], p: &[M::T], _t: M::T, y: &mut [M::T]| {
                 y[0] = -p[0] * x[0] + p[1] * x[1] * x[2];
                 y[1] = p[0] * x[0] - p[1] * x[1] * x[2] - p[2] * x[1] * x[1];
                 y[2] = p[2] * x[1] * x[1];
             },
-            |x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V| {
+            // J * v, applied to the batched sensitivities (one parameter per batch lane)
+            |x: &[M::T], p: &[M::T], _t: M::T, v: &[M::T], y: &mut [M::T]| {
+                let two = M::T::from_f64(2.0).unwrap();
                 y[0] = -p[0] * v[0] + p[1] * v[1] * x[2] + p[1] * x[1] * v[2];
                 y[1] = p[0] * v[0]
                     - p[1] * v[1] * x[2]
                     - p[1] * x[1] * v[2]
-                    - M::T::from_f64(2.0).unwrap() * p[2] * x[1] * v[1];
-                y[2] = M::T::from_f64(2.0).unwrap() * p[2] * x[1] * v[1];
+                    - two * p[2] * x[1] * v[1];
+                y[2] = two * p[2] * x[1] * v[1];
             },
-            |x: &M::V, _p: &M::V, _t: M::T, v: &M::V, y: &mut M::V| {
+            |x: &[M::T], _p: &[M::T], _t: M::T, v: &[M::T], y: &mut [M::T]| {
                 y[0] = -v[0] * x[0] + v[1] * x[1] * x[2];
                 y[1] = v[0] * x[0] - v[1] * x[1] * x[2] - v[2] * x[1] * x[1];
                 y[2] = v[2] * x[1] * x[1];
             },
         )
         .init_sens(
-            |_p: &M::V, _t: M::T, y: &mut M::V| {
+            |_p: &[M::T], _t: M::T, y: &mut [M::T]| {
                 y[0] = M::T::one();
                 y[1] = M::T::zero();
                 y[2] = M::T::zero();
             },
-            |_p: &M::V, _t: M::T, _v: &M::V, y: &mut M::V| y.fill(M::T::zero()),
+            |_p: &[M::T], _t: M::T, _v: &[M::T], y: &mut [M::T]| y.fill(M::T::zero()),
             3,
         )
         .build()

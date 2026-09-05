@@ -3,7 +3,7 @@ use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criteri
 use diffsol::{CudaMat, CudaVec};
 use diffsol::{
     DenseMatrix, FaerMat, FaerSparseMat, FaerVec, Matrix, MatrixCommon, NalgebraMat, NalgebraVec,
-    Scale, Vector, VectorHost,
+    Scale, Vector,
 };
 use std::hint::black_box;
 
@@ -779,8 +779,8 @@ where
     group.finish();
 }
 
-/// 🟢 as_slice — Raw slice view
-fn bench_as_slice<V: Vector<T = f64> + VectorHost + 'static>(c: &mut Criterion, label: &str)
+/// 🟢 for_each_batch — Per-batch slice access
+fn bench_for_each_batch<V: Vector<T = f64> + 'static>(c: &mut Criterion, label: &str)
 where
     V::C: Default + Clone,
 {
@@ -788,27 +788,15 @@ where
     for &ns in ONE_SIZE {
         group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
             let ctx = V::C::default();
-            let v = V::from_element(ns, 1.0, ctx.clone());
+            let x = V::from_element(ns, 1.0, ctx.clone());
+            let mut y = V::from_element(ns, 1.0, ctx.clone());
             b.iter(|| {
-                black_box(v.as_slice());
-            });
-        });
-    }
-    group.finish();
-}
-
-/// 🟢 as_mut_slice — Mutable raw slice view
-fn bench_as_mut_slice<V: Vector<T = f64> + VectorHost + 'static>(c: &mut Criterion, label: &str)
-where
-    V::C: Default + Clone,
-{
-    let mut group = c.benchmark_group(label);
-    for &ns in ONE_SIZE {
-        group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
-            let ctx = V::C::default();
-            let mut v = V::from_element(ns, 1.0, ctx.clone());
-            b.iter(|| {
-                black_box(v.as_mut_slice());
+                y.for_each_batch([&x], |y, [x], _| {
+                    for (y, x) in y.iter_mut().zip(x.iter()) {
+                        *y = *x;
+                    }
+                });
+                black_box(&y);
             });
         });
     }
@@ -889,13 +877,7 @@ macro_rules! bench_vector_backend {
         bench_as_view_mut::<$V>($c, concat!("as_view_mut/", $label));
         bench_len::<$V>($c, concat!("len/", $label));
         bench_clone_as_vec::<$V>($c, concat!("clone_as_vec/", $label));
-    };
-}
-
-macro_rules! bench_vector_backend_host {
-    ($c:expr, $label:expr, $V:ty) => {
-        bench_as_slice::<$V>($c, concat!("as_slice/", $label));
-        bench_as_mut_slice::<$V>($c, concat!("as_mut_slice/", $label));
+        bench_for_each_batch::<$V>($c, concat!("for_each_batch/", $label));
     };
 }
 
@@ -923,12 +905,10 @@ fn criterion_benchmark(c: &mut Criterion) {
     bench_vector_backend!(c, "nalgebra", NalgebraVec<f64>);
     bench_matrix_backend!(c, "nalgebra", NalgebraMat<f64>);
     bench_dense_matrix_backend!(c, "nalgebra", NalgebraMat<f64>);
-    bench_vector_backend_host!(c, "nalgebra", NalgebraVec<f64>);
 
     bench_vector_backend!(c, "faer", FaerVec<f64>);
     bench_matrix_backend!(c, "faer", FaerMat<f64>);
     bench_dense_matrix_backend!(c, "faer", FaerMat<f64>);
-    bench_vector_backend_host!(c, "faer", FaerVec<f64>);
 
     bench_matrix_backend!(c, "faer_sparse", FaerSparseMat<f64>);
 

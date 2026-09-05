@@ -1,7 +1,7 @@
 use std::{cell::RefCell, marker::PhantomData};
 
 use crate::{LinearOp, LinearOpTranspose, Matrix, Op, Vector};
-use num_traits::{One, Zero};
+use num_traits::Zero;
 
 use super::{BuilderOp, OpStatistics, ParameterisedOp};
 
@@ -93,23 +93,25 @@ mod autodiff_impl {
     use super::*;
     use std::autodiff::autodiff_reverse;
 
-    impl<M: Matrix, F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V)> LinearClosureAutodiff<M, F> {
+    impl<M: Matrix, F: Fn(&[M::T], &[M::T], M::T, M::T, &mut [M::T])> LinearClosureAutodiff<M, F> {
         #[autodiff_reverse(call_vjp, Const, Duplicated, Const, Const, Const, Duplicated)]
-        pub fn call_func(&self, x: &M::V, p: &M::V, t: M::T, beta: M::T, y: &mut M::V) {
+        pub fn call_func(&self, x: &[M::T], p: &[M::T], t: M::T, beta: M::T, y: &mut [M::T]) {
             (self.func)(x, p, t, beta, y)
         }
     }
 
-    impl<M: Matrix, F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V)> LinearOp
+    impl<M: Matrix, F: Fn(&[M::T], &[M::T], M::T, M::T, &mut [M::T])> LinearOp
         for ParameterisedOp<'_, LinearClosureAutodiff<M, F>>
     {
         fn gemv_inplace(&self, x: &M::V, t: M::T, beta: M::T, y: &mut M::V) {
             self.op.statistics.borrow_mut().increment_call();
-            self.op.call_func(x, self.p, t, beta, y);
+            y.for_each_batch([x, self.p], |y, [x, p], _| {
+                self.op.call_func(x, p, t, beta, y)
+            });
         }
     }
 
-    impl<M: Matrix, F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V)> LinearOpTranspose
+    impl<M: Matrix, F: Fn(&[M::T], &[M::T], M::T, M::T, &mut [M::T])> LinearOpTranspose
         for ParameterisedOp<'_, LinearClosureAutodiff<M, F>>
     {
         fn gemv_transpose_inplace(&self, x: &M::V, t: M::T, beta: M::T, y: &mut M::V) {
@@ -117,19 +119,32 @@ mod autodiff_impl {
             let mut tmp_output = self.op.tmp_output.borrow_mut();
             let mut tmp_input_adjoint = self.op.tmp_input_adjoint.borrow_mut();
             let mut tmp_output_adjoint = self.op.tmp_output_adjoint.borrow_mut();
-            tmp_output.fill(M::T::zero());
-            tmp_input_adjoint.fill(M::T::zero());
-            tmp_output_adjoint.copy_from(x);
-            self.op.call_vjp(
-                &tmp_input,
-                &mut tmp_input_adjoint,
-                self.p,
-                t,
-                M::T::zero(),
-                &mut tmp_output,
-                &mut tmp_output_adjoint,
+            <M::V as Vector>::for_each_batch_mut(
+                [
+                    y,
+                    &mut tmp_input_adjoint,
+                    &mut tmp_output,
+                    &mut tmp_output_adjoint,
+                ],
+                [x, &tmp_input, self.p],
+                |[y, tmp_input_adjoint, tmp_output, tmp_output_adjoint], [x, tmp_input, p], _| {
+                    tmp_output.fill(M::T::zero());
+                    tmp_input_adjoint.fill(M::T::zero());
+                    tmp_output_adjoint.copy_from_slice(x);
+                    self.op.call_vjp(
+                        tmp_input,
+                        tmp_input_adjoint,
+                        p,
+                        t,
+                        M::T::zero(),
+                        tmp_output,
+                        tmp_output_adjoint,
+                    );
+                    for (y, adj) in y.iter_mut().zip(tmp_input_adjoint.iter()) {
+                        *y = *adj + beta * *y;
+                    }
+                },
             );
-            y.axpy(M::T::one(), &tmp_input_adjoint, beta);
         }
     }
 }
@@ -146,12 +161,11 @@ mod tests {
     type M = NalgebraMat<f64>;
     type V = NalgebraVec<f64>;
 
-    fn mass(x: &V, p: &V, _t: f64, beta: f64, y: &mut V) {
-        let out = V::from_vec(
-            vec![p[0] * x[0] + 2.0 * x[1], 3.0 * x[0] + p[1] * x[1]],
-            NalgebraContext::default(),
-        );
-        y.axpy(1.0, &out, beta);
+    fn mass(x: &[f64], p: &[f64], _t: f64, beta: f64, y: &mut [f64]) {
+        let out = [p[0] * x[0] + 2.0 * x[1], 3.0 * x[0] + p[1] * x[1]];
+        for (y, out) in y.iter_mut().zip(out.iter()) {
+            *y = *out + beta * *y;
+        }
     }
 
     #[test]

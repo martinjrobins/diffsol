@@ -189,6 +189,11 @@ macro_rules! ind {
         impl<T: FaerScalar> Index<(usize, usize)> for $t {
             type Output = T;
             fn index(&self, x: (usize, usize)) -> &T {
+                assert_eq!(
+                    self.context.nbatch(),
+                    1,
+                    "indexing not supported for batched matrices"
+                );
                 &self.data[(x.0, self.col(0, x.1))]
             }
         }
@@ -197,6 +202,11 @@ macro_rules! ind {
 ind!(FaerMat<T>);
 impl<T: FaerScalar> IndexMut<(usize, usize)> for FaerMat<T> {
     fn index_mut(&mut self, x: (usize, usize)) -> &mut T {
+        assert_eq!(
+            self.context.nbatch(),
+            1,
+            "indexing not supported for batched matrices"
+        );
         let c = self.col(0, x.1);
         &mut self.data[(x.0, c)]
     }
@@ -351,6 +361,17 @@ impl<T: FaerScalar> Matrix for FaerMat<T> {
             .for_each(|unzip!(v, column)| *v += *column);
         }
     }
+    fn add_columns_to_batched_vector(&self, v: &mut FaerVec<T>) {
+        assert_eq!(v.len(), self.nrows(), "row count mismatch");
+        assert_eq!(
+            v.context.nbatch(),
+            self.context.nbatch() * self.ncols(),
+            "batch count mismatch: the destination holds one lane per (batch, column)"
+        );
+        // batch `b` column `j` lives at physical column `b * ncols + j`, which is exactly the
+        // destination lane, so the two buffers have the same shape and faer can add them whole
+        v.data += self.data.rb();
+    }
     fn triplet_iter(
         &self,
     ) -> (
@@ -474,6 +495,11 @@ impl<T: FaerScalar> DenseMatrix for FaerMat<T> {
         self.data = d
     }
     fn get_index(&self, i: usize, j: usize) -> T {
+        assert_eq!(
+            self.context.nbatch(),
+            1,
+            "get_index not supported for batched matrices"
+        );
         self.data[(i, self.col(0, j))]
     }
     fn gemv_cols(&self, start: usize, end: usize, alpha: T, x: &[T], beta: T, y: &mut FaerVec<T>) {
@@ -523,10 +549,17 @@ impl<T: FaerScalar> DenseMatrix for FaerMat<T> {
         }
     }
     fn set_index(&mut self, i: usize, j: usize, v: T) {
-        for b in 0..self.context.nbatch() {
-            let c = self.col(b, j);
-            self.data[(i, c)] = v;
-        }
+        assert_eq!(
+            self.context.nbatch(),
+            1,
+            "set_index not supported for batched matrices"
+        );
+        let c = self.col(0, j);
+        self.data[(i, c)] = v;
+    }
+    fn set_index_batch(&mut self, batch: usize, i: usize, j: usize, value: T) {
+        let c = self.col(batch, j);
+        self.data[(i, c)] = value;
     }
     fn column(&self, i: usize) -> FaerVecRef<'_, T> {
         let nc = self.ncols();

@@ -344,6 +344,24 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
         }
     }
 
+    fn add_columns_to_batched_vector(&self, v: &mut Self::V) {
+        assert_eq!(v.len(), self.nrows(), "row count mismatch");
+        let ncols = self.ncols();
+        assert_eq!(
+            v.context.nbatch(),
+            self.context.nbatch() * ncols,
+            "batch count mismatch: the destination holds one lane per (batch, column)"
+        );
+        for batch in 0..self.context.nbatch() {
+            let matrix = self.batch(batch);
+            for j in 0..ncols {
+                let mut column = v.data.rb_mut().col_mut(batch * ncols + j);
+                for i in matrix.col_range(j) {
+                    column[matrix.row_idx()[i]] += matrix.val()[i];
+                }
+            }
+        }
+    }
     fn triplet_iter(
         &self,
     ) -> (
@@ -373,6 +391,10 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
         ctx: Self::C,
     ) -> Result<Self, LaError> {
         assert_eq!(values.len(), indices.len() * ctx.nbatch());
+        if indices.is_empty() {
+            // `empty pattern is just a zero matrix
+            return Ok(Self::zeros(nrows, ncols, ctx));
+        }
         let data = values
             .chunks(indices.len())
             .map(|values| {

@@ -3,10 +3,11 @@ use crate::{
     matrix::dense_nalgebra_serial::NalgebraMat,
     ode_solver_error,
     op::{linear_closure_with_adjoint::LinearClosureWithAdjoint, BuilderOp},
-    Closure, ClosureNoJac, ClosureWithAdjoint, ClosureWithSens, ConstantClosure,
-    ConstantClosureWithAdjoint, ConstantClosureWithSens, ConstantOp, InitialConditionSolverOptions,
-    LinearClosure, LinearOp, Matrix, NonLinearOp, OdeEquations, OdeSolverOptions, OdeSolverProblem,
-    Op, ParameterisedOp, Scalar, UnitCallable, Vector,
+    scale, Closure, ClosureNoJac, ClosureWithAdjoint, ClosureWithSens, ConstantClosure,
+    ConstantClosureWithAdjoint, ConstantClosureWithSens, ConstantOp, Context,
+    InitialConditionSolverOptions, LinearClosure, LinearOp, Matrix, NonLinearOp, OdeEquations,
+    OdeSolverOptions, OdeSolverProblem, Op, ParameterisedOp, Scalar, UnitCallable, Vector,
+    VectorViewMut,
 };
 
 #[cfg(feature = "autodiff")]
@@ -143,10 +144,10 @@ where
     ///
     /// # Arguments
     ///
-    /// - `rhs`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the right-hand side of the ODE.
+    /// - `rhs`: Function of type `Fn(x: &[T], p: &[T], t: T, y: &mut [T])` that computes the right-hand side of the ODE.
     pub fn rhs<F>(self, rhs: F) -> OdeBuilder<M, ClosureNoJac<M, F>, Init, Mass, Root, Out, Reset>
     where
-        F: Fn(&M::V, &M::V, M::T, &mut M::V),
+        F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
     {
         let nstates = 0;
         OdeBuilder::<M, ClosureNoJac<M, F>, Init, Mass, Root, Out, Reset> {
@@ -187,16 +188,16 @@ where
     ///
     /// # Arguments
     ///
-    /// - `rhs`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the right-hand side of the ODE.
-    /// - `rhs_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the right-hand side with the vector v.
+    /// - `rhs`: Function of type `Fn(x: &[T], p: &[T], t: T, y: &mut [T])` that computes the right-hand side of the ODE.
+    /// - `rhs_jac`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the Jacobian of the right-hand side with the vector v.
     pub fn rhs_implicit<F, G>(
         self,
         rhs: F,
         rhs_jac: G,
     ) -> OdeBuilder<M, Closure<M, F, G>, Init, Mass, Root, Out, Reset>
     where
-        F: Fn(&M::V, &M::V, M::T, &mut M::V),
-        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
+        G: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
     {
         let nstates = 0;
         OdeBuilder::<M, Closure<M, F, G>, Init, Mass, Root, Out, Reset> {
@@ -237,9 +238,9 @@ where
     /// Set the right-hand side of the ODE for forward sensitivity analysis.
     ///
     /// # Arguments
-    /// - `rhs`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the right-hand side of the ODE.
-    /// - `rhs_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the right-hand side with the vector v.
-    /// - `rhs_sens`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the partial derivative of the rhs wrt the parameters, with the vector v.
+    /// - `rhs`: Function of type `Fn(x: &[T], p: &[T], t: T, y: &mut [T])` that computes the right-hand side of the ODE.
+    /// - `rhs_jac`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the Jacobian of the right-hand side with the vector v.
+    /// - `rhs_sens`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the partial derivative of the rhs wrt the parameters, with the vector v.
     #[allow(clippy::type_complexity)]
     pub fn rhs_sens_implicit<F, G, H>(
         self,
@@ -248,9 +249,9 @@ where
         rhs_sens: H,
     ) -> OdeBuilder<M, ClosureWithSens<M, F, G, H>, Init, Mass, Root, Out, Reset>
     where
-        F: Fn(&M::V, &M::V, M::T, &mut M::V),
-        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-        H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
+        G: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
+        H: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
     {
         let nstates = 0;
         OdeBuilder::<M, ClosureWithSens<M, F, G, H>, Init, Mass, Root, Out, Reset> {
@@ -295,10 +296,10 @@ where
     /// including the transpose Jacobian operations.
     ///
     /// # Arguments
-    /// - `rhs`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the right-hand side of the ODE.
-    /// - `rhs_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the right-hand side with the vector v.
-    /// - `rhs_adjoint`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the transpose of the Jacobian with the vector v.
-    /// - `rhs_sens_adjoint`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the transpose of the partial derivative of the rhs wrt the parameters, with the vector v.
+    /// - `rhs`: Function of type `Fn(x: &[T], p: &[T], t: T, y: &mut [T])` that computes the right-hand side of the ODE.
+    /// - `rhs_jac`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the Jacobian of the right-hand side with the vector v.
+    /// - `rhs_adjoint`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the transpose of the Jacobian with the vector v.
+    /// - `rhs_sens_adjoint`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the transpose of the partial derivative of the rhs wrt the parameters, with the vector v.
     #[allow(clippy::type_complexity)]
     pub fn rhs_adjoint_implicit<F, G, H, I>(
         self,
@@ -308,10 +309,10 @@ where
         rhs_sens_adjoint: I,
     ) -> OdeBuilder<M, ClosureWithAdjoint<M, F, G, H, I>, Init, Mass, Root, Out, Reset>
     where
-        F: Fn(&M::V, &M::V, M::T, &mut M::V),
-        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-        H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-        I: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
+        G: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
+        H: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
+        I: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
     {
         let nstates = 0;
         OdeBuilder::<M, ClosureWithAdjoint<M, F, G, H, I>, Init, Mass, Root, Out, Reset> {
@@ -360,17 +361,16 @@ where
     ///
     /// # Example
     /// ```no_run
-    /// use diffsol::{NalgebraMat, NalgebraVec, OdeBuilder};
+    /// use diffsol::{NalgebraMat, OdeBuilder};
     ///
     /// type M = NalgebraMat<f64>;
-    /// type V = NalgebraVec<f64>;
     ///
     /// let _problem = OdeBuilder::<M>::new()
-    ///     .rhs_autodiff(|x: &V, p: &V, t, y: &mut V| {
+    ///     .rhs_autodiff(|x: &[f64], p: &[f64], t, y: &mut [f64]| {
     ///         y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]);
     ///     })
     ///     .p([1.0, 10.0])
-    ///     .init_autodiff(|_p: &V, _t, y: &mut V| y[0] = 0.1, 1)
+    ///     .init_autodiff(|_p: &[f64], _t, y: &mut [f64]| y[0] = 0.1, 1)
     ///     .build()
     ///     .unwrap();
     /// ```
@@ -380,7 +380,7 @@ where
         func: F,
     ) -> OdeBuilder<M, ClosureAutodiff<M, F>, Init, Mass, Root, Out, Reset>
     where
-        F: Fn(&M::V, &M::V, M::T, &mut M::V),
+        F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
     {
         let nstates = 0;
         OdeBuilder::<M, ClosureAutodiff<M, F>, Init, Mass, Root, Out, Reset> {
@@ -428,7 +428,7 @@ where
         nstates: usize,
     ) -> OdeBuilder<M, Rhs, ConstantClosureAutodiff<M, F>, Mass, Root, Out, Reset>
     where
-        F: Fn(&M::V, M::T, &mut M::V),
+        F: Fn(&[M::T], M::T, &mut [M::T]),
     {
         OdeBuilder::<M, Rhs, ConstantClosureAutodiff<M, F>, Mass, Root, Out, Reset> {
             rhs: self.rhs,
@@ -465,14 +465,14 @@ where
     /// Set the initial condition of the ODE.
     ///
     /// # Arguments
-    /// - `init`: Function of type Fn(p: &V, t: S) -> V that computes the initial state.
+    /// - `init`: Function of type `Fn(p: &[T], t: T, y: &mut [T])` that computes the initial state.
     pub fn init<F>(
         self,
         init: F,
         nstates: usize,
     ) -> OdeBuilder<M, Rhs, ConstantClosure<M, F>, Mass, Root, Out, Reset>
     where
-        F: Fn(&M::V, M::T, &mut M::V),
+        F: Fn(&[M::T], M::T, &mut [M::T]),
     {
         OdeBuilder::<M, Rhs, ConstantClosure<M, F>, Mass, Root, Out, Reset> {
             rhs: self.rhs,
@@ -505,8 +505,8 @@ where
     /// Set the initial condition of the ODE for forward sensitivity analysis.
     ///
     /// # Arguments
-    /// - `init`: Function of type Fn(p: &V, t: S) -> V that computes the initial state.
-    /// - `init_sens`: Function of type Fn(p: &V, t: S, y: &mut V) that computes the multiplication of the partial derivative of the initial state wrt the parameters, with the vector v.
+    /// - `init`: Function of type `Fn(p: &[T], t: T, y: &mut [T])` that computes the initial state.
+    /// - `init_sens`: Function of type `Fn(p: &[T], t: T, y: &mut [T])` that computes the multiplication of the partial derivative of the initial state wrt the parameters, with the vector v.
     pub fn init_sens<F, G>(
         self,
         init: F,
@@ -514,8 +514,8 @@ where
         nstates: usize,
     ) -> OdeBuilder<M, Rhs, ConstantClosureWithSens<M, F, G>, Mass, Root, Out, Reset>
     where
-        F: Fn(&M::V, M::T, &mut M::V),
-        G: Fn(&M::V, M::T, &M::V, &mut M::V),
+        F: Fn(&[M::T], M::T, &mut [M::T]),
+        G: Fn(&[M::T], M::T, &[M::T], &mut [M::T]),
     {
         OdeBuilder::<M, Rhs, ConstantClosureWithSens<M, F, G>, Mass, Root, Out, Reset> {
             rhs: self.rhs,
@@ -554,8 +554,8 @@ where
     /// Set the initial condition of the ODE for adjoint sensitivity analysis.
     ///
     /// # Arguments
-    /// - `init`: Function of type Fn(p: &V, t: S) -> V that computes the initial state.
-    /// - `init_sens_adjoint`: Function of type Fn(p: &V, t: S, y: &V, y_adj: &mut V) that computes the multiplication of the partial derivative of the initial state wrt the parameters, with the vector v.
+    /// - `init`: Function of type `Fn(p: &[T], t: T, y: &mut [T])` that computes the initial state.
+    /// - `init_sens_adjoint`: Function of type `Fn(p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the partial derivative of the initial state wrt the parameters, with the vector v.
     ///
     pub fn init_adjoint<F, G>(
         self,
@@ -564,8 +564,8 @@ where
         nstates: usize,
     ) -> OdeBuilder<M, Rhs, ConstantClosureWithAdjoint<M, F, G>, Mass, Root, Out, Reset>
     where
-        F: Fn(&M::V, M::T, &mut M::V),
-        G: Fn(&M::V, M::T, &M::V, &mut M::V),
+        F: Fn(&[M::T], M::T, &mut [M::T]),
+        G: Fn(&[M::T], M::T, &[M::T], &mut [M::T]),
     {
         OdeBuilder::<M, Rhs, ConstantClosureWithAdjoint<M, F, G>, Mass, Root, Out, Reset> {
             rhs: self.rhs,
@@ -604,10 +604,10 @@ where
     /// Set the mass matrix of the ODE.
     ///
     /// # Arguments
-    /// - `mass`: Function of type Fn(v: &V, p: &V, t: S, beta: S, y: &mut V) that computes a gemv multiplication of the mass matrix with the vector v (i.e. y = M * v + beta * y).
+    /// - `mass`: Function of type `Fn(v: &[T], p: &[T], t: T, beta: T, y: &mut [T])` that computes a gemv multiplication of the mass matrix with the vector v (i.e. y = M * v + beta * y).
     pub fn mass<F>(self, mass: F) -> OdeBuilder<M, Rhs, Init, LinearClosure<M, F>, Root, Out, Reset>
     where
-        F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
+        F: Fn(&[M::T], &[M::T], M::T, M::T, &mut [M::T]),
     {
         let nstates = 0;
         OdeBuilder::<M, Rhs, Init, LinearClosure<M, F>, Root, Out, Reset> {
@@ -644,18 +644,18 @@ where
         }
     }
 
-    /// Set the mass matrix of the ODE for adjoint sensitivity analysis,
+    /// Set the mass matrix of the ODE for adjoint and forward sensitivity analysis,
     /// using automatic differentiation via `std::autodiff`.
     ///
-    /// The closure has the same signature as [`mass`](Self::mass). The transpose
-    /// mass-matrix product required by the adjoint solve is generated automatically.
+    /// The closure has the same signature as [`mass`](Self::mass). The gradients
+    /// required by the adjoint solve are generated automatically.
     #[cfg(feature = "autodiff")]
     pub fn mass_autodiff<F>(
         self,
         func: F,
     ) -> OdeBuilder<M, Rhs, Init, LinearClosureAutodiff<M, F>, Root, Out, Reset>
     where
-        F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
+        F: Fn(&[M::T], &[M::T], M::T, M::T, &mut [M::T]),
     {
         let nstates = 0;
         OdeBuilder::<M, Rhs, Init, LinearClosureAutodiff<M, F>, Root, Out, Reset> {
@@ -695,9 +695,9 @@ where
     ///
     /// # Arguments
     ///
-    /// - `mass`: Function of type Fn(v: &V, p: &V, t: S, beta: S, y: &mut V) that computes a gemv multiplication of the mass matrix with
+    /// - `mass`: Function of type `Fn(v: &[T], p: &[T], t: T, beta: T, y: &mut [T])` that computes a gemv multiplication of the mass matrix with
     ///   the vector v (i.e. y = M * v + beta * y).
-    /// - `mass_adjoint`: Function of type Fn(v: &V, p: &V, t: S, beta: S, y: &mut V) that computes a gemv multiplication of the transpose of the mass matrix with
+    /// - `mass_adjoint`: Function of type `Fn(v: &[T], p: &[T], t: T, beta: T, y: &mut [T])` that computes a gemv multiplication of the transpose of the mass matrix with
     ///   the vector v (i.e. y = M^T * v + beta * y).
     pub fn mass_adjoint<F, G>(
         self,
@@ -705,8 +705,8 @@ where
         mass_adjoint: G,
     ) -> OdeBuilder<M, Rhs, Init, LinearClosureWithAdjoint<M, F, G>, Root, Out, Reset>
     where
-        F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
-        G: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
+        F: Fn(&[M::T], &[M::T], M::T, M::T, &mut [M::T]),
+        G: Fn(&[M::T], &[M::T], M::T, M::T, &mut [M::T]),
     {
         let nstates = 0;
         OdeBuilder::<M, Rhs, Init, LinearClosureWithAdjoint<M, F, G>, Root, Out, Reset> {
@@ -747,7 +747,7 @@ where
     /// Set a root equation for the ODE.
     ///
     /// # Arguments
-    /// - `root`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the root function.
+    /// - `root`: Function of type `Fn(x: &[T], p: &[T], t: T, y: &mut [T])` that computes the root function.
     /// - `nroots`: Number of roots (i.e. number of elements in the `y` arg in `root`), an event is triggered when any of the roots changes sign.
     pub fn root<F>(
         self,
@@ -755,7 +755,7 @@ where
         nroots: usize,
     ) -> OdeBuilder<M, Rhs, Init, Mass, ClosureNoJac<M, F>, Out, Reset>
     where
-        F: Fn(&M::V, &M::V, M::T, &mut M::V),
+        F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
     {
         let nstates = 0;
         OdeBuilder::<M, Rhs, Init, Mass, ClosureNoJac<M, F>, Out, Reset> {
@@ -792,7 +792,7 @@ where
         }
     }
 
-    /// Set a root equation for the ODE for adjoint sensitivity analysis,
+    /// Set a root equation for the ODE for adjoint and forward sensitivity analysis,
     /// using automatic differentiation via `std::autodiff`.
     ///
     /// The closure is automatically differentiated to generate the Jacobian
@@ -804,7 +804,7 @@ where
         nroots: usize,
     ) -> OdeBuilder<M, Rhs, Init, Mass, ClosureAutodiff<M, F>, Out, Reset>
     where
-        F: Fn(&M::V, &M::V, M::T, &mut M::V),
+        F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
     {
         let nstates = 0;
         OdeBuilder::<M, Rhs, Init, Mass, ClosureAutodiff<M, F>, Out, Reset> {
@@ -843,9 +843,9 @@ where
     /// Set a root equation for the ODE for forward sensitivity analysis.
     ///
     /// # Arguments
-    /// - `root`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the root function.
-    /// - `root_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the root function with the vector v.
-    /// - `root_sens`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the partial derivative of the root function wrt the parameters with the vector v.
+    /// - `root`: Function of type `Fn(x: &[T], p: &[T], t: T, y: &mut [T])` that computes the root function.
+    /// - `root_jac`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the Jacobian of the root function with the vector v.
+    /// - `root_sens`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the partial derivative of the root function wrt the parameters with the vector v.
     /// - `nroots`: Number of root outputs.
     #[allow(clippy::type_complexity)]
     pub fn root_sens_implicit<F, G, H>(
@@ -856,9 +856,9 @@ where
         nroots: usize,
     ) -> OdeBuilder<M, Rhs, Init, Mass, ClosureWithSens<M, F, G, H>, Out, Reset>
     where
-        F: Fn(&M::V, &M::V, M::T, &mut M::V),
-        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-        H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
+        G: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
+        H: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
     {
         let nstates = 0;
         OdeBuilder::<M, Rhs, Init, Mass, ClosureWithSens<M, F, G, H>, Out, Reset> {
@@ -900,10 +900,10 @@ where
     /// Set a root equation for the ODE for adjoint sensitivity analysis.
     ///
     /// # Arguments
-    /// - `root`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the root function.
-    /// - `root_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the root function with the vector v.
-    /// - `root_adjoint`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the transpose of the Jacobian of the root function with the vector v.
-    /// - `root_sens_adjoint`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the transpose of the partial derivative of the root function wrt the parameters with the vector v.
+    /// - `root`: Function of type `Fn(x: &[T], p: &[T], t: T, y: &mut [T])` that computes the root function.
+    /// - `root_jac`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the Jacobian of the root function with the vector v.
+    /// - `root_adjoint`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the transpose of the Jacobian of the root function with the vector v.
+    /// - `root_sens_adjoint`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the transpose of the partial derivative of the root function wrt the parameters with the vector v.
     /// - `nroots`: Number of root outputs.
     #[allow(clippy::type_complexity)]
     pub fn root_adjoint_implicit<F, G, H, I>(
@@ -915,10 +915,10 @@ where
         nroots: usize,
     ) -> OdeBuilder<M, Rhs, Init, Mass, ClosureWithAdjoint<M, F, G, H, I>, Out, Reset>
     where
-        F: Fn(&M::V, &M::V, M::T, &mut M::V),
-        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-        H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-        I: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
+        G: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
+        H: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
+        I: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
     {
         let nstates = 0;
         OdeBuilder::<M, Rhs, Init, Mass, ClosureWithAdjoint<M, F, G, H, I>, Out, Reset> {
@@ -965,10 +965,10 @@ where
     /// The number of outputs equals the number of states and is set automatically.
     ///
     /// # Arguments
-    /// - `reset`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the new state.
+    /// - `reset`: Function of type `Fn(x: &[T], p: &[T], t: T, y: &mut [T])` that computes the new state.
     pub fn reset<F>(self, reset: F) -> OdeBuilder<M, Rhs, Init, Mass, Root, Out, ClosureNoJac<M, F>>
     where
-        F: Fn(&M::V, &M::V, M::T, &mut M::V),
+        F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
     {
         let nstates = 0;
         OdeBuilder::<M, Rhs, Init, Mass, Root, Out, ClosureNoJac<M, F>> {
@@ -1004,7 +1004,7 @@ where
         }
     }
 
-    /// Set the reset function of the ODE for adjoint sensitivity analysis,
+    /// Set the reset function of the ODE for adjoint and forward sensitivity analysis,
     /// using automatic differentiation via `std::autodiff`.
     ///
     /// The closure is automatically differentiated to generate Jacobian and
@@ -1015,7 +1015,7 @@ where
         func: F,
     ) -> OdeBuilder<M, Rhs, Init, Mass, Root, Out, ClosureAutodiff<M, F>>
     where
-        F: Fn(&M::V, &M::V, M::T, &mut M::V),
+        F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
     {
         let nstates = 0;
         OdeBuilder::<M, Rhs, Init, Mass, Root, Out, ClosureAutodiff<M, F>> {
@@ -1058,16 +1058,16 @@ where
     /// The number of outputs equals the number of states and is set automatically.
     ///
     /// # Arguments
-    /// - `reset`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the new state.
-    /// - `reset_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the reset function with the vector v.
+    /// - `reset`: Function of type `Fn(x: &[T], p: &[T], t: T, y: &mut [T])` that computes the new state.
+    /// - `reset_jac`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the Jacobian of the reset function with the vector v.
     pub fn reset_implicit<F, G>(
         self,
         reset: F,
         reset_jac: G,
     ) -> OdeBuilder<M, Rhs, Init, Mass, Root, Out, Closure<M, F, G>>
     where
-        F: Fn(&M::V, &M::V, M::T, &mut M::V),
-        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
+        G: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
     {
         let nstates = 0;
         OdeBuilder::<M, Rhs, Init, Mass, Root, Out, Closure<M, F, G>> {
@@ -1107,9 +1107,9 @@ where
     /// Set the reset function of the ODE for forward sensitivity analysis.
     ///
     /// # Arguments
-    /// - `reset`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the new state.
-    /// - `reset_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the reset function with the vector v.
-    /// - `reset_sens`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the partial derivative of the reset function wrt the parameters with the vector v.
+    /// - `reset`: Function of type `Fn(x: &[T], p: &[T], t: T, y: &mut [T])` that computes the new state.
+    /// - `reset_jac`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the Jacobian of the reset function with the vector v.
+    /// - `reset_sens`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the partial derivative of the reset function wrt the parameters with the vector v.
     #[allow(clippy::type_complexity)]
     pub fn reset_sens_implicit<F, G, H>(
         self,
@@ -1118,9 +1118,9 @@ where
         reset_sens: H,
     ) -> OdeBuilder<M, Rhs, Init, Mass, Root, Out, ClosureWithSens<M, F, G, H>>
     where
-        F: Fn(&M::V, &M::V, M::T, &mut M::V),
-        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-        H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
+        G: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
+        H: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
     {
         let nstates = 0;
         OdeBuilder::<M, Rhs, Init, Mass, Root, Out, ClosureWithSens<M, F, G, H>> {
@@ -1161,10 +1161,10 @@ where
     /// Set the reset function of the ODE for adjoint sensitivity analysis.
     ///
     /// # Arguments
-    /// - `reset`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the new state.
-    /// - `reset_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the reset function with the vector v.
-    /// - `reset_adjoint`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the transpose of the Jacobian of the reset function with the vector v.
-    /// - `reset_sens_adjoint`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the transpose of the partial derivative of the reset function wrt the parameters with the vector v.
+    /// - `reset`: Function of type `Fn(x: &[T], p: &[T], t: T, y: &mut [T])` that computes the new state.
+    /// - `reset_jac`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the Jacobian of the reset function with the vector v.
+    /// - `reset_adjoint`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the transpose of the Jacobian of the reset function with the vector v.
+    /// - `reset_sens_adjoint`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the transpose of the partial derivative of the reset function wrt the parameters with the vector v.
     #[allow(clippy::type_complexity)]
     pub fn reset_adjoint_implicit<F, G, H, I>(
         self,
@@ -1174,10 +1174,10 @@ where
         reset_sens_adjoint: I,
     ) -> OdeBuilder<M, Rhs, Init, Mass, Root, Out, ClosureWithAdjoint<M, F, G, H, I>>
     where
-        F: Fn(&M::V, &M::V, M::T, &mut M::V),
-        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-        H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-        I: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
+        G: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
+        H: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
+        I: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
     {
         let nstates = 0;
         OdeBuilder::<M, Rhs, Init, Mass, Root, Out, ClosureWithAdjoint<M, F, G, H, I>> {
@@ -1228,7 +1228,7 @@ where
         nout: usize,
     ) -> OdeBuilder<M, Rhs, Init, Mass, Root, ClosureAutodiff<M, F>, Reset>
     where
-        F: Fn(&M::V, &M::V, M::T, &mut M::V),
+        F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
     {
         let nstates = 0;
         OdeBuilder::<M, Rhs, Init, Mass, Root, ClosureAutodiff<M, F>, Reset> {
@@ -1270,8 +1270,8 @@ where
     /// These can be integrated alongside the ODE or used for root finding.
     ///
     /// # Arguments
-    /// - `out`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the output.
-    /// - `out_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the output with the vector v.
+    /// - `out`: Function of type `Fn(x: &[T], p: &[T], t: T, y: &mut [T])` that computes the output.
+    /// - `out_jac`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the Jacobian of the output with the vector v.
     /// - `nout`: Number of output equations (i.e. size of the output vector `y`).
     pub fn out_implicit<F, G>(
         self,
@@ -1280,8 +1280,8 @@ where
         nout: usize,
     ) -> OdeBuilder<M, Rhs, Init, Mass, Root, Closure<M, F, G>, Reset>
     where
-        F: Fn(&M::V, &M::V, M::T, &mut M::V),
-        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
+        G: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
     {
         let nstates = 0;
         OdeBuilder::<M, Rhs, Init, Mass, Root, Closure<M, F, G>, Reset> {
@@ -1324,9 +1324,9 @@ where
     /// computing sensitivities of the outputs with respect to parameters.
     ///
     /// # Arguments
-    /// - `out`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the output.
-    /// - `out_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the output with the vector v.
-    /// - `out_sens`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the partial derivative of the output wrt the parameters, with the vector v.
+    /// - `out`: Function of type `Fn(x: &[T], p: &[T], t: T, y: &mut [T])` that computes the output.
+    /// - `out_jac`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the Jacobian of the output with the vector v.
+    /// - `out_sens`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the partial derivative of the output wrt the parameters, with the vector v.
     /// - `nout`: Number of output equations (i.e. size of the output vector `y`).
     #[allow(clippy::type_complexity)]
     pub fn out_sens_implicit<F, G, H>(
@@ -1337,9 +1337,9 @@ where
         nout: usize,
     ) -> OdeBuilder<M, Rhs, Init, Mass, Root, ClosureWithSens<M, F, G, H>, Reset>
     where
-        F: Fn(&M::V, &M::V, M::T, &mut M::V),
-        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-        H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
+        G: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
+        H: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
     {
         let nstates = 0;
         OdeBuilder::<M, Rhs, Init, Mass, Root, ClosureWithSens<M, F, G, H>, Reset> {
@@ -1383,10 +1383,10 @@ where
     /// including the transpose Jacobian operations.
     ///
     /// # Arguments
-    /// - `out`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the output.
-    /// - `out_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the output with the vector v.
-    /// - `out_adjoint`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the transpose of the Jacobian with the vector v.
-    /// - `out_sens_adjoint`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the transpose of the partial derivative of the output wrt the parameters, with the vector v.
+    /// - `out`: Function of type `Fn(x: &[T], p: &[T], t: T, y: &mut [T])` that computes the output.
+    /// - `out_jac`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the Jacobian of the output with the vector v.
+    /// - `out_adjoint`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the transpose of the Jacobian with the vector v.
+    /// - `out_sens_adjoint`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the transpose of the partial derivative of the output wrt the parameters, with the vector v.
     /// - `nout`: Number of output equations.
     #[allow(clippy::type_complexity)]
     pub fn out_adjoint_implicit<F, G, H, I>(
@@ -1398,10 +1398,10 @@ where
         nout: usize,
     ) -> OdeBuilder<M, Rhs, Init, Mass, Root, ClosureWithAdjoint<M, F, G, H, I>, Reset>
     where
-        F: Fn(&M::V, &M::V, M::T, &mut M::V),
-        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-        H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-        I: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
+        G: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
+        H: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
+        I: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
     {
         let nstates = 0;
         OdeBuilder::<M, Rhs, Init, Mass, Root, ClosureWithAdjoint<M, F, G, H, I>, Reset> {
@@ -1659,7 +1659,7 @@ where
         nout: Option<usize>,
         nparam: usize,
         ctx: M::C,
-    ) -> Result<(M::V, Option<Vec<M::V>>, Option<M::V>, Option<M::V>), DiffsolError> {
+    ) -> Result<(M::V, Option<M::V>, Option<M::V>, Option<M::V>), DiffsolError> {
         let atol = Self::build_atol(atol, nstates, "states", ctx.clone())?;
         let out_atol = match out_atol {
             Some(out_atol) => Some(Self::build_atol(
@@ -1679,9 +1679,14 @@ where
             )?),
             None => None,
         };
+        // The sensitivity tolerances are laid out the way the augmented state is: one batch lane
+        // per (problem batch, parameter), lane `b * nparam + p` holding this parameter's
+        // tolerance, so the whole augmented state is error-controlled in one norm. Each parameter
+        // gets the given tolerance divided by its scale (see [`OdeBuilder::param_scales`]), which
+        // is why the lanes cannot simply broadcast a narrower vector.
         let sens_atol = match sens_atol {
-            Some(sens_atol) => {
-                let sens_atol = Self::build_atol(sens_atol, nstates, "sensitivity", ctx.clone())?;
+            Some(sens_atol) if nparam > 0 => {
+                let base = Self::build_atol(sens_atol, nstates, "sensitivity", ctx.clone())?;
                 let param_scales = param_scales.unwrap_or_else(|| vec![M::T::one(); nparam]);
                 if param_scales.len() != nparam {
                     return Err(ode_solver_error!(
@@ -1693,26 +1698,27 @@ where
                         )
                     ));
                 }
-                let mut scaled_atols = Vec::with_capacity(nparam);
-                for scale in param_scales {
-                    let scale_f64 = scale.to_f64().unwrap();
+                for param_scale in &param_scales {
+                    let scale_f64 = param_scale.to_f64().unwrap();
                     if !scale_f64.is_finite() || scale_f64 == 0.0 {
                         return Err(ode_solver_error!(
                             BuilderError,
                             "Parameter scales must be finite and non-zero."
                         ));
                     }
-                    let mut scaled_atol = M::V::zeros(nstates, ctx.clone());
-                    scaled_atol.axpy(
-                        M::T::one() / num_traits::abs(scale),
-                        &sens_atol,
-                        M::T::zero(),
-                    );
-                    scaled_atols.push(scaled_atol);
+                }
+                let nbatch = ctx.nbatch();
+                let aug_ctx = ctx.clone_with_nbatch(nbatch * nparam)?;
+                let mut scaled_atols = M::V::zeros(nstates, aug_ctx);
+                for lane in 0..nbatch * nparam {
+                    let param_scale = param_scales[lane % nparam];
+                    let mut lane_atol = scaled_atols.get_batch_mut(lane);
+                    lane_atol.copy_from_view(&base.get_batch(lane / nparam));
+                    lane_atol *= scale(M::T::one() / num_traits::abs(param_scale));
                 }
                 Some(scaled_atols)
             }
-            None => None,
+            _ => None,
         };
         Ok((atol, sens_atol, out_atol, param_atol))
     }
@@ -1854,6 +1860,17 @@ where
             if let Some(ref mut mass) = mass {
                 mass.calculate_sparsity(&y0, self.t0, &p);
             }
+            // sparsities required for sensitivity and adjoint equations
+            init.calculate_augmented_sparsity(&y0, self.t0, &p);
+            if let Some(ref mut out) = out {
+                out.calculate_augmented_sparsity(&y0, self.t0, &p);
+            }
+            if let Some(ref mut root) = root {
+                root.calculate_augmented_sparsity(&y0, self.t0, &p);
+            }
+            if let Some(ref mut reset) = reset {
+                reset.calculate_augmented_sparsity(&y0, self.t0, &p);
+            }
         }
         let nout = out.as_ref().map(|out| out.nout());
         let eqn = OdeSolverEquations::new(rhs, init, mass, root, out, reset, p);
@@ -1913,7 +1930,7 @@ where
         code: &str,
     ) -> Result<OdeSolverProblem<crate::DiffSl<M, CG>>, DiffsolError>
     where
-        M: Matrix<V: crate::VectorHost, T: DiffSlScalar>,
+        M: Matrix<T: DiffSlScalar>,
     {
         #[cfg(feature = "diffsl-cranelift")]
         let include_sensitivities = M::is_sparse()
@@ -1985,30 +2002,31 @@ where
 #[cfg(test)]
 mod tests {
     use super::OdeBuilder;
+    use crate::{Context, VectorView};
 
     #[cfg(feature = "autodiff")]
     #[test]
     fn autodiff_builder_supports_all_optional_operations() {
-        use crate::{NalgebraMat, NalgebraVec, OdeBuilder, Vector};
+        use crate::{NalgebraMat, OdeBuilder};
 
         type M = NalgebraMat<f64>;
-        type V = NalgebraVec<f64>;
+        type T = f64;
 
         OdeBuilder::<M>::new()
             .p([2.0])
-            .rhs_autodiff(|x: &V, p: &V, _t, y: &mut V| y[0] = p[0] * x[0])
-            .init_autodiff(|_p: &V, _t, y: &mut V| y[0] = 1.0, 1)
-            .mass_autodiff(|x: &V, _p: &V, _t, beta, y: &mut V| y.axpy(1.0, x, beta))
-            .root_autodiff(|x: &V, _p: &V, _t, y: &mut V| y[0] = x[0] - 0.5, 1)
-            .reset_autodiff(|x: &V, _p: &V, _t, y: &mut V| y[0] = 2.0 * x[0])
-            .out_autodiff(|x: &V, _p: &V, _t, y: &mut V| y[0] = x[0] * x[0], 1)
+            .rhs_autodiff(|x: &[T], p: &[T], _t, y: &mut [T]| y[0] = p[0] * x[0])
+            .init_autodiff(|_p: &[T], _t, y: &mut [T]| y[0] = 1.0, 1)
+            .mass_autodiff(|x: &[T], _p: &[T], _t, beta: T, y: &mut [T]| y[0] = x[0] + beta * y[0])
+            .root_autodiff(|x: &[T], _p: &[T], _t, y: &mut [T]| y[0] = x[0] - 0.5, 1)
+            .reset_autodiff(|x: &[T], _p: &[T], _t, y: &mut [T]| y[0] = 2.0 * x[0])
+            .out_autodiff(|x: &[T], _p: &[T], _t, y: &mut [T]| y[0] = x[0] * x[0], 1)
             .build()
             .unwrap();
     }
 
-    #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
-    use crate::{Context, OdeEquations, Op};
     use crate::{NalgebraMat, Vector};
+    #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
+    use crate::{OdeEquations, Op};
     #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
     use diffsl::execution::{
         module::{CodegenModuleCompile, CodegenModuleJit},
@@ -2032,7 +2050,7 @@ mod tests {
     fn build_from_diffsl_resizes_empty_params<CG, M>()
     where
         CG: CodegenModuleJit + CodegenModuleCompile,
-        M: crate::Matrix<V: crate::VectorHost, T: DiffSlScalar>,
+        M: crate::Matrix<T: DiffSlScalar>,
     {
         let problem = OdeBuilder::<M>::new()
             .build_from_diffsl::<CG>(logistic_diffsl_code())
@@ -2119,8 +2137,10 @@ mod tests {
         )
         .unwrap();
         let sens_atol = sens_atol.unwrap();
-        assert_eq!(sens_atol[0].get_index(0), 4.0);
-        assert_eq!(sens_atol[1].get_index(0), 2.0);
+        // one lane per parameter (nbatch == 1), each scaled by its own parameter scale
+        assert_eq!(sens_atol.context().nbatch(), 2);
+        assert_eq!(sens_atol.get_batch(0).get_index(0), 4.0);
+        assert_eq!(sens_atol.get_batch(1).get_index(0), 2.0);
     }
 
     #[test]
@@ -2139,8 +2159,9 @@ mod tests {
         )
         .unwrap();
         let sens_atol = sens_atol.unwrap();
-        assert_eq!(sens_atol[0].get_index(0), 8.0);
-        assert_eq!(sens_atol[1].get_index(0), 8.0);
+        assert_eq!(sens_atol.context().nbatch(), 2);
+        assert_eq!(sens_atol.get_batch(0).get_index(0), 8.0);
+        assert_eq!(sens_atol.get_batch(1).get_index(0), 8.0);
     }
 
     #[test]

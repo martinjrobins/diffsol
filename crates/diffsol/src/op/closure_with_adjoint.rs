@@ -15,10 +15,10 @@ use super::{BuilderOp, OpStatistics, ParameterisedOp};
 pub struct ClosureWithAdjoint<M, F, G, H, I>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-    H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-    I: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
+    G: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
+    H: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
+    I: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
 {
     func: F,
     jacobian_action: G,
@@ -40,10 +40,10 @@ where
 impl<M, F, G, H, I> ClosureWithAdjoint<M, F, G, H, I>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-    H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-    I: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
+    G: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
+    H: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
+    I: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -107,8 +107,10 @@ where
         let op = ParameterisedOp { op: self, p };
         let non_zeros = find_sens_adjoint_non_zeros(&op, y0, t0);
         let nparams = p.len();
+        // `-g_p^T` maps outputs to parameters: the same as `nstates` for the rhs, but not for an
+        // out operator
         self.sens_sparsity = Some(
-            MatrixSparsity::try_from_indices(nparams, self.nstates, non_zeros.clone())
+            MatrixSparsity::try_from_indices(nparams, self.nout(), non_zeros.clone())
                 .expect("invalid sparsity pattern"),
         );
         self.coloring_sens_adjoint = Some(JacobianColoring::new(
@@ -122,10 +124,10 @@ where
 impl<M, F, G, H, I> Op for ClosureWithAdjoint<M, F, G, H, I>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-    H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-    I: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
+    G: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
+    H: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
+    I: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
 {
     type V = M::V;
     type T = M::T;
@@ -151,13 +153,18 @@ where
 impl<M, F, G, H, I> BuilderOp for ClosureWithAdjoint<M, F, G, H, I>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-    H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-    I: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
+    G: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
+    H: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
+    I: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
 {
     fn calculate_sparsity(&mut self, y0: &Self::V, t0: Self::T, p: &Self::V) {
         self.calculate_jacobian_sparsity(y0, t0, p);
+        self.calculate_adjoint_sparsity(y0, t0, p);
+        self.calculate_sens_adjoint_sparsity(y0, t0, p);
+    }
+
+    fn calculate_augmented_sparsity(&mut self, y0: &Self::V, t0: Self::T, p: &Self::V) {
         self.calculate_adjoint_sparsity(y0, t0, p);
         self.calculate_sens_adjoint_sparsity(y0, t0, p);
     }
@@ -175,28 +182,30 @@ where
 impl<M, F, G, H, I> NonLinearOp for ParameterisedOp<'_, ClosureWithAdjoint<M, F, G, H, I>>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-    H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-    I: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
+    G: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
+    H: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
+    I: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
 {
     fn call_inplace(&self, x: &M::V, t: M::T, y: &mut M::V) {
         self.op.statistics.borrow_mut().increment_call();
-        (self.op.func)(x, self.p, t, y)
+        y.for_each_batch([x, self.p], |y, [x, p], _| (self.op.func)(x, p, t, y));
     }
 }
 
 impl<M, F, G, H, I> NonLinearOpJacobian for ParameterisedOp<'_, ClosureWithAdjoint<M, F, G, H, I>>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-    H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-    I: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
+    G: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
+    H: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
+    I: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
 {
     fn jac_mul_inplace(&self, x: &M::V, t: M::T, v: &M::V, y: &mut M::V) {
         self.op.statistics.borrow_mut().increment_jac_mul();
-        (self.op.jacobian_action)(x, self.p, t, v, y)
+        y.for_each_batch([x, self.p, v], |y, [x, p, v], _| {
+            (self.op.jacobian_action)(x, p, t, v, y)
+        });
     }
     fn jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
         self.op.statistics.borrow_mut().increment_matrix();
@@ -214,14 +223,16 @@ where
 impl<M, F, G, H, I> NonLinearOpAdjoint for ParameterisedOp<'_, ClosureWithAdjoint<M, F, G, H, I>>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-    H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-    I: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
+    G: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
+    H: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
+    I: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
 {
     fn jac_transpose_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
         self.op.statistics.borrow_mut().increment_jac_adj_mul();
-        (self.op.jacobian_adjoint_action)(x, self.p, t, v, y);
+        y.for_each_batch([x, self.p, v], |y, [x, p, v], _| {
+            (self.op.jacobian_adjoint_action)(x, p, t, v, y)
+        });
     }
 
     fn adjoint_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
@@ -240,13 +251,15 @@ impl<M, F, G, H, I> NonLinearOpSensAdjoint
     for ParameterisedOp<'_, ClosureWithAdjoint<M, F, G, H, I>>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-    H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-    I: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
+    G: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
+    H: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
+    I: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
 {
-    fn sens_transpose_mul_inplace(&self, _x: &Self::V, _t: Self::T, _v: &Self::V, y: &mut Self::V) {
-        (self.op.sens_adjoint_action)(_x, self.p, _t, _v, y);
+    fn sens_transpose_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
+        y.for_each_batch([x, self.p, v], |y, [x, p, v], _| {
+            (self.op.sens_adjoint_action)(x, p, t, v, y)
+        });
     }
     fn sens_adjoint_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
         if let Some(coloring) = self.op.coloring_sens_adjoint.as_ref() {

@@ -1,7 +1,8 @@
 use crate::{C, LS, M, T, V};
 use diffsol::{
-    AdjointOdeSolverMethod, DenseMatrix, Matrix, MatrixCommon, OdeEquationsImplicitAdjoint,
-    OdeSolverMethod, OdeSolverState, Scale, VectorViewMut,
+    AdjointOdeSolverMethod, Context, DenseMatrix, Matrix, MatrixCommon,
+    OdeEquationsImplicitAdjoint, OdeSolverMethod, OdeSolverState, Scale, Vector, VectorView,
+    VectorViewMut,
 };
 
 #[allow(dead_code)]
@@ -29,7 +30,10 @@ where
     let (final_state, _) = adjoint_solver
         .solve_adjoint_backwards_pass(t_data.as_slice(), &[&g_m])
         .unwrap();
-    for (i, dgdp_i) in final_state.as_ref().sg.iter().enumerate() {
-        println!("sens wrt parameter {i}: {dgdp_i:?}");
+    // the adjoint state holds one output channel per batch lane
+    let sg = final_state.as_ref().sg;
+    for i in 0..sg.context().nbatch() {
+        let dgdp_i = sg.get_batch(i).into_owned();
+        println!("sens of output {i}: {dgdp_i:?}");
     }
 }

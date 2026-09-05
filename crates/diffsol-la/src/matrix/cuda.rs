@@ -450,6 +450,11 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
     }
 
     fn get_index(&self, i: IndexType, j: IndexType) -> Self::T {
+        assert_eq!(
+            self.context.nbatch(),
+            1,
+            "get_index not supported for batched matrices"
+        );
         self.get_index(i, j)
     }
 
@@ -465,6 +470,18 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
     }
 
     fn set_index(&mut self, i: IndexType, j: IndexType, value: Self::T) {
+        assert_eq!(
+            self.context.nbatch(),
+            1,
+            "set_index not supported for batched matrices"
+        );
+        self.set_index(i, j, value);
+    }
+
+    fn set_index_batch(&mut self, batch: IndexType, i: IndexType, j: IndexType, value: Self::T) {
+        // batches are contiguous blocks of `ncols` columns, so batch `batch`'s column `j` is
+        // physical column `batch * ncols + j` (see `Matrix::zeros`)
+        let j = batch * self.ncols() + j;
         self.set_index(i, j, value);
     }
 
@@ -497,6 +514,11 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
         );
         let nrows = self.nrows();
         let nbatch = self.context.nbatch();
+        if nrows == 0 || nbatch == 0 {
+            // a launch with a zero grid dimension is an error, where the CPU backends simply
+            // iterate over nothing
+            return;
+        }
         let f = self.context.function::<T>("mul_cols_by");
         let config = self
             .context
@@ -736,6 +758,28 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
             .arg(&mat_stride)
             .arg(&mat_nbatch_i32);
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
+    }
+
+    fn add_columns_to_batched_vector(&self, v: &mut Self::V) {
+        let nrows = self.nrows();
+        let ncols = self.ncols();
+        let nbatch = self.context.nbatch();
+        assert_eq!(v.len(), nrows, "row count mismatch");
+        assert_eq!(
+            v.context.nbatch(),
+            nbatch * ncols,
+            "batch count mismatch: the destination holds one lane per (batch, column)"
+        );
+        // batch `b` column `j` lives at offset `(b * ncols + j) * nrows`, which is exactly the
+        // destination lane's offset, so the matrix *is* a vector of `nbatch * ncols` lanes and
+        // this is a plain batched axpy over the whole buffer
+        let columns_as_lanes = CudaVecRef {
+            data: self.data.as_view(),
+            context: v.context.clone(),
+            nstates: nrows,
+            col_offset: 0,
+        };
+        v.axpy_v(T::one(), &columns_as_lanes, T::one());
     }
 
     fn triplet_iter(

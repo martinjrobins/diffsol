@@ -70,10 +70,10 @@ pub trait NonLinearOpJacobian: NonLinearOp {
         let mut v = Self::V::zeros(self.nstates(), self.context().clone());
         let mut col = Self::V::zeros(self.nout(), self.context().clone());
         for j in 0..self.nstates() {
-            v.set_index(j, Self::T::one());
+            v.fill_index(j, Self::T::one());
             self.jac_mul_inplace(x, &v, &mut col);
             y.set_column(j, &col);
-            v.set_index(j, Self::T::zero());
+            v.fill_index(j, Self::T::zero());
         }
     }
 

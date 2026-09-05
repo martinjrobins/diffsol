@@ -7,7 +7,7 @@
 //while for each boundary point, it is res_i = u_i.
 
 use crate::{
-    ode_solver::problem::OdeSolverSolution, scalar::Scalar, Matrix, MatrixHost, OdeBuilder,
+    ode_solver::problem::OdeSolverSolution, scalar::Scalar, Matrix, OdeBuilder,
     OdeEquationsImplicit, OdeSolverProblem, Vector,
 };
 use num_traits::{FromPrimitive, One, Zero};
@@ -18,21 +18,20 @@ use crate::{ConstantOp, LinearOp, NonLinearOpJacobian, OdeEquations};
 #[cfg(feature = "diffsl")]
 #[allow(clippy::type_complexity)]
 pub fn heat2d_diffsl_problem<
-    M: MatrixHost<T = f64>,
+    M: Matrix<T = f64>,
     CG: crate::CodegenModuleJit + crate::CodegenModuleCompile,
     const MGRID: usize,
 >() -> (
     OdeSolverProblem<impl crate::OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
-    use crate::VectorHost;
     let (problem, _soln) = head2d_problem::<M, MGRID>();
     let u0 = problem.eqn.init().call(0.0);
     let jac = problem.eqn.rhs().jacobian(&u0, 0.0);
     let mass = problem.eqn.mass().unwrap().matrix(0.0);
     let init = problem.eqn.init().call(0.0);
     let init_diffsl = init
-        .as_slice()
+        .clone_as_vec()
         .iter()
         .map(|v| format!("            {}", *v))
         .collect::<Vec<_>>()
@@ -99,9 +98,9 @@ pub fn heat2d_diffsl_problem<
     (problem, soln)
 }
 
-fn heat2d_rhs<M: MatrixHost, const MGRID: usize>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
+fn heat2d_rhs<M: Matrix, const MGRID: usize>(x: &[M::T], _p: &[M::T], _t: M::T, y: &mut [M::T]) {
     // Initialize y to x, to take care of boundary equations.
-    y.copy_from(x);
+    y.copy_from_slice(x);
     let mm = M::T::from_f64(MGRID as f64).unwrap();
     let four = M::T::from_f64(4.0).unwrap();
 
@@ -119,15 +118,15 @@ fn heat2d_rhs<M: MatrixHost, const MGRID: usize>(x: &M::V, _p: &M::V, _t: M::T, 
     }
 }
 
-fn heat2d_jac_mul<M: MatrixHost, const MGRID: usize>(
-    _x: &M::V,
-    _p: &M::V,
+fn heat2d_jac_mul<M: Matrix, const MGRID: usize>(
+    _x: &[M::T],
+    _p: &[M::T],
     _t: M::T,
-    v: &M::V,
-    y: &mut M::V,
+    v: &[M::T],
+    y: &mut [M::T],
 ) {
-    // Initialize y to x, to take care of boundary equations.
-    y.copy_from(v);
+    // Initialize y to v, to take care of boundary equations.
+    y.copy_from_slice(v);
     let mm = M::T::from_f64(MGRID as f64).unwrap();
     let four = M::T::from_f64(4.0).unwrap();
 
@@ -145,7 +144,7 @@ fn heat2d_jac_mul<M: MatrixHost, const MGRID: usize>(
     }
 }
 
-fn heat2d_init<M: MatrixHost, const MGRID: usize>(_p: &M::V, _t: M::T, uu: &mut M::V) {
+fn heat2d_init<M: Matrix, const MGRID: usize>(_p: &[M::T], _t: M::T, uu: &mut [M::T]) {
     let mm = M::T::from_f64(MGRID as f64).unwrap();
     let bval = M::T::zero();
     let one = M::T::one();
@@ -176,12 +175,12 @@ fn heat2d_init<M: MatrixHost, const MGRID: usize>(_p: &M::V, _t: M::T, uu: &mut 
     }
 }
 
-fn heat2d_mass<M: MatrixHost, const MGRID: usize>(
-    x: &M::V,
-    _p: &M::V,
+fn heat2d_mass<M: Matrix, const MGRID: usize>(
+    x: &[M::T],
+    _p: &[M::T],
     _t: M::T,
     beta: M::T,
-    y: &mut M::V,
+    y: &mut [M::T],
 ) {
     let mm = MGRID;
     let mm1 = mm - 1;
@@ -198,19 +197,18 @@ fn heat2d_mass<M: MatrixHost, const MGRID: usize>(
     }
 }
 
-fn heat2d_out<M: MatrixHost, const MGRID: usize>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
+fn heat2d_out<M: Matrix, const MGRID: usize>(x: &[M::T], _p: &[M::T], _t: M::T, y: &mut [M::T]) {
     let dx = M::T::one() / (M::T::from_f64(MGRID as f64).unwrap() - M::T::one());
-    let norm = x.norm(2);
-    let scaled_norm = norm * dx;
-    y[0] = scaled_norm * scaled_norm;
+    let squared_norm = x.iter().fold(M::T::zero(), |acc, xi| acc + *xi * *xi);
+    y[0] = squared_norm * dx * dx;
 }
 
 fn heat2d_out_jac_mul<M: Matrix, const MGRID: usize>(
-    _x: &M::V,
-    _p: &M::V,
+    _x: &[M::T],
+    _p: &[M::T],
     _t: M::T,
-    _v: &M::V,
-    _y: &mut M::V,
+    _v: &[M::T],
+    _y: &mut [M::T],
 ) {
     unimplemented!()
 }
@@ -248,7 +246,7 @@ fn _pde_solution<T: Scalar>(x: T, y: T, t: T, max_terms: usize) -> T {
 }
 
 #[allow(clippy::type_complexity)]
-pub fn head2d_problem<M: MatrixHost + 'static, const MGRID: usize>() -> (
+pub fn head2d_problem<M: Matrix + 'static, const MGRID: usize>() -> (
     OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {

@@ -1,6 +1,4 @@
-use diffsol::{
-    FaerSparseMat, LlvmModule, OdeBuilder, OdeSolverMethod, Vector, VectorCommon, VectorHost,
-};
+use diffsol::{FaerSparseMat, LlvmModule, OdeBuilder, OdeSolverMethod, Vector, VectorCommon};
 use faer::linalg::solvers::Solve;
 use faer::sparse::linalg::solvers::{Lu, SymbolicLu};
 use faer::sparse::{SparseColMat, Triplet};
@@ -87,7 +85,7 @@ pub(crate) fn main() {
         let v: Vec<f64> = (0..n_u)
             .map(|i| {
                 if free_mask[i] {
-                    let x = solver.state().y.as_slice()[fi];
+                    let x = solver.state().y.get_index(fi);
                     fi += 1;
                     x
                 } else {
@@ -147,7 +145,7 @@ pub(crate) fn main() {
             let v: Vec<f64> = (0..n_u)
                 .map(|i| {
                     if free_mask[i] {
-                        let x = solver.state().y.as_slice()[fi];
+                        let x = solver.state().y.get_index(fi);
                         fi += 1;
                         x
                     } else {

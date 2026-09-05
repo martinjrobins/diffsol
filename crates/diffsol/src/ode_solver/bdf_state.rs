@@ -1,7 +1,7 @@
 use crate::{
     error::DiffsolError, ode_solver_error, scalar::IndexType, scale, AugmentedOdeEquations,
-    DefaultDenseMatrix, DenseMatrix, OdeEquations, OdeSolverProblem, OdeSolverState, Op, StateRef,
-    StateRefMut, Vector, VectorViewMut,
+    Context, DefaultDenseMatrix, DenseMatrix, OdeEquations, OdeSolverProblem, OdeSolverState, Op,
+    StateRef, StateRefMut, Vector, VectorViewMut,
 };
 use num_traits::Zero;
 use std::ops::MulAssign;
@@ -17,17 +17,17 @@ where
 {
     pub(crate) order: usize,
     pub(crate) diff: M,
-    pub(crate) sdiff: Vec<M>,
+    pub(crate) sdiff: M,
     pub(crate) gdiff: M,
-    pub(crate) sgdiff: Vec<M>,
+    pub(crate) sgdiff: M,
     pub(crate) y: V,
     pub(crate) dy: V,
     pub(crate) g: V,
     pub(crate) dg: V,
-    pub(crate) s: Vec<V>,
-    pub(crate) ds: Vec<V>,
-    pub(crate) sg: Vec<V>,
-    pub(crate) dsg: Vec<V>,
+    pub(crate) s: V,
+    pub(crate) ds: V,
+    pub(crate) sg: V,
+    pub(crate) dsg: V,
     pub(crate) t: V::T,
     pub(crate) h: V::T,
     pub(crate) diff_initialised: bool,
@@ -37,10 +37,6 @@ where
 }
 
 /// Highest BDF order.
-///
-/// Free-standing rather than an associated const of [`BdfState`]: an associated const of a
-/// generic type cannot size an array, and referring to one means spelling out the generic
-/// parameters at every use.
 pub(crate) const MAX_ORDER: IndexType = 5;
 
 impl<V, M> BdfState<V, M>
@@ -54,17 +50,17 @@ where
         Self {
             order: 1,
             diff: default_m.clone(),
-            sdiff: Vec::new(),
+            sdiff: default_m.clone(),
             gdiff: default_m.clone(),
-            sgdiff: Vec::new(),
+            sgdiff: default_m.clone(),
             y: default_v.clone(),
             dy: default_v.clone(),
             g: default_v.clone(),
             dg: default_v.clone(),
-            s: Vec::new(),
-            ds: Vec::new(),
-            sg: Vec::new(),
-            dsg: Vec::new(),
+            s: default_v.clone(),
+            ds: default_v.clone(),
+            sg: default_v.clone(),
+            dsg: default_v.clone(),
             t: V::T::zero(),
             h: V::T::zero(),
             diff_initialised: false,
@@ -83,15 +79,9 @@ where
     }
 
     pub fn initialise_sdiff_to_first_order(&mut self) {
-        let naug = self.sdiff.len();
-        for i in 0..naug {
-            let sdiff = &mut self.sdiff[i];
-            let s = &self.s[i];
-            let ds = &self.ds[i];
-            sdiff.column_mut(0).copy_from(s);
-            sdiff.column_mut(1).copy_from(ds);
-            sdiff.column_mut(1).mul_assign(scale(self.h));
-        }
+        self.sdiff.column_mut(0).copy_from(&self.s);
+        self.sdiff.column_mut(1).copy_from(&self.ds);
+        self.sdiff.column_mut(1).mul_assign(scale(self.h));
         self.sdiff_initialised = true;
     }
 
@@ -103,15 +93,9 @@ where
     }
 
     pub fn initialise_sgdiff_to_first_order(&mut self) {
-        let naug = self.sgdiff.len();
-        for i in 0..naug {
-            let sgdiff = &mut self.sgdiff[i];
-            let sg = &self.sg[i];
-            let dsg = &self.dsg[i];
-            sgdiff.column_mut(0).copy_from(sg);
-            sgdiff.column_mut(1).copy_from(dsg);
-            sgdiff.column_mut(1).mul_assign(scale(self.h));
-        }
+        self.sgdiff.column_mut(0).copy_from(&self.sg);
+        self.sgdiff.column_mut(1).copy_from(&self.dsg);
+        self.sgdiff.column_mut(1).mul_assign(scale(self.h));
         self.sgdiff_initialised = true;
     }
 }
@@ -151,19 +135,13 @@ where
         ode_problem: &OdeSolverProblem<Eqn>,
         augmented_eqn: &AugmentedEqn,
     ) -> Result<(), DiffsolError> {
-        let naug = augmented_eqn.max_index();
+        let nlanes = augmented_eqn.aug_context().nbatch();
         let nstates = ode_problem.eqn.rhs().nstates();
-        if self.sdiff.len() != naug || self.sdiff[0].nrows() != nstates {
+        if self.sdiff.nrows() != nstates || self.sdiff.context().nbatch() != nlanes {
             return Err(ode_solver_error!(StateProblemMismatch));
         }
-        let (sgdiff_len, sgdiff_size) = if let Some(out) = augmented_eqn.out() {
-            (naug, out.nout())
-        } else {
-            (0, 0)
-        };
-        if self.sgdiff.len() != sgdiff_len
-            || (sgdiff_len > 0 && self.sgdiff[0].nrows() != sgdiff_size)
-        {
+        let sgdiff_size = augmented_eqn.out().map(|out| out.nout()).unwrap_or(0);
+        if self.sgdiff.nrows() != sgdiff_size || self.sgdiff.context().nbatch() != nlanes {
             return Err(ode_solver_error!(StateProblemMismatch));
         }
         if !self.sdiff_initialised {
@@ -191,13 +169,10 @@ where
         let nstates = y.len();
         let ctx = y.context();
         let diff = M::zeros(nstates, MAX_ORDER + 3, ctx.clone());
-        let sdiff = vec![M::zeros(nstates, MAX_ORDER + 3, ctx.clone()); s.len()];
+        // the augmented differences carry the augmented batch count of the state they track
+        let sdiff = M::zeros(s.len(), MAX_ORDER + 3, s.context().clone());
         let gdiff = M::zeros(g.len(), MAX_ORDER + 3, ctx.clone());
-        let sgdiff = if !sg.is_empty() {
-            vec![M::zeros(sg[0].len(), MAX_ORDER + 3, ctx.clone()); sg.len()]
-        } else {
-            Vec::new()
-        };
+        let sgdiff = M::zeros(sg.len(), MAX_ORDER + 3, sg.context().clone());
         Self {
             order: 1,
             diff,

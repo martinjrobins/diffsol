@@ -23,10 +23,10 @@ use diffsol::ObjectModule;
 use diffsol::OdeBuilder;
 use diffsol::{
     error::DiffsolError,
-    matrix::{MatrixHost, MatrixRef},
-    CodegenModule, ConstantOp, DefaultDenseMatrix, DefaultSolver, DenseMatrix, DiffSl,
+    matrix::{Matrix, MatrixRef},
+    CodegenModule, ConstantOp, Context, DefaultDenseMatrix, DefaultSolver, DenseMatrix, DiffSl,
     MatrixCommon, NonLinearOp, NonLinearOpJacobian, OdeEquations, OdeSolverProblem, Op, Vector,
-    VectorCommon, VectorHost, VectorRef,
+    VectorCommon, VectorRef,
 };
 #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
 use diffsol::{CodegenModuleCompile, CodegenModuleJit};
@@ -172,22 +172,26 @@ pub(crate) fn solve_factory_external(
     matrix_type: MatrixType,
     scalar_type: ScalarType,
 ) -> Result<Box<dyn Solve>, DiffsolRtError> {
+    // the C ABI only carries the rhs and mass patterns; the out, reset and stop operators' are
+    // left empty, which is the same "no non-zeros" contract the other lists already use
+    let deps = diffsol::DiffSlDeps {
+        rhs_state: rhs_state_deps,
+        rhs_input: rhs_input_deps,
+        mass_state: mass_state_deps,
+        ..Default::default()
+    };
     let solve: Box<dyn Solve> = match matrix_type {
         MatrixType::NalgebraDense => match scalar_type {
             #[cfg(feature = "diffsl-external-f32")]
             ScalarType::F32 => Box::new(GenericSolve::<
                 diffsol::NalgebraMat<f32>,
                 diffsl::ExternalModule<f32>,
-            >::from_external(
-                rhs_state_deps, rhs_input_deps, mass_state_deps, false
-            )?),
+            >::from_external(deps, false)?),
             #[cfg(feature = "diffsl-external-f64")]
             ScalarType::F64 => Box::new(GenericSolve::<
                 diffsol::NalgebraMat<f64>,
                 diffsl::ExternalModule<f64>,
-            >::from_external(
-                rhs_state_deps, rhs_input_deps, mass_state_deps, false
-            )?),
+            >::from_external(deps, false)?),
             _ => {
                 return Err(DiffsolRtError::from(DiffsolError::Other(
                     "Unsupported scalar type for NalgebraDense".to_string(),
@@ -199,16 +203,12 @@ pub(crate) fn solve_factory_external(
             ScalarType::F32 => Box::new(GenericSolve::<
                 diffsol::FaerMat<f32>,
                 diffsl::ExternalModule<f32>,
-            >::from_external(
-                rhs_state_deps, rhs_input_deps, mass_state_deps, false
-            )?),
+            >::from_external(deps, false)?),
             #[cfg(feature = "diffsl-external-f64")]
             ScalarType::F64 => Box::new(GenericSolve::<
                 diffsol::FaerMat<f64>,
                 diffsl::ExternalModule<f64>,
-            >::from_external(
-                rhs_state_deps, rhs_input_deps, mass_state_deps, false
-            )?),
+            >::from_external(deps, false)?),
             _ => {
                 return Err(DiffsolRtError::from(DiffsolError::Other(
                     "Unsupported scalar type for FaerDense".to_string(),
@@ -220,16 +220,12 @@ pub(crate) fn solve_factory_external(
             ScalarType::F32 => Box::new(GenericSolve::<
                 diffsol::FaerSparseMat<f32>,
                 diffsl::ExternalModule<f32>,
-            >::from_external(
-                rhs_state_deps, rhs_input_deps, mass_state_deps, false
-            )?),
+            >::from_external(deps, false)?),
             #[cfg(feature = "diffsl-external-f64")]
             ScalarType::F64 => Box::new(GenericSolve::<
                 diffsol::FaerSparseMat<f64>,
                 diffsl::ExternalModule<f64>,
-            >::from_external(
-                rhs_state_deps, rhs_input_deps, mass_state_deps, false
-            )?),
+            >::from_external(deps, false)?),
             _ => {
                 return Err(DiffsolRtError::from(DiffsolError::Other(
                     "Unsupported scalar type for FaerSparse".to_string(),
@@ -249,72 +245,43 @@ pub(crate) fn solve_factory_external_dynamic(
     matrix_type: MatrixType,
     scalar_type: ScalarType,
 ) -> Result<Box<dyn Solve>, DiffsolRtError> {
+    // see `solve_factory_external`: the C ABI carries only the rhs and mass patterns
+    let deps = diffsol::DiffSlDeps {
+        rhs_state: rhs_state_deps,
+        rhs_input: rhs_input_deps,
+        mass_state: mass_state_deps,
+        ..Default::default()
+    };
     let solve: Box<dyn Solve> = match matrix_type {
         MatrixType::NalgebraDense => match scalar_type {
             ScalarType::F32 => Box::new(GenericSolve::<
                 diffsol::NalgebraMat<f32>,
                 diffsl::ExternalDynModule<f32>,
-            >::from_external_dynamic(
-                path,
-                rhs_state_deps,
-                rhs_input_deps,
-                mass_state_deps,
-                false,
-            )?),
+            >::from_external_dynamic(path, deps, false)?),
             ScalarType::F64 => Box::new(GenericSolve::<
                 diffsol::NalgebraMat<f64>,
                 diffsl::ExternalDynModule<f64>,
-            >::from_external_dynamic(
-                path,
-                rhs_state_deps,
-                rhs_input_deps,
-                mass_state_deps,
-                false,
-            )?),
+            >::from_external_dynamic(path, deps, false)?),
         },
         MatrixType::FaerDense => match scalar_type {
             ScalarType::F32 => Box::new(GenericSolve::<
                 diffsol::FaerMat<f32>,
                 diffsl::ExternalDynModule<f32>,
-            >::from_external_dynamic(
-                path,
-                rhs_state_deps,
-                rhs_input_deps,
-                mass_state_deps,
-                false,
-            )?),
+            >::from_external_dynamic(path, deps, false)?),
             ScalarType::F64 => Box::new(GenericSolve::<
                 diffsol::FaerMat<f64>,
                 diffsl::ExternalDynModule<f64>,
-            >::from_external_dynamic(
-                path,
-                rhs_state_deps,
-                rhs_input_deps,
-                mass_state_deps,
-                false,
-            )?),
+            >::from_external_dynamic(path, deps, false)?),
         },
         MatrixType::FaerSparse => match scalar_type {
             ScalarType::F32 => Box::new(GenericSolve::<
                 diffsol::FaerSparseMat<f32>,
                 diffsl::ExternalDynModule<f32>,
-            >::from_external_dynamic(
-                path,
-                rhs_state_deps,
-                rhs_input_deps,
-                mass_state_deps,
-                false,
-            )?),
+            >::from_external_dynamic(path, deps, false)?),
             ScalarType::F64 => Box::new(GenericSolve::<
                 diffsol::FaerSparseMat<f64>,
                 diffsl::ExternalDynModule<f64>,
-            >::from_external_dynamic(
-                path,
-                rhs_state_deps,
-                rhs_input_deps,
-                mass_state_deps,
-                false,
-            )?),
+            >::from_external_dynamic(path, deps, false)?),
         },
     };
     Ok(solve)
@@ -447,8 +414,8 @@ pub(crate) fn solve_factory_from_serialized_diffsl(
 
 pub(crate) struct GenericSolve<M, CG>
 where
-    M: MatrixHost<T: Scalar>,
-    M::V: Vector + VectorHost,
+    M: Matrix<T: Scalar>,
+    M::V: Vector,
     CG: CodegenModule,
 {
     problem: OdeSolverProblem<DiffSl<M, CG>>,
@@ -456,8 +423,8 @@ where
 
 impl<M, CG> GenericSolve<M, CG>
 where
-    M: MatrixHost<T: Scalar>,
-    M::V: Vector + VectorHost + DefaultDenseMatrix,
+    M: Matrix<T: Scalar>,
+    M::V: Vector + DefaultDenseMatrix,
     CG: CodegenModule,
 {
     fn from_eqn(eqn: DiffSl<M, CG>) -> Result<Self, DiffsolRtError> {
@@ -499,20 +466,16 @@ where
 #[cfg(feature = "external")]
 impl<M> GenericSolve<M, diffsl::ExternalModule<M::T>>
 where
-    M: MatrixHost<T: ExternalScalar>,
-    M::V: Vector + VectorHost + DefaultDenseMatrix,
+    M: Matrix<T: ExternalScalar>,
+    M::V: Vector + DefaultDenseMatrix,
 {
     pub fn from_external(
-        rhs_state_deps: Vec<(usize, usize)>,
-        rhs_input_deps: Vec<(usize, usize)>,
-        mass_state_deps: Vec<(usize, usize)>,
+        deps: diffsol::DiffSlDeps,
         include_sensitivities: bool,
     ) -> Result<Self, DiffsolRtError> {
         let eqn = DiffSl::<M, diffsl::ExternalModule<M::T>>::from_external(
             M::C::default(),
-            rhs_state_deps,
-            rhs_input_deps,
-            mass_state_deps,
+            deps,
             include_sensitivities,
         )?;
         Self::from_eqn(eqn)
@@ -522,22 +485,18 @@ where
 #[cfg(feature = "diffsl-external-dynamic")]
 impl<M> GenericSolve<M, diffsl::ExternalDynModule<M::T>>
 where
-    M: MatrixHost<T: Scalar>,
-    M::V: Vector + VectorHost + DefaultDenseMatrix,
+    M: Matrix<T: Scalar>,
+    M::V: Vector + DefaultDenseMatrix,
 {
     pub fn from_external_dynamic(
         path: impl Into<PathBuf>,
-        rhs_state_deps: Vec<(usize, usize)>,
-        rhs_input_deps: Vec<(usize, usize)>,
-        mass_state_deps: Vec<(usize, usize)>,
+        deps: diffsol::DiffSlDeps,
         include_sensitivities: bool,
     ) -> Result<Self, DiffsolRtError> {
         let eqn = DiffSl::<M, diffsl::ExternalDynModule<M::T>>::from_external_dynamic(
             path,
             M::C::default(),
-            rhs_state_deps,
-            rhs_input_deps,
-            mass_state_deps,
+            deps,
             include_sensitivities,
         )?;
         Self::from_eqn(eqn)
@@ -546,8 +505,8 @@ where
 
 impl<M> GenericSolve<M, ObjectModule>
 where
-    M: MatrixHost<T: Scalar>,
-    M::V: Vector + VectorHost + DefaultDenseMatrix,
+    M: Matrix<T: Scalar>,
+    M::V: Vector + DefaultDenseMatrix,
 {
     pub fn from_serialized_diffsl(serialized_diffsl: &[u8]) -> Result<Self, DiffsolRtError> {
         let eqn = serde_json::from_slice::<DiffSl<M, ObjectModule>>(serialized_diffsl)
@@ -558,7 +517,7 @@ where
 
 impl<M, CG> Solve for GenericSolve<M, CG>
 where
-    M: MatrixHost<T: Scalar + ToPrimitive>
+    M: Matrix<T: Scalar + ToPrimitive>
         + DefaultSolver
         + LuValidator<M>
         + KluValidator<M>
@@ -566,7 +525,7 @@ where
     CG: CodegenModule,
     for<'b> <<M::V as DefaultDenseMatrix>::M as MatrixCommon>::Inner: ToHostArray<M::T> + Clone,
     for<'b> <M::V as VectorCommon>::Inner: ToHostArray<M::T> + Clone,
-    M::V: VectorHost + DefaultDenseMatrix + Send + Sync + 'static,
+    M::V: DefaultDenseMatrix + Send + Sync + 'static,
     <M::V as DefaultDenseMatrix>::M: Send + Sync,
     for<'b> &'b M::V: VectorRef<M::V>,
     for<'b> &'b M: MatrixRef<M>,
@@ -601,7 +560,7 @@ where
     }
 
     fn atol(&self) -> f64 {
-        self.problem.atol[0].to_f64().unwrap()
+        self.problem.atol.get_index(0).to_f64().unwrap()
     }
 
     fn serialized_diffsl(&self) -> Result<Vec<u8>, DiffsolRtError> {
@@ -649,24 +608,27 @@ where
     }
 
     fn set_sens_atol(&mut self, sens_atol: Option<f64>) {
+        // one batch lane per (problem batch, parameter), as the augmented state is laid out
         self.problem.sens_atol = sens_atol.map(|value| {
-            (0..self.problem.eqn.nparams())
-                .map(|_| {
-                    M::V::from_element(
-                        self.problem.eqn.nstates(),
-                        M::T::from_f64(value).unwrap(),
-                        M::C::default(),
-                    )
-                })
-                .collect()
+            let nparams = self.problem.eqn.nparams();
+            let ctx = self.problem.context();
+            let aug_ctx = ctx
+                .clone_with_nbatch(ctx.nbatch() * nparams)
+                .expect("failed to create the augmented context");
+            M::V::from_element(
+                self.problem.eqn.nstates(),
+                M::T::from_f64(value).unwrap(),
+                aug_ctx,
+            )
         });
     }
 
     fn sens_atol(&self) -> Option<f64> {
+        // every lane holds the same value unless parameter scales were set, which this API
+        // cannot express, so reporting the first is exact for anything it can have set
         self.problem
             .sens_atol
             .as_ref()
-            .and_then(|values| values.first())
             .and_then(|value| (value.len() > 0).then(|| value.get_index(0).to_f64().unwrap()))
     }
 
@@ -999,7 +961,7 @@ fn host_array_to_dense_matrix<M>(
     array: HostArray,
 ) -> Result<<M::V as DefaultDenseMatrix>::M, DiffsolRtError>
 where
-    M: MatrixHost<T: Scalar>,
+    M: Matrix<T: Scalar>,
     M::V: DefaultDenseMatrix,
 {
     let view = array.as_array::<M::T>()?;
@@ -1047,7 +1009,7 @@ mod tests {
             + CodegenModuleJit
             + CodegenModuleCompile
             + SolveSerialization<diffsol::NalgebraMat<T>>,
-        diffsol::NalgebraMat<T>: diffsol::matrix::MatrixHost,
+        diffsol::NalgebraMat<T>: diffsol::matrix::Matrix,
         <diffsol::NalgebraMat<T> as MatrixCommon>::T: crate::scalar_type::Scalar,
         <diffsol::NalgebraMat<T> as MatrixCommon>::V: diffsol::DefaultDenseMatrix,
     {
@@ -1092,7 +1054,7 @@ mod tests {
             + CodegenModuleJit
             + CodegenModuleCompile
             + SolveSerialization<diffsol::NalgebraMat<T>>,
-        diffsol::NalgebraMat<T>: diffsol::matrix::MatrixHost,
+        diffsol::NalgebraMat<T>: diffsol::matrix::Matrix,
         <diffsol::NalgebraMat<T> as MatrixCommon>::T: crate::scalar_type::Scalar,
         <diffsol::NalgebraMat<T> as MatrixCommon>::V: diffsol::DefaultDenseMatrix,
         GenericSolve<diffsol::NalgebraMat<T>, CG>: Solve,
@@ -1166,7 +1128,7 @@ mod tests {
             + CodegenModuleJit
             + CodegenModuleCompile
             + SolveSerialization<diffsol::NalgebraMat<T>>,
-        diffsol::NalgebraMat<T>: diffsol::matrix::MatrixHost,
+        diffsol::NalgebraMat<T>: diffsol::matrix::Matrix,
         <diffsol::NalgebraMat<T> as MatrixCommon>::T: crate::scalar_type::Scalar,
         <diffsol::NalgebraMat<T> as MatrixCommon>::V: diffsol::DefaultDenseMatrix,
         GenericSolve<diffsol::NalgebraMat<T>, CG>: Solve,

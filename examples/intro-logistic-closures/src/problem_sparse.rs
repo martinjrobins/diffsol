@@ -1,5 +1,5 @@
 use diffsol::{FaerSparseMat, MatrixCommon, OdeBuilder};
-use diffsol::{OdeEquationsImplicit, OdeSolverProblem, Vector};
+use diffsol::{OdeEquationsImplicit, OdeSolverProblem};
 type M = FaerSparseMat<f64>;
 type V = <M as MatrixCommon>::V;
 type C = <M as MatrixCommon>::C;

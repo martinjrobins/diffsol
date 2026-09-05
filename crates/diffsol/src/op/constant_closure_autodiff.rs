@@ -1,9 +1,7 @@
 use std::marker::PhantomData;
 
-use crate::{Matrix, Op, Scale, Vector};
-use num_traits::One;
+use crate::{Matrix, Op, Vector};
 use std::cell::RefCell;
-use std::ops::MulAssign;
 
 use super::BuilderOp;
 
@@ -74,31 +72,38 @@ mod autodiff_impl {
     use crate::{ConstantOp, ConstantOpSensAdjoint, ParameterisedOp, Vector};
     use std::autodiff::autodiff_reverse;
 
-    impl<M: Matrix, F: Fn(&M::V, M::T, &mut M::V)> ConstantClosureAutodiff<M, F> {
+    impl<M: Matrix, F: Fn(&[M::T], M::T, &mut [M::T])> ConstantClosureAutodiff<M, F> {
         #[autodiff_reverse(call_sens_vjp, Const, Duplicated, Const, Duplicated)]
-        pub fn call_func(&self, p: &M::V, t: M::T, y: &mut M::V) {
+        pub fn call_func(&self, p: &[M::T], t: M::T, y: &mut [M::T]) {
             (self.func)(p, t, y)
         }
     }
 
-    impl<M: Matrix, F: Fn(&M::V, M::T, &mut M::V)> ConstantOp
+    impl<M: Matrix, F: Fn(&[M::T], M::T, &mut [M::T])> ConstantOp
         for ParameterisedOp<'_, ConstantClosureAutodiff<M, F>>
     {
         fn call_inplace(&self, t: Self::T, y: &mut Self::V) {
-            self.op.call_func(self.p, t, y);
+            y.for_each_batch([self.p], |y, [p], _| self.op.call_func(p, t, y));
         }
     }
 
-    impl<M: Matrix, F: Fn(&M::V, M::T, &mut M::V)> ConstantOpSensAdjoint
+    impl<M: Matrix, F: Fn(&[M::T], M::T, &mut [M::T])> ConstantOpSensAdjoint
         for ParameterisedOp<'_, ConstantClosureAutodiff<M, F>>
     {
         fn sens_transpose_mul_inplace(&self, t: Self::T, v: &Self::V, y: &mut Self::V) {
             let mut tmp_nstates = self.op.tmp_nstates.borrow_mut();
             let mut tmp_nstates2 = self.op.tmp_nstates2.borrow_mut();
-            tmp_nstates.copy_from(v);
-            self.op
-                .call_sens_vjp(self.p, y, t, &mut tmp_nstates2, &mut tmp_nstates);
-            y.mul_assign(Scale(-M::T::one()));
+            <M::V as Vector>::for_each_batch_mut(
+                [y, &mut tmp_nstates, &mut tmp_nstates2],
+                [v, self.p],
+                |[y, tmp_nstates, tmp_nstates2], [v, p], _| {
+                    tmp_nstates.copy_from_slice(v);
+                    self.op.call_sens_vjp(p, y, t, tmp_nstates2, tmp_nstates);
+                    for y in y.iter_mut() {
+                        *y = -*y;
+                    }
+                },
+            );
         }
     }
 }
@@ -115,7 +120,7 @@ mod tests {
     type M = NalgebraMat<f64>;
     type V = NalgebraVec<f64>;
 
-    fn initial_condition(p: &V, t: f64, y: &mut V) {
+    fn initial_condition(p: &[f64], t: f64, y: &mut [f64]) {
         y[0] = p[0] * p[0] + 2.0 * p[1] + t;
         y[1] = 3.0 * p[0] + p[1] - t;
     }

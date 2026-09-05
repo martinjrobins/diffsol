@@ -125,12 +125,12 @@ mod tests {
                                 return method.state().y.clone();
                             }
                             Ok(OdeSolverStopReason::TstopReached) => {
-                                break (method.state().y.clone(), method.state().s.to_vec());
+                                break (method.state().y.clone(), method.state().s.clone());
                             }
                             _ => (),
                         }
                     },
-                    Err(_) => (method.state().y.clone(), method.state().s.to_vec()),
+                    Err(_) => (method.state().y.clone(), method.state().s.clone()),
                 }
             } else {
                 while method.state().t.abs() < point.t.abs() {
@@ -174,9 +174,24 @@ mod tests {
                 );
                 if solve_for_sensitivities {
                     if let Some(sens_soln_points) = solution.sens_solution_points.as_ref() {
+                        let nchannels = sens_soln_points.len();
+                        let nbatch_problem = sens_soln.context().nbatch() / nchannels;
+                        let mut sens_channel = M::V::zeros(
+                            sens_soln.len(),
+                            sens_soln
+                                .context()
+                                .clone_with_nbatch(nbatch_problem)
+                                .unwrap(),
+                        );
                         for (j, sens_points) in sens_soln_points.iter().enumerate() {
                             let sens_point = &sens_points[i];
-                            let sens_soln = &sens_soln[j];
+                            crate::ode_equations::augmented_channel(
+                                &sens_soln,
+                                nchannels,
+                                j,
+                                &mut sens_channel,
+                            );
+                            let sens_soln = &sens_channel;
                             let error = sens_soln.clone() - &sens_point.state;
                             let error_norm =
                                 error.squared_norm(&sens_point.state, atol, rtol).sqrt();
@@ -209,11 +224,11 @@ mod tests {
         let nparams = problem.eqn.nparams();
         let nout = problem.eqn.nout();
         let ctx = problem.eqn.context();
-        let mut dgdp = <Eqn::V as DefaultDenseMatrix>::M::zeros(nparams, nout, ctx.clone());
         let final_time = soln.solution_points.last().unwrap().t;
         let mut p_0 = Eqn::V::zeros(nparams, ctx.clone());
         problem.eqn.get_params(&mut p_0);
         let nbatch = p_0.context().nbatch();
+        let mut dgdp = <Eqn::V as DefaultDenseMatrix>::M::zeros(nparams, nout, ctx.clone());
         let h_base = Eqn::T::from_f64(1e-6).unwrap();
         let mut h = Eqn::V::from_element(nparams, h_base, ctx.clone());
         h.axpy(h_base, &p_0, Eqn::T::one());
@@ -253,7 +268,7 @@ mod tests {
                 let denom = Eqn::T::from_f64(2.0).unwrap() * hb;
                 for j in 0..nout {
                     let delta_val = delta_full.get_batch(b).get_index(j) / denom;
-                    dgdp.set_index(i, b * nout + j, delta_val);
+                    dgdp.set_index_batch(b, i, j, delta_val);
                 }
             }
         }
@@ -330,11 +345,10 @@ mod tests {
         let nparams = problem.eqn.nparams();
         let nout = 2;
         let ctx = problem.eqn.context();
-        let mut dgdp = <Eqn::V as DefaultDenseMatrix>::M::zeros(nparams, nout, ctx.clone());
-
         let mut p_0 = ctx.vector_zeros(nparams);
         problem.eqn.get_params(&mut p_0);
         let nbatch = p_0.context().nbatch();
+        let mut dgdp = <Eqn::V as DefaultDenseMatrix>::M::zeros(nparams, nout, ctx.clone());
         let h_base = Eqn::T::from_f64(1e-6).unwrap();
         let mut h = Eqn::V::from_element(nparams, h_base, ctx.clone());
         h.axpy(h_base, &p_0, Eqn::T::one());
@@ -384,7 +398,7 @@ mod tests {
                 let denom = Eqn::T::from_f64(2.0).unwrap() * hb;
                 for j in 0..nout {
                     let delta_val = delta_full.get_batch(b).get_index(j) / denom;
-                    dgdp.set_index(i, b * nout + j, delta_val);
+                    dgdp.set_index_batch(b, i, j, delta_val);
                 }
             }
         }
@@ -565,9 +579,12 @@ mod tests {
             .solve_adjoint_backwards_pass(times, dgdu.iter().collect::<Vec<_>>().as_slice())
             .unwrap();
         let gs_adj = state.into_common().sg;
+        let nchannels = dgdp_check.ncols();
+        let mut g_adj = Eqn::V::zeros(gs_adj.len(), dgdp_check.context().clone());
         #[allow(clippy::needless_range_loop)]
-        for j in 0..dgdp_check.ncols() {
-            gs_adj[j].assert_eq_norm(
+        for j in 0..nchannels {
+            crate::ode_equations::augmented_channel(&gs_adj, nchannels, j, &mut g_adj);
+            g_adj.assert_eq_norm(
                 &dgdp_check.column(j).into_owned(),
                 &atol,
                 rtol,
@@ -598,9 +615,12 @@ mod tests {
             .solve_adjoint_backwards_pass(&[], &[])
             .unwrap();
         let gs_adj = state.into_common().sg;
+        let nchannels = dgdp_check.ncols();
+        let mut g_adj = Eqn::V::zeros(gs_adj.len(), dgdp_check.context().clone());
         #[allow(clippy::needless_range_loop)]
-        for j in 0..dgdp_check.ncols() {
-            gs_adj[j].assert_eq_norm(&dgdp_check.column(j).into_owned(), &atol, rtol, factor);
+        for j in 0..nchannels {
+            crate::ode_equations::augmented_channel(&gs_adj, nchannels, j, &mut g_adj);
+            g_adj.assert_eq_norm(&dgdp_check.column(j).into_owned(), &atol, rtol, factor);
         }
     }
 
@@ -868,27 +888,28 @@ mod tests {
         assert!(s
             .interpolate_out_inplace(s.state().t, &mut g_wrong_length)
             .is_err());
-        let mut s_wrong_length = vec![
-            M::V::zeros(1, s.problem().context().clone()),
-            M::V::zeros(1, s.problem().context().clone()),
-        ];
+        // the sensitivities hold one channel per batch lane, so both the state count and the
+        // channel count have to match
+        let sens_ctx = s.state().s.context().clone();
+        let nstates_sens = s.state().s.len();
+        let mut s_wrong_length = M::V::zeros(nstates_sens + 1, sens_ctx.clone());
         assert!(s
             .interpolate_sens_inplace(s.state().t, &mut s_wrong_length)
             .is_err());
-        let mut s_wrong_vec_length = if integrating_sens {
-            vec![M::V::zeros(2, s.problem().context().clone())]
-        } else {
-            vec![]
-        };
-        if integrating_sens {
-            assert!(s
-                .interpolate_sens_inplace(s.state().t, &mut s_wrong_vec_length)
-                .is_err());
-        } else {
-            assert!(s
-                .interpolate_sens_inplace(s.state().t, &mut s_wrong_vec_length)
-                .is_ok());
-        }
+        let mut s_wrong_nchannels = M::V::zeros(
+            nstates_sens,
+            s.problem()
+                .context()
+                .clone_with_nbatch(sens_ctx.nbatch() + 1)
+                .unwrap(),
+        );
+        assert!(s
+            .interpolate_sens_inplace(s.state().t, &mut s_wrong_nchannels)
+            .is_err());
+        let mut s_right_shape = M::V::zeros(nstates_sens, sens_ctx);
+        assert!(s
+            .interpolate_sens_inplace(s.state().t, &mut s_right_shape)
+            .is_ok());
 
         s.state_mut().y.fill(M::T::from_f64(3.0).unwrap());
         assert!(s.interpolate(s.state().t).is_ok());
@@ -999,7 +1020,7 @@ mod tests {
     }
 
     #[cfg(feature = "diffsl-cranelift")]
-    pub fn test_ball_bounce_problem<M: crate::MatrixHost<T = f64>>(
+    pub fn test_ball_bounce_problem<M: crate::Matrix<T = f64>>(
     ) -> OdeSolverProblem<crate::DiffSl<M, crate::CraneliftJitModule>> {
         crate::OdeBuilder::<M>::new()
             .build_from_diffsl(
@@ -1024,7 +1045,7 @@ mod tests {
     #[cfg(feature = "diffsl-cranelift")]
     pub fn test_ball_bounce<'a, M, Method>(mut solver: Method) -> (Vec<f64>, Vec<f64>, Vec<f64>)
     where
-        M: crate::MatrixHost<T = f64>,
+        M: crate::Matrix<T = f64>,
         M: DefaultSolver<T = f64>,
         M::V: DefaultDenseMatrix<T = f64>,
         Method: OdeSolverMethod<'a, crate::DiffSl<M, crate::CraneliftJitModule>>,
@@ -1492,11 +1513,13 @@ mod tests {
         let mut missing_metadata_checkpointers = adjoint_checkpointers.clone();
         missing_metadata_checkpointers[0].clear_terminal_reset_root_idx();
         let missing_metadata_solver = use_replay_solver.then(|| post_reset_solver.clone());
-        let mut missing_metadata_adjoint_eqn = problem.adjoint_equations(
-            missing_metadata_checkpointers,
-            missing_metadata_solver,
-            None,
-        );
+        let mut missing_metadata_adjoint_eqn = problem
+            .adjoint_equations(
+                missing_metadata_checkpointers,
+                missing_metadata_solver,
+                None,
+            )
+            .unwrap();
         let mut missing_metadata_adjoint_state =
             build_adjoint_state(&mut missing_metadata_adjoint_eqn).unwrap();
         missing_metadata_adjoint_state
@@ -1523,8 +1546,9 @@ mod tests {
 
         // now build the correct adjoint and check that it produces the correct gradient
         let adjoint_solver = use_replay_solver.then_some(post_reset_solver);
-        let mut adjoint_eqn =
-            problem.adjoint_equations(adjoint_checkpointers, adjoint_solver, None);
+        let mut adjoint_eqn = problem
+            .adjoint_equations(adjoint_checkpointers, adjoint_solver, None)
+            .unwrap();
         let mut adjoint_state = build_adjoint_state(&mut adjoint_eqn).unwrap();
         adjoint_state
             .as_mut()
@@ -1557,12 +1581,17 @@ mod tests {
             t0,
             adjoint_state.as_ref().t,
         );
-        adjoint_state.as_ref().sg[0].assert_eq_norm(
-            &expected_grad,
-            &atol,
-            Eqn::T::from_f64(1e-6).unwrap(),
-            Eqn::T::from_f64(60.0).unwrap(),
-        );
+        adjoint_state
+            .as_ref()
+            .sg
+            .get_batch(0)
+            .into_owned()
+            .assert_eq_norm(
+                &expected_grad,
+                &atol,
+                Eqn::T::from_f64(1e-6).unwrap(),
+                Eqn::T::from_f64(60.0).unwrap(),
+            );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1633,11 +1662,13 @@ mod tests {
         );
 
         let adjoint_solver = use_replay_solver.then_some(post_reset_solver);
-        let mut adjoint_eqn = problem.adjoint_equations(
-            checkpointers.into_iter().take(2).collect(),
-            adjoint_solver,
-            Some(dgdu.len()),
-        );
+        let mut adjoint_eqn = problem
+            .adjoint_equations(
+                checkpointers.into_iter().take(2).collect(),
+                adjoint_solver,
+                Some(dgdu.len()),
+            )
+            .unwrap();
         let mut adjoint_state = build_adjoint_state(&mut adjoint_eqn).unwrap();
         adjoint_state
             .as_mut()
@@ -1665,9 +1696,13 @@ mod tests {
             t0,
             adjoint_state.as_ref().t,
         );
+        let nchannels = dgdp_check.ncols();
+        let sg = adjoint_state.as_ref().sg;
+        let mut sg_j = Eqn::V::zeros(sg.len(), problem.context().clone());
         #[allow(clippy::needless_range_loop)]
-        for j in 0..dgdp_check.ncols() {
-            adjoint_state.as_ref().sg[j].assert_eq_norm(
+        for j in 0..nchannels {
+            crate::ode_equations::augmented_channel(sg, nchannels, j, &mut sg_j);
+            sg_j.assert_eq_norm(
                 &dgdp_check.column(j).into_owned(),
                 &atol,
                 Eqn::T::from_f64(1e-6).unwrap(),
@@ -1764,7 +1799,9 @@ mod tests {
         );
 
         let adjoint_solver = use_replay_solver.then_some(terminal_forward_solver.clone());
-        let mut adjoint_eqn = problem.adjoint_equations(checkpointers, adjoint_solver, None);
+        let mut adjoint_eqn = problem
+            .adjoint_equations(checkpointers, adjoint_solver, None)
+            .unwrap();
         let mut adjoint_state = build_adjoint_state(&mut adjoint_eqn).unwrap();
         adjoint_state
             .as_mut()
@@ -1796,12 +1833,17 @@ mod tests {
             t0,
             adjoint_state.as_ref().t,
         );
-        adjoint_state.as_ref().sg[0].assert_eq_norm(
-            &expected_grad,
-            &atol,
-            Eqn::T::from_f64(1e-6).unwrap(),
-            Eqn::T::from_f64(60.0).unwrap(),
-        );
+        adjoint_state
+            .as_ref()
+            .sg
+            .get_batch(0)
+            .into_owned()
+            .assert_eq_norm(
+                &expected_grad,
+                &atol,
+                Eqn::T::from_f64(1e-6).unwrap(),
+                Eqn::T::from_f64(60.0).unwrap(),
+            );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1899,8 +1941,9 @@ mod tests {
         );
 
         let adjoint_solver = use_replay_solver.then_some(terminal_forward_solver.clone());
-        let mut adjoint_eqn =
-            problem.adjoint_equations(checkpointers, adjoint_solver, Some(dgdu_eval_refs.len()));
+        let mut adjoint_eqn = problem
+            .adjoint_equations(checkpointers, adjoint_solver, Some(dgdu_eval_refs.len()))
+            .unwrap();
         let mut adjoint_state = build_adjoint_state(&mut adjoint_eqn).unwrap();
         adjoint_state
             .as_mut()
@@ -1927,9 +1970,13 @@ mod tests {
             t0,
             adjoint_state.as_ref().t,
         );
+        let nchannels = dgdp_check.ncols();
+        let sg = adjoint_state.as_ref().sg;
+        let mut sg_j = Eqn::V::zeros(sg.len(), problem.context().clone());
         #[allow(clippy::needless_range_loop)]
-        for j in 0..dgdp_check.ncols() {
-            adjoint_state.as_ref().sg[j].assert_eq_norm(
+        for j in 0..nchannels {
+            crate::ode_equations::augmented_channel(sg, nchannels, j, &mut sg_j);
+            sg_j.assert_eq_norm(
                 &dgdp_check.column(j).into_owned(),
                 &atol,
                 Eqn::T::from_f64(1e-6).unwrap(),

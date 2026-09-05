@@ -28,9 +28,9 @@ where
 impl<M, F, G, H> ClosureWithSens<M, F, G, H>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-    H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
+    G: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
+    H: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
 {
     pub fn new(
         func: F,
@@ -89,9 +89,9 @@ where
 impl<M, F, G, H> BuilderOp for ClosureWithSens<M, F, G, H>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-    H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
+    G: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
+    H: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
 {
     fn set_nstates(&mut self, nstates: usize) {
         self.nstates = nstates;
@@ -106,6 +106,10 @@ where
     fn calculate_sparsity(&mut self, y0: &Self::V, t0: Self::T, p: &Self::V) {
         self.calculate_jacobian_sparsity(y0, t0, p);
         self.calculate_sens_sparsity(y0, t0, p);
+    }
+
+    fn calculate_augmented_sparsity(&mut self, y0: &Self::V, t0: Self::T, p: &Self::V) {
+        ClosureWithSens::calculate_sens_sparsity(self, y0, t0, p);
     }
 }
 
@@ -137,26 +141,28 @@ where
 impl<M, F, G, H> NonLinearOp for ParameterisedOp<'_, ClosureWithSens<M, F, G, H>>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-    H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
+    G: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
+    H: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
 {
     fn call_inplace(&self, x: &M::V, t: M::T, y: &mut M::V) {
         self.op.statistics.borrow_mut().increment_call();
-        (self.op.func)(x, self.p, t, y)
+        y.for_each_batch([x, self.p], |y, [x, p], _| (self.op.func)(x, p, t, y));
     }
 }
 
 impl<M, F, G, H> NonLinearOpJacobian for ParameterisedOp<'_, ClosureWithSens<M, F, G, H>>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-    H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
+    G: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
+    H: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
 {
     fn jac_mul_inplace(&self, x: &M::V, t: M::T, v: &M::V, y: &mut M::V) {
         self.op.statistics.borrow_mut().increment_jac_mul();
-        (self.op.jacobian_action)(x, self.p, t, v, y)
+        y.for_each_batch([x, self.p, v], |y, [x, p, v], _| {
+            (self.op.jacobian_action)(x, p, t, v, y)
+        });
     }
     fn jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
         self.op.statistics.borrow_mut().increment_matrix();
@@ -174,12 +180,14 @@ where
 impl<M, F, G, H> NonLinearOpSens for ParameterisedOp<'_, ClosureWithSens<M, F, G, H>>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-    H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
+    G: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
+    H: Fn(&[M::T], &[M::T], M::T, &[M::T], &mut [M::T]),
 {
     fn sens_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
-        (self.op.sens_action)(x, self.p, t, v, y);
+        y.for_each_batch([x, self.p, v], |y, [x, p, v], _| {
+            (self.op.sens_action)(x, p, t, v, y)
+        });
     }
 
     fn sens_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {

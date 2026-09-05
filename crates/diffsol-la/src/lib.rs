@@ -60,7 +60,6 @@ pub mod scalar;
 /// This module defines the [Vector] trait and related traits for vector operations:
 /// - [VectorView] and [VectorViewMut] for borrowed views
 /// - [VectorIndex] for index collections
-/// - [VectorHost] for CPU-resident vectors with direct access
 ///
 /// Implementations are provided for:
 /// - [NalgebraVec] using nalgebra vectors
@@ -87,7 +86,7 @@ pub use matrix::{
 pub(crate) use matrix::extract_block::ColMajBlock;
 pub use matrix::{
     sparsity::Dense, sparsity::DenseRef, sparsity::MatrixSparsity, sparsity::MatrixSparsityRef,
-    MatrixHost, MatrixRef,
+    MatrixRef,
 };
 
 pub use scalar::{scale, FaerScalar, IndexType, NalgebraScalar, Scalar, Scale};
@@ -96,7 +95,7 @@ pub use vector::DefaultDenseMatrix;
 pub use vector::{
     faer_serial::{FaerVec, FaerVecIndex, FaerVecMut, FaerVecRef},
     nalgebra_serial::{NalgebraVec, NalgebraVecMut, NalgebraVecRef},
-    Vector, VectorCommon, VectorHost, VectorIndex, VectorRef, VectorView, VectorViewMut,
+    Vector, VectorCommon, VectorIndex, VectorRef, VectorView, VectorViewMut,
 };
 
 #[cfg(feature = "cuda")]

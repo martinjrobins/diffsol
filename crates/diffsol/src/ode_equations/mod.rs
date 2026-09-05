@@ -2,7 +2,7 @@ use crate::{
     op::{constant_op::ConstantOpSensAdjoint, linear_op::LinearOpTranspose, ParameterisedOp},
     ConstantOp, ConstantOpSens, LinearOp, Matrix, NonLinearOp, NonLinearOpAdjoint,
     NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, NonLinearOpTimePartial, Op,
-    StochOp, UnitCallable, Vector,
+    StochOp, UnitCallable, Vector, VectorViewMut,
 };
 use serde::Serialize;
 
@@ -39,19 +39,56 @@ impl OdeEquationsStatistics {
     }
 }
 
+/// Equations for the augmented state that a solver integrates alongside the main equations:
+/// the forward sensitivities (one channel per parameter, see [`crate::SensEquations`]) or the
+/// adjoint (one channel per output, see [`crate::AdjointEquations`]).
+///
+/// # Batched channels
+///
+/// All `max_index()` channels are held in a single vector (or matrix) whose batch count is
+/// `problem_nbatch * max_index()`, laid out with the channel as the *inner*, contiguous index:
+///
+/// ```text
+/// lane(batch b, channel i) = b * max_index() + i
+/// ```
+///
+/// This is the layout required by grouped batch broadcasting, so an operand of the main equations
+/// (`nbatch == problem_nbatch`) broadcasts into the augmented state, and one operation evaluates
+/// every channel at once. [`Self::aug_context`] is the context to allocate augmented state with;
+/// the ops themselves keep the narrow problem context so that Jacobians and their factorisations
+/// stay at `problem_nbatch` (they are shared by every channel).
 pub trait AugmentedOdeEquations<Eqn: OdeEquations>:
     OdeEquations<T = Eqn::T, V = Eqn::V, M = Eqn::M, C = Eqn::C> + Clone
 {
+    /// Update the equations for a new state of the main equations.
     fn update_rhs_out_state(&mut self, y: &Eqn::V, dy: &Eqn::V, t: Eqn::T);
-    fn set_index(&mut self, index: usize);
+    /// The number of augmented channels: one per parameter (sensitivities) or per output (adjoint).
     fn max_index(&self) -> usize;
+    /// The context to allocate the augmented state with, holding
+    /// `Op::context().nbatch() * max_index()` batches.
+    fn aug_context(&self) -> &Eqn::C;
     fn include_in_error_control(&self) -> bool;
     fn include_out_in_error_control(&self) -> bool;
     fn rtol(&self) -> Option<Eqn::T>;
-    fn atol(&self, index: usize) -> Option<&Eqn::V>;
+    /// Absolute tolerances for the augmented state, batched like the state itself (or narrower,
+    /// in which case it broadcasts over the channels).
+    fn atol(&self) -> Option<&Eqn::V>;
     fn out_rtol(&self) -> Option<Eqn::T>;
     fn out_atol(&self) -> Option<&Eqn::V>;
     fn integrate_main_eqn(&self) -> bool;
+}
+
+/// Copy augmented channel `i` out of `src`, which holds one channel per batch lane (see
+/// [`AugmentedOdeEquations`]), into `dst`, which holds the problem's batch count.
+///
+/// Use this only where per-channel data has to be taken apart again, e.g. writing the
+/// per-parameter dense sensitivity output; the solvers themselves work on all channels at once.
+pub(crate) fn augmented_channel<V: Vector>(src: &V, nchannels: usize, i: usize, dst: &mut V) {
+    use crate::Context;
+    for b in 0..dst.context().nbatch() {
+        dst.get_batch_mut(b)
+            .copy_from_view(&src.get_batch(b * nchannels + i));
+    }
 }
 
 pub trait AugmentedOdeEquationsImplicit<Eqn: OdeEquationsImplicit>:
@@ -156,10 +193,10 @@ impl<Eqn: OdeEquations> AugmentedOdeEquations<Eqn> for NoAug<Eqn> {
     fn update_rhs_out_state(&mut self, _y: &Eqn::V, _dy: &Eqn::V, _t: Eqn::T) {
         panic!("This should never be called")
     }
-    fn set_index(&mut self, _index: usize) {
+    fn aug_context(&self) -> &<Eqn as Op>::C {
         panic!("This should never be called")
     }
-    fn atol(&self, _index: usize) -> Option<&<Eqn as Op>::V> {
+    fn atol(&self) -> Option<&<Eqn as Op>::V> {
         panic!("This should never be called")
     }
     fn include_out_in_error_control(&self) -> bool {
@@ -875,12 +912,8 @@ mod tests {
             no_aug.update_rhs_out_state(&v, &v, 0.0)
         }))
         .is_err());
-        assert!(catch_unwind(AssertUnwindSafe(|| {
-            let mut no_aug = no_aug.clone();
-            no_aug.set_index(0)
-        }))
-        .is_err());
-        assert!(catch_unwind(AssertUnwindSafe(|| no_aug.atol(0))).is_err());
+        assert!(catch_unwind(AssertUnwindSafe(|| no_aug.aug_context())).is_err());
+        assert!(catch_unwind(AssertUnwindSafe(|| no_aug.atol())).is_err());
         assert!(catch_unwind(AssertUnwindSafe(|| no_aug.include_out_in_error_control())).is_err());
         assert!(catch_unwind(AssertUnwindSafe(|| no_aug.out_atol())).is_err());
         assert!(catch_unwind(AssertUnwindSafe(|| no_aug.out_rtol())).is_err());

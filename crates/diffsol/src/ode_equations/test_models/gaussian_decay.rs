@@ -1,25 +1,29 @@
 use crate::ode_solver::problem::OdeSolverSolution;
 use crate::OdeSolverProblem;
 use crate::{
-    scalar::{scale, Scalar},
-    ConstantOp, DenseMatrix, OdeBuilder, OdeEquations, OdeEquationsImplicit, Vector,
+    scalar::Scalar, ConstantOp, DenseMatrix, OdeBuilder, OdeEquations, OdeEquationsImplicit, Vector,
 };
 use num_traits::{FromPrimitive, Pow};
 use num_traits::{One, Zero};
-use std::ops::MulAssign;
 
 // dy/dt = -aty (p = [a])
-fn gaussian_decay<M: DenseMatrix>(x: &M::V, p: &M::V, t: M::T, y: &mut M::V) {
-    y.copy_from(x);
-    y.component_mul_assign(p);
-    y.mul_assign(scale(-t));
+fn gaussian_decay<M: DenseMatrix>(x: &[M::T], p: &[M::T], t: M::T, y: &mut [M::T]) {
+    for ((y, x), p) in y.iter_mut().zip(x.iter()).zip(p.iter()) {
+        *y = -t * *p * *x;
+    }
 }
 
 // Jv = -atv
-fn gaussian_decay_jacobian<M: DenseMatrix>(_x: &M::V, p: &M::V, t: M::T, v: &M::V, y: &mut M::V) {
-    y.copy_from(v);
-    y.component_mul_assign(p);
-    y.mul_assign(scale(-t));
+fn gaussian_decay_jacobian<M: DenseMatrix>(
+    _x: &[M::T],
+    p: &[M::T],
+    t: M::T,
+    v: &[M::T],
+    y: &mut [M::T],
+) {
+    for ((y, p), v) in y.iter_mut().zip(p.iter()).zip(v.iter()) {
+        *y = -t * *p * *v;
+    }
 }
 
 #[allow(clippy::type_complexity)]
