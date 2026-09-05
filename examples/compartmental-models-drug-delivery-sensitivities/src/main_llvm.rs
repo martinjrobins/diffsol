@@ -1,6 +1,6 @@
 use diffsol::{
     AdjointOdeSolverMethod, DenseMatrix, LlvmModule, MatrixCommon, OdeBuilder, OdeEquations,
-    OdeSolverMethod, OdeSolverState, Op, Vector,
+    OdeSolverMethod, OdeSolverState, Op, Vector, VectorView,
 };
 use plotly::{common::AxisSide, common::Mode, layout::Axis, layout::Layout, Plot, Scatter};
 use std::{fs, path::PathBuf};
@@ -71,7 +71,7 @@ pub fn main() {
             .unwrap();
 
         aucs.push(auc);
-        auc_grads.push(adjoint_state.as_ref().sg[0].get_index(0));
+        auc_grads.push(adjoint_state.as_ref().sg.get_batch(0).get_index(0));
     }
 
     let mut plot = Plot::new();
