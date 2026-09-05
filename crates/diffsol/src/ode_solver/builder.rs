@@ -144,7 +144,7 @@ where
     ///
     /// # Arguments
     ///
-    /// - `rhs`: Function of type Fn(x: &[T], p: &[T], t: T, y: &mut [T]) that computes the right-hand side of the ODE.
+    /// - `rhs`: Function of type `Fn(x: &[T], p: &[T], t: T, y: &mut [T])` that computes the right-hand side of the ODE.
     pub fn rhs<F>(self, rhs: F) -> OdeBuilder<M, ClosureNoJac<M, F>, Init, Mass, Root, Out, Reset>
     where
         F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
@@ -188,8 +188,8 @@ where
     ///
     /// # Arguments
     ///
-    /// - `rhs`: Function of type Fn(x: &[T], p: &[T], t: T, y: &mut [T]) that computes the right-hand side of the ODE.
-    /// - `rhs_jac`: Function of type Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T]) that computes the multiplication of the Jacobian of the right-hand side with the vector v.
+    /// - `rhs`: Function of type `Fn(x: &[T], p: &[T], t: T, y: &mut [T])` that computes the right-hand side of the ODE.
+    /// - `rhs_jac`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the Jacobian of the right-hand side with the vector v.
     pub fn rhs_implicit<F, G>(
         self,
         rhs: F,
@@ -238,9 +238,9 @@ where
     /// Set the right-hand side of the ODE for forward sensitivity analysis.
     ///
     /// # Arguments
-    /// - `rhs`: Function of type Fn(x: &[T], p: &[T], t: T, y: &mut [T]) that computes the right-hand side of the ODE.
-    /// - `rhs_jac`: Function of type Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T]) that computes the multiplication of the Jacobian of the right-hand side with the vector v.
-    /// - `rhs_sens`: Function of type Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T]) that computes the multiplication of the partial derivative of the rhs wrt the parameters, with the vector v.
+    /// - `rhs`: Function of type `Fn(x: &[T], p: &[T], t: T, y: &mut [T])` that computes the right-hand side of the ODE.
+    /// - `rhs_jac`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the Jacobian of the right-hand side with the vector v.
+    /// - `rhs_sens`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the partial derivative of the rhs wrt the parameters, with the vector v.
     #[allow(clippy::type_complexity)]
     pub fn rhs_sens_implicit<F, G, H>(
         self,
@@ -296,10 +296,10 @@ where
     /// including the transpose Jacobian operations.
     ///
     /// # Arguments
-    /// - `rhs`: Function of type Fn(x: &[T], p: &[T], t: T, y: &mut [T]) that computes the right-hand side of the ODE.
-    /// - `rhs_jac`: Function of type Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T]) that computes the multiplication of the Jacobian of the right-hand side with the vector v.
-    /// - `rhs_adjoint`: Function of type Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T]) that computes the multiplication of the transpose of the Jacobian with the vector v.
-    /// - `rhs_sens_adjoint`: Function of type Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T]) that computes the multiplication of the transpose of the partial derivative of the rhs wrt the parameters, with the vector v.
+    /// - `rhs`: Function of type `Fn(x: &[T], p: &[T], t: T, y: &mut [T])` that computes the right-hand side of the ODE.
+    /// - `rhs_jac`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the Jacobian of the right-hand side with the vector v.
+    /// - `rhs_adjoint`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the transpose of the Jacobian with the vector v.
+    /// - `rhs_sens_adjoint`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the transpose of the partial derivative of the rhs wrt the parameters, with the vector v.
     #[allow(clippy::type_complexity)]
     pub fn rhs_adjoint_implicit<F, G, H, I>(
         self,
@@ -465,7 +465,7 @@ where
     /// Set the initial condition of the ODE.
     ///
     /// # Arguments
-    /// - `init`: Function of type Fn(p: &[T], t: T, y: &mut [T]) that computes the initial state.
+    /// - `init`: Function of type `Fn(p: &[T], t: T, y: &mut [T])` that computes the initial state.
     pub fn init<F>(
         self,
         init: F,
@@ -505,8 +505,8 @@ where
     /// Set the initial condition of the ODE for forward sensitivity analysis.
     ///
     /// # Arguments
-    /// - `init`: Function of type Fn(p: &[T], t: T, y: &mut [T]) that computes the initial state.
-    /// - `init_sens`: Function of type Fn(p: &[T], t: T, y: &mut [T]) that computes the multiplication of the partial derivative of the initial state wrt the parameters, with the vector v.
+    /// - `init`: Function of type `Fn(p: &[T], t: T, y: &mut [T])` that computes the initial state.
+    /// - `init_sens`: Function of type `Fn(p: &[T], t: T, y: &mut [T])` that computes the multiplication of the partial derivative of the initial state wrt the parameters, with the vector v.
     pub fn init_sens<F, G>(
         self,
         init: F,
@@ -554,8 +554,8 @@ where
     /// Set the initial condition of the ODE for adjoint sensitivity analysis.
     ///
     /// # Arguments
-    /// - `init`: Function of type Fn(p: &[T], t: T, y: &mut [T]) that computes the initial state.
-    /// - `init_sens_adjoint`: Function of type Fn(p: &[T], t: T, v: &[T], y: &mut [T]) that computes the multiplication of the partial derivative of the initial state wrt the parameters, with the vector v.
+    /// - `init`: Function of type `Fn(p: &[T], t: T, y: &mut [T])` that computes the initial state.
+    /// - `init_sens_adjoint`: Function of type `Fn(p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the partial derivative of the initial state wrt the parameters, with the vector v.
     ///
     pub fn init_adjoint<F, G>(
         self,
@@ -604,7 +604,7 @@ where
     /// Set the mass matrix of the ODE.
     ///
     /// # Arguments
-    /// - `mass`: Function of type Fn(v: &[T], p: &[T], t: T, beta: T, y: &mut [T]) that computes a gemv multiplication of the mass matrix with the vector v (i.e. y = M * v + beta * y).
+    /// - `mass`: Function of type `Fn(v: &[T], p: &[T], t: T, beta: T, y: &mut [T])` that computes a gemv multiplication of the mass matrix with the vector v (i.e. y = M * v + beta * y).
     pub fn mass<F>(self, mass: F) -> OdeBuilder<M, Rhs, Init, LinearClosure<M, F>, Root, Out, Reset>
     where
         F: Fn(&[M::T], &[M::T], M::T, M::T, &mut [M::T]),
@@ -695,9 +695,9 @@ where
     ///
     /// # Arguments
     ///
-    /// - `mass`: Function of type Fn(v: &[T], p: &[T], t: T, beta: T, y: &mut [T]) that computes a gemv multiplication of the mass matrix with
+    /// - `mass`: Function of type `Fn(v: &[T], p: &[T], t: T, beta: T, y: &mut [T])` that computes a gemv multiplication of the mass matrix with
     ///   the vector v (i.e. y = M * v + beta * y).
-    /// - `mass_adjoint`: Function of type Fn(v: &[T], p: &[T], t: T, beta: T, y: &mut [T]) that computes a gemv multiplication of the transpose of the mass matrix with
+    /// - `mass_adjoint`: Function of type `Fn(v: &[T], p: &[T], t: T, beta: T, y: &mut [T])` that computes a gemv multiplication of the transpose of the mass matrix with
     ///   the vector v (i.e. y = M^T * v + beta * y).
     pub fn mass_adjoint<F, G>(
         self,
@@ -747,7 +747,7 @@ where
     /// Set a root equation for the ODE.
     ///
     /// # Arguments
-    /// - `root`: Function of type Fn(x: &[T], p: &[T], t: T, y: &mut [T]) that computes the root function.
+    /// - `root`: Function of type `Fn(x: &[T], p: &[T], t: T, y: &mut [T])` that computes the root function.
     /// - `nroots`: Number of roots (i.e. number of elements in the `y` arg in `root`), an event is triggered when any of the roots changes sign.
     pub fn root<F>(
         self,
@@ -843,9 +843,9 @@ where
     /// Set a root equation for the ODE for forward sensitivity analysis.
     ///
     /// # Arguments
-    /// - `root`: Function of type Fn(x: &[T], p: &[T], t: T, y: &mut [T]) that computes the root function.
-    /// - `root_jac`: Function of type Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T]) that computes the multiplication of the Jacobian of the root function with the vector v.
-    /// - `root_sens`: Function of type Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T]) that computes the multiplication of the partial derivative of the root function wrt the parameters with the vector v.
+    /// - `root`: Function of type `Fn(x: &[T], p: &[T], t: T, y: &mut [T])` that computes the root function.
+    /// - `root_jac`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the Jacobian of the root function with the vector v.
+    /// - `root_sens`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the partial derivative of the root function wrt the parameters with the vector v.
     /// - `nroots`: Number of root outputs.
     #[allow(clippy::type_complexity)]
     pub fn root_sens_implicit<F, G, H>(
@@ -900,10 +900,10 @@ where
     /// Set a root equation for the ODE for adjoint sensitivity analysis.
     ///
     /// # Arguments
-    /// - `root`: Function of type Fn(x: &[T], p: &[T], t: T, y: &mut [T]) that computes the root function.
-    /// - `root_jac`: Function of type Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T]) that computes the multiplication of the Jacobian of the root function with the vector v.
-    /// - `root_adjoint`: Function of type Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T]) that computes the multiplication of the transpose of the Jacobian of the root function with the vector v.
-    /// - `root_sens_adjoint`: Function of type Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T]) that computes the multiplication of the transpose of the partial derivative of the root function wrt the parameters with the vector v.
+    /// - `root`: Function of type `Fn(x: &[T], p: &[T], t: T, y: &mut [T])` that computes the root function.
+    /// - `root_jac`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the Jacobian of the root function with the vector v.
+    /// - `root_adjoint`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the transpose of the Jacobian of the root function with the vector v.
+    /// - `root_sens_adjoint`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the transpose of the partial derivative of the root function wrt the parameters with the vector v.
     /// - `nroots`: Number of root outputs.
     #[allow(clippy::type_complexity)]
     pub fn root_adjoint_implicit<F, G, H, I>(
@@ -965,7 +965,7 @@ where
     /// The number of outputs equals the number of states and is set automatically.
     ///
     /// # Arguments
-    /// - `reset`: Function of type Fn(x: &[T], p: &[T], t: T, y: &mut [T]) that computes the new state.
+    /// - `reset`: Function of type `Fn(x: &[T], p: &[T], t: T, y: &mut [T])` that computes the new state.
     pub fn reset<F>(self, reset: F) -> OdeBuilder<M, Rhs, Init, Mass, Root, Out, ClosureNoJac<M, F>>
     where
         F: Fn(&[M::T], &[M::T], M::T, &mut [M::T]),
@@ -1058,8 +1058,8 @@ where
     /// The number of outputs equals the number of states and is set automatically.
     ///
     /// # Arguments
-    /// - `reset`: Function of type Fn(x: &[T], p: &[T], t: T, y: &mut [T]) that computes the new state.
-    /// - `reset_jac`: Function of type Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T]) that computes the multiplication of the Jacobian of the reset function with the vector v.
+    /// - `reset`: Function of type `Fn(x: &[T], p: &[T], t: T, y: &mut [T])` that computes the new state.
+    /// - `reset_jac`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the Jacobian of the reset function with the vector v.
     pub fn reset_implicit<F, G>(
         self,
         reset: F,
@@ -1107,9 +1107,9 @@ where
     /// Set the reset function of the ODE for forward sensitivity analysis.
     ///
     /// # Arguments
-    /// - `reset`: Function of type Fn(x: &[T], p: &[T], t: T, y: &mut [T]) that computes the new state.
-    /// - `reset_jac`: Function of type Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T]) that computes the multiplication of the Jacobian of the reset function with the vector v.
-    /// - `reset_sens`: Function of type Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T]) that computes the multiplication of the partial derivative of the reset function wrt the parameters with the vector v.
+    /// - `reset`: Function of type `Fn(x: &[T], p: &[T], t: T, y: &mut [T])` that computes the new state.
+    /// - `reset_jac`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the Jacobian of the reset function with the vector v.
+    /// - `reset_sens`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the partial derivative of the reset function wrt the parameters with the vector v.
     #[allow(clippy::type_complexity)]
     pub fn reset_sens_implicit<F, G, H>(
         self,
@@ -1161,10 +1161,10 @@ where
     /// Set the reset function of the ODE for adjoint sensitivity analysis.
     ///
     /// # Arguments
-    /// - `reset`: Function of type Fn(x: &[T], p: &[T], t: T, y: &mut [T]) that computes the new state.
-    /// - `reset_jac`: Function of type Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T]) that computes the multiplication of the Jacobian of the reset function with the vector v.
-    /// - `reset_adjoint`: Function of type Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T]) that computes the multiplication of the transpose of the Jacobian of the reset function with the vector v.
-    /// - `reset_sens_adjoint`: Function of type Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T]) that computes the multiplication of the transpose of the partial derivative of the reset function wrt the parameters with the vector v.
+    /// - `reset`: Function of type `Fn(x: &[T], p: &[T], t: T, y: &mut [T])` that computes the new state.
+    /// - `reset_jac`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the Jacobian of the reset function with the vector v.
+    /// - `reset_adjoint`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the transpose of the Jacobian of the reset function with the vector v.
+    /// - `reset_sens_adjoint`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the transpose of the partial derivative of the reset function wrt the parameters with the vector v.
     #[allow(clippy::type_complexity)]
     pub fn reset_adjoint_implicit<F, G, H, I>(
         self,
@@ -1270,8 +1270,8 @@ where
     /// These can be integrated alongside the ODE or used for root finding.
     ///
     /// # Arguments
-    /// - `out`: Function of type Fn(x: &[T], p: &[T], t: T, y: &mut [T]) that computes the output.
-    /// - `out_jac`: Function of type Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T]) that computes the multiplication of the Jacobian of the output with the vector v.
+    /// - `out`: Function of type `Fn(x: &[T], p: &[T], t: T, y: &mut [T])` that computes the output.
+    /// - `out_jac`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the Jacobian of the output with the vector v.
     /// - `nout`: Number of output equations (i.e. size of the output vector `y`).
     pub fn out_implicit<F, G>(
         self,
@@ -1324,9 +1324,9 @@ where
     /// computing sensitivities of the outputs with respect to parameters.
     ///
     /// # Arguments
-    /// - `out`: Function of type Fn(x: &[T], p: &[T], t: T, y: &mut [T]) that computes the output.
-    /// - `out_jac`: Function of type Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T]) that computes the multiplication of the Jacobian of the output with the vector v.
-    /// - `out_sens`: Function of type Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T]) that computes the multiplication of the partial derivative of the output wrt the parameters, with the vector v.
+    /// - `out`: Function of type `Fn(x: &[T], p: &[T], t: T, y: &mut [T])` that computes the output.
+    /// - `out_jac`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the Jacobian of the output with the vector v.
+    /// - `out_sens`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the partial derivative of the output wrt the parameters, with the vector v.
     /// - `nout`: Number of output equations (i.e. size of the output vector `y`).
     #[allow(clippy::type_complexity)]
     pub fn out_sens_implicit<F, G, H>(
@@ -1383,10 +1383,10 @@ where
     /// including the transpose Jacobian operations.
     ///
     /// # Arguments
-    /// - `out`: Function of type Fn(x: &[T], p: &[T], t: T, y: &mut [T]) that computes the output.
-    /// - `out_jac`: Function of type Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T]) that computes the multiplication of the Jacobian of the output with the vector v.
-    /// - `out_adjoint`: Function of type Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T]) that computes the multiplication of the transpose of the Jacobian with the vector v.
-    /// - `out_sens_adjoint`: Function of type Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T]) that computes the multiplication of the transpose of the partial derivative of the output wrt the parameters, with the vector v.
+    /// - `out`: Function of type `Fn(x: &[T], p: &[T], t: T, y: &mut [T])` that computes the output.
+    /// - `out_jac`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the Jacobian of the output with the vector v.
+    /// - `out_adjoint`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the transpose of the Jacobian with the vector v.
+    /// - `out_sens_adjoint`: Function of type `Fn(x: &[T], p: &[T], t: T, v: &[T], y: &mut [T])` that computes the multiplication of the transpose of the partial derivative of the output wrt the parameters, with the vector v.
     /// - `nout`: Number of output equations.
     #[allow(clippy::type_complexity)]
     pub fn out_adjoint_implicit<F, G, H, I>(
