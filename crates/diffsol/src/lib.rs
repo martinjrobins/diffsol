@@ -472,4 +472,13 @@ pub use diffsol_la::{CudaType, ScalarCuda};
 #[cfg(feature = "cuda")]
 pub use linear_solver::CudaLU;
 
+#[cfg(feature = "cuda-oxide")]
+pub use diffsol_la::OxideContext;
+#[cfg(feature = "cuda-oxide")]
+pub use diffsol_la::OxideMat;
+#[cfg(feature = "cuda-oxide")]
+pub use diffsol_la::{OxideIndex, OxideVec, OxideVecMut, OxideVecRef};
+#[cfg(feature = "cuda-oxide")]
+pub use linear_solver::OxideLU;
+
 pub use diffsol_la::scale;

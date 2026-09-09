@@ -11,6 +11,9 @@ use sparsity::{Dense, MatrixSparsity, MatrixSparsityRef};
 #[cfg(feature = "cuda")]
 pub mod cuda;
 
+#[cfg(feature = "cuda-oxide")]
+pub mod cuda_oxide;
+
 #[cfg(feature = "nalgebra")]
 pub mod dense_nalgebra_serial;
 

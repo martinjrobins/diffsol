@@ -10,6 +10,9 @@ pub use diffsol_la::KLU;
 #[cfg(feature = "cuda")]
 pub use diffsol_la::CudaLU;
 
+#[cfg(feature = "cuda-oxide")]
+pub use diffsol_la::OxideLU;
+
 /// Re-export of the [`diffsol_la`] linear-solver backends' module paths, so that
 /// existing `crate::linear_solver::<backend>` paths keep resolving.
 pub use diffsol_la::linear_solver::{faer, nalgebra};
@@ -19,6 +22,9 @@ pub use diffsol_la::linear_solver::suitesparse;
 
 #[cfg(feature = "cuda")]
 pub use diffsol_la::linear_solver::cuda;
+
+#[cfg(feature = "cuda-oxide")]
+pub use diffsol_la::linear_solver::cuda_oxide;
 
 /// A borrowing adapter that presents a [NonLinearOpJacobian] (evaluated at a
 /// fixed state `x` and time `t`) as a [`diffsol_la::LinearOp`].

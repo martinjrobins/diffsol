@@ -12,7 +12,7 @@ pub enum LaError {
     LinearSolverError(#[from] LinearSolverError),
     #[error("Matrix error: {0}")]
     MatrixError(#[from] MatrixError),
-    #[cfg(feature = "cuda")]
+    #[cfg(any(feature = "cuda", feature = "cuda-oxide"))]
     #[error("Cuda error: {0}")]
     CudaError(#[from] CudaError),
     #[error("Error: {0}")]
@@ -55,7 +55,7 @@ pub enum MatrixError {
     Other(String),
 }
 
-#[cfg(feature = "cuda")]
+#[cfg(any(feature = "cuda", feature = "cuda-oxide"))]
 #[derive(Error, Debug, Clone)]
 pub enum CudaError {
     #[error("Failed to allocate memory on GPU")]
@@ -66,7 +66,7 @@ pub enum CudaError {
     Other(String),
 }
 
-#[cfg(feature = "cuda")]
+#[cfg(any(feature = "cuda", feature = "cuda-oxide"))]
 #[macro_export]
 macro_rules! cuda_error {
     ($variant:ident) => {

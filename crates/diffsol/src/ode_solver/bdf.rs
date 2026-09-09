@@ -1712,6 +1712,15 @@ mod test {
         test_ode_solver(&mut s, soln, None, false, false);
     }
 
+    #[cfg(feature = "cuda-oxide")]
+    #[test]
+    fn bdf_test_cuda_oxide_exponential_decay() {
+        use crate::{OxideLU, OxideMat};
+        let (problem, soln) = exponential_decay_problem::<OxideMat>(false);
+        let mut s = problem.bdf::<OxideLU>().unwrap();
+        test_ode_solver(&mut s, soln, None, false, false);
+    }
+
     #[test]
     fn bdf_test_checkpointing() {
         let (problem, soln) = exponential_decay_problem::<M>(false);

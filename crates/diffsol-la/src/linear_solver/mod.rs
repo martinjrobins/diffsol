@@ -12,6 +12,9 @@ pub mod suitesparse;
 #[cfg(feature = "cuda")]
 pub mod cuda;
 
+#[cfg(feature = "cuda-oxide")]
+pub mod cuda_oxide;
+
 pub use faer::lu::LU as FaerLU;
 pub use nalgebra::lu::LU as NalgebraNativeLU;
 pub use nalgebra::reusable_lu::ReusableLU as NalgebraLU;
