@@ -1,8 +1,8 @@
 use crate::{
     find_jacobian_non_zeros, find_matrix_non_zeros, ode_solver::problem::OdeSolverSolution,
-    ConstantOp, JacobianColoring, LinearOp, Matrix, MatrixSparsity, NonLinearOp,
-    NonLinearOpJacobian, OdeEquations, OdeEquationsImplicit, OdeEquationsRef, OdeSolverProblem, Op,
-    ParameterisedOp, UnitCallable, Vector,
+    scalar::Scalar, ConstantOp, Context, JacobianColoring, LinearOp, Matrix, MatrixSparsity,
+    NonLinearOp, NonLinearOpJacobian, OdeEquations, OdeEquationsImplicit, OdeEquationsRef,
+    OdeSolverProblem, Op, ParameterisedOp, UnitCallable, Vector,
 };
 use num_traits::{FromPrimitive, One, Zero};
 
@@ -1066,14 +1066,14 @@ fn soln<M: Matrix>(ctx: M::C) -> OdeSolverSolution<M::V> {
             1.0,
         ),
     ];
+    let nbatch = ctx.nbatch();
     for (values, time) in data {
-        let values = M::V::from_vec(
-            values
-                .iter()
-                .map(|v| M::T::from_f64(*v).unwrap())
-                .collect::<Vec<_>>(),
-            ctx.clone(),
-        );
+        // every lane solves the same problem, so each output value repeats per lane
+        let mut per_lane = Vec::with_capacity(values.len() * nbatch);
+        for _ in 0..nbatch {
+            per_lane.extend(values.iter().map(|v| M::T::from_f64(*v).unwrap()));
+        }
+        let values = M::V::from_vec(per_lane, ctx.clone());
         let time = M::T::from_f64(time).unwrap();
         soln.push(values, time);
     }
@@ -1245,5 +1245,495 @@ mod tests {
                 }
             }
         }
+    }
+}
+
+// ============================================================
+// Element-parallel implementation
+// ============================================================
+
+/// The interaction and diffusion coefficients, copied out of [`FoodWebContext`] so a device
+/// closure can capture them by value (`M::C` is not `Copy`, and the kernel cannot follow a
+/// host reference).
+#[derive(Clone, Copy)]
+struct FoodWebConsts<T: Scalar> {
+    acoef: [[T; NUM_SPECIES]; NUM_SPECIES],
+    bcoef: [T; NUM_SPECIES],
+    cox: [T; NUM_SPECIES],
+    coy: [T; NUM_SPECIES],
+}
+
+impl<T: Scalar> FoodWebConsts<T> {
+    fn new<M: Matrix<T = T>, const NX: usize>(context: &FoodWebContext<M, NX>) -> Self {
+        Self {
+            acoef: context.acoef,
+            bcoef: context.bcoef,
+            cox: context.cox,
+            coy: context.coy,
+        }
+    }
+}
+
+/// The grid geometry of element `i`: its species, its cell's first element, and the four
+/// neighbouring cells' first elements.
+///
+/// The boundary conditions are homogeneous Neumann, so an edge cell differences against itself
+/// by reflecting the offset -- the same trick the whole-lane version uses.
+#[inline]
+fn foodweb_elem_geometry<const NX: usize>(i: usize) -> (usize, usize, usize, usize, usize, usize) {
+    let nsmx = NUM_SPECIES * NX;
+    let is = i % NUM_SPECIES;
+    let loc = i - is;
+    let jx = (loc % nsmx) / NUM_SPECIES;
+    let jy = loc / nsmx;
+    // an edge cell reflects: the missing neighbour is replaced by the one on the other side, so
+    // both differences use it and the second-difference doubles, as in the whole-lane version
+    let locyu = if jy != NX - 1 { loc + nsmx } else { loc - nsmx };
+    let locyl = if jy != 0 { loc - nsmx } else { loc + nsmx };
+    let locxu = if jx != NX - 1 {
+        loc + NUM_SPECIES
+    } else {
+        loc - NUM_SPECIES
+    };
+    let locxl = if jx != 0 {
+        loc - NUM_SPECIES
+    } else {
+        loc + NUM_SPECIES
+    };
+    (is, loc, locyu, locyl, locxu, locxl)
+}
+
+/// `b_i`, the space-dependent factor of the reaction term, at cell `(jx, jy)`.
+#[inline]
+fn foodweb_elem_fac<T: Scalar, const NX: usize>(loc: usize) -> T {
+    let nsmx = NUM_SPECIES * NX;
+    let jx = (loc % nsmx) / NUM_SPECIES;
+    let jy = loc / nsmx;
+    let xx = jx as f64 * (AX / (NX as f64 - 1.0));
+    let yy = jy as f64 * (AY / (NX as f64 - 1.0));
+    T::from_f64(
+        1.0 + ALPHA * xx * yy
+            + BETA
+                * (4.0 * std::f64::consts::PI * xx).sin()
+                * (4.0 * std::f64::consts::PI * yy).sin(),
+    )
+    .unwrap()
+}
+
+/// One element of the food-web right-hand side: diffusion plus interaction.
+fn foodweb_elem_rhs<T: Scalar, const NX: usize>(y: &mut T, x: &[T], c: FoodWebConsts<T>, i: usize) {
+    let (is, loc, locyu, locyl, locxu, locxl) = foodweb_elem_geometry::<NX>(i);
+    let mut dp = T::zero();
+    for js in 0..NUM_SPECIES {
+        dp += c.acoef[is][js] * x[loc + js];
+    }
+    let fac = foodweb_elem_fac::<T, NX>(loc);
+    let rate = x[i] * (c.bcoef[is] * fac + dp);
+
+    let dcyli = x[i] - x[locyl + is];
+    let dcyui = x[locyu + is] - x[i];
+    let dcxli = x[i] - x[locxl + is];
+    let dcxui = x[locxu + is] - x[i];
+
+    *y = c.coy[is] * (dcyui - dcyli) + c.cox[is] * (dcxui - dcxli) + rate;
+}
+
+/// One element of `J v` for [`foodweb_elem_rhs`].
+fn foodweb_elem_jac_mul<T: Scalar, const NX: usize>(
+    y: &mut T,
+    x: &[T],
+    v: &[T],
+    c: FoodWebConsts<T>,
+    i: usize,
+) {
+    let (is, loc, locyu, locyl, locxu, locxl) = foodweb_elem_geometry::<NX>(i);
+    let mut dp = T::zero();
+    let mut ddp = T::zero();
+    for js in 0..NUM_SPECIES {
+        dp += c.acoef[is][js] * x[loc + js];
+        ddp += c.acoef[is][js] * v[loc + js];
+    }
+    let fac = foodweb_elem_fac::<T, NX>(loc);
+    let drate = x[i] * ddp + v[i] * (c.bcoef[is] * fac + dp);
+
+    let dcyli = v[i] - v[locyl + is];
+    let dcyui = v[locyu + is] - v[i];
+    let dcxli = v[i] - v[locxl + is];
+    let dcxui = v[locxu + is] - v[i];
+
+    *y = c.coy[is] * (dcyui - dcyli) + c.cox[is] * (dcxui - dcxli) + drate;
+}
+
+/// One element of the initial condition: a polynomial in the prey, a flat value in the predators.
+fn foodweb_elem_init<T: Scalar, const NX: usize>(y: &mut T, i: usize) {
+    let nsmx = NUM_SPECIES * NX;
+    let is = i % NUM_SPECIES;
+    let loc = i - is;
+    let jx = (loc % nsmx) / NUM_SPECIES;
+    let jy = loc / nsmx;
+    let xx = jx as f64 * (AX / (NX as f64 - 1.0));
+    let yy = jy as f64 * (AY / (NX as f64 - 1.0));
+    let xyfactor = (16.0 * xx * (1.0 - xx) * yy * (1.0 - yy)).powi(2);
+    *y = if is < NPREY {
+        T::from_f64(10.0 + (is + 1) as f64 * xyfactor).unwrap()
+    } else {
+        T::from_f64(1.0e5).unwrap()
+    };
+}
+
+/// The food-web model with every operator written one element at a time, so
+/// [`Vector::for_each_elem`] can run it a thread per `(lane, element)` on a device backend.
+pub struct FoodWebElem<M, const NX: usize>
+where
+    M: Matrix,
+{
+    consts: FoodWebConsts<M::T>,
+    nstates: usize,
+    rhs_sparsity: Option<M::Sparsity>,
+    rhs_coloring: Option<JacobianColoring<M>>,
+    mass_sparsity: Option<M::Sparsity>,
+    mass_coloring: Option<JacobianColoring<M>>,
+    ctx: M::C,
+}
+
+impl<M: Matrix, const NX: usize> FoodWebElem<M, NX> {
+    pub fn new(context: FoodWebContext<M, NX>, t0: M::T) -> Self {
+        let mut ret = Self {
+            consts: FoodWebConsts::new(&context),
+            nstates: context.nstates,
+            rhs_sparsity: None,
+            rhs_coloring: None,
+            mass_sparsity: None,
+            mass_coloring: None,
+            ctx: context.ctx.clone(),
+        };
+        let y0 = FoodWebElemInit { eqn: &ret }.call(t0);
+
+        let rhs = FoodWebElemRhs { eqn: &ret };
+        let non_zeros = find_jacobian_non_zeros(&rhs, &y0, t0);
+        ret.rhs_sparsity = Some(
+            MatrixSparsity::try_from_indices(rhs.nout(), rhs.nstates(), non_zeros.clone()).unwrap(),
+        );
+        ret.rhs_coloring = Some(JacobianColoring::new(
+            ret.rhs_sparsity.as_ref().unwrap(),
+            &non_zeros,
+            ret.ctx.clone(),
+        ));
+
+        let mass = FoodWebElemMass { eqn: &ret };
+        let non_zeros = find_matrix_non_zeros(&mass, t0);
+        ret.mass_sparsity = Some(
+            MatrixSparsity::try_from_indices(mass.nout(), mass.nstates(), non_zeros.clone())
+                .unwrap(),
+        );
+        ret.mass_coloring = Some(JacobianColoring::new(
+            ret.mass_sparsity.as_ref().unwrap(),
+            &non_zeros,
+            ret.ctx.clone(),
+        ));
+        ret
+    }
+}
+
+pub struct FoodWebElemRhs<'a, M: Matrix, const NX: usize> {
+    eqn: &'a FoodWebElem<M, NX>,
+}
+pub struct FoodWebElemMass<'a, M: Matrix, const NX: usize> {
+    eqn: &'a FoodWebElem<M, NX>,
+}
+pub struct FoodWebElemInit<'a, M: Matrix, const NX: usize> {
+    eqn: &'a FoodWebElem<M, NX>,
+}
+pub struct FoodWebElemOut<'a, M: Matrix, const NX: usize> {
+    eqn: &'a FoodWebElem<M, NX>,
+}
+
+macro_rules! impl_foodweb_elem_op {
+    ($name:ident, $nout:expr) => {
+        impl<M: Matrix, const NX: usize> Op for $name<'_, M, NX> {
+            type M = M;
+            type V = M::V;
+            type T = M::T;
+            type C = M::C;
+
+            fn nstates(&self) -> usize {
+                self.eqn.nstates
+            }
+            fn nout(&self) -> usize {
+                $nout
+            }
+            fn nparams(&self) -> usize {
+                0
+            }
+            fn context(&self) -> &Self::C {
+                &self.eqn.ctx
+            }
+        }
+    };
+}
+
+impl_foodweb_elem_op!(FoodWebElemRhs, NUM_SPECIES * NX * NX);
+impl_foodweb_elem_op!(FoodWebElemMass, NUM_SPECIES * NX * NX);
+impl_foodweb_elem_op!(FoodWebElemInit, NUM_SPECIES * NX * NX);
+impl_foodweb_elem_op!(FoodWebElemOut, 2 * NUM_SPECIES);
+
+impl<M: Matrix, const NX: usize> NonLinearOp for FoodWebElemRhs<'_, M, NX> {
+    fn call_inplace(&self, x: &M::V, _t: M::T, y: &mut M::V) {
+        let c = self.eqn.consts;
+        y.for_each_elem(
+            [x],
+            move |y: &mut M::T, [x]: [&[M::T]; 1], _lane: usize, i: usize| {
+                foodweb_elem_rhs::<M::T, NX>(y, x, c, i)
+            },
+        );
+    }
+}
+
+impl<M: Matrix, const NX: usize> NonLinearOpJacobian for FoodWebElemRhs<'_, M, NX> {
+    fn jac_mul_inplace(&self, x: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
+        let c = self.eqn.consts;
+        y.for_each_elem(
+            [x, v],
+            move |y: &mut M::T, [x, v]: [&[M::T]; 2], _lane: usize, i: usize| {
+                foodweb_elem_jac_mul::<M::T, NX>(y, x, v, c, i)
+            },
+        );
+    }
+    fn jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
+        if let Some(coloring) = self.eqn.rhs_coloring.as_ref() {
+            coloring.jacobian_inplace(self, x, t, y);
+        } else {
+            self._default_jacobian_inplace(x, t, y);
+        }
+    }
+    fn jacobian_sparsity(&self) -> Option<M::Sparsity> {
+        self.eqn.rhs_sparsity.clone()
+    }
+}
+
+impl<M: Matrix, const NX: usize> LinearOp for FoodWebElemMass<'_, M, NX> {
+    fn gemv_inplace(&self, x: &Self::V, _t: Self::T, beta: Self::T, y: &mut Self::V) {
+        // the predator equations are algebraic, so their mass rows are zero
+        y.for_each_elem(
+            [x],
+            move |y: &mut M::T, [x]: [&[M::T]; 1], _lane: usize, i: usize| {
+                *y = if i % NUM_SPECIES < NPREY {
+                    x[i] + beta * *y
+                } else {
+                    beta * *y
+                };
+            },
+        );
+    }
+    fn matrix_inplace(&self, t: Self::T, y: &mut Self::M) {
+        if let Some(coloring) = self.eqn.mass_coloring.as_ref() {
+            coloring.matrix_inplace(self, t, y);
+        } else {
+            self._default_matrix_inplace(t, y);
+        }
+    }
+    fn sparsity(&self) -> Option<M::Sparsity> {
+        self.eqn.mass_sparsity.clone()
+    }
+}
+
+impl<M: Matrix, const NX: usize> ConstantOp for FoodWebElemInit<'_, M, NX> {
+    fn call_inplace(&self, _t: M::T, y: &mut M::V) {
+        y.for_each_elem(
+            [],
+            |y: &mut M::T, _: [&[M::T]; 0], _lane: usize, i: usize| {
+                foodweb_elem_init::<M::T, NX>(y, i)
+            },
+        );
+    }
+}
+
+impl<M: Matrix, const NX: usize> NonLinearOp for FoodWebElemOut<'_, M, NX> {
+    fn call_inplace(&self, x: &M::V, _t: M::T, y: &mut M::V) {
+        // the two corners of the grid, per species
+        y.for_each_elem(
+            [x],
+            |y: &mut M::T, [x]: [&[M::T]; 1], _lane: usize, i: usize| {
+                let nsmx = NUM_SPECIES * NX;
+                let is = i / 2;
+                let loc = if i.is_multiple_of(2) {
+                    0
+                } else {
+                    NUM_SPECIES * (NX - 1) + nsmx * (NX - 1)
+                };
+                *y = x[loc + is];
+            },
+        );
+    }
+}
+
+impl<M: Matrix, const NX: usize> NonLinearOpJacobian for FoodWebElemOut<'_, M, NX> {
+    fn jac_mul_inplace(&self, _x: &Self::V, _t: Self::T, v: &Self::V, y: &mut Self::V) {
+        y.for_each_elem(
+            [v],
+            |y: &mut M::T, [v]: [&[M::T]; 1], _lane: usize, i: usize| {
+                let nsmx = NUM_SPECIES * NX;
+                let is = i / 2;
+                let loc = if i.is_multiple_of(2) {
+                    0
+                } else {
+                    NUM_SPECIES * (NX - 1) + nsmx * (NX - 1)
+                };
+                *y = v[loc + is];
+            },
+        );
+    }
+}
+
+impl<M: Matrix, const NX: usize> Op for FoodWebElem<M, NX> {
+    type M = M;
+    type V = M::V;
+    type T = M::T;
+    type C = M::C;
+
+    fn nstates(&self) -> usize {
+        self.nstates
+    }
+    fn nout(&self) -> usize {
+        2 * NUM_SPECIES
+    }
+    fn nparams(&self) -> usize {
+        0
+    }
+    fn context(&self) -> &Self::C {
+        &self.ctx
+    }
+}
+
+impl<'a, M: Matrix, const NX: usize> OdeEquationsRef<'a> for FoodWebElem<M, NX> {
+    type Rhs = FoodWebElemRhs<'a, M, NX>;
+    type Mass = FoodWebElemMass<'a, M, NX>;
+    type Init = FoodWebElemInit<'a, M, NX>;
+    type Out = FoodWebElemOut<'a, M, NX>;
+    type Root = ParameterisedOp<'a, UnitCallable<M>>;
+    type Reset = ParameterisedOp<'a, UnitCallable<M>>;
+}
+
+impl<M: Matrix, const NX: usize> OdeEquations for FoodWebElem<M, NX> {
+    fn rhs(&self) -> FoodWebElemRhs<'_, M, NX> {
+        FoodWebElemRhs { eqn: self }
+    }
+    fn mass(&self) -> Option<FoodWebElemMass<'_, M, NX>> {
+        Some(FoodWebElemMass { eqn: self })
+    }
+    fn init(&self) -> FoodWebElemInit<'_, M, NX> {
+        FoodWebElemInit { eqn: self }
+    }
+    fn out(&self) -> Option<FoodWebElemOut<'_, M, NX>> {
+        Some(FoodWebElemOut { eqn: self })
+    }
+    fn root(&self) -> Option<<Self as OdeEquationsRef<'_>>::Root> {
+        None
+    }
+    fn set_params(&mut self, _p: &Self::V) {
+        unimplemented!()
+    }
+    fn get_params(&self, _p: &mut Self::V) {
+        unimplemented!()
+    }
+}
+
+/// [`foodweb_problem`] with every operator element-parallel, over `nbatch` lanes.
+#[allow(clippy::type_complexity)]
+pub fn foodweb_elem_problem<M, const NX: usize>(
+    nbatch: usize,
+) -> (
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
+    OdeSolverSolution<M::V>,
+)
+where
+    M: Matrix,
+{
+    let ctx = M::C::default().clone_with_nbatch(nbatch).unwrap();
+    let rtol = M::T::from_f64(1e-5).unwrap();
+    let atol = M::V::from_element(
+        NUM_SPECIES * NX * NX,
+        M::T::from_f64(1e-5).unwrap(),
+        ctx.clone(),
+    );
+    let t0 = M::T::zero();
+    let h0 = M::T::one();
+    let context = FoodWebContext::<M, NX>::new(ctx.clone());
+    let eqn = FoodWebElem::new(context, t0);
+    let problem = OdeSolverProblem::new(
+        eqn,
+        rtol,
+        atol,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        t0,
+        h0,
+        false,
+        Default::default(),
+        Default::default(),
+    )
+    .unwrap();
+    let soln = soln::<M>(ctx);
+    (problem, soln)
+}
+
+#[cfg(test)]
+mod elem_tests {
+    use super::*;
+    use crate::{
+        matrix::dense_nalgebra_serial::NalgebraMat, DenseMatrix, MatrixCommon, NalgebraVec,
+    };
+
+    /// The stored solution in [`soln`] is the `NX == 10` grid, as `bdf_test_faer_sparse_foodweb`
+    /// uses.
+    const NX: usize = 10;
+
+    /// The element operators and the whole-lane operators of [`foodweb_problem`] are two copies
+    /// of the same maths, so check them against each other.
+    #[test]
+    fn test_elem_matches_lane() {
+        type M = NalgebraMat<f64>;
+        let (elem, _) = foodweb_elem_problem::<M, NX>(1);
+        let (lane, _) = foodweb_problem::<M, NX>();
+
+        let y0 = elem.eqn.init().call(0.0);
+        y0.assert_eq_st(&lane.eqn.init().call(0.0), 1e-10);
+
+        elem.eqn.rhs().call(&y0, 0.0).assert_eq_norm(
+            &lane.eqn.rhs().call(&y0, 0.0),
+            &elem.atol,
+            elem.rtol,
+            1e-5,
+        );
+
+        let v = NalgebraVec::from_element(NUM_SPECIES * NX * NX, 0.5, *elem.context());
+        elem.eqn.rhs().jac_mul(&y0, 0.0, &v).assert_eq_norm(
+            &lane.eqn.rhs().jac_mul(&y0, 0.0, &v),
+            &elem.atol,
+            elem.rtol,
+            1e-5,
+        );
+
+        let mass_elem = elem.eqn.mass().unwrap().matrix(0.0);
+        let mass_lane = lane.eqn.mass().unwrap().matrix(0.0);
+        for i in 0..mass_elem.nrows() {
+            for j in 0..mass_elem.ncols() {
+                assert_eq!(
+                    mass_elem.get_index(i, j),
+                    mass_lane.get_index(i, j),
+                    "mass[{i}, {j}]"
+                );
+            }
+        }
+
+        elem.eqn
+            .out()
+            .unwrap()
+            .call(&y0, 0.0)
+            .assert_eq_st(&lane.eqn.out().unwrap().call(&y0, 0.0), 1e-10);
     }
 }

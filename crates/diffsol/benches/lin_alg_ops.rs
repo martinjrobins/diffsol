@@ -13,9 +13,8 @@ const VSIZES: &[usize] = &[2, 10, 100, 500];
 const MSIZES: &[usize] = &[10, 100, 500];
 const ONE_SIZE: &[usize] = &[50];
 
-// Every `b.iter` body ends with `ctx.synchronize()`: the device backends only enqueue their
-// work, so without it a bench prices the launch and not the kernel. It compiles away on the CPU
-// backends, whose `Context::synchronize` is an empty default.
+// Note: Every `b.iter` body ends with `ctx.synchronize()` so device backends do the work.
+// This means the device backends have a launch-plus-sync timing floor (~8.5us on an A40).
 
 /// Sizes the `for_each_*` benches run: a one-thread-per-lane launch only shows its cost at a
 /// lane long enough to be worth splitting.

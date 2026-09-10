@@ -1566,12 +1566,12 @@ mod test {
                 exponential_decay_with_algebraic_problem,
                 exponential_decay_with_algebraic_problem_sens,
             },
-            foodweb::foodweb_problem,
+            foodweb::{foodweb_elem_problem, foodweb_problem},
             gaussian_decay::gaussian_decay_problem,
-            heat2d::head2d_problem,
+            heat2d::{head2d_problem, heat2d_elem_problem},
             logistic::logistic_problem_adjoint_no_out,
             robertson::{robertson, robertson_sens},
-            robertson_ode::robertson_ode,
+            robertson_ode::{robertson_ode, robertson_ode_elem_problem},
             robertson_ode_with_sens::robertson_ode_with_sens,
         },
         ode_solver::tests::{
@@ -2423,6 +2423,88 @@ mod test {
         ");
     }
 
+    #[test]
+    fn test_bdf_faer_sparse_heat2d_elem() {
+        let (problem, soln) = heat2d_elem_problem::<FaerSparseMat<f64>, 10>(1);
+        let mut s = problem.bdf::<FaerSparseLU<f64>>().unwrap();
+        test_ode_solver(&mut s, soln, None, false, false);
+    }
+
+    #[test]
+    fn test_bdf_nalgebra_heat2d_elem_batched() {
+        let (problem, soln) = heat2d_elem_problem::<NalgebraMat<f64>, 10>(2);
+        let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
+        test_ode_solver(&mut s, soln, None, false, false);
+    }
+
+    #[test]
+    fn test_bdf_faer_sparse_foodweb_elem() {
+        let (problem, soln) = foodweb_elem_problem::<FaerSparseMat<f64>, 10>(1);
+        let mut s = problem.bdf::<FaerSparseLU<f64>>().unwrap();
+        test_ode_solver(&mut s, soln, None, false, false);
+    }
+
+    #[test]
+    fn test_bdf_faer_sparse_robertson_ode_elem() {
+        let (problem, soln) = robertson_ode_elem_problem::<FaerSparseMat<f64>>(1);
+        let mut s = problem.bdf::<FaerSparseLU<f64>>().unwrap();
+        test_ode_solver(&mut s, soln, None, false, false);
+    }
+
+    #[cfg(feature = "cuda-oxide")]
+    #[test]
+    fn test_bdf_cuda_oxide_heat2d_elem() {
+        use crate::{OxideLU, OxideMat};
+        let (problem, soln) = heat2d_elem_problem::<OxideMat, 10>(1);
+        let mut s = problem.bdf::<OxideLU>().unwrap();
+        test_ode_solver(&mut s, soln, None, false, false);
+    }
+
+    #[cfg(feature = "cuda-oxide")]
+    #[test]
+    fn test_bdf_cuda_oxide_heat2d_elem_batched() {
+        use crate::{OxideLU, OxideMat};
+        let (problem, soln) = heat2d_elem_problem::<OxideMat, 10>(2);
+        let mut s = problem.bdf::<OxideLU>().unwrap();
+        test_ode_solver(&mut s, soln, None, false, false);
+    }
+
+    #[cfg(feature = "cuda-oxide")]
+    #[test]
+    fn test_bdf_cuda_oxide_foodweb_elem() {
+        use crate::{OxideLU, OxideMat};
+        let (problem, soln) = foodweb_elem_problem::<OxideMat, 10>(1);
+        let mut s = problem.bdf::<OxideLU>().unwrap();
+        test_ode_solver(&mut s, soln, None, false, false);
+    }
+
+    #[cfg(feature = "cuda-oxide")]
+    #[test]
+    fn test_bdf_cuda_oxide_foodweb_elem_batched() {
+        use crate::{OxideLU, OxideMat};
+        let (problem, soln) = foodweb_elem_problem::<OxideMat, 10>(2);
+        let mut s = problem.bdf::<OxideLU>().unwrap();
+        test_ode_solver(&mut s, soln, None, false, false);
+    }
+
+    #[cfg(feature = "cuda-oxide")]
+    #[test]
+    fn test_bdf_cuda_oxide_robertson_ode_elem() {
+        use crate::{OxideLU, OxideMat};
+        let (problem, soln) = robertson_ode_elem_problem::<OxideMat>(1);
+        let mut s = problem.bdf::<OxideLU>().unwrap();
+        test_ode_solver(&mut s, soln, None, false, false);
+    }
+
+    #[cfg(feature = "cuda-oxide")]
+    #[test]
+    fn test_bdf_cuda_oxide_robertson_ode_elem_batched() {
+        use crate::{OxideLU, OxideMat};
+        let (problem, soln) = robertson_ode_elem_problem::<OxideMat>(4);
+        let mut s = problem.bdf::<OxideLU>().unwrap();
+        test_ode_solver(&mut s, soln, None, false, false);
+    }
+
     #[cfg(feature = "diffsl-llvm")]
     #[test]
     fn test_bdf_faer_sparse_foodweb_diffsl() {
@@ -2447,6 +2529,16 @@ mod test {
         use crate::{CudaLU, CudaMat};
         let (problem, soln) = exponential_decay_problem_batched::<CudaMat<f64>>(2);
         let mut s = problem.bdf::<CudaLU<f64>>().unwrap();
+        test_ode_solver(&mut s, soln, None, false, false);
+    }
+
+    #[cfg(feature = "cuda-oxide")]
+    #[test]
+    fn test_bdf_cuda_oxide_exponential_decay_batched() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_problem_batched;
+        use crate::{OxideLU, OxideMat};
+        let (problem, soln) = exponential_decay_problem_batched::<OxideMat>(2);
+        let mut s = problem.bdf::<OxideLU>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
     }
 

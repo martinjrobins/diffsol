@@ -7,8 +7,10 @@
 //while for each boundary point, it is res_i = u_i.
 
 use crate::{
-    ode_solver::problem::OdeSolverSolution, scalar::Scalar, Matrix, OdeBuilder,
-    OdeEquationsImplicit, OdeSolverProblem, Vector,
+    find_jacobian_non_zeros, find_matrix_non_zeros, ode_solver::problem::OdeSolverSolution,
+    scalar::Scalar, ConstantOp, Context, JacobianColoring, LinearOp, Matrix, MatrixSparsity,
+    NonLinearOp, NonLinearOpJacobian, OdeBuilder, OdeEquations, OdeEquationsImplicit,
+    OdeEquationsRef, OdeSolverProblem, Op, ParameterisedOp, UnitCallable, Vector,
 };
 use num_traits::{FromPrimitive, One, Zero};
 
@@ -287,14 +289,14 @@ fn soln<M: Matrix>(ctx: M::C) -> OdeSolverSolution<M::V> {
         (vec![1.735145399301106e-18], 5.12),
         (vec![3.259034338585213e-17], 10.24),
     ];
+    let nbatch = ctx.nbatch();
     for (values, time) in data {
-        let values = M::V::from_vec(
-            values
-                .iter()
-                .map(|v| M::T::from_f64(*v).unwrap())
-                .collect::<Vec<_>>(),
-            ctx.clone(),
-        );
+        // every lane solves the same problem, so each output value repeats per lane
+        let mut per_lane = Vec::with_capacity(values.len() * nbatch);
+        for _ in 0..nbatch {
+            per_lane.extend(values.iter().map(|v| M::T::from_f64(*v).unwrap()));
+        }
+        let values = M::V::from_vec(per_lane, ctx.clone());
         let time = M::T::from_f64(time).unwrap();
         soln.push(values, time);
     }
@@ -355,5 +357,402 @@ mod tests {
     #[test]
     fn test_soln() {
         let (_problem, _soln) = head2d_problem::<NalgebraMat<f64>, 10>();
+    }
+}
+
+// ============================================================
+// Element-parallel implementation
+// ============================================================
+
+/// The constants of the discretisation, precomputed on the host.
+///
+/// A device closure captures by value and cannot afford a panic path, so
+/// `T::from_f64(x).unwrap()` has to happen out here rather than in the kernel.
+#[derive(Clone, Copy)]
+struct Heat2dConsts<T: Scalar> {
+    /// `1 / dx^2`
+    coeff: T,
+    /// `dx`
+    dx: T,
+    four: T,
+    sixteen: T,
+}
+
+impl<T: Scalar> Heat2dConsts<T> {
+    fn new(mgrid: usize) -> Self {
+        let dx = 1.0 / (mgrid as f64 - 1.0);
+        Self {
+            coeff: T::from_f64(1.0 / (dx * dx)).unwrap(),
+            dx: T::from_f64(dx).unwrap(),
+            four: T::from_f64(4.0).unwrap(),
+            sixteen: T::from_f64(16.0).unwrap(),
+        }
+    }
+}
+
+/// Is element `i` of the grid on the boundary?
+#[inline]
+fn heat2d_is_boundary(mgrid: usize, i: usize) -> bool {
+    let (jx, jy) = (i % mgrid, i / mgrid);
+    jx == 0 || jy == 0 || jx == mgrid - 1 || jy == mgrid - 1
+}
+
+/// One element of the 5-point central difference, holding the boundary values fixed.
+///
+/// The element form of [`heat2d_rhs`], and of [`heat2d_jac_mul`] too: the operator is linear, so
+/// the same body serves `f(x)` and `J v`.
+fn heat2d_elem_rhs<T: Scalar>(y: &mut T, x: &[T], c: Heat2dConsts<T>, mgrid: usize, i: usize) {
+    *y = if heat2d_is_boundary(mgrid, i) {
+        // the boundary equations are algebraic: the residual is the value itself
+        x[i]
+    } else {
+        c.coeff * (x[i - 1] + x[i + 1] + x[i - mgrid] + x[i + mgrid] - c.four * x[i])
+    };
+}
+
+/// One element of the mass action `y = M x + beta y`, the element form of [`heat2d_mass`].
+fn heat2d_elem_mass<T: Scalar>(y: &mut T, x: &[T], beta: T, mgrid: usize, i: usize) {
+    // the boundary rows of the mass matrix are zero
+    *y = if heat2d_is_boundary(mgrid, i) {
+        beta * *y
+    } else {
+        x[i] + beta * *y
+    };
+}
+
+/// One element of the initial condition, the element form of [`heat2d_init`].
+fn heat2d_elem_init<T: Scalar>(y: &mut T, c: Heat2dConsts<T>, mgrid: usize, i: usize) {
+    *y = if heat2d_is_boundary(mgrid, i) {
+        T::zero()
+    } else {
+        let (jx, jy) = (i % mgrid, i / mgrid);
+        let xfact = c.dx * T::from_usize(jx).unwrap();
+        let yfact = c.dx * T::from_usize(jy).unwrap();
+        c.sixteen * xfact * (T::one() - xfact) * yfact * (T::one() - yfact)
+    };
+}
+
+/// The heat equation on an `MGRID x MGRID` grid, with every operator written one element at a
+/// time so [`Vector::for_each_elem`] can run it a thread per `(lane, element)` on a device
+/// backend.
+pub struct Heat2dElem<M: Matrix, const MGRID: usize> {
+    consts: Heat2dConsts<M::T>,
+    rhs_sparsity: Option<M::Sparsity>,
+    rhs_coloring: Option<JacobianColoring<M>>,
+    mass_sparsity: Option<M::Sparsity>,
+    mass_coloring: Option<JacobianColoring<M>>,
+    ctx: M::C,
+}
+
+impl<M: Matrix, const MGRID: usize> Heat2dElem<M, MGRID> {
+    const NSTATES: usize = MGRID * MGRID;
+
+    pub fn new(ctx: M::C, t0: M::T) -> Self {
+        let mut ret = Self {
+            consts: Heat2dConsts::new(MGRID),
+            rhs_sparsity: None,
+            rhs_coloring: None,
+            mass_sparsity: None,
+            mass_coloring: None,
+            ctx,
+        };
+        let y0 = Heat2dElemInit { eqn: &ret }.call(t0);
+
+        let rhs = Heat2dElemRhs { eqn: &ret };
+        let non_zeros = find_jacobian_non_zeros(&rhs, &y0, t0);
+        ret.rhs_sparsity = Some(
+            MatrixSparsity::try_from_indices(rhs.nout(), rhs.nstates(), non_zeros.clone()).unwrap(),
+        );
+        ret.rhs_coloring = Some(JacobianColoring::new(
+            ret.rhs_sparsity.as_ref().unwrap(),
+            &non_zeros,
+            ret.ctx.clone(),
+        ));
+
+        let mass = Heat2dElemMass { eqn: &ret };
+        let non_zeros = find_matrix_non_zeros(&mass, t0);
+        ret.mass_sparsity = Some(
+            MatrixSparsity::try_from_indices(mass.nout(), mass.nstates(), non_zeros.clone())
+                .unwrap(),
+        );
+        ret.mass_coloring = Some(JacobianColoring::new(
+            ret.mass_sparsity.as_ref().unwrap(),
+            &non_zeros,
+            ret.ctx.clone(),
+        ));
+        ret
+    }
+}
+
+pub struct Heat2dElemRhs<'a, M: Matrix, const MGRID: usize> {
+    eqn: &'a Heat2dElem<M, MGRID>,
+}
+pub struct Heat2dElemMass<'a, M: Matrix, const MGRID: usize> {
+    eqn: &'a Heat2dElem<M, MGRID>,
+}
+pub struct Heat2dElemInit<'a, M: Matrix, const MGRID: usize> {
+    eqn: &'a Heat2dElem<M, MGRID>,
+}
+pub struct Heat2dElemOut<'a, M: Matrix, const MGRID: usize> {
+    eqn: &'a Heat2dElem<M, MGRID>,
+}
+
+macro_rules! impl_heat2d_elem_op {
+    ($name:ident, $nout:expr) => {
+        impl<M: Matrix, const MGRID: usize> Op for $name<'_, M, MGRID> {
+            type M = M;
+            type V = M::V;
+            type T = M::T;
+            type C = M::C;
+
+            fn nstates(&self) -> usize {
+                Heat2dElem::<M, MGRID>::NSTATES
+            }
+            fn nout(&self) -> usize {
+                $nout
+            }
+            fn nparams(&self) -> usize {
+                0
+            }
+            fn context(&self) -> &Self::C {
+                &self.eqn.ctx
+            }
+        }
+    };
+}
+
+impl_heat2d_elem_op!(Heat2dElemRhs, Heat2dElem::<M, MGRID>::NSTATES);
+impl_heat2d_elem_op!(Heat2dElemMass, Heat2dElem::<M, MGRID>::NSTATES);
+impl_heat2d_elem_op!(Heat2dElemInit, Heat2dElem::<M, MGRID>::NSTATES);
+impl_heat2d_elem_op!(Heat2dElemOut, 1);
+
+impl<M: Matrix, const MGRID: usize> NonLinearOp for Heat2dElemRhs<'_, M, MGRID> {
+    fn call_inplace(&self, x: &M::V, _t: M::T, y: &mut M::V) {
+        let c = self.eqn.consts;
+        y.for_each_elem(
+            [x],
+            move |y: &mut M::T, [x]: [&[M::T]; 1], _lane: usize, i: usize| {
+                heat2d_elem_rhs(y, x, c, MGRID, i)
+            },
+        );
+    }
+}
+
+impl<M: Matrix, const MGRID: usize> NonLinearOpJacobian for Heat2dElemRhs<'_, M, MGRID> {
+    fn jac_mul_inplace(&self, _x: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
+        let c = self.eqn.consts;
+        // the operator is linear, so the action of the jacobian is the operator itself
+        y.for_each_elem(
+            [v],
+            move |y: &mut M::T, [v]: [&[M::T]; 1], _lane: usize, i: usize| {
+                heat2d_elem_rhs(y, v, c, MGRID, i)
+            },
+        );
+    }
+    fn jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
+        if let Some(coloring) = self.eqn.rhs_coloring.as_ref() {
+            coloring.jacobian_inplace(self, x, t, y);
+        } else {
+            self._default_jacobian_inplace(x, t, y);
+        }
+    }
+    fn jacobian_sparsity(&self) -> Option<M::Sparsity> {
+        self.eqn.rhs_sparsity.clone()
+    }
+}
+
+impl<M: Matrix, const MGRID: usize> LinearOp for Heat2dElemMass<'_, M, MGRID> {
+    fn gemv_inplace(&self, x: &Self::V, _t: Self::T, beta: Self::T, y: &mut Self::V) {
+        y.for_each_elem(
+            [x],
+            move |y: &mut M::T, [x]: [&[M::T]; 1], _lane: usize, i: usize| {
+                heat2d_elem_mass(y, x, beta, MGRID, i)
+            },
+        );
+    }
+    fn matrix_inplace(&self, t: Self::T, y: &mut Self::M) {
+        if let Some(coloring) = self.eqn.mass_coloring.as_ref() {
+            coloring.matrix_inplace(self, t, y);
+        } else {
+            self._default_matrix_inplace(t, y);
+        }
+    }
+    fn sparsity(&self) -> Option<M::Sparsity> {
+        self.eqn.mass_sparsity.clone()
+    }
+}
+
+impl<M: Matrix, const MGRID: usize> ConstantOp for Heat2dElemInit<'_, M, MGRID> {
+    fn call_inplace(&self, _t: M::T, y: &mut M::V) {
+        let c = self.eqn.consts;
+        y.for_each_elem(
+            [],
+            move |y: &mut M::T, _: [&[M::T]; 0], _lane: usize, i: usize| {
+                heat2d_elem_init(y, c, MGRID, i)
+            },
+        );
+    }
+}
+
+impl<M: Matrix, const MGRID: usize> NonLinearOp for Heat2dElemOut<'_, M, MGRID> {
+    fn call_inplace(&self, x: &M::V, _t: M::T, y: &mut M::V) {
+        // `dx^2 * sum_i x_i^2`, one output per lane, so one thread per lane walks the lane
+        let dx2 = self.eqn.consts.dx * self.eqn.consts.dx;
+        y.for_each_elem(
+            [x],
+            move |y: &mut M::T, [x]: [&[M::T]; 1], _lane: usize, _i: usize| {
+                let mut acc = M::T::zero();
+                for xk in x.iter() {
+                    acc += *xk * *xk;
+                }
+                *y = acc * dx2;
+            },
+        );
+    }
+}
+
+impl<M: Matrix, const MGRID: usize> NonLinearOpJacobian for Heat2dElemOut<'_, M, MGRID> {
+    fn jac_mul_inplace(&self, _x: &M::V, _t: M::T, _v: &M::V, _y: &mut M::V) {
+        // as in the builder version, the output jacobian is not needed by any solve here
+        unimplemented!()
+    }
+}
+
+impl<M: Matrix, const MGRID: usize> Op for Heat2dElem<M, MGRID> {
+    type M = M;
+    type V = M::V;
+    type T = M::T;
+    type C = M::C;
+
+    fn nstates(&self) -> usize {
+        Self::NSTATES
+    }
+    fn nout(&self) -> usize {
+        1
+    }
+    fn nparams(&self) -> usize {
+        0
+    }
+    fn context(&self) -> &Self::C {
+        &self.ctx
+    }
+}
+
+impl<'a, M: Matrix, const MGRID: usize> OdeEquationsRef<'a> for Heat2dElem<M, MGRID> {
+    type Rhs = Heat2dElemRhs<'a, M, MGRID>;
+    type Mass = Heat2dElemMass<'a, M, MGRID>;
+    type Init = Heat2dElemInit<'a, M, MGRID>;
+    type Out = Heat2dElemOut<'a, M, MGRID>;
+    type Root = ParameterisedOp<'a, UnitCallable<M>>;
+    type Reset = ParameterisedOp<'a, UnitCallable<M>>;
+}
+
+impl<M: Matrix, const MGRID: usize> OdeEquations for Heat2dElem<M, MGRID> {
+    fn rhs(&self) -> Heat2dElemRhs<'_, M, MGRID> {
+        Heat2dElemRhs { eqn: self }
+    }
+    fn mass(&self) -> Option<Heat2dElemMass<'_, M, MGRID>> {
+        Some(Heat2dElemMass { eqn: self })
+    }
+    fn init(&self) -> Heat2dElemInit<'_, M, MGRID> {
+        Heat2dElemInit { eqn: self }
+    }
+    fn out(&self) -> Option<Heat2dElemOut<'_, M, MGRID>> {
+        Some(Heat2dElemOut { eqn: self })
+    }
+    fn root(&self) -> Option<<Self as OdeEquationsRef<'_>>::Root> {
+        None
+    }
+    fn set_params(&mut self, _p: &Self::V) {
+        unimplemented!()
+    }
+    fn get_params(&self, _p: &mut Self::V) {
+        unimplemented!()
+    }
+}
+
+/// [`head2d_problem`] with every operator element-parallel, over `nbatch` lanes.
+#[allow(clippy::type_complexity)]
+pub fn heat2d_elem_problem<M: Matrix + 'static, const MGRID: usize>(
+    nbatch: usize,
+) -> (
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
+    OdeSolverSolution<M::V>,
+) {
+    let ctx = M::C::default().clone_with_nbatch(nbatch).unwrap();
+    let rtol = M::T::from_f64(1e-7).unwrap();
+    let atol = M::V::from_element(MGRID * MGRID, M::T::from_f64(1e-7).unwrap(), ctx.clone());
+    let t0 = M::T::zero();
+    let h0 = M::T::one();
+    let eqn = Heat2dElem::<M, MGRID>::new(ctx.clone(), t0);
+    let problem = OdeSolverProblem::new(
+        eqn,
+        rtol,
+        atol,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        t0,
+        h0,
+        false,
+        Default::default(),
+        Default::default(),
+    )
+    .unwrap();
+    let soln = soln::<M>(ctx);
+    (problem, soln)
+}
+
+#[cfg(test)]
+mod elem_tests {
+    use super::*;
+    use crate::{
+        matrix::dense_nalgebra_serial::NalgebraMat, DenseMatrix, MatrixCommon, NalgebraVec,
+    };
+
+    const MGRID: usize = 10;
+
+    /// The element operators and the whole-lane operators of [`head2d_problem`] are two copies of
+    /// the same maths, so check them against each other.
+    #[test]
+    fn test_elem_matches_lane() {
+        type M = NalgebraMat<f64>;
+        let (elem, _) = heat2d_elem_problem::<M, MGRID>(1);
+        let (lane, _) = head2d_problem::<M, MGRID>();
+
+        let y0 = elem.eqn.init().call(0.0);
+        y0.assert_eq_st(&lane.eqn.init().call(0.0), 1e-14);
+
+        elem.eqn
+            .rhs()
+            .call(&y0, 0.0)
+            .assert_eq_st(&lane.eqn.rhs().call(&y0, 0.0), 1e-9);
+
+        let v = NalgebraVec::from_element(MGRID * MGRID, 0.5, *elem.context());
+        elem.eqn
+            .rhs()
+            .jac_mul(&y0, 0.0, &v)
+            .assert_eq_st(&lane.eqn.rhs().jac_mul(&y0, 0.0, &v), 1e-9);
+
+        let mass_elem = elem.eqn.mass().unwrap().matrix(0.0);
+        let mass_lane = lane.eqn.mass().unwrap().matrix(0.0);
+        for i in 0..mass_elem.nrows() {
+            for j in 0..mass_elem.ncols() {
+                assert_eq!(
+                    mass_elem.get_index(i, j),
+                    mass_lane.get_index(i, j),
+                    "mass[{i}, {j}]"
+                );
+            }
+        }
+
+        elem.eqn
+            .out()
+            .unwrap()
+            .call(&y0, 0.0)
+            .assert_eq_st(&lane.eqn.out().unwrap().call(&y0, 0.0), 1e-12);
     }
 }

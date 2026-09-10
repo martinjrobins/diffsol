@@ -73,6 +73,10 @@ name = "lin_alg_ops"
 harness = false
 
 [[bench]]
+name = "ode_solvers_oxide"
+harness = false
+
+[[bench]]
 name = "pybamm_dfn"
 harness = false
 

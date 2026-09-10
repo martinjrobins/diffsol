@@ -76,7 +76,7 @@ impl Display for OdeSolverStatistics {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::rc::Rc;
 
     use self::problem::OdeSolverSolution;
