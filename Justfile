@@ -55,6 +55,20 @@ oxide-build *ARGS:
         cargo +{{oxide_nightly}} oxide build --arch {{oxide_arch}} -- \
         -p diffsol --features cuda-oxide {{ARGS}}
 
+# Run the cuda-oxide benchmarks.
+#
+# `cargo oxide` has no `bench` subcommand, so build the bench target and run it
+# with criterion's `--bench` flag.
+#
+# TODO: CARGO_PROFILE_DEV_DEBUG=0 is required as debug builds fail, need to investigate this
+oxide-bench *ARGS:
+    CARGO_PROFILE_DEV_DEBUG=0 CUDA_OXIDE_BACKEND="{{oxide_backend}}" \
+        RUSTFLAGS="{{oxide_flags}}" \
+        cargo +{{oxide_nightly}} oxide build --arch {{oxide_arch}} -- \
+        -p diffsol --features cuda-oxide --bench lin_alg_ops
+    "$(ls -t target/debug/build/diffsol/*/out/lin_alg_ops-* | grep -v '\.d$' | head -1)" \
+        --bench {{ARGS}}
+
 # Run the cuda-oxide tests under compute-sanitizer (memcheck or racecheck).
 #
 # `cargo oxide sanitize` only drives executable targets, so build the test

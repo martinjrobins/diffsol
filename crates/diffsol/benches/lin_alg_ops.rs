@@ -793,7 +793,7 @@ where
             let x = V::from_element(ns, 1.0, ctx.clone());
             let mut y = V::from_element(ns, 1.0, ctx.clone());
             b.iter(|| {
-                y.for_each_batch([&x], copy_lane());
+                y.for_each_batch([&x], copy_lane);
                 black_box(&y);
             });
         });
@@ -813,7 +813,7 @@ where
             let x = V::from_element(ns, 1.0, ctx.clone());
             let mut y = V::from_element(ns, 1.0, ctx.clone());
             b.iter(|| {
-                y.for_each_batch_host([&x], copy_lane());
+                y.for_each_batch_host([&x], copy_lane);
                 black_box(&y);
             });
         });
@@ -822,13 +822,9 @@ where
 }
 
 /// The lane body both `for_each_batch` benches run, so the two price the same work.
-fn copy_lane() -> impl Fn(&mut [f64], [&[f64]; 1], usize) + Copy + Send {
-    |y: &mut [f64], [x]: [&[f64]; 1], _lane: usize| {
-        let mut i = 0;
-        while i < y.len() {
-            y[i] = x[i];
-            i += 1;
-        }
+fn copy_lane(y: &mut [f64], [x]: [&[f64]; 1], _lane: usize) {
+    for (y, x) in y.iter_mut().zip(x.iter()) {
+        *y = *x;
     }
 }
 
