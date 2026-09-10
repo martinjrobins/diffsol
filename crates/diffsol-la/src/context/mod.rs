@@ -3,6 +3,9 @@ use crate::{error::LaError, DefaultDenseMatrix, Matrix, Vector};
 #[cfg(feature = "cuda")]
 pub mod cuda;
 
+#[cfg(feature = "cuda-oxide")]
+pub mod cuda_oxide;
+
 #[cfg(feature = "nalgebra")]
 pub mod nalgebra;
 

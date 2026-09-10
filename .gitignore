@@ -31,3 +31,7 @@ test_par
 AGENTS.md
 *report.md
 .codegraph/
+
+# cuda-oxide writes its intermediate device artifacts into the working directory
+/*.ll
+/*.ptx

@@ -11,6 +11,9 @@ use sparsity::{Dense, MatrixSparsity, MatrixSparsityRef};
 #[cfg(feature = "cuda")]
 pub mod cuda;
 
+#[cfg(feature = "cuda-oxide")]
+pub mod cuda_oxide;
+
 #[cfg(feature = "nalgebra")]
 pub mod dense_nalgebra_serial;
 
@@ -1835,7 +1838,6 @@ pub(crate) mod tests {
 
     // --- Batched DenseMatrix-specific tests ---
 
-    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_set_index_batch<M: DenseMatrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);

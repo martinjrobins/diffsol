@@ -14,6 +14,7 @@ default = ["nalgebra", "faer"]
 faer = ["diffsol-la/faer"]
 nalgebra = ["diffsol-la/nalgebra"]
 cuda = ["diffsol-la/cuda"]
+cuda-oxide = ["diffsol-la/cuda-oxide"]
 suitesparse = ["diffsol-la/suitesparse"]
 
 [dependencies]

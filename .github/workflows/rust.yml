@@ -269,6 +269,99 @@ jobs:
         files: cobertura.xml
         flags: gpu
 
+  cuda-oxide-compile:
+    name: "cuda-oxide Compile/Clippy - Ubuntu - nightly-2026-08-28"
+    runs-on: ubuntu-latest
+    #  Build-only for now until we get a cuda 13 enabled runner
+    timeout-minutes: 75
+    env:
+      OXIDE_NIGHTLY: nightly-2026-08-28
+      # Same rev as the cuda-device/cuda-host pin in crates/diffsol-la/Cargo.toml
+      # and as `oxide_rev` in the Justfile
+      OXIDE_REV: 26754ae52c26c097dc1c465a1e42c4c5d05a3d40
+      OXIDE_ARCH: sm_86
+      # Overrides the workflow-level RUSTFLAGS: -Znext-solver=coherence works
+      # around a rustc ICE on this nightly (rust-lang/rust#162323)
+      RUSTFLAGS: -Znext-solver=coherence
+    steps:
+    - uses: actions/checkout@v4
+    - name: Free Disk Space (Ubuntu)
+      uses: jlumbroso/free-disk-space@main
+      with:
+        android: true
+        dotnet: true
+        haskell: true
+        large-packages: false
+        docker-images: true
+        swap-storage: true
+    - name: Set up Rust
+      run: |
+        rustup toolchain install ${OXIDE_NIGHTLY} --no-self-update \
+          --component rust-src,rustc-dev,llvm-tools,clippy
+        rustup run ${OXIDE_NIGHTLY} rustc -Vv
+    - uses: Jimver/cuda-toolkit@v0.2.35
+      with:
+        cuda: "13.1.1"
+        method: network
+    - name: Cache cargo and cuda-oxide backend
+      id: oxide-cache
+      uses: actions/cache@v4
+      with:
+        # Cache the backend .so only. 
+        # Key carries the nightly (the .so links that toolchain's
+        # librustc_driver) and the cuda-oxide rev.
+        path: |
+          ${{ env.CARGO_HOME }}/bin
+          ${{ env.CARGO_HOME }}/registry
+          ${{ env.CARGO_HOME }}/git
+          ${{ env.CARGO_HOME }}/cuda-oxide-backend/librustc_codegen_cuda.so
+          target
+        key: diffsol-oxide-${{ runner.os }}-nightly-2026-08-28-26754ae
+    - name: Install cargo-oxide
+      if: steps.oxide-cache.outputs.cache-hit != 'true'
+      run: |
+        cargo +${OXIDE_NIGHTLY} install --locked \
+          --git https://github.com/NVlabs/cuda-oxide.git --rev ${OXIDE_REV} cargo-oxide
+    - name: Put cargo bin on PATH
+      run: echo "${CARGO_HOME}/bin" >> $GITHUB_PATH
+    # cargo-oxide normally locates the backend by resolving this project's
+    # cuda-device/cuda-host dependency with `cargo metadata --all-features`,
+    # which this workspace cannot satisfy. Build the backend from the pinned
+    # checkout instead and hand it over via CUDA_OXIDE_BACKEND.
+    - name: Check out cuda-oxide at the pinned rev
+      if: steps.oxide-cache.outputs.cache-hit != 'true'
+      uses: actions/checkout@v4
+      with:
+        repository: NVlabs/cuda-oxide
+        ref: ${{ env.OXIDE_REV }}
+        path: cuda-oxide-src
+    - name: Build the codegen backend
+      if: steps.oxide-cache.outputs.cache-hit != 'true'
+      working-directory: cuda-oxide-src
+      run: |
+        cargo +${OXIDE_NIGHTLY} oxide setup
+        so="$(find crates/rustc-codegen-cuda/target -name librustc_codegen_cuda.so | head -1)"
+        mkdir -p "${CARGO_HOME}/cuda-oxide-backend"
+        cp "${so}" "${CARGO_HOME}/cuda-oxide-backend/librustc_codegen_cuda.so"
+    - name: Point cuda-oxide at the backend
+      run: |
+        echo "CUDA_OXIDE_BACKEND=${CARGO_HOME}/cuda-oxide-backend/librustc_codegen_cuda.so" \
+          >> $GITHUB_ENV
+    - name: Environment check (non-fatal)
+      # Just FYI, exits 1 on this repo purely because there is no rust-toolchain.toml,
+      run: cargo +${OXIDE_NIGHTLY} oxide doctor || true
+    - name: Compile tests - cuda-oxide
+      run: |
+        sysroot="$(rustup run ${OXIDE_NIGHTLY} rustc --print sysroot)"
+        export LIBRARY_PATH="${sysroot}/lib:${LIBRARY_PATH:-}"
+        export LD_LIBRARY_PATH="${sysroot}/lib:${LD_LIBRARY_PATH:-}"
+        cargo +${OXIDE_NIGHTLY} oxide test --arch ${OXIDE_ARCH} -- \
+          --workspace --features cuda-oxide --no-run
+    - name: Clippy - cuda-oxide
+      run: |
+        cargo +${OXIDE_NIGHTLY} clippy --workspace --features cuda-oxide \
+          --all-targets -- -D warnings -A unused-imports
+
   deploy:
     if: ${{ github.ref == 'refs/heads/main' }}
     permissions:

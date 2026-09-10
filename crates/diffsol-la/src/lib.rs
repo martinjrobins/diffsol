@@ -14,6 +14,9 @@
 /// The [Context] trait defines the interface that must be implemented.
 pub mod context;
 
+#[cfg(feature = "cuda-oxide")]
+pub(crate) mod cuda_oxide_kernels;
+
 /// Error types and handling.
 ///
 /// This module defines the [LaError] enum and specialized error variants for
@@ -108,3 +111,12 @@ pub use matrix::cuda::CudaMat;
 pub use scalar::cuda::{CudaType, ScalarCuda};
 #[cfg(feature = "cuda")]
 pub use vector::cuda::{CudaIndex, CudaVec, CudaVecMut, CudaVecRef};
+
+#[cfg(feature = "cuda-oxide")]
+pub use context::cuda_oxide::OxideContext;
+#[cfg(feature = "cuda-oxide")]
+pub use linear_solver::cuda_oxide::lu::OxideLU;
+#[cfg(feature = "cuda-oxide")]
+pub use matrix::cuda_oxide::OxideMat;
+#[cfg(feature = "cuda-oxide")]
+pub use vector::cuda_oxide::{OxideIndex, OxideVec, OxideVecMut, OxideVecRef};

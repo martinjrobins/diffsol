@@ -14,6 +14,9 @@ default = ["nalgebra", "faer"]
 faer = []
 nalgebra = []
 cuda = ["dep:cudarc"]
+# CUDA backend with kernels written in Rust via NVlabs cuda-oxide. Requires
+# `cargo oxide` on the pinned nightly; see README.
+cuda-oxide = ["dep:cuda-device", "dep:cuda-host", "dep:cuda-core", "dep:cudarc"]
 suitesparse = ["dep:suitesparse_sys"]
 algebraic-ops = []
 
@@ -35,6 +38,11 @@ cudarc = { workspace = true, optional = true, default-features = false, features
   "runtime",
   "nvrtc",
 ] }
+
+# cuda-oxide: device/host glue is git-only, the host runtime is on crates.io.
+cuda-device = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "26754ae52c26c097dc1c465a1e42c4c5d05a3d40", optional = true }
+cuda-host = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "26754ae52c26c097dc1c465a1e42c4c5d05a3d40", optional = true }
+cuda-core = { version = "0.3.1", optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 faer = { workspace = true, features = ["rayon"] }

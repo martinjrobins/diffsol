@@ -1,0 +1,68 @@
+# Build and test the `cuda-oxide` GPU backend.
+#
+# Prerequisites (`cargo oxide doctor` checks them): 
+# the pinned nightly with `rust-src`/`rustc-dev`/`llvm-tools`,
+# CUDA Toolkit 13+, LLVM 21+ with NVPTX, driver 580+, an Ampere+ GPU.
+#
+# RUSTFLAGS works around a rustc ICE on this nightly:
+# https://github.com/rust-lang/rust/issues/162323
+#
+# `oxide_rev` is the commit crates/diffsol-la/Cargo.toml pins for
+# cuda-device/cuda-host, and the driver and the codegen backend must come from
+# it too, so kernels and the backend that lowers them agree. Install the driver
+# with:
+#
+#   cargo +nightly-2026-08-28 install --locked \
+#     --git https://github.com/NVlabs/cuda-oxide.git --rev <oxide_rev> cargo-oxide
+#
+# and build the backend with `just oxide-backend`. 
+#
+# cargo-oxide itself uses `cargo metadata --all-features` to find backend,
+# but diffsol has conflicting features so use CUDA_OXIDE_BACKEND directly 
+# as below.
+#
+# Bump oxide_nightly/oxide_rev here, in crates/diffsol-la/Cargo.toml and in
+# OXIDE_NIGHTLY/OXIDE_REV (.github/workflows/rust.yml) together.
+oxide_nightly := "nightly-2026-08-28"
+oxide_rev := "26754ae52c26c097dc1c465a1e42c4c5d05a3d40"
+oxide_flags := "-Znext-solver=coherence"
+oxide_arch := "sm_86"
+oxide_backend := justfile_directory() / "target/cuda-oxide-backend/librustc_codegen_cuda.so"
+
+# Build the codegen backend from the pinned cuda-oxide rev. Needed once per
+# rev/nightly: the .so links that toolchain's librustc_driver.
+oxide-backend:
+    rm -rf target/cuda-oxide-src
+    git clone --filter=blob:none --no-checkout \
+        https://github.com/NVlabs/cuda-oxide.git target/cuda-oxide-src
+    git -C target/cuda-oxide-src checkout {{oxide_rev}}
+    cd target/cuda-oxide-src && cargo +{{oxide_nightly}} oxide setup
+    mkdir -p target/cuda-oxide-backend
+    cp "$(find target/cuda-oxide-src/crates/rustc-codegen-cuda/target \
+        -name librustc_codegen_cuda.so | head -1)" {{oxide_backend}}
+
+# Check the cuda-oxide toolchain is installed and usable.
+oxide-doctor:
+    CUDA_OXIDE_BACKEND="{{oxide_backend}}" cargo +{{oxide_nightly}} oxide doctor
+
+oxide-test *ARGS:
+    CUDA_OXIDE_BACKEND="{{oxide_backend}}" RUSTFLAGS="{{oxide_flags}}" \
+        cargo +{{oxide_nightly}} oxide test --arch {{oxide_arch}} -- \
+        -p diffsol-la --features cuda-oxide {{ARGS}}
+
+oxide-build *ARGS:
+    CUDA_OXIDE_BACKEND="{{oxide_backend}}" RUSTFLAGS="{{oxide_flags}}" \
+        cargo +{{oxide_nightly}} oxide build --arch {{oxide_arch}} -- \
+        -p diffsol --features cuda-oxide {{ARGS}}
+
+# Run the cuda-oxide tests under compute-sanitizer (memcheck or racecheck).
+#
+# `cargo oxide sanitize` only drives executable targets, so build the test
+# binary and hand that to compute-sanitizer directly.
+oxide-sanitize tool="memcheck" *ARGS:
+    CUDA_OXIDE_BACKEND="{{oxide_backend}}" RUSTFLAGS="{{oxide_flags}}" \
+        cargo +{{oxide_nightly}} oxide test --arch {{oxide_arch}} -- \
+        -p diffsol-la --features cuda-oxide --no-run
+    compute-sanitizer --tool {{tool}} --error-exitcode 1 \
+        "$(ls -t target/debug/build/diffsol-la/*/out/diffsol_la-* | grep -v '\.d$' | head -1)" \
+        --test-threads=1 {{ARGS}}
