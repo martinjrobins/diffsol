@@ -170,11 +170,8 @@ impl OxideMat {
 // ============================================================
 // cuBLAS
 //
-// cuda-oxide does not wrap cuBLAS, so `gemv` goes through cudarc's raw `sys`
-// bindings. Only the bindings are used: the buffers are cuda-oxide's, handed
-// over as `CUdeviceptr`s, which is valid because `cuda_core::CudaContext` and
-// cudarc both retain the *primary* context for a device ordinal, so there is
-// one `CUcontext` and the pointers mean the same thing on both sides.
+// `gemv` goes through cudarc's raw `sys` bindings (cuda-oxide does
+// not wrap these).
 // ============================================================
 
 /// A cuBLAS handle owned by one thread, for one device ordinal.

@@ -1444,7 +1444,7 @@ impl Vector for OxideVec {
     /// The closure is host code, so every operand is staged through host
     /// memory.
     ///
-    /// cuda-oxide can compile a host closure into a generic kernel, which would
+    /// TODO: cuda-oxide can compile a host closure into a generic kernel, which would
     /// let this run on the device; not attempted yet.
     fn for_each_batch_mut<const M: usize, const N: usize>(
         mut mut_args: [&mut Self; M],
@@ -1751,7 +1751,8 @@ mod tests {
             .iter()
             .zip(got.iter().zip(expected.iter()))
         {
-            // the device sums in tree order, the host sequentially
+            // the device sums per warp then across warps, the host
+            // sequentially
             assert!(
                 ((got - want) / want).abs() < 1e-10,
                 "{name} at nstates={nstates} nbatch={nbatch}: {got} != {want}"
@@ -1759,11 +1760,11 @@ mod tests {
         }
     }
 
-    /// [`SMALL_NSTATES`] is 112, so 112 takes the several-lanes-per-block
-    /// kernels and 113 the one-block-per-lane ones.
+    /// [`SMALL_NSTATES`] is 85, so 85 takes the several-lanes-per-block
+    /// kernels and 86 the one-block-per-lane ones.
     #[test]
     fn reductions_across_the_nstates_threshold() {
-        for nstates in [1, 3, 64, 112, 113, 300] {
+        for nstates in [1, 3, 64, 85, 86, 300] {
             for nbatch in [1, 2, 7] {
                 check_reductions(nstates, nbatch);
             }
@@ -1791,7 +1792,7 @@ mod tests {
     /// Every shape is 6.5M elements on the large path, so the bytes moved are
     /// identical; what changes is how many lane iterations the grid runs, and so
     /// how many times a thread issues one load, stalls on it, and waits out the
-    /// block tree's barriers before it may issue the next. Bandwidth-bound
+    /// block reduction's barriers before it may issue the next. Bandwidth-bound
     /// would be flat; loop-bound falls as lanes get longer and fewer.
     ///
     /// Run with
@@ -1833,7 +1834,7 @@ mod tests {
     #[ignore = "profiling only"]
     fn ncu_shapes() {
         const NBATCH: usize = 100_000;
-        for nstates in [64usize, 65] {
+        for nstates in [85usize, 86] {
             let ctx = OxideContext::default().with_nbatch(NBATCH);
             let x = OxideVec::from_element(nstates, 2.0, ctx.clone());
             println!("nstates={nstates} norm={}", x.norm(2));
@@ -1857,7 +1858,7 @@ mod tests {
         use std::time::Instant;
         const REPS: u32 = 200;
         const NBATCH: usize = 10_000;
-        for nstates in [64usize, 96, 112, 128, 160, 200] {
+        for nstates in [64usize, 80, 85, 86, 128, 200] {
             let ctx = OxideContext::default().with_nbatch(NBATCH);
             let x = OxideVec::from_element(nstates, 2.0, ctx.clone());
             for _ in 0..20 {

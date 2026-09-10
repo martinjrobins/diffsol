@@ -1,6 +1,6 @@
 //! GPU kernels for the `cuda-oxide` backend.
 use cuda_device::atomic::{AtomicOrdering, DeviceAtomicU64};
-use cuda_device::{cuda_module, kernel, launch_bounds, launch_contract, thread};
+use cuda_device::{cuda_module, kernel, launch_bounds, launch_contract, thread, warp};
 use cuda_device::{DisjointSlice, Runtime2DIndex, SharedArray};
 
 use crate::matrix::MAX_SMALL_COLS;
@@ -8,13 +8,23 @@ use crate::matrix::MAX_SMALL_COLS;
 const MAX_SMALL_COLS_SQ: usize = MAX_SMALL_COLS * MAX_SMALL_COLS;
 pub(crate) const BLOCK_SIZE: u32 = 256;
 
+/// Warps in a block. Every kernel's launch contract pins the block to
+/// `(BLOCK_SIZE, 1, 1)`, so a block is always this many *whole* warps -- which
+/// is what lets the block reductions shuffle with the full-warp mask.
+const WARPS_PER_BLOCK: usize = BLOCK_SIZE as usize / 32;
+
 /// Above this `nstates`, the reductions switch from several-lanes-per-block to
 /// one-block-per-lane.
 ///
 /// the crossing moves with the block shape and with how many SMs the
 /// device has. `timing_threshold` in `crate::vector::cuda_oxide`'s tests
 /// re-derives it; this is the only number to change.
-pub(crate) const SMALL_NSTATES: u32 = 112;
+///
+/// 85 is where `cols_per_block = BLOCK_SIZE / nstates` falls from 3 to 2, and
+/// measurement lands on the same step: at `nbatch = 10_000` on an A40 the small
+/// kernels take 61us at 85 against the large path's 80us, and 85us at 86
+/// against its 80us.
+pub(crate) const SMALL_NSTATES: u32 = 85;
 
 /// Batch lane and element for flat work item `i`.
 /// Note: The host guarantees `nstates > 0`.
@@ -638,21 +648,15 @@ pub mod kernels {
     // a batch lane either fits inside a block or it does not. The host picks by
     // `nstates` against `SMALL_NSTATES`.
     //
-    // *Small* `nstates`: threads in block assigned like column major indexing.
+    // *Small* `nstates`: threads in block assigned like column major indexing
+    // where nstates are the rows and nmbatches are the cols
     // A block owns `cols_per_block = BLOCK_SIZE / nstates`
-    // whole lanes. Thread `t` loads element `t % nstates` of lane
-    // `t / nstates` -- a coalesced read -- into shared memory, and after one
-    // barrier, threads `c < cols_per_block` sum lane `c`'s slots in index order.
-    // The `block_max_into` does the cross-lane maximum using a tree reduction
-    // TODO: could we speed up the reductions using warp shuffles?
+    // whole lanes.
     //
     // *Large* `nstates` (single block): one block per lane, block-striding over the lane's
-    // states and reducing using a tree reduction in shared memory,
-    // then the block jumps `gridDim.x / blocks_per_lane` lanes along and
-    // repeats. Grid is sized by the device rather than by `nbatch`.
-    //
-    // TODO: performance bad for nstates just above `SMALL_NSTATES`, could be
-    // the tree reduction
+    // states into a register and reducing that with [`block_sum`]'s warp
+    // shuffles, then the block jumps `gridDim.x / blocks_per_lane` lanes along
+    // and repeats. Grid is sized by the device rather than by `nbatch`.
     //
     // *Large* `nstates (multi block): if too few lanes to fill the device with
     // single block, then `blocks_per_lane > 1` and several blocks share a lane,
@@ -813,20 +817,9 @@ pub mod kernels {
             let mut local = 0.0f64;
             let mut i = lane_start(blk);
             while i < nstates as usize {
-                let ratio = error_ratio(
-                    y,
-                    y0,
-                    atol,
-                    rtol,
-                    b,
-                    nbatch,
-                    y_stride,
-                    y0_stride,
-                    y0_nbatch,
-                    atol_stride,
-                    atol_nbatch,
-                    i,
-                );
+                let denom = y0[broadcast_src(b, y0_stride, y0_nbatch, nbatch, i)].abs() * rtol
+                    + atol[broadcast_src(b, atol_stride, atol_nbatch, nbatch, i)];
+                let ratio = y[b * y_stride as usize + i] / denom;
                 local += ratio * ratio;
                 i += step;
             }
@@ -867,20 +860,9 @@ pub mod kernels {
         let (first, nstates_u, cols) = lane_block(nstates, cols_per_block);
         let term = match lane_element(first, nstates_u, cols, nbatch, tid) {
             Some((b, elem)) => {
-                let ratio = error_ratio(
-                    y,
-                    y0,
-                    atol,
-                    rtol,
-                    b,
-                    nbatch,
-                    y_stride,
-                    y0_stride,
-                    y0_nbatch,
-                    atol_stride,
-                    atol_nbatch,
-                    elem,
-                );
+                let denom = y0[broadcast_src(b, y0_stride, y0_nbatch, nbatch, elem)].abs() * rtol
+                    + atol[broadcast_src(b, atol_stride, atol_nbatch, nbatch, elem)];
+                let ratio = y[b * y_stride as usize + elem] / denom;
                 ratio * ratio
             }
             None => 0.0,
@@ -1152,11 +1134,8 @@ pub mod kernels {
     /// over `nc` columns of `mat`.
     ///
     /// This is a kernel rather than a `cublasDgemv` call because `w` comes from
-    /// a *host* slice: cuBLAS needs device pointers for its vector arguments,
-    /// so serving `w` through cuBLAS would mean a host-to-device copy on every
-    /// Runge-Kutta stage. Passing the coefficients by value in the launch
-    /// avoids both the copy and the allocation. The column range's start is
-    /// folded into the `mat` window by the host.
+    /// a small fixed *host* slice. The `mat` window starts at the beginning of
+    /// the column range.
     #[kernel]
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1), requires = (y.len() == n))]
@@ -1201,13 +1180,12 @@ pub mod kernels {
         }
     }
 
-    /// `mat[b, 0..ncols] = mat[b, 0..ncols] * rhs` in place, `rhs` column-major.
+    ///  in-place gemm `C = C * B` where B is small.
+    /// `mat[b, 0..ncols] = mat[b, 0..ncols] * rhs[0..ncols, 0..ncols]`
+    /// in place where ncols is small, `rhs` column-major.
     ///
     /// Each thread owns one `(row, batch)` element, reads that row's `ncols`
-    /// values into registers and writes the results back, so the update needs
-    /// no scratch matrix. BLAS has no in-place `C = C * B`, which is why this is
-    /// a kernel: as a gemm it would cost a second full-size device matrix plus
-    /// a swap, purely to avoid aliasing.
+    /// values into registers and writes the results back
     #[kernel]
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1))]
@@ -1262,9 +1240,8 @@ pub mod kernels {
     /// for i in (order+1 .. 0].rev(): diff[:, i] += diff[:, i+1]
     /// ```
     ///
-    /// (each addition uses the just-updated value of column `i+1`). The
-    /// recurrence is sequential per `(row, batch)` element but independent
-    /// across elements, so each thread runs the short carry loop itself.
+    /// Each thread owns a `(row, batch)` element and loops over the
+    /// columns of the difference table doing the loop described above
     #[kernel]
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1))]
@@ -1309,29 +1286,6 @@ pub mod kernels {
                 i -= 1;
             }
         }
-    }
-
-    /// `y / (|y0| * rtol + atol)` at element `i` of lane `b`: the error norm's
-    /// term, shared by both shapes of `vec_squared_norm`.
-    #[inline(always)]
-    #[allow(clippy::too_many_arguments)]
-    fn error_ratio(
-        y: &[f64],
-        y0: &[f64],
-        atol: &[f64],
-        rtol: f64,
-        b: usize,
-        nbatch: u32,
-        y_stride: u32,
-        y0_stride: u32,
-        y0_nbatch: u32,
-        atol_stride: u32,
-        atol_nbatch: u32,
-        i: usize,
-    ) -> f64 {
-        let denom = y0[broadcast_src(b, y0_stride, y0_nbatch, nbatch, i)].abs() * rtol
-            + atol[broadcast_src(b, atol_stride, atol_nbatch, nbatch, i)];
-        y[b * y_stride as usize + i] / denom
     }
 
     /// Folds a non-negative `value` into `out[0]`, the reductions' one output.
@@ -1451,42 +1405,44 @@ pub mod kernels {
     }
 
     /// Sums `local` across the block, returning the total in thread 0 and
-    /// `None` in every other thread, so a caller cannot use a value it does not
-    /// own.
+    /// `None` in every other thread.
     ///
-    /// Safe to call repeatedly in a lane loop: the only shared access left
-    /// after the last barrier is thread 0's read of slot 0, which is also the
-    /// only thread that writes that slot on the next iteration.
+    /// Each warp folds its 32 values, publishes one total, and warp
+    /// 0 folds those the same way.
+    ///
+    /// Trailing barrier means that this is safe to call repeatedly in a lane loop
     fn block_sum(local: f64) -> Option<f64> {
-        static mut SDATA: SharedArray<f64, { BLOCK_SIZE as usize }> = SharedArray::UNINIT;
+        static mut SWARP: SharedArray<f64, WARPS_PER_BLOCK> = SharedArray::UNINIT;
 
-        let tid = thread::threadIdx_x() as usize;
-        // SAFETY: each thread writes only its own slot, and the barrier below
-        // separates it from any other thread's read.
-        unsafe {
-            SDATA[tid] = local;
+        let lane = warp::lane_id() as usize;
+        let w = warp::warp_id() as usize;
+
+        let warp_total = warp::reduce_sum_f64(local);
+        if lane == 0 {
+            // SAFETY: one slot per warp, written by its lane 0 only, and the
+            // barrier below separates it from warp 0's read.
+            unsafe {
+                SWARP[w] = warp_total;
+            }
         }
         thread::sync_threads();
 
-        let mut s = BLOCK_SIZE as usize / 2;
-        while s > 0 {
-            if tid < s {
-                // SAFETY: see `vec_root_finding` -- one owner per slot per
-                // round, barriers between rounds.
-                unsafe {
-                    SDATA[tid] += SDATA[tid + s];
-                }
+        let mut total = None;
+        if w == 0 {
+            // SAFETY: read-only after the barrier, and `lane` is in bounds
+            // under the guard. The 32 - `WARPS_PER_BLOCK` lanes with no slot
+            // still join the shuffle, with the identity.
+            let slot = if lane < WARPS_PER_BLOCK {
+                unsafe { SWARP[lane] }
+            } else {
+                0.0
+            };
+            let sum = warp::reduce_sum_f64(slot);
+            if lane == 0 {
+                total = Some(sum);
             }
-            thread::sync_threads();
-            s /= 2;
         }
-
-        if tid == 0 {
-            // SAFETY: slot 0 is written only by this thread, and the barrier
-            // above closed the last round that wrote it.
-            Some(unsafe { SDATA[0] })
-        } else {
-            None
-        }
+        thread::sync_threads();
+        total
     }
 }
