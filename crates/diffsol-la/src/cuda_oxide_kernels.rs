@@ -1502,4 +1502,43 @@ pub mod kernels {
         });
         f(o, a, b);
     }
+
+    /// Run `f` once per element of every batch lane: `f` gets element `elem` of each operand in
+    /// `outs` and the whole lane of each operand in `ins`.
+    ///
+    /// One thread per `(lane, element)` pair, so an opaque `f` that writes only its own element
+    /// still fills the device. The host only launches this when every operand in `outs` has the
+    /// full lane count and the same `nstates`.
+    #[kernel]
+    #[launch_bounds(256)]
+    #[launch_contract(domain = 1, block = (256, 1, 1))]
+    pub fn vec_for_each_elem<const M: usize, const N: usize, F>(
+        f: F,
+        outs: LaneArgsMut<M>,
+        ins: LaneArgs<N>,
+        n: u32,
+        nstates: u32,
+        nbatch: u32,
+    ) where
+        F: Fn([&mut f64; M], [&[f64]; N], usize, usize) + Copy,
+    {
+        let i = thread::index_1d().get();
+        if i >= n as usize {
+            return;
+        }
+        let (b, elem) = split(i, nstates);
+        // SAFETY: each pointer is read out of a `Copy` byval struct, so the `M` references
+        // borrow no shared owner, and element `elem` of lane `b` -- with every operand holding
+        // the full lane count -- is touched by this thread alone.
+        let o =
+            core::array::from_fn(|k| unsafe { &mut *outs.ptr[k].add(b * nstates as usize + elem) });
+        // SAFETY: as above; a read operand with a smaller lane count is broadcast, so several
+        // threads may read the same lane.
+        let a = core::array::from_fn(|k| unsafe {
+            let len = ins.nstates[k] as usize;
+            let base = broadcast_src(b, ins.nstates[k], ins.nbatch[k], nbatch, 0);
+            core::slice::from_raw_parts(ins.ptr[k].add(base), len)
+        });
+        f(o, a, b, elem);
+    }
 }

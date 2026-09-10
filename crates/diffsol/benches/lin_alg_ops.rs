@@ -1,17 +1,25 @@
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
+use diffsol::{
+    Context, DenseMatrix, FaerMat, FaerSparseMat, FaerVec, Matrix, MatrixCommon, NalgebraMat,
+    NalgebraVec, Scale, Vector,
+};
 #[cfg(feature = "cuda")]
 use diffsol::{CudaMat, CudaVec};
 #[cfg(feature = "cuda-oxide")]
 use diffsol::{OxideMat, OxideVec};
-use diffsol::{
-    DenseMatrix, FaerMat, FaerSparseMat, FaerVec, Matrix, MatrixCommon, NalgebraMat, NalgebraVec,
-    Scale, Vector,
-};
 use std::hint::black_box;
 
 const VSIZES: &[usize] = &[2, 10, 100, 500];
 const MSIZES: &[usize] = &[10, 100, 500];
 const ONE_SIZE: &[usize] = &[50];
+
+// Every `b.iter` body ends with `ctx.synchronize()`: the device backends only enqueue their
+// work, so without it a bench prices the launch and not the kernel. It compiles away on the CPU
+// backends, whose `Context::synchronize` is an empty default.
+
+/// Sizes the `for_each_*` benches run: a one-thread-per-lane launch only shows its cost at a
+/// lane long enough to be worth splitting.
+const LANE_SIZES: &[usize] = &[50, 10_000];
 
 // ─────────────────────────────────────────────────────────
 // Helper: binary mutating op on two owned vectors
@@ -30,6 +38,7 @@ where
             b.iter(|| {
                 op(&mut y, &x);
                 black_box(&y);
+                ctx.synchronize();
             });
         });
     }
@@ -68,6 +77,7 @@ where
             b.iter(|| {
                 op(&mut v);
                 black_box(&v);
+                ctx.synchronize();
             });
         });
     }
@@ -103,7 +113,11 @@ fn bench_vector_construct<V>(
     for &ns in sizes {
         group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
             let ctx = V::C::default();
-            b.iter(|| op(ns, ctx.clone()));
+            b.iter(|| {
+                let v = op(ns, ctx.clone());
+                ctx.synchronize();
+                v
+            });
         });
     }
     group.finish();
@@ -152,6 +166,7 @@ fn bench_matrix_op<M>(
             b.iter(|| {
                 op(&mat, &x, &mut y);
                 black_box(&y);
+                ctx.synchronize();
             });
         });
     }
@@ -227,6 +242,7 @@ where
             b.iter(|| {
                 y.axpy_v(1.0, &x_view, 0.5);
                 black_box(&y);
+                ctx.synchronize();
             });
         });
     }
@@ -248,6 +264,7 @@ where
             b.iter(|| {
                 y.copy_from_view(&x_view);
                 black_box(&y);
+                ctx.synchronize();
             });
         });
     }
@@ -268,6 +285,7 @@ where
             let x = V::from_element(ns, 2.0, ctx.clone());
             b.iter(|| {
                 black_box(&y + &x);
+                ctx.synchronize();
             });
         });
     }
@@ -288,6 +306,7 @@ where
             let x = V::from_element(ns, 2.0, ctx.clone());
             b.iter(|| {
                 black_box(&y - &x);
+                ctx.synchronize();
             });
         });
     }
@@ -307,9 +326,15 @@ where
             let y = V::from_element(ns, 1.0, ctx.clone());
             let x = V::from_element(ns, 2.0, ctx.clone());
             b.iter_batched(
-                || y.clone(),
+                || {
+                    let y = y.clone();
+                    // the clone enqueues too, so let it land before the timed body starts
+                    ctx.synchronize();
+                    y
+                },
                 |y| {
                     black_box(y + &x);
+                    ctx.synchronize();
                 },
                 BatchSize::SmallInput,
             );
@@ -331,9 +356,15 @@ where
             let y = V::from_element(ns, 1.0, ctx.clone());
             let x = V::from_element(ns, 2.0, ctx.clone());
             b.iter_batched(
-                || y.clone(),
+                || {
+                    let y = y.clone();
+                    // the clone enqueues too, so let it land before the timed body starts
+                    ctx.synchronize();
+                    y
+                },
                 |y| {
                     black_box(y - &x);
+                    ctx.synchronize();
                 },
                 BatchSize::SmallInput,
             );
@@ -364,9 +395,10 @@ where
     for &ns in MSIZES {
         group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
             let ctx = M::C::default();
-            let mat = M::zeros(ns, ns + 1, ctx);
+            let mat = M::zeros(ns, ns + 1, ctx.clone());
             b.iter(|| {
                 black_box(mat.column(0));
+                ctx.synchronize();
             });
         });
     }
@@ -393,6 +425,7 @@ where
             b.iter(|| {
                 mat.gemv_cols(0, weights.len(), 1.0, &weights, 0.0, &mut v);
                 black_box(&v);
+                ctx.synchronize();
             });
         });
     }
@@ -435,6 +468,7 @@ fn bench_stage_accumulate<M: Matrix<T = f64> + DenseMatrix + 'static>(
                 y.copy_from(&y0);
                 mat.gemv(1.0, &w_full, 1.0, &mut y);
                 black_box(&y);
+                ctx.synchronize();
             });
         });
         group.bench_with_input(BenchmarkId::new("gemv_cols", ns), &ns, |b, _| {
@@ -442,6 +476,7 @@ fn bench_stage_accumulate<M: Matrix<T = f64> + DenseMatrix + 'static>(
                 y.copy_from(&y0);
                 mat.gemv_cols(0, k, 1.0, &weights, 1.0, &mut y);
                 black_box(&y);
+                ctx.synchronize();
             });
         });
     }
@@ -474,11 +509,12 @@ where
         for &ns in MUL_COLS_SIZES {
             group.bench_with_input(BenchmarkId::new(format!("k{k}"), ns), &ns, |b, &ns| {
                 let ctx = M::C::default();
-                let mut mat = M::zeros(ns, k + 3, ctx);
+                let mut mat = M::zeros(ns, k + 3, ctx.clone());
                 fill_dense(&mut mat, ns);
                 b.iter(|| {
                     mat.mul_cols_by(k, &rhs);
                     black_box(&mat);
+                    ctx.synchronize();
                 });
             });
         }
@@ -519,6 +555,7 @@ where
             let y = V::from_element(ns, 1.0, ctx.clone());
             b.iter(|| {
                 black_box(&y * Scale(2.0));
+                ctx.synchronize();
             });
         });
     }
@@ -537,6 +574,7 @@ where
             let y = V::from_element(ns, 1.0, ctx.clone());
             b.iter(|| {
                 black_box(y.clone() / Scale(2.0));
+                ctx.synchronize();
             });
         });
     }
@@ -582,6 +620,7 @@ where
             b.iter(|| {
                 mat.set_column(0, &v);
                 black_box(&mat);
+                ctx.synchronize();
             });
         });
     }
@@ -604,6 +643,7 @@ where
             b.iter(|| {
                 mat.scale_add_and_assign(&x, 2.0, &y);
                 black_box(&mat);
+                ctx.synchronize();
             });
         });
     }
@@ -625,6 +665,7 @@ where
             b.iter(|| {
                 mat.copy_from(&other);
                 black_box(&mat);
+                ctx.synchronize();
             });
         });
     }
@@ -655,6 +696,7 @@ where
             let v = V::from_element(ns, 1.0, ctx.clone());
             b.iter(|| {
                 black_box(v.get_index(0));
+                ctx.synchronize();
             });
         });
     }
@@ -715,6 +757,7 @@ where
             let v = V::from_element(ns, 1.0, ctx.clone());
             b.iter(|| {
                 black_box(v.clone());
+                ctx.synchronize();
             });
         });
     }
@@ -733,6 +776,7 @@ where
             let v = V::from_element(ns, 1.0, ctx.clone());
             b.iter(|| {
                 black_box(v.as_view());
+                ctx.synchronize();
             });
         });
     }
@@ -751,6 +795,7 @@ where
             let mut v = V::from_element(ns, 1.0, ctx.clone());
             b.iter(|| {
                 black_box(v.as_view_mut());
+                ctx.synchronize();
             });
         });
     }
@@ -787,13 +832,14 @@ where
     V::C: Default + Clone,
 {
     let mut group = c.benchmark_group(label);
-    for &ns in ONE_SIZE {
+    for &ns in LANE_SIZES {
         group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
             let ctx = V::C::default();
             let x = V::from_element(ns, 1.0, ctx.clone());
             let mut y = V::from_element(ns, 1.0, ctx.clone());
             b.iter(|| {
                 y.for_each_batch([&x], copy_lane);
+                ctx.synchronize();
                 black_box(&y);
             });
         });
@@ -807,13 +853,35 @@ where
     V::C: Default + Clone,
 {
     let mut group = c.benchmark_group(label);
-    for &ns in ONE_SIZE {
+    for &ns in LANE_SIZES {
         group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
             let ctx = V::C::default();
             let x = V::from_element(ns, 1.0, ctx.clone());
             let mut y = V::from_element(ns, 1.0, ctx.clone());
             b.iter(|| {
                 y.for_each_batch_host([&x], copy_lane);
+                ctx.synchronize();
+                black_box(&y);
+            });
+        });
+    }
+    group.finish();
+}
+
+/// 🟢 for_each_elem — the same copy, a thread per element on the device where the backend has one
+fn bench_for_each_elem<V: Vector<T = f64> + 'static>(c: &mut Criterion, label: &str)
+where
+    V::C: Default + Clone,
+{
+    let mut group = c.benchmark_group(label);
+    for &ns in LANE_SIZES {
+        group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
+            let ctx = V::C::default();
+            let x = V::from_element(ns, 1.0, ctx.clone());
+            let mut y = V::from_element(ns, 1.0, ctx.clone());
+            b.iter(|| {
+                y.for_each_elem([&x], copy_elem);
+                ctx.synchronize();
                 black_box(&y);
             });
         });
@@ -828,6 +896,11 @@ fn copy_lane(y: &mut [f64], [x]: [&[f64]; 1], _lane: usize) {
     }
 }
 
+/// The element body of the same copy, so `for_each_elem` prices the work `copy_lane` does.
+fn copy_elem(y: &mut f64, [x]: [&[f64]; 1], _lane: usize, i: usize) {
+    *y = x[i];
+}
+
 /// 🟢 from_diagonal — Diagonal matrix creation
 fn bench_from_diagonal<M: Matrix<T = f64> + 'static>(c: &mut Criterion, label: &str)
 where
@@ -839,7 +912,11 @@ where
         group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
             let ctx = M::C::default();
             let v = M::V::from_element(ns, 2.0, ctx.clone());
-            b.iter(|| M::from_diagonal(&v));
+            b.iter(|| {
+                let m = M::from_diagonal(&v);
+                ctx.synchronize();
+                m
+            });
         });
     }
     group.finish();
@@ -861,6 +938,7 @@ where
             b.iter(|| {
                 mat.add_column_to_vector(0, &mut v);
                 black_box(&v);
+                ctx.synchronize();
             });
         });
     }
@@ -904,6 +982,7 @@ macro_rules! bench_vector_backend {
         bench_clone_as_vec::<$V>($c, concat!("clone_as_vec/", $label));
         bench_for_each_batch::<$V>($c, concat!("for_each_batch/", $label));
         bench_for_each_batch_host::<$V>($c, concat!("for_each_batch_host/", $label));
+        bench_for_each_elem::<$V>($c, concat!("for_each_elem/", $label));
     };
 }
 

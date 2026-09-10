@@ -335,6 +335,56 @@ pub trait Vector:
         Self::for_each_batch_mut([self], args, move |[y], ins, lane| f(y, ins, lane));
     }
 
+    /// Run `f` once per element of every batch lane **on the device where the backend has one**,
+    /// falling back to a host loop otherwise.
+    ///
+    /// The element-parallel counterpart of [`Self::for_each_batch_mut`]: `f` is handed one
+    /// element of each output rather than the whole lane, so a backend with a device can run
+    /// every `(lane, element)` pair concurrently.
+    ///
+    /// The inputs are still full lane slices, so reads may go anywhere in the lane.
+    ///
+    /// `f` must be device-compilable Rust — arithmetic and control flow over the slices, no host
+    /// function pointers, no allocation, no `std`.
+    fn for_each_elem_mut<const M: usize, const N: usize>(
+        mut_args: [&mut Self; M],
+        args: [&Self; N],
+        f: impl Fn([&mut Self::T; M], [&[Self::T]; N], usize, usize) + Copy + Send,
+    ) {
+        Self::for_each_batch_mut_host(mut_args, args, |mut outs, ins, lane| {
+            let n = outs[0].len();
+            assert!(
+                outs.iter().all(|o| o.len() == n),
+                "for_each_elem_mut needs every mutable operand to have the same length"
+            );
+            for i in 0..n {
+                f(outs.each_mut().map(|o| &mut o[i]), ins, lane, i);
+            }
+        });
+    }
+
+    /// Run `f` once per element of every batch lane of `self` **on the device where the backend
+    /// has one**.
+    ///
+    /// The single-output case of [`Self::for_each_elem_mut`], and subject to the same
+    /// device-compilable requirement on `f`.
+    ///
+    /// ```ignore
+    /// // y_i = x_i p_0 + x_{i+1}, wrapping, for every batch of y
+    /// y.for_each_elem([x, p], |y, [x, p], _lane, i| {
+    ///     *y = x[i] * p[0] + x[(i + 1) % x.len()];
+    /// });
+    /// ```
+    fn for_each_elem<const N: usize>(
+        &mut self,
+        args: [&Self; N],
+        f: impl Fn(&mut Self::T, [&[Self::T]; N], usize, usize) + Copy + Send,
+    ) {
+        Self::for_each_elem_mut([self], args, move |[y], ins, lane, elem| {
+            f(y, ins, lane, elem)
+        });
+    }
+
     /// Copy all values from `other` into this vector.
     fn copy_from(&mut self, other: &Self);
 
@@ -529,6 +579,10 @@ macro_rules! generate_vector_tests_nonbatched {
             #[test]
             fn [<test_for_each_batch_mut_ $suffix>]() {
                 $crate::vector::tests::test_for_each_batch_mut::<$V>();
+            }
+            #[test]
+            fn [<test_for_each_elem_mut_ $suffix>]() {
+                $crate::vector::tests::test_for_each_elem_mut::<$V>();
             }
             #[test]
             fn [<test_set_index_ $suffix>]() {
@@ -738,6 +792,10 @@ macro_rules! generate_vector_tests_batched {
             #[test]
             fn [<test_batched_for_each_batch_mut_ $suffix>]() {
                 $crate::vector::tests::test_batched_for_each_batch_mut::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_for_each_elem_mut_ $suffix>]() {
+                $crate::vector::tests::test_batched_for_each_elem_mut::<$V>($ctx2);
             }
             #[test]
             #[should_panic(expected = "for_each_batch")]
@@ -1701,6 +1759,48 @@ pub(crate) mod tests {
         assert_eq!(scratch.clone_as_vec(), fv::<V>(&[2.0, 2.0]));
         assert_eq!(y_host.clone_as_vec(), y.clone_as_vec());
         assert_eq!(scratch_host.clone_as_vec(), scratch.clone_as_vec());
+    }
+
+    #[cfg_attr(not(any(feature = "cuda", feature = "cuda-oxide")), allow(dead_code))]
+    /// `for_each_elem_mut` writes element `i` of every mutable operand, and reads anywhere in the
+    /// input lane.
+    pub fn test_for_each_elem_mut<V: Vector>() {
+        let x = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0]), V::C::default());
+        let mut y = V::zeros(3, V::C::default());
+        let mut z = V::zeros(3, V::C::default());
+        let mut y_host = V::zeros(3, V::C::default());
+        let mut z_host = V::zeros(3, V::C::default());
+
+        let wrap = |[y, z]: [&mut V::T; 2], [x]: [&[V::T]; 1], _lane: usize, i: usize| {
+            *y = x[i] + x[(i + 1) % x.len()];
+            *z = *y * f::<V>(2.0);
+        };
+        V::for_each_elem_mut([&mut y, &mut z], [&x], wrap);
+        V::for_each_batch_mut_host([&mut y_host, &mut z_host], [&x], |[y, z], [x], lane| {
+            for i in 0..x.len() {
+                wrap([&mut y[i], &mut z[i]], [x], lane, i);
+            }
+        });
+        assert_eq!(y.clone_as_vec(), fv::<V>(&[3.0, 5.0, 4.0]));
+        assert_eq!(z.clone_as_vec(), fv::<V>(&[6.0, 10.0, 8.0]));
+        assert_eq!(y_host.clone_as_vec(), y.clone_as_vec());
+        assert_eq!(z_host.clone_as_vec(), z.clone_as_vec());
+    }
+
+    /// `for_each_elem_mut` broadcasts an `nbatch == 1` input over the output's lanes, and hands
+    /// the closure the lane it is writing.
+    pub fn test_batched_for_each_elem_mut<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let x = V::from_vec(fv::<V>(&[1.0, 2.0]), V::C::default());
+        let mut y = V::zeros(2, ctx.clone());
+        let mut z = V::zeros(2, ctx);
+
+        V::for_each_elem_mut([&mut y, &mut z], [&x], |[y, z], [x], lane, i| {
+            *y = x[i] + f::<V>(lane as f64 * 10.0);
+            *z = x[(i + 1) % x.len()];
+        });
+        assert_eq!(y.clone_as_vec(), fv::<V>(&[1.0, 2.0, 11.0, 12.0]));
+        assert_eq!(z.clone_as_vec(), fv::<V>(&[2.0, 1.0, 2.0, 1.0]));
     }
 
     /// An `nbatch == 1` scratch is shared by every lane of a batched output.

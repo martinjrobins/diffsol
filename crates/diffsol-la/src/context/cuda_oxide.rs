@@ -160,6 +160,11 @@ impl crate::Context for OxideContext {
     fn clone_with_nbatch(&self, nbatch: usize) -> Result<Self, LaError> {
         self.clone_with_nbatch_inner(nbatch)
     }
+    fn synchronize(&self) {
+        self.stream
+            .synchronize()
+            .expect("Failed to synchronize stream");
+    }
 }
 
 /// Element `offset` of `buf` as a device pointer, checked to have `len`
