@@ -1839,7 +1839,6 @@ pub(crate) mod tests {
     // --- Batched DenseMatrix-specific tests ---
 
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
-    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_set_index_batch<M: DenseMatrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         // 2x2 matrix, nbatch=2: every (batch, row, col) gets a value that identifies it

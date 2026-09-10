@@ -189,6 +189,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::clone_on_copy)]
     fn config_default_clone_copy_and_base_accessors_panic() {
         let config = NoCheckpointingSolverConfig::<f64>::default();
         let mut config_mut = config;
