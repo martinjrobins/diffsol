@@ -75,6 +75,6 @@ where
     I: Fn(&[M::T], M::T, &mut [M::T]),
 {
     fn call_inplace(&self, t: Self::T, y: &mut Self::V) {
-        y.for_each_batch([self.p], |y, [p], _| (self.op.func)(p, t, y));
+        y.for_each_batch_host([self.p], |y, [p], _| (self.op.func)(p, t, y));
     }
 }

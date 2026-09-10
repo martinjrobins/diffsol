@@ -123,7 +123,7 @@ where
 {
     fn call_inplace(&self, x: &M::V, t: M::T, y: &mut M::V) {
         self.op.statistics.borrow_mut().increment_call();
-        y.for_each_batch([x, self.p], |y, [x, p], _| (self.op.func)(x, p, t, y));
+        y.for_each_batch_host([x, self.p], |y, [x, p], _| (self.op.func)(x, p, t, y));
     }
 }
 
@@ -135,7 +135,7 @@ where
 {
     fn jac_mul_inplace(&self, x: &M::V, t: M::T, v: &M::V, y: &mut M::V) {
         self.op.statistics.borrow_mut().increment_jac_mul();
-        y.for_each_batch([x, self.p, v], |y, [x, p, v], _| {
+        y.for_each_batch_host([x, self.p, v], |y, [x, p, v], _| {
             (self.op.jacobian_action)(x, p, t, v, y)
         });
     }

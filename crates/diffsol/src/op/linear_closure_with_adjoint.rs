@@ -140,7 +140,7 @@ where
 {
     fn gemv_inplace(&self, x: &M::V, t: M::T, beta: M::T, y: &mut M::V) {
         self.op.statistics.borrow_mut().increment_call();
-        y.for_each_batch([x, self.p], |y, [x, p], _| (self.op.func)(x, p, t, beta, y));
+        y.for_each_batch_host([x, self.p], |y, [x, p], _| (self.op.func)(x, p, t, beta, y));
     }
 
     fn matrix_inplace(&self, t: Self::T, y: &mut Self::M) {
@@ -163,7 +163,7 @@ where
     G: Fn(&[M::T], &[M::T], M::T, M::T, &mut [M::T]),
 {
     fn gemv_transpose_inplace(&self, x: &Self::V, t: Self::T, beta: Self::T, y: &mut Self::V) {
-        y.for_each_batch([x, self.p], |y, [x, p], _| {
+        y.for_each_batch_host([x, self.p], |y, [x, p], _| {
             (self.op.func_adjoint)(x, p, t, beta, y)
         });
     }

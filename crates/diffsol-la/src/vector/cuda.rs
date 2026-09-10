@@ -1239,8 +1239,10 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
     }
     /// The closure is host code, so need to copy back from device
-    /// TODO: investigate cuda-oxide so we can compile closure to device
-    fn for_each_batch_mut<const M: usize, const N: usize>(
+    ///
+    /// This backend has no device path: `Vector::for_each_batch_mut` keeps its default and lands
+    /// here. The `cuda-oxide` backend compiles the closure into a kernel instead.
+    fn for_each_batch_mut_host<const M: usize, const N: usize>(
         mut mut_args: [&mut Self; M],
         args: [&Self; N],
         mut f: impl FnMut([&mut [Self::T]; M], [&[Self::T]; N], usize),

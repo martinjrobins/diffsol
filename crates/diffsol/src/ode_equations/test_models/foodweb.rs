@@ -338,7 +338,7 @@ where
 {
     #[allow(unused_mut)]
     fn call_inplace(&self, _t: M::T, mut y: &mut M::V) {
-        y.for_each_batch([], |y, [], _| {
+        y.for_each_batch_host([], |y, [], _| {
             let nsmx: usize = NUM_SPECIES * NX;
             let dx: f64 = AX / (NX as f64 - 1.0);
             let dy: f64 = AY / (NX as f64 - 1.0);
@@ -418,7 +418,7 @@ where
      */
     #[allow(unused_mut)]
     fn call_inplace(&self, x: &M::V, _t: M::T, mut y: &mut M::V) {
-        y.for_each_batch([x], |y, [x], _| {
+        y.for_each_batch_host([x], |y, [x], _| {
             let nsmx: usize = NUM_SPECIES * NX;
             let dx: f64 = AX / (NX as f64 - 1.0);
             let dy: f64 = AY / (NX as f64 - 1.0);
@@ -504,7 +504,7 @@ where
 {
     #[allow(unused_mut)]
     fn jac_mul_inplace(&self, x: &M::V, _t: M::T, v: &M::V, mut y: &mut M::V) {
-        y.for_each_batch([x, v], |y, [x, v], _| {
+        y.for_each_batch_host([x, v], |y, [x, v], _| {
             let nsmx: usize = NUM_SPECIES * NX;
             let dx: f64 = AX / (NX as f64 - 1.0);
             let dy: f64 = AY / (NX as f64 - 1.0);
@@ -647,7 +647,7 @@ where
         /* Loop over all grid points, setting residual values appropriately
         for differential or algebraic components.                        */
         for jy in 0..NX {
-            y.for_each_batch([x], |y, [x], _| {
+            y.for_each_batch_host([x], |y, [x], _| {
                 let yloc = nsmx * jy;
                 for jx in 0..NX {
                     let loc = yloc + NUM_SPECIES * jx;
@@ -705,7 +705,7 @@ where
 {
     #[allow(unused_mut)]
     fn call_inplace(&self, x: &M::V, _t: M::T, mut y: &mut M::V) {
-        y.for_each_batch([x], |y, [x], _| {
+        y.for_each_batch_host([x], |y, [x], _| {
             let nsmx: usize = NUM_SPECIES * NX;
             let jx_tl = 0;
             let jy_tl = 0;
@@ -727,7 +727,7 @@ where
 {
     #[allow(unused_mut)]
     fn jac_mul_inplace(&self, _x: &Self::V, _t: Self::T, v: &Self::V, mut y: &mut Self::V) {
-        y.for_each_batch([v], |y, [v], _| {
+        y.for_each_batch_host([v], |y, [v], _| {
             let nsmx: usize = NUM_SPECIES * NX;
 
             let jx_tl = 0;
@@ -915,7 +915,7 @@ where
 {
     #[allow(unused_mut)]
     fn call_inplace(&self, x: &M::V, _t: M::T, mut y: &mut M::V) {
-        y.for_each_batch([x], |y, [x], _| {
+        y.for_each_batch_host([x], |y, [x], _| {
             let nsmx: usize = NX;
             let dx = AX / (NX as f64 - 1.0);
             let dy = AY / (NX as f64 - 1.0);
@@ -960,7 +960,7 @@ where
 {
     #[allow(unused_mut)]
     fn jac_mul_inplace(&self, _x: &M::V, _t: M::T, v: &M::V, mut y: &mut M::V) {
-        y.for_each_batch([v], |y, [v], _| {
+        y.for_each_batch_host([v], |y, [v], _| {
             let nsmx: usize = NX;
             let dx = AX / (NX as f64 - 1.0);
             let dy = AY / (NX as f64 - 1.0);

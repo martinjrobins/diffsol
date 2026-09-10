@@ -109,6 +109,22 @@ fn lane_start(blk: usize) -> usize {
     blk * thread::blockDim_x() as usize + thread::threadIdx_x() as usize
 }
 
+/// Device addresses and lane geometry of the read-only operands of one
+/// [`kernels::vec_for_each_batch`] launch.
+#[derive(Clone, Copy)]
+pub struct LaneArgs<const K: usize> {
+    pub ptr: [*const f64; K],
+    pub nstates: [u32; K],
+    pub nbatch: [u32; K],
+}
+
+/// Mutable counterpart of [`LaneArgs`], for the operands the closure writes.
+#[derive(Clone, Copy)]
+pub struct LaneArgsMut<const K: usize> {
+    pub ptr: [*mut f64; K],
+    pub nstates: [u32; K],
+}
+
 #[cuda_module]
 pub mod kernels {
     use super::*;
@@ -1444,5 +1460,46 @@ pub mod kernels {
         }
         thread::sync_threads();
         total
+    }
+
+    // ========================================================================
+    // Caller-supplied lane closures
+    // ========================================================================
+
+    /// Run `f` once per batch lane, on the lane slices of `outs` and `ins`.
+    ///
+    /// One thread per lane, which is the only parallelism available when `f` is
+    /// opaque. The host only launches this when every operand in `outs` has the
+    /// full lane count, so the threads write disjoint ranges.
+    #[kernel]
+    #[launch_bounds(256)]
+    #[launch_contract(domain = 1, block = (256, 1, 1))]
+    pub fn vec_for_each_batch<const M: usize, const N: usize, F>(
+        f: F,
+        outs: LaneArgsMut<M>,
+        ins: LaneArgs<N>,
+        nbatch: u32,
+    ) where
+        F: Fn([&mut [f64]; M], [&[f64]; N], usize) + Copy,
+    {
+        let b = thread::index_1d().get();
+        if b >= nbatch as usize {
+            return;
+        }
+        // SAFETY: each pointer is read out of a `Copy` byval struct, so the `M`
+        // mutable slices borrow no shared owner, and lane `b` of an operand
+        // with the full lane count is touched by this thread alone.
+        let o = core::array::from_fn(|i| unsafe {
+            let n = outs.nstates[i] as usize;
+            core::slice::from_raw_parts_mut(outs.ptr[i].add(b * n), n)
+        });
+        // SAFETY: as above; a read operand with a smaller lane count is
+        // broadcast, so several threads may read the same lane.
+        let a = core::array::from_fn(|i| unsafe {
+            let n = ins.nstates[i] as usize;
+            let base = broadcast_src(b, ins.nstates[i], ins.nbatch[i], nbatch, 0);
+            core::slice::from_raw_parts(ins.ptr[i].add(base), n)
+        });
+        f(o, a, b);
     }
 }

@@ -1,6 +1,8 @@
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 #[cfg(feature = "cuda")]
 use diffsol::{CudaMat, CudaVec};
+#[cfg(feature = "cuda-oxide")]
+use diffsol::{OxideMat, OxideVec};
 use diffsol::{
     DenseMatrix, FaerMat, FaerSparseMat, FaerVec, Matrix, MatrixCommon, NalgebraMat, NalgebraVec,
     Scale, Vector,
@@ -779,7 +781,7 @@ where
     group.finish();
 }
 
-/// 🟢 for_each_batch — Per-batch slice access
+/// 🟢 for_each_batch — Per-batch slice access, on the device where the backend has one
 fn bench_for_each_batch<V: Vector<T = f64> + 'static>(c: &mut Criterion, label: &str)
 where
     V::C: Default + Clone,
@@ -791,16 +793,43 @@ where
             let x = V::from_element(ns, 1.0, ctx.clone());
             let mut y = V::from_element(ns, 1.0, ctx.clone());
             b.iter(|| {
-                y.for_each_batch([&x], |y, [x], _| {
-                    for (y, x) in y.iter_mut().zip(x.iter()) {
-                        *y = *x;
-                    }
-                });
+                y.for_each_batch([&x], copy_lane());
                 black_box(&y);
             });
         });
     }
     group.finish();
+}
+
+/// 🟢 for_each_batch_host — the same lane loop, always staged through host memory
+fn bench_for_each_batch_host<V: Vector<T = f64> + 'static>(c: &mut Criterion, label: &str)
+where
+    V::C: Default + Clone,
+{
+    let mut group = c.benchmark_group(label);
+    for &ns in ONE_SIZE {
+        group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
+            let ctx = V::C::default();
+            let x = V::from_element(ns, 1.0, ctx.clone());
+            let mut y = V::from_element(ns, 1.0, ctx.clone());
+            b.iter(|| {
+                y.for_each_batch_host([&x], copy_lane());
+                black_box(&y);
+            });
+        });
+    }
+    group.finish();
+}
+
+/// The lane body both `for_each_batch` benches run, so the two price the same work.
+fn copy_lane() -> impl Fn(&mut [f64], [&[f64]; 1], usize) + Copy + Send {
+    |y: &mut [f64], [x]: [&[f64]; 1], _lane: usize| {
+        let mut i = 0;
+        while i < y.len() {
+            y[i] = x[i];
+            i += 1;
+        }
+    }
 }
 
 /// 🟢 from_diagonal — Diagonal matrix creation
@@ -878,6 +907,7 @@ macro_rules! bench_vector_backend {
         bench_len::<$V>($c, concat!("len/", $label));
         bench_clone_as_vec::<$V>($c, concat!("clone_as_vec/", $label));
         bench_for_each_batch::<$V>($c, concat!("for_each_batch/", $label));
+        bench_for_each_batch_host::<$V>($c, concat!("for_each_batch_host/", $label));
     };
 }
 
@@ -917,6 +947,13 @@ fn criterion_benchmark(c: &mut Criterion) {
         bench_vector_backend!(c, "cuda", CudaVec<f64>);
         bench_matrix_backend!(c, "cuda", CudaMat<f64>);
         bench_dense_matrix_backend!(c, "cuda", CudaMat<f64>);
+    }
+
+    #[cfg(feature = "cuda-oxide")]
+    {
+        bench_vector_backend!(c, "cuda_oxide", OxideVec);
+        bench_matrix_backend!(c, "cuda_oxide", OxideMat);
+        bench_dense_matrix_backend!(c, "cuda_oxide", OxideMat);
     }
 }
 

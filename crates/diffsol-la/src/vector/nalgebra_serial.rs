@@ -592,7 +592,7 @@ impl<T: NalgebraScalar> Vector for NalgebraVec<T> {
             context: NalgebraContext::default(),
         }
     }
-    fn for_each_batch_mut<const M: usize, const N: usize>(
+    fn for_each_batch_mut_host<const M: usize, const N: usize>(
         mut mut_args: [&mut Self; M],
         args: [&Self; N],
         mut f: impl FnMut([&mut [T]; M], [&[T]; N], usize),

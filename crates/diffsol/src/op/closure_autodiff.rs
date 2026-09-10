@@ -99,7 +99,7 @@ mod autodiff_impl {
     {
         fn call_inplace(&self, x: &M::V, t: M::T, y: &mut M::V) {
             self.op.statistics.borrow_mut().increment_call();
-            y.for_each_batch([x, self.p], |y, [x, p], _| self.op.call_func(x, p, t, y));
+            y.for_each_batch_host([x, self.p], |y, [x, p], _| self.op.call_func(x, p, t, y));
         }
     }
 
@@ -109,7 +109,7 @@ mod autodiff_impl {
         fn jac_mul_inplace(&self, x: &M::V, t: M::T, v: &M::V, y: &mut M::V) {
             self.op.statistics.borrow_mut().increment_jac_mul();
             let mut tmp_nstates = self.op.tmp_nstates.borrow_mut();
-            <M::V as Vector>::for_each_batch_mut(
+            <M::V as Vector>::for_each_batch_mut_host(
                 [y, &mut tmp_nstates],
                 [x, v, self.p],
                 |[y, tmp_nstates], [x, v, p], _| self.op.call_jvp(x, v, p, t, tmp_nstates, y),
@@ -129,7 +129,7 @@ mod autodiff_impl {
     {
         fn sens_mul_inplace(&self, x: &M::V, t: M::T, v: &M::V, y: &mut M::V) {
             let mut tmp_nstates = self.op.tmp_nstates.borrow_mut();
-            <M::V as Vector>::for_each_batch_mut(
+            <M::V as Vector>::for_each_batch_mut_host(
                 [y, &mut tmp_nstates],
                 [x, self.p, v],
                 |[y, tmp_nstates], [x, p, v], _| self.op.call_sens_jvp(x, p, v, t, tmp_nstates, y),
@@ -144,7 +144,7 @@ mod autodiff_impl {
             self.op.statistics.borrow_mut().increment_jac_adj_mul();
             let mut tmp_nstates = self.op.tmp_nstates.borrow_mut();
             let mut tmp_nstates2 = self.op.tmp_nstates2.borrow_mut();
-            <M::V as Vector>::for_each_batch_mut(
+            <M::V as Vector>::for_each_batch_mut_host(
                 [y, &mut tmp_nstates, &mut tmp_nstates2],
                 [x, v, self.p],
                 |[y, tmp_nstates, tmp_nstates2], [x, v, p], _| {
@@ -179,7 +179,7 @@ mod autodiff_impl {
         ) {
             let mut tmp_nstates = self.op.tmp_nstates.borrow_mut();
             let mut tmp_nstates2 = self.op.tmp_nstates2.borrow_mut();
-            <M::V as Vector>::for_each_batch_mut(
+            <M::V as Vector>::for_each_batch_mut_host(
                 [y, &mut tmp_nstates, &mut tmp_nstates2],
                 [x, v, self.p],
                 |[y, tmp_nstates, tmp_nstates2], [x, v, p], _| {

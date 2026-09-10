@@ -26,7 +26,7 @@ use cuda_host::RowWidth;
 use super::{VectorIndex, VectorView, VectorViewMut};
 use crate::context::broadcast_batch;
 use crate::context::cuda_oxide::{copy_at, read_at, write_at};
-use crate::cuda_oxide_kernels::{BLOCK_SIZE, SMALL_NSTATES};
+use crate::cuda_oxide_kernels::{LaneArgs, LaneArgsMut, BLOCK_SIZE, SMALL_NSTATES};
 use crate::{
     Context, DefaultDenseMatrix, IndexType, OxideContext, OxideMat, Scale, Vector, VectorCommon,
 };
@@ -173,6 +173,28 @@ fn launch_window(
     // pointer in `data`'s context with at least `len * size_of::<f64>()` bytes
     // behind it.
     ManuallyDrop::new(unsafe { DeviceBuffer::from_raw_parts(ptr, len, data.context().clone()) })
+}
+
+/// Runs `f` once per batch lane on the device, one thread per lane.
+///
+/// A free function rather than the trait method's body because the kernel's
+/// closure type parameter has to be named to be turbofished at the launch.
+pub(crate) fn launch_for_each_batch<const M: usize, const N: usize, F>(
+    ctx: &OxideContext,
+    f: F,
+    outs: LaneArgsMut<M>,
+    ins: LaneArgs<N>,
+    nbatch: u32,
+) where
+    F: Fn([&mut [f64]; M], [&[f64]; N], usize) + Copy + Send,
+{
+    let cfg = OxideContext::config_1d(nbatch);
+    let m = &ctx.module;
+    let p = m
+        .prepare_vec_for_each_batch::<M, N, F>(cfg)
+        .expect("prepare vec_for_each_batch");
+    m.vec_for_each_batch::<M, N, F>(&ctx.stream, &p, f, outs, ins, nbatch)
+        .expect("launch vec_for_each_batch");
 }
 
 /// One source operand of a launch: where its data starts, how far apart its
@@ -1441,12 +1463,10 @@ impl Vector for OxideVec {
         )
         .expect("launch vec_scatter");
     }
-    /// The closure is host code, so every operand is staged through host
-    /// memory.
-    ///
-    /// TODO: cuda-oxide can compile a host closure into a generic kernel, which would
-    /// let this run on the device; not attempted yet.
-    fn for_each_batch_mut<const M: usize, const N: usize>(
+    /// The closure runs on the host, so every operand is staged through host
+    /// memory. [`Vector::for_each_batch_mut`] below compiles the closure into a
+    /// kernel instead.
+    fn for_each_batch_mut_host<const M: usize, const N: usize>(
         mut mut_args: [&mut Self; M],
         args: [&Self; N],
         mut f: impl FnMut([&mut [Self::T]; M], [&[Self::T]; N], usize),
@@ -1490,6 +1510,53 @@ impl Vector for OxideVec {
                 .copy_from_host(&stream, h)
                 .expect("Failed to copy data from host to device");
         }
+    }
+
+    /// The closure is run one
+    /// lane per thread, so no operand travels through host memory.
+    ///
+    /// Panics if a written operand has fewer lanes than the output..
+    ///
+    /// ponytail: one thread per lane, upgrade path is a
+    /// block-per-lane variant.
+    fn for_each_batch_mut<const M: usize, const N: usize>(
+        mut_args: [&mut Self; M],
+        args: [&Self; N],
+        f: impl Fn([&mut [Self::T]; M], [&[Self::T]; N], usize) + Copy + Send,
+    ) {
+        assert!(M > 0, "for_each_batch needs at least one mutable operand");
+        let ctx = mut_args[0].context.clone();
+        let nbatch = ctx.nbatch();
+        for arg in mut_args.iter() {
+            ctx.assert_broadcastable_into(arg.context.nbatch(), "for_each_batch");
+        }
+        for arg in args.iter() {
+            ctx.assert_broadcastable_into(arg.context.nbatch(), "for_each_batch");
+        }
+        assert!(
+            mut_args.iter().all(|a| a.context.nbatch() == nbatch),
+            "for_each_batch_mut writes a mutable operand shared by several lanes, which the \
+             device cannot order: use for_each_batch_mut_host"
+        );
+        // An empty operand's buffer has no address to hand the kernel, and a zero-length slice
+        // still has to be built from a non-null aligned pointer.
+        let device_ptr = |v: &Self| {
+            if v.is_empty() {
+                std::ptr::NonNull::<f64>::dangling().as_ptr()
+            } else {
+                v.data.cu_deviceptr() as *mut f64
+            }
+        };
+        let outs = LaneArgsMut {
+            ptr: std::array::from_fn(|i| device_ptr(mut_args[i])),
+            nstates: std::array::from_fn(|i| mut_args[i].len() as u32),
+        };
+        let ins = LaneArgs {
+            ptr: args.map(|a| device_ptr(a) as *const f64),
+            nstates: args.map(|a| a.len() as u32),
+            nbatch: args.map(|a| a.context.nbatch() as u32),
+        };
+        launch_for_each_batch(&ctx, f, outs, ins, nbatch as u32);
     }
 }
 
@@ -1660,6 +1727,25 @@ impl<'a> VectorViewMut<'a> for OxideVecMut<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A mutable operand shared by several lanes is a host-loop shape, and the device method
+    /// says so rather than quietly staging it through host memory.
+    #[test]
+    #[should_panic(expected = "for_each_batch_mut_host")]
+    fn for_each_batch_mut_rejects_shared_output() {
+        let ctx = OxideContext::default().with_nbatch(2);
+        let x = OxideVec::from_element(2, 1.0, ctx.clone());
+        let mut y = OxideVec::zeros(2, ctx);
+        let mut scratch = OxideVec::zeros(2, OxideContext::default());
+        OxideVec::for_each_batch_mut(
+            [&mut y, &mut scratch],
+            [&x],
+            |[y, scratch]: [&mut [f64]; 2], [x]: [&[f64]; 1], _lane: usize| {
+                scratch.copy_from_slice(x);
+                y.copy_from_slice(scratch);
+            },
+        );
+    }
 
     /// Launch-shape timing, for comparing the 2D and flat-1D launch shapes.
     ///
