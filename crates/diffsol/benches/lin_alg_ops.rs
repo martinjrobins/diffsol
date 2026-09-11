@@ -388,6 +388,61 @@ where
     });
 }
 
+/// `(states, lanes)` cells the wide-sensitivity gemv bench sweeps.
+const GEMV_WIDE_CELLS: &[(usize, usize)] = &[(3, 10), (32, 10), (100, 10), (256, 10)];
+
+/// 🔴 gemv (batched) — the same multiply over many lanes. `nparams > 1` is the grouped broadcast
+/// the sensitivity equations run: `nbatch * nparams` right-hand-side lanes over `nbatch` matrices.
+/// `grouped_x` flips which operand is wide -- `nbatch * nparams` matrix lanes against `nbatch`
+/// lanes of `x`, the shape a user's `jac_mul_inplace` makes when it multiplies a matrix it built
+/// at the augmented width by a state-width vector.
+fn bench_gemv_batched<M: Matrix<T = f64> + 'static>(
+    c: &mut Criterion,
+    label: &str,
+    cells: &[(usize, usize)],
+    nparams: usize,
+    grouped_x: bool,
+) where
+    M::C: Default + Clone,
+    M::V: Vector<T = f64, C = M::C> + Clone,
+{
+    let mut group = c.benchmark_group(label);
+    group.sample_size(20);
+    for &(ns, nb) in cells {
+        let id = if nparams == 1 {
+            format!("n{ns}_nbatch{nb}")
+        } else {
+            format!("n{ns}_nbatch{nb}x{nparams}")
+        };
+        // the setup is inside the closure so that a filtered-out cell costs nothing
+        group.bench_function(id, |b| {
+            let ctx = M::C::default()
+                .clone_with_nbatch(nb)
+                .expect("backend declined nbatch");
+            let wide = ctx
+                .clone_with_nbatch(nb * nparams)
+                .expect("backend declined nbatch");
+            // `y` always carries every lane; the other wide operand is the matrix or `x`
+            let (mat_ctx, x_ctx) = if grouped_x {
+                (wide.clone(), ctx.clone())
+            } else {
+                (ctx.clone(), wide.clone())
+            };
+            let mut mat = M::zeros(ns, ns, mat_ctx);
+            fill_dense(&mut mat, ns);
+            let x = M::V::from_element(ns, 1.0, x_ctx);
+            let mut y = M::V::zeros(ns, wide);
+            b.iter(|| {
+                // beta = 0, so repeated iterations neither drift nor overflow
+                mat.gemv(1.0, &x, 0.0, &mut y);
+                black_box(&y);
+                ctx.synchronize();
+            })
+        });
+    }
+    group.finish();
+}
+
 /// 🔴 matrix_column — Extract a vector view of one matrix column per batch.
 /// Called every RK stage (diff.column(i)) and every BDF Nordsieck/diff update.
 fn bench_matrix_column<M: Matrix<T = f64> + DenseMatrix + 'static>(c: &mut Criterion, label: &str)
@@ -1289,6 +1344,34 @@ macro_rules! bench_matrix_backend {
     };
 }
 
+/// Backends whose context takes `nbatch > 1`; the sparse backend is not one of them.
+macro_rules! bench_batched_matrix_backend {
+    ($c:expr, $label:expr, $M:ty) => {
+        bench_gemv_batched::<$M>($c, concat!("gemv_batched/", $label), LU_CELLS, 1, false);
+        bench_gemv_batched::<$M>(
+            $c,
+            concat!("gemv_batched_grouped/", $label),
+            LU_CELLS,
+            LU_NPARAMS,
+            false,
+        );
+        bench_gemv_batched::<$M>(
+            $c,
+            concat!("gemv_batched_grouped_x/", $label),
+            LU_CELLS,
+            LU_NPARAMS,
+            true,
+        );
+        bench_gemv_batched::<$M>(
+            $c,
+            concat!("gemv_batched_grouped100/", $label),
+            GEMV_WIDE_CELLS,
+            100,
+            false,
+        );
+    };
+}
+
 macro_rules! bench_dense_matrix_backend {
     ($c:expr, $label:expr, $M:ty) => {
         bench_matrix_column::<$M>($c, concat!("matrix_column/", $label));
@@ -1312,11 +1395,13 @@ fn criterion_benchmark(c: &mut Criterion) {
     bench_vector_backend!(c, "nalgebra", NalgebraVec<f64>);
     bench_matrix_backend!(c, "nalgebra", NalgebraMat<f64>);
     bench_dense_matrix_backend!(c, "nalgebra", NalgebraMat<f64>);
+    bench_batched_matrix_backend!(c, "nalgebra", NalgebraMat<f64>);
     bench_lu_backend!(c, "nalgebra", NalgebraMat<f64>, NalgebraLU<f64>);
 
     bench_vector_backend!(c, "faer", FaerVec<f64>);
     bench_matrix_backend!(c, "faer", FaerMat<f64>);
     bench_dense_matrix_backend!(c, "faer", FaerMat<f64>);
+    bench_batched_matrix_backend!(c, "faer", FaerMat<f64>);
     bench_lu_backend!(c, "faer", FaerMat<f64>, FaerLU<f64>);
 
     bench_matrix_backend!(c, "faer_sparse", FaerSparseMat<f64>);
@@ -1326,6 +1411,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         bench_vector_backend!(c, "cuda", CudaVec<f64>);
         bench_matrix_backend!(c, "cuda", CudaMat<f64>);
         bench_dense_matrix_backend!(c, "cuda", CudaMat<f64>);
+        bench_batched_matrix_backend!(c, "cuda", CudaMat<f64>);
         bench_lu_backend!(c, "cuda", CudaMat<f64>, CudaLU<f64>);
     }
 
@@ -1334,6 +1420,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         bench_vector_backend!(c, "cuda_oxide", OxideVec);
         bench_matrix_backend!(c, "cuda_oxide", OxideMat);
         bench_dense_matrix_backend!(c, "cuda_oxide", OxideMat);
+        bench_batched_matrix_backend!(c, "cuda_oxide", OxideMat);
         bench_lu_backend!(c, "cuda_oxide", OxideMat, OxideLU);
     }
 }

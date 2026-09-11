@@ -1595,6 +1595,34 @@ pub(crate) mod tests {
         );
     }
 
+    /// The mirror of [`test_grouped_gemv_m`]: the matrix holds one lane per right-hand side
+    /// while `x` carries 2, so each `x` lane serves two contiguous results — which still
+    /// multiply different matrix lanes.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_grouped_gemv_x_m<M: Matrix>(ctx2: M::C) {
+        let wide = ctx4::<M>(&ctx2);
+        // batch b = (b + 1) I
+        let indices = vec![(0, 0), (1, 1)];
+        let values = (1..=4).flat_map(|i| [f::<M>(i as f64); 2]).collect();
+        let a = M::try_from_triplets(2, 2, indices, values, wide.clone()).unwrap();
+        let x = M::V::from_vec((1..=4).map(|i| f::<M>(i as f64)).collect(), ctx2);
+        let mut y = M::V::zeros(2, wide);
+        a.gemv(f::<M>(1.0), &x, f::<M>(0.0), &mut y);
+        assert_eq!(
+            y.clone_as_vec(),
+            vec![
+                f::<M>(1.0),
+                f::<M>(2.0),
+                f::<M>(2.0),
+                f::<M>(4.0),
+                f::<M>(9.0),
+                f::<M>(12.0),
+                f::<M>(12.0),
+                f::<M>(16.0),
+            ]
+        );
+    }
+
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_grouped_copy_from_m<M: Matrix>(ctx2: M::C) {
         let wide = ctx4::<M>(&ctx2);
@@ -2680,6 +2708,10 @@ macro_rules! generate_matrix_tests_batched {
             #[test]
             fn [<test_grouped_gemv_ $suffix>]() {
                 $crate::matrix::tests::test_grouped_gemv_m::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_grouped_gemv_x_ $suffix>]() {
+                $crate::matrix::tests::test_grouped_gemv_x_m::<$M>($ctx2);
             }
             #[test]
             fn [<test_grouped_copy_from_ $suffix>]() {

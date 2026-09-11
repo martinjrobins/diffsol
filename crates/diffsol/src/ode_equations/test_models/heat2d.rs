@@ -15,9 +15,6 @@ use crate::{
 use num_traits::{FromPrimitive, One, Zero};
 
 #[cfg(feature = "diffsl")]
-use crate::{ConstantOp, LinearOp, NonLinearOpJacobian, OdeEquations};
-
-#[cfg(feature = "diffsl")]
 #[allow(clippy::type_complexity)]
 pub fn heat2d_diffsl_problem<
     M: Matrix<T = f64>,
