@@ -89,7 +89,8 @@ pub struct NewtonNonlinearSolver<M: Matrix, Ls: LinearSolver<M>, Lsearch: LineSe
     linear_solver: Ls,
     line_search: Lsearch,
     is_jacobian_set: bool,
-    tmp: M::V,
+    /// Work vectors, one per batch count the solver has been asked for.
+    tmps: Vec<M::V>,
 }
 
 impl<M: Matrix, Ls: LinearSolver<M>, Lsearch: LineSearch<M::V>>
@@ -100,7 +101,7 @@ impl<M: Matrix, Ls: LinearSolver<M>, Lsearch: LineSearch<M::V>>
             linear_solver,
             line_search,
             is_jacobian_set: false,
-            tmp: M::V::zeros(0, Default::default()),
+            tmps: Vec::new(),
         }
     }
     pub fn linear_solver(&self) -> &Ls {
@@ -131,7 +132,7 @@ impl<M: Matrix, Ls: LinearSolver<M>, Lsearch: LineSearch<M::V>> NonLinearSolver<
         self.linear_solver
             .set_sparsity(&JacobianRef::sparsity_only(op));
         self.is_jacobian_set = false;
-        self.tmp = C::V::zeros(op.nstates(), op.context().clone());
+        self.tmps = vec![C::V::zeros(op.nstates(), op.context().clone())];
     }
 
     fn reset_jacobian<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M, C = M::C>>(
@@ -165,16 +166,27 @@ impl<M: Matrix, Ls: LinearSolver<M>, Lsearch: LineSearch<M::V>> NonLinearSolver<
             };
             return Err(NlError::from(error));
         }
-        // the working vector has to match the solution's batch count.
-        // the operator, its Jacobian and its factorisation stay at the problem's batch count
-        if self.tmp.context().nbatch() != xn.context().nbatch() {
-            self.tmp = C::V::zeros(op.nstates(), xn.context().clone());
-        }
+        // the working vector has to match the solution's batch count. A sensitivity step
+        // alternates between the two counts, so keep a vector per count rather than
+        // reallocating on every switch
+        let nbatch = xn.context().nbatch();
+        let existing = self
+            .tmps
+            .iter()
+            .position(|t| t.context().nbatch() == nbatch);
+        let tmp = match existing {
+            Some(i) => &mut self.tmps[i],
+            None => {
+                self.tmps
+                    .push(C::V::zeros(op.nstates(), xn.context().clone()));
+                self.tmps.last_mut().unwrap()
+            }
+        };
         let linear_solver = |x: &mut C::V| self.linear_solver.solve_in_place(x).map_err(Into::into);
         let fun = |x: &C::V, y: &mut C::V| op.call_inplace(x, y);
         newton_iteration(
             xn,
-            &mut self.tmp,
+            tmp,
             error_y,
             fun,
             linear_solver,

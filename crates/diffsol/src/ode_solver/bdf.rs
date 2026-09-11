@@ -2607,6 +2607,15 @@ mod test {
         test_ode_solver(&mut s, soln, None, false, true);
     }
 
+    #[cfg(feature = "cuda-oxide")]
+    #[test]
+    fn test_bdf_cuda_oxide_exponential_decay_batched_sens() {
+        use crate::{OxideLU, OxideMat};
+        let (problem, soln) = exponential_decay_problem_batched_sens::<OxideMat>(2);
+        let mut s = problem.bdf_sens::<OxideLU>().unwrap();
+        test_ode_solver(&mut s, soln, None, false, true);
+    }
+
     #[cfg(feature = "cuda")]
     #[test]
     fn test_bdf_cuda_exponential_decay_batched_sens_with_reset() {

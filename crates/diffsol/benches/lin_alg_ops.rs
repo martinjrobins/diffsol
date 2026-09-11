@@ -1,12 +1,17 @@
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use diffsol::{
-    Context, DenseMatrix, FaerMat, FaerSparseMat, FaerVec, Matrix, MatrixCommon, NalgebraMat,
-    NalgebraVec, Scale, Vector,
+    Context, DenseMatrix, FaerLU, FaerMat, FaerSparseMat, FaerVec, IndexType, Matrix, MatrixCommon,
+    NalgebraLU, NalgebraMat, NalgebraVec, Scale, Vector,
 };
 #[cfg(feature = "cuda")]
-use diffsol::{CudaMat, CudaVec};
+use diffsol::{CudaLU, CudaMat, CudaVec};
 #[cfg(feature = "cuda-oxide")]
-use diffsol::{OxideMat, OxideVec};
+use diffsol::{OxideLU, OxideMat, OxideVec};
+use diffsol_la::{LinearOp as LaLinearOp, LinearSolver as LaLinearSolver};
+use diffsol_nl::{
+    Convergence, NewtonNonlinearSolver, NoLineSearch, NonLinearOp, NonLinearOpJacobian,
+    NonLinearSolver,
+};
 use std::hint::black_box;
 
 const VSIZES: &[usize] = &[2, 10, 100, 500];
@@ -945,6 +950,294 @@ where
 }
 
 // ═════════════════════════════════════════════════════════
+// 🔴 LU — one factorisation per Jacobian update, one solve per Newton iteration
+// ═════════════════════════════════════════════════════════
+
+/// `(states, lanes)` cells the LU benches sweep. `robertson_ode` is 3 states per lane,
+/// `heat2d` and `foodweb` 25 to 1800, so the cells bracket the point where per-lane work
+/// starts to dominate launch overhead -- and no cell costs more than about a GFLOP, so the
+/// CPU backends stay affordable.
+const LU_CELLS: &[(usize, usize)] = &[
+    (3, 1),
+    (8, 1),
+    (16, 1),
+    (64, 1),
+    (256, 1),
+    (500, 1),
+    (3, 100),
+    (3, 1000),
+    (32, 1),
+    (32, 100),
+    (32, 1000),
+    (100, 1),
+    (100, 100),
+    (256, 100),
+    (500, 10),
+];
+/// Parameters the grouped-broadcast solve mimics: the sensitivity equations run on
+/// `nbatch * nparams` lanes against `nbatch` factorisations.
+const LU_NPARAMS: usize = 4;
+
+/// `A_b = I`, so a solve leaves the right-hand side unchanged and repeated `b.iter` solves
+/// neither drift nor underflow. Factorisation cost does not depend on the values.
+struct IdentityOp<M: Matrix> {
+    matrix: M,
+}
+
+impl<M: Matrix> LaLinearOp for IdentityOp<M> {
+    type T = M::T;
+    type V = M::V;
+    type M = M;
+    type C = M::C;
+
+    fn nrows(&self) -> IndexType {
+        self.matrix.nrows()
+    }
+    fn ncols(&self) -> IndexType {
+        self.matrix.ncols()
+    }
+    fn context(&self) -> &Self::C {
+        self.matrix.context()
+    }
+    fn matrix_inplace(&self, y: &mut Self::M) {
+        y.copy_from(&self.matrix);
+    }
+}
+
+fn identity_op<M>(ns: usize, ctx: M::C) -> IdentityOp<M>
+where
+    M: Matrix<T = f64>,
+    M::V: Vector<T = f64, C = M::C>,
+{
+    let diag = M::V::from_element(ns, 1.0, ctx);
+    IdentityOp {
+        matrix: M::from_diagonal(&diag),
+    }
+}
+
+/// 🔴 lu_factor — refactorise on every Jacobian update
+fn bench_lu_factor<M, LS>(c: &mut Criterion, label: &str)
+where
+    M: Matrix<T = f64> + 'static,
+    M::C: Default + Clone,
+    M::V: Vector<T = f64, C = M::C>,
+    LS: LaLinearSolver<M>,
+{
+    let mut group = c.benchmark_group(label);
+    group.sample_size(20);
+    for &(ns, nb) in LU_CELLS {
+        // the setup is inside the closure so that a filtered-out cell costs nothing
+        group.bench_function(format!("n{ns}_nbatch{nb}"), |b| {
+            let ctx = M::C::default()
+                .clone_with_nbatch(nb)
+                .expect("backend declined nbatch");
+            let op = identity_op::<M>(ns, ctx.clone());
+            let mut s = LS::default();
+            s.set_sparsity(&op);
+            b.iter(|| {
+                s.set_linearisation(&op);
+                ctx.synchronize();
+            })
+        });
+    }
+    group.finish();
+}
+
+/// 🔴 lu_solve — one solve per Newton iteration. `nparams > 1` is the grouped broadcast the
+/// sensitivity equations run: `nbatch * nparams` right-hand side lanes over `nbatch`
+/// factorisations.
+fn bench_lu_solve<M, LS>(c: &mut Criterion, label: &str, nparams: usize)
+where
+    M: Matrix<T = f64> + 'static,
+    M::C: Default + Clone,
+    M::V: Vector<T = f64, C = M::C>,
+    LS: LaLinearSolver<M>,
+{
+    let mut group = c.benchmark_group(label);
+    group.sample_size(20);
+    for &(ns, nb) in LU_CELLS {
+        let id = if nparams == 1 {
+            format!("n{ns}_nbatch{nb}")
+        } else {
+            format!("n{ns}_nbatch{nb}x{nparams}")
+        };
+        // the setup is inside the closure so that a filtered-out cell costs nothing
+        group.bench_function(id, |b| {
+            let ctx = M::C::default()
+                .clone_with_nbatch(nb)
+                .expect("backend declined nbatch");
+            let rhs_ctx = ctx
+                .clone_with_nbatch(nb * nparams)
+                .expect("backend declined nbatch");
+            let op = identity_op::<M>(ns, ctx.clone());
+            let mut s = LS::default();
+            s.set_sparsity(&op);
+            s.set_linearisation(&op);
+            let mut x = M::V::from_element(ns, 1.0, rhs_ctx);
+            b.iter(|| {
+                s.solve_in_place(&mut x).unwrap();
+                black_box(&x);
+                ctx.synchronize();
+            })
+        });
+    }
+    group.finish();
+}
+
+/// 🔴 lu_solve_sens — the solve pattern of a sensitivity step: the state's lanes and the
+/// augmented `nbatch * nparams` lanes alternate against one factorisation, each with its own
+/// vector, so a solver caching anything per right-hand side has to survive the switch
+fn bench_lu_solve_sens<M, LS>(c: &mut Criterion, label: &str)
+where
+    M: Matrix<T = f64> + 'static,
+    M::C: Default + Clone,
+    M::V: Vector<T = f64, C = M::C>,
+    LS: LaLinearSolver<M>,
+{
+    let mut group = c.benchmark_group(label);
+    group.sample_size(20);
+    for &(ns, nb) in LU_CELLS {
+        group.bench_function(format!("n{ns}_nbatch{nb}x{LU_NPARAMS}"), |b| {
+            let ctx = M::C::default()
+                .clone_with_nbatch(nb)
+                .expect("backend declined nbatch");
+            let aug_ctx = ctx
+                .clone_with_nbatch(nb * LU_NPARAMS)
+                .expect("backend declined nbatch");
+            let op = identity_op::<M>(ns, ctx.clone());
+            let mut s = LS::default();
+            s.set_sparsity(&op);
+            s.set_linearisation(&op);
+            let mut x = M::V::from_element(ns, 1.0, ctx.clone());
+            let mut x_aug = M::V::from_element(ns, 1.0, aug_ctx);
+            b.iter(|| {
+                s.solve_in_place(&mut x).unwrap();
+                s.solve_in_place(&mut x_aug).unwrap();
+                black_box((&x, &x_aug));
+                ctx.synchronize();
+            })
+        });
+    }
+    group.finish();
+}
+
+/// `(states, lanes)` cells the Newton bench sweeps. The switch cost it prices is a fixed
+/// per-solve overhead, so wide matrices would only bury it.
+const NEWTON_CELLS: &[(usize, usize)] = &[(3, 100), (3, 1000), (32, 100)];
+
+/// `F(x) = 2 x .* x - 8`, elementwise so that every operation is one launch whatever the lane
+/// count.
+///
+/// Elementwise on purpose: the sensitivity test models are host-slice closures that stage
+/// through host memory on a device backend, and a `gemv`-based operator would price
+/// `OxideMat::gemv`'s per-lane cuBLAS loop instead -- either would bury what this bench is
+/// for, which is the per-solve overhead of switching lane counts.
+struct SquareOp<M: DenseMatrix> {
+    nstates: IndexType,
+    eights: M::V,
+    ctx: M::C,
+}
+
+impl<M: DenseMatrix<T = f64>> SquareOp<M>
+where
+    M::V: Vector<T = f64, C = M::C>,
+    M::C: Clone,
+{
+    fn new(nstates: usize, ctx: M::C) -> Self {
+        let eights = M::V::from_element(nstates, 8.0, ctx.clone());
+        Self {
+            nstates,
+            eights,
+            ctx,
+        }
+    }
+}
+
+impl<M: DenseMatrix<T = f64>> NonLinearOp for SquareOp<M>
+where
+    M::V: Vector<T = f64, C = M::C>,
+{
+    type T = f64;
+    type V = M::V;
+    type M = M;
+    type C = M::C;
+
+    fn nstates(&self) -> IndexType {
+        self.nstates
+    }
+    fn nout(&self) -> IndexType {
+        self.nstates
+    }
+    fn context(&self) -> &Self::C {
+        &self.ctx
+    }
+    fn call_inplace(&self, x: &Self::V, y: &mut Self::V) {
+        // y = 2 x .* x - 8
+        y.copy_from(x);
+        y.component_mul_assign(x);
+        *y *= Scale(2.0);
+        y.axpy(-1.0, &self.eights, 1.0);
+    }
+}
+
+impl<M: DenseMatrix<T = f64>> NonLinearOpJacobian for SquareOp<M>
+where
+    M::V: Vector<T = f64, C = M::C>,
+{
+    fn jac_mul_inplace(&self, x: &Self::V, v: &Self::V, y: &mut Self::V) {
+        // J v = 4 x .* v
+        y.copy_from(x);
+        y.component_mul_assign(v);
+        *y *= Scale(4.0);
+    }
+}
+
+/// 🔴 newton_sens — a sensitivity step's two Newton solves: the state's lanes then the
+/// augmented `nbatch * nparams`, against one Jacobian, sharing one solver
+fn bench_newton_sens<M, LS>(c: &mut Criterion, label: &str)
+where
+    M: DenseMatrix<T = f64> + 'static,
+    M::C: Default + Clone,
+    M::V: Vector<T = f64, C = M::C>,
+    LS: LaLinearSolver<M>,
+{
+    let mut group = c.benchmark_group(label);
+    group.sample_size(20);
+    for &(ns, nb) in NEWTON_CELLS {
+        group.bench_function(format!("n{ns}_nbatch{nb}x{LU_NPARAMS}"), |b| {
+            let ctx = M::C::default()
+                .clone_with_nbatch(nb)
+                .expect("backend declined nbatch");
+            let aug_ctx = ctx
+                .clone_with_nbatch(nb * LU_NPARAMS)
+                .expect("backend declined nbatch");
+            let op = SquareOp::<M>::new(ns, ctx.clone());
+            let atol = M::V::from_element(ns, 1e-6, ctx.clone());
+            let x0 = M::V::from_element(ns, 2.1, ctx.clone());
+            let x0_aug = M::V::from_element(ns, 2.1, aug_ctx.clone());
+            let mut s =
+                NewtonNonlinearSolver::<M, LS, NoLineSearch>::new(LS::default(), NoLineSearch);
+            s.set_problem(&op);
+            s.reset_jacobian(&op, &x0);
+            let mut x = x0.clone();
+            let mut x_aug = x0_aug.clone();
+            let mut convergence = Convergence::new(1e-6, &atol);
+            b.iter(|| {
+                x.copy_from(&x0);
+                x_aug.copy_from(&x0_aug);
+                s.solve_in_place(&op, &mut x, &x0, &mut convergence)
+                    .unwrap();
+                s.solve_in_place(&op, &mut x_aug, &x0_aug, &mut convergence)
+                    .unwrap();
+                black_box((&x, &x_aug));
+                ctx.synchronize();
+            })
+        });
+    }
+    group.finish();
+}
+
+// ═════════════════════════════════════════════════════════
 // Backend macros — add new backends with one call each
 // ═════════════════════════════════════════════════════════
 
@@ -1005,14 +1298,26 @@ macro_rules! bench_dense_matrix_backend {
     };
 }
 
+macro_rules! bench_lu_backend {
+    ($c:expr, $label:expr, $M:ty, $LS:ty) => {
+        bench_lu_factor::<$M, $LS>($c, concat!("lu_factor/", $label));
+        bench_lu_solve::<$M, $LS>($c, concat!("lu_solve/", $label), 1);
+        bench_lu_solve::<$M, $LS>($c, concat!("lu_solve_grouped/", $label), LU_NPARAMS);
+        bench_lu_solve_sens::<$M, $LS>($c, concat!("lu_solve_sens/", $label));
+        bench_newton_sens::<$M, $LS>($c, concat!("newton_sens/", $label));
+    };
+}
+
 fn criterion_benchmark(c: &mut Criterion) {
     bench_vector_backend!(c, "nalgebra", NalgebraVec<f64>);
     bench_matrix_backend!(c, "nalgebra", NalgebraMat<f64>);
     bench_dense_matrix_backend!(c, "nalgebra", NalgebraMat<f64>);
+    bench_lu_backend!(c, "nalgebra", NalgebraMat<f64>, NalgebraLU<f64>);
 
     bench_vector_backend!(c, "faer", FaerVec<f64>);
     bench_matrix_backend!(c, "faer", FaerMat<f64>);
     bench_dense_matrix_backend!(c, "faer", FaerMat<f64>);
+    bench_lu_backend!(c, "faer", FaerMat<f64>, FaerLU<f64>);
 
     bench_matrix_backend!(c, "faer_sparse", FaerSparseMat<f64>);
 
@@ -1021,6 +1326,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         bench_vector_backend!(c, "cuda", CudaVec<f64>);
         bench_matrix_backend!(c, "cuda", CudaMat<f64>);
         bench_dense_matrix_backend!(c, "cuda", CudaMat<f64>);
+        bench_lu_backend!(c, "cuda", CudaMat<f64>, CudaLU<f64>);
     }
 
     #[cfg(feature = "cuda-oxide")]
@@ -1028,6 +1334,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         bench_vector_backend!(c, "cuda_oxide", OxideVec);
         bench_matrix_backend!(c, "cuda_oxide", OxideMat);
         bench_dense_matrix_backend!(c, "cuda_oxide", OxideMat);
+        bench_lu_backend!(c, "cuda_oxide", OxideMat, OxideLU);
     }
 }
 

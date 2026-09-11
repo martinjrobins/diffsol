@@ -193,22 +193,9 @@ thread_local! {
 }
 
 impl OxideContext {
-    /// `y = alpha * a * x + beta * y`, column-major, unit increments.
-    ///
-    /// The pointers are raw so that a per-batch slice needs no view type; each
-    /// must address at least `nrows * ncols`, `ncols` and `nrows` elements
-    /// respectively.
-    #[allow(clippy::too_many_arguments)]
-    fn gemv(
-        &self,
-        nrows: IndexType,
-        ncols: IndexType,
-        alpha: f64,
-        beta: f64,
-        a: u64,
-        x: u64,
-        y: u64,
-    ) {
+    /// Runs `f` with this thread's cuBLAS handle for this device, bound to the
+    /// context's stream so cuBLAS work is ordered against the kernel launches.
+    pub(crate) fn with_blas<R>(&self, f: impl FnOnce(cublas::cublasHandle_t) -> R) -> R {
         let ordinal = self.stream.context().ordinal();
         let cu_stream = self.stream.cu_stream() as cublas::cudaStream_t;
         BLAS.with(|handles| {
@@ -225,15 +212,39 @@ impl OxideContext {
                 };
                 BlasHandle(handle)
             });
-            // SAFETY: the pointers are device pointers in this context, sized
-            // as documented above; `nrows`/`ncols` fit in `c_int` for any
-            // matrix that fits in device memory.
+            // SAFETY: the handle is live and the stream belongs to this context.
             unsafe {
                 cublas::cublasSetStream_v2(handle.0, cu_stream)
                     .result()
                     .expect("Failed to set cuBLAS stream");
+            }
+            f(handle.0)
+        })
+    }
+
+    /// `y = alpha * a * x + beta * y`, column-major, unit increments.
+    ///
+    /// The pointers are raw so that a per-batch slice needs no view type; each
+    /// must address at least `nrows * ncols`, `ncols` and `nrows` elements
+    /// respectively.
+    #[allow(clippy::too_many_arguments)]
+    fn gemv(
+        &self,
+        nrows: IndexType,
+        ncols: IndexType,
+        alpha: f64,
+        beta: f64,
+        a: u64,
+        x: u64,
+        y: u64,
+    ) {
+        self.with_blas(|handle| {
+            // SAFETY: the pointers are device pointers in this context, sized
+            // as documented above; `nrows`/`ncols` fit in `c_int` for any
+            // matrix that fits in device memory.
+            unsafe {
                 cublas::cublasDgemv_v2(
-                    handle.0,
+                    handle,
                     cublas::cublasOperation_t::CUBLAS_OP_N,
                     nrows as c_int,
                     ncols as c_int,
