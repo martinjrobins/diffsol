@@ -66,6 +66,7 @@ pub(crate) mod tests {
     }
 
     /// Create an `nstates`-square diagonal operator `A = diag(value, ..., value)`.
+    #[cfg_attr(not(feature = "cuda-oxide"), allow(dead_code))]
     pub fn diagonal_op_n<M: Matrix>(nstates: IndexType, value: f64, ctx: M::C) -> DiagonalOp<M> {
         use num_traits::FromPrimitive;
         let v = M::T::from_f64(value).unwrap();
