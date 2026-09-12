@@ -1,10 +1,9 @@
 use crate::{
-    matrix::DenseMatrix, scale, LinearOp, Matrix, MatrixSparsity, NonLinearOp, NonLinearOpJacobian,
+    matrix::DenseMatrix, LinearOp, Matrix, MatrixSparsity, NonLinearOp, NonLinearOpJacobian,
     OdeEquationsImplicit, Op, Vector,
 };
 use log::debug;
 use num_traits::{One, ToPrimitive, Zero};
-use std::ops::MulAssign;
 use std::{
     cell::{Ref, RefCell},
     ops::{Deref, SubAssign},
@@ -195,8 +194,7 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
     ) {
         // update psi term as defined in second equation on page 9 of [1]
         debug_assert!(order >= 1, "BDF order is always at least one");
-        diff.gemv_cols(1, order + 1, Eqn::T::one(), gamma, Eqn::T::zero(), psi);
-        psi.mul_assign(scale(alpha[order]));
+        diff.gemv_cols(1, order + 1, alpha[order], gamma, Eqn::T::zero(), psi);
     }
     pub fn set_psi_and_y0<M: DenseMatrix<V = Eqn::V, T = Eqn::T>>(
         &self,

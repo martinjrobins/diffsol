@@ -2277,21 +2277,21 @@ mod test {
         let mut s = problem.bdf_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 411
-        number_of_steps: 1016
+        number_of_linear_solver_setups: 409
+        number_of_steps: 1013
         number_of_error_test_failures: 256
-        number_of_nonlinear_solver_iterations: 3357
-        number_of_nonlinear_solver_fails: 14
+        number_of_nonlinear_solver_iterations: 3338
+        number_of_nonlinear_solver_fails: 12
         number_of_linear_solver_setups_from_checkpoint: 1
-        number_of_linear_solver_setups_from_first_convergence_fail: 13
+        number_of_linear_solver_setups_from_first_convergence_fail: 11
         number_of_linear_solver_setups_from_second_convergence_fail: 1
         number_of_linear_solver_setups_from_error_test_fail: 256
         number_of_linear_solver_setups_from_step_success: 140
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 1533
-        number_of_jac_muls: 1926
-        number_of_matrix_evals: 25
+        number_of_jac_muls: 1897
+        number_of_matrix_evals: 23
         number_of_jac_adj_muls: 0
         "###);
     }
