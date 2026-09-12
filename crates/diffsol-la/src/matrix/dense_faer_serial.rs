@@ -13,9 +13,7 @@ use crate::{
 };
 
 use faer::reborrow::{Reborrow, ReborrowMut};
-use faer::{
-    get_global_parallelism, linalg::matmul::matmul, unzip, zip, Accum, Mat, MatMut, MatRef,
-};
+use faer::{linalg::matmul::matmul, unzip, zip, Accum, Mat, MatMut, MatRef};
 
 /// A batched matrix, stored as `nbatch` side-by-side blocks of `logical_ncols` columns.
 ///
@@ -238,7 +236,7 @@ macro_rules! gemv_data {
                 $self.data.rb().subcols($self.col_bcast(b, 0, nb), nc),
                 $x.data.rb().col($x.batch(b, nb)),
                 $a,
-                get_global_parallelism(),
+                $self.context.par,
             );
         }
     }};
@@ -288,7 +286,7 @@ macro_rules! gemv_cols_data {
                     $self.data.rb().subcols($self.col_bcast(b, start, nb), nc),
                     x,
                     $a,
-                    get_global_parallelism(),
+                    $self.context.par,
                 );
             }
         }

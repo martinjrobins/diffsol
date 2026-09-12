@@ -1,4 +1,4 @@
-use faer::{get_global_parallelism, Par};
+use faer::Par;
 
 /// Context for the faer backend.
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -10,7 +10,7 @@ pub struct FaerContext {
 impl FaerContext {
     pub fn new() -> Self {
         Self {
-            par: get_global_parallelism(),
+            par: Par::Seq,
             nbatch: 1,
         }
     }
@@ -18,7 +18,7 @@ impl FaerContext {
     pub fn with_nbatch(nbatch: usize) -> Self {
         assert!(nbatch > 0, "nbatch must be > 0");
         Self {
-            par: get_global_parallelism(),
+            par: Par::Seq,
             nbatch,
         }
     }

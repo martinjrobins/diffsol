@@ -13,7 +13,7 @@ use faer::reborrow::{Reborrow, ReborrowMut};
 use faer::sparse::linalg::matmul::sparse_dense_matmul;
 use faer::sparse::ops::{ternary_op_assign_into, union_symbolic};
 use faer::sparse::{Pair, SparseColMat, SymbolicSparseColMat, SymbolicSparseColMatRef, Triplet};
-use faer::{get_global_parallelism, Accum};
+use faer::Accum;
 
 #[derive(Clone, Debug)]
 pub struct FaerSparseMat<T: FaerScalar> {
@@ -415,8 +415,7 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
         y.context
             .assert_broadcastable_into(x.context.nbatch(), "gemv");
         let nb = y.data.ncols();
-        // one parallelism query for the whole call rather than one per batch
-        let par = get_global_parallelism();
+        let par = self.context.par;
         for batch in 0..nb {
             let mut ycol = y.data.rb_mut().col_mut(batch);
             let accum = if beta.is_zero() {
