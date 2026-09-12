@@ -1,10 +1,9 @@
 use crate::{
-    error::DiffsolError, ode_solver_error, scalar::IndexType, scale, AugmentedOdeEquations,
-    Context, DefaultDenseMatrix, DenseMatrix, OdeEquations, OdeSolverProblem, OdeSolverState, Op,
-    StateRef, StateRefMut, Vector, VectorViewMut,
+    error::DiffsolError, ode_solver_error, scalar::IndexType, AugmentedOdeEquations, Context,
+    DefaultDenseMatrix, DenseMatrix, OdeEquations, OdeSolverProblem, OdeSolverState, Op, StateRef,
+    StateRefMut, Vector, VectorViewMut,
 };
 use num_traits::Zero;
-use std::ops::MulAssign;
 
 use super::state::StateCommon;
 
@@ -73,29 +72,31 @@ where
     pub fn initialise_diff_to_first_order(&mut self) {
         self.order = 1usize;
         self.diff.column_mut(0).copy_from(&self.y);
-        self.diff.column_mut(1).copy_from(&self.dy);
-        self.diff.column_mut(1).mul_assign(scale(self.h));
+        self.diff.column_mut(1).axpy(self.h, &self.dy, M::T::zero());
         self.diff_initialised = true;
     }
 
     pub fn initialise_sdiff_to_first_order(&mut self) {
         self.sdiff.column_mut(0).copy_from(&self.s);
-        self.sdiff.column_mut(1).copy_from(&self.ds);
-        self.sdiff.column_mut(1).mul_assign(scale(self.h));
+        self.sdiff
+            .column_mut(1)
+            .axpy(self.h, &self.ds, M::T::zero());
         self.sdiff_initialised = true;
     }
 
     pub fn initialise_gdiff_to_first_order(&mut self) {
         self.gdiff.column_mut(0).copy_from(&self.g);
-        self.gdiff.column_mut(1).copy_from(&self.dg);
-        self.gdiff.column_mut(1).mul_assign(scale(self.h));
+        self.gdiff
+            .column_mut(1)
+            .axpy(self.h, &self.dg, M::T::zero());
         self.gdiff_initialised = true;
     }
 
     pub fn initialise_sgdiff_to_first_order(&mut self) {
         self.sgdiff.column_mut(0).copy_from(&self.sg);
-        self.sgdiff.column_mut(1).copy_from(&self.dsg);
-        self.sgdiff.column_mut(1).mul_assign(scale(self.h));
+        self.sgdiff
+            .column_mut(1)
+            .axpy(self.h, &self.dsg, M::T::zero());
         self.sgdiff_initialised = true;
     }
 }

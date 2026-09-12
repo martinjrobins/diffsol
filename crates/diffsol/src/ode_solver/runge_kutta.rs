@@ -610,9 +610,15 @@ where
         } else {
             let c =
                 (tableau.c()[i] - tableau.c()[i - 2]) / (tableau.c()[i - 1] - tableau.c()[i - 2]);
-            // dy = c1  + c * (c1 - c2)
-            hdy.copy_from_view(&diff.column(i - 1));
-            hdy.axpy_v(-c, &diff.column(i - 2), Eqn::T::one() + c);
+            // dy = (1 + c) * c1 - c * c2, in one pass over the two adjacent columns
+            diff.gemv_cols(
+                i - 2,
+                i,
+                Eqn::T::one(),
+                &[-c, Eqn::T::one() + c],
+                Eqn::T::zero(),
+                hdy,
+            );
         }
     }
 

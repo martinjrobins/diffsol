@@ -972,8 +972,11 @@ where
             )?;
             self.statistics.number_of_nonlinear_solver_iterations += self.convergence.niter();
             let s_new = &*s_new;
-            self.s_deltas.copy_from(s_new);
-            self.s_deltas -= &self.s_predict;
+            Eqn::V::for_each_elem_mut(
+                [&mut self.s_deltas],
+                [s_new, &self.s_predict],
+                |[d], [s_new, s_predict], _lane, i| *d = s_new[i] - s_predict[i],
+            );
         }
 
         if s_op.eqn().out().is_some() {
