@@ -11,7 +11,7 @@ use num_traits::{abs, FromPrimitive, One, Signed, ToPrimitive, Zero};
 
 use crate::ode_solver_error;
 use crate::{
-    matrix::MatrixRef, nonlinear_solver::root::RootFinder, op::bdf::BdfCallable, scalar::scale,
+    matrix::MatrixRef, nonlinear_solver::root::RootFinder, op::bdf::BdfCallable,
     AugmentedOdeEquations, BdfState, DenseMatrix, JacobianUpdate, NonLinearOp, NonLinearSolver,
     OdeEquationsImplicit, OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeSolverMethod,
     OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, Scalar, SensEquations, Vector,
@@ -1415,8 +1415,11 @@ where
             let state = &mut self.state;
             state.y.copy_from(&self.y_predict);
             state.t = self.t_predict;
-            state.dy.copy_from_view(&state.diff.column(1));
-            state.dy *= scale(Eqn::T::one() / state.h);
+            // dy = diff[:, 1] / h, in one pass rather than a copy and a scale
+            let inv_h = Eqn::T::one() / state.h;
+            state
+                .dy
+                .axpy_v(inv_h, &state.diff.column(1), Eqn::T::zero());
         }
 
         // update statistics
