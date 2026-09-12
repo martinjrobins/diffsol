@@ -46,6 +46,32 @@ jobs:
     steps:
       - *checkout
       - *install-rust
+      # release-plz runs `cargo-semver-checks` with no feature flags, so it falls back to that
+      # tool's heuristic: every feature except `unstable`/`nightly`/`bench`/`no_std` and
+      # `_`-prefixed names.
+      #
+      # Neither tool can express "skip these features", so this shadows the binary with a 
+      # wrapper that checks the default features.
+      # TODO: missing all the optional features, do we need these?
+      - name: Limit cargo-semver-checks to default features
+        run: |
+          mkdir -p "$RUNNER_TEMP/semver-shim"
+          cat > "$RUNNER_TEMP/semver-shim/cargo-semver-checks" <<'SHIM'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          self_dir=$(cd "$(dirname "$0")" && pwd)
+          IFS=: read -ra path_dirs <<< "$PATH"
+          for dir in "${path_dirs[@]}"; do
+            if [ "$dir" = "$self_dir" ]; then continue; fi
+            if [ -x "$dir/cargo-semver-checks" ]; then
+              exec "$dir/cargo-semver-checks" "$@" --default-features
+            fi
+          done
+          echo "cargo-semver-checks shim: real binary not found on PATH" >&2
+          exit 127
+          SHIM
+          chmod +x "$RUNNER_TEMP/semver-shim/cargo-semver-checks"
+          echo "$RUNNER_TEMP/semver-shim" >> "$GITHUB_PATH"
       - name: Run release-plz
         uses: release-plz/action@v0.5
         with:
