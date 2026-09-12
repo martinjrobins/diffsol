@@ -714,20 +714,20 @@ where
         }
     }
 
-    let mut bits = [0u64];
-    // SAFETY: `out` is one `u64`-sized cell and `bits` is one `u64`; the
-    // synchronize completes the copy before it is read.
+    // SAFETY: `out` is one `u64`-sized cell and `readback` one pinned `u64`; the
+    // event completes the copy before it is read.
     unsafe {
         memcpy_dtoh_async(
-            bits.as_mut_ptr(),
+            scratch.readback.as_mut_ptr(),
             scratch.out.cu_deviceptr(),
             scratch.out.num_bytes(),
             stream.cu_stream(),
         )
     }
-    .and_then(|()| stream.synchronize())
+    .and_then(|()| scratch.done.record(stream))
+    .and_then(|()| scratch.done.synchronize())
     .expect("Failed to copy reduction output");
-    f64::from_bits(bits[0])
+    f64::from_bits(scratch.readback.as_slice()[0])
 }
 
 impl OxideContext {
