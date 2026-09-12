@@ -58,7 +58,6 @@ insta = { version = "1.48", features = ["yaml"] }
 criterion = { version = "0.8" }
 skeptic = "0.13"
 paste = { workspace = true }
-colog = "1.4"
 
 [build-dependencies]
 bindgen = { version = "0.72", optional = true }
