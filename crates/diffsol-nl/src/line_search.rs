@@ -3,7 +3,7 @@ use crate::{
     error::NlError,
     non_linear_solver_error,
 };
-use diffsol_la::{Scalar, Vector};
+use diffsol_la::{Context, Scalar, Vector};
 use log::warn;
 use num_traits::{FromPrimitive, One, Pow};
 
@@ -141,7 +141,7 @@ impl<V: Vector> LineSearch<V> for BacktrackingLineSearch<V> {
             }
         }
 
-        if self.x0.len() == 0 {
+        if self.x0.len() != x.len() || self.x0.context().nbatch() != x.context().nbatch() {
             self.x0 = V::zeros(x.len(), x.context().clone());
             self.delta0 = V::zeros(delta.len(), delta.context().clone());
         }

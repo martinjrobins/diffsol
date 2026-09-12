@@ -141,4 +141,9 @@ impl crate::Context for CudaContext {
             nbatch,
         })
     }
+    fn synchronize(&self) {
+        self.stream
+            .synchronize()
+            .expect("Failed to synchronize stream");
+    }
 }

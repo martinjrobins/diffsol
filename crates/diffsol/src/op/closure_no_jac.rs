@@ -86,6 +86,6 @@ where
 {
     fn call_inplace(&self, x: &M::V, t: M::T, y: &mut M::V) {
         self.op.statistics.borrow_mut().increment_call();
-        y.for_each_batch([x, self.p], |y, [x, p], _| (self.op.func)(x, p, t, y));
+        y.for_each_batch_host([x, self.p], |y, [x, p], _| (self.op.func)(x, p, t, y));
     }
 }

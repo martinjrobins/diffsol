@@ -46,14 +46,54 @@ oxide-doctor:
     CUDA_OXIDE_BACKEND="{{oxide_backend}}" cargo +{{oxide_nightly}} oxide doctor
 
 oxide-test *ARGS:
-    CUDA_OXIDE_BACKEND="{{oxide_backend}}" RUSTFLAGS="{{oxide_flags}}" \
+    CARGO_PROFILE_DEV_DEBUG=0 CUDA_OXIDE_BACKEND="{{oxide_backend}}" \
+        RUSTFLAGS="{{oxide_flags}}" \
         cargo +{{oxide_nightly}} oxide test --arch {{oxide_arch}} -- \
         -p diffsol-la --features cuda-oxide {{ARGS}}
+
+# Run the cuda-oxide tests in the `diffsol` crate (the recipe above is pinned to
+# `diffsol-la`; `just` would read a leading `--` as a package argument, so this is
+# a second recipe rather than a parameter).
+#
+# `diffsol` monomorphizes the generic lane-closure kernels, so this build needs the
+# CARGO_PROFILE_DEV_DEBUG=0 workaround described on `oxide-bench` below.
+oxide-test-diffsol *ARGS:
+    CARGO_PROFILE_DEV_DEBUG=0 CUDA_OXIDE_BACKEND="{{oxide_backend}}" \
+        RUSTFLAGS="{{oxide_flags}}" \
+        cargo +{{oxide_nightly}} oxide test --arch {{oxide_arch}} -- \
+        -p diffsol --features cuda-oxide {{ARGS}}
 
 oxide-build *ARGS:
     CUDA_OXIDE_BACKEND="{{oxide_backend}}" RUSTFLAGS="{{oxide_flags}}" \
         cargo +{{oxide_nightly}} oxide build --arch {{oxide_arch}} -- \
         -p diffsol --features cuda-oxide {{ARGS}}
+
+# Run the cuda-oxide benchmarks.
+#
+# `cargo oxide` has no `bench` subcommand, so build the bench target and run it
+# with criterion's `--bench` flag.
+#
+# CARGO_PROFILE_DEV_DEBUG=0: a generic kernel monomorphized in a consuming crate lands in that
+# crate's own PTX bundle, and `load_all_ptx_bundles_merged` merges the bundles by stripping only
+# `.version`/`.target`/`.address_size`. Debug builds also carry `.file 1..N` line tables, so the
+# merged module has duplicate file indices and the driver rejects it ("a PTX JIT compilation
+# failed" / ptxas "Duplicate file index #1"). Dropping debug info drops the `.file` directives.
+oxide-bench *ARGS:
+    CARGO_PROFILE_DEV_DEBUG=0 CUDA_OXIDE_BACKEND="{{oxide_backend}}" \
+        RUSTFLAGS="{{oxide_flags}}" \
+        cargo +{{oxide_nightly}} oxide build --arch {{oxide_arch}} -- \
+        -p diffsol --features cuda-oxide --bench lin_alg_ops
+    "$(ls -t target/debug/build/diffsol/*/out/lin_alg_ops-* | grep -v '\.d$' | head -1)" \
+        --bench {{ARGS}}
+
+# Run the element-parallel ODE model benchmarks (see the note on `oxide-bench`).
+oxide-bench-ode *ARGS:
+    CARGO_PROFILE_DEV_DEBUG=0 CUDA_OXIDE_BACKEND="{{oxide_backend}}" \
+        RUSTFLAGS="{{oxide_flags}}" \
+        cargo +{{oxide_nightly}} oxide build --arch {{oxide_arch}} -- \
+        -p diffsol --features cuda-oxide --bench ode_solvers_oxide
+    "$(ls -t target/debug/build/diffsol/*/out/ode_solvers_oxide-* | grep -v '\.d$' | head -1)" \
+        --bench {{ARGS}}
 
 # Run the cuda-oxide tests under compute-sanitizer (memcheck or racecheck).
 #

@@ -108,7 +108,7 @@ where
 {
     fn gemv_inplace(&self, x: &M::V, t: M::T, beta: M::T, y: &mut M::V) {
         self.op.statistics.borrow_mut().increment_call();
-        y.for_each_batch([x, self.p], |y, [x, p], _| (self.op.func)(x, p, t, beta, y));
+        y.for_each_batch_host([x, self.p], |y, [x, p], _| (self.op.func)(x, p, t, beta, y));
     }
 
     fn matrix_inplace(&self, t: Self::T, y: &mut Self::M) {

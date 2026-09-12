@@ -59,6 +59,13 @@ pub trait Context: Clone + Default {
     fn nbatch(&self) -> usize {
         1
     }
+    /// Waits for any queued work to finish.
+    ///
+    /// A no-op on the CPU backends, where every operation has already run by the time it
+    /// returns. On a device backend the operations only enqueue, so anything timing them has to
+    /// call this before reading the clock.
+    #[inline]
+    fn synchronize(&self) {}
     /// Creates a new context with the given batch count.
     ///
     /// Other properties of the context (e.g. CUDA stream, faer parallelism)

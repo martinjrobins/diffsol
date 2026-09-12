@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 
 use crate::{
-    ConstantOpSens, LinearOp, LinearOpTranspose, Matrix, MatrixSparsity, NonLinearOp,
+    ConstantOpSens, Context, LinearOp, LinearOpTranspose, Matrix, MatrixSparsity, NonLinearOp,
     NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, Scalar,
-    Vector, VectorIndex, VectorView,
+    Vector, VectorIndex,
 };
 use num_traits::{One, Zero};
 
@@ -13,36 +13,46 @@ pub mod coloring;
 pub mod graph;
 pub mod greedy_coloring;
 
+/// The probe vectors for a non-zero search, laid out with one probe vector per batch
+/// so one operator call covers every column.
+/// TODO: this holds `ncols * nbatch` lanes of both vectors at once; chunk the columns if that
+/// ever gets too big for the device.
+fn probe_columns<V: Vector>(nrows: usize, ncols: usize, ctx: &V::C) -> (V, V) {
+    let ctx = ctx
+        .clone_with_nbatch(ctx.nbatch() * ncols)
+        .expect("backend declined a lane per column");
+    let mut v = V::zeros(ncols, ctx.clone());
+    // `v.len()` is `ncols`, so the lane's own column needs no capture in the device closure
+    v.for_each_batch([], |v, [], lane| v[lane % v.len()] = V::T::NAN);
+    (v, V::zeros(nrows, ctx))
+}
+
+/// The non-zeros a [`probe_columns`] call found, read back in one copy, from batch 0's lanes.
+fn probe_triplets<V: Vector>(col: &V, nrows: usize, ncols: usize) -> Vec<(usize, usize)> {
+    let host = col.clone_as_vec();
+    let mut triplets = Vec::with_capacity(nrows);
+    for j in 0..ncols {
+        for i in 0..nrows {
+            if host[j * nrows + i].is_nan() {
+                triplets.push((i, j));
+            }
+        }
+    }
+    triplets
+}
+
 macro_rules! gen_find_non_zeros_nonlinear {
     ($name:ident, $op_fn:ident, $op_trait:ident, $nrows:ident, $ncols:ident) => {
         /// Find the non-zero entries of the $name matrix of a non-linear operator.
-        /// TODO: This function is not efficient for non-host vectors and could be part of the Vector trait
-        ///       to allow for more efficient implementations. It's ok for now since this is only used once
-        ///       during the setup phase.
         pub fn $name<F: NonLinearOp + $op_trait + ?Sized>(
             op: &F,
             x: &F::V,
             t: F::T,
         ) -> Vec<(usize, usize)> {
-            let mut v = F::V::zeros(op.$ncols(), op.context().clone());
-            let mut col = F::V::zeros(op.$nrows(), op.context().clone());
-            let mut triplets = Vec::with_capacity(op.nstates());
-            for j in 0..op.$ncols() {
-                v.fill_index(j, F::T::NAN);
-                op.$op_fn(x, t, &v, &mut col);
-                {
-                    // assume that every batch has the same non-zeros
-                    let col_b0 = col.get_batch(0);
-                    for i in 0..op.$nrows() {
-                        if col_b0.get_index(i).is_nan() {
-                            triplets.push((i, j));
-                        }
-                    }
-                }
-                col.fill(F::T::zero());
-                v.fill_index(j, F::T::zero());
-            }
-            triplets
+            let (nrows, ncols) = (op.$nrows(), op.$ncols());
+            let (v, mut col) = probe_columns::<F::V>(nrows, ncols, op.context());
+            op.$op_fn(x, t, &v, &mut col);
+            probe_triplets(&col, nrows, ncols)
         }
     };
 }
@@ -88,53 +98,20 @@ pub fn find_constant_sens_non_zeros<F: ConstantOpSens + ?Sized>(
     op: &F,
     t: F::T,
 ) -> Vec<(usize, usize)> {
-    let mut v = F::V::zeros(op.nparams(), op.context().clone());
-    let mut col = F::V::zeros(op.nout(), op.context().clone());
-    let mut triplets = Vec::with_capacity(op.nout());
-    for j in 0..op.nparams() {
-        v.fill_index(j, F::T::NAN);
-        op.sens_mul_inplace(t, &v, &mut col);
-        {
-            // assume that every batch has the same non-zeros
-            let col_b0 = col.get_batch(0);
-            for i in 0..op.nout() {
-                if col_b0.get_index(i).is_nan() {
-                    triplets.push((i, j));
-                }
-            }
-        }
-        col.fill(F::T::zero());
-        v.fill_index(j, F::T::zero());
-    }
-    triplets
+    let (nrows, ncols) = (op.nout(), op.nparams());
+    let (v, mut col) = probe_columns::<F::V>(nrows, ncols, op.context());
+    op.sens_mul_inplace(t, &v, &mut col);
+    probe_triplets(&col, nrows, ncols)
 }
 
 macro_rules! gen_find_non_zeros_linear {
     ($name:ident, $op_fn:ident $(, $op_trait:tt )?) => {
         /// Find the non-zero entries of the $name matrix of a non-linear operator.
-        /// TODO: This function is not efficient for non-host vectors and could be part of the Vector trait
-        ///       to allow for more efficient implementations. It's ok for now since this is only used once
-        ///       during the setup phase.
         pub fn $name<F: LinearOp + ?Sized $(+ $op_trait)?>(op: &F, t: F::T) -> Vec<(usize, usize)> {
-            let mut v = F::V::zeros(op.nstates(), op.context().clone());
-            let mut col = F::V::zeros(op.nout(), op.context().clone());
-            let mut triplets = Vec::with_capacity(op.nstates());
-            for j in 0..op.nstates() {
-                v.fill_index(j, F::T::NAN);
-                op.$op_fn(&v, t, &mut col);
-                {
-                    // assume non-zeros are the same for all batches
-                    let col_b0 = col.get_batch(0);
-                    for i in 0..op.nout() {
-                        if col_b0.get_index(i).is_nan() {
-                            triplets.push((i, j));
-                        }
-                    }
-                }
-                col.fill(F::T::zero());
-                v.fill_index(j, F::T::zero());
-            }
-            triplets
+            let (nrows, ncols) = (op.nout(), op.nstates());
+            let (v, mut col) = probe_columns::<F::V>(nrows, ncols, op.context());
+            op.$op_fn(&v, t, &mut col);
+            probe_triplets(&col, nrows, ncols)
         }
     };
 }

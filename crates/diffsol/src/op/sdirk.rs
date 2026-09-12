@@ -200,16 +200,19 @@ impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
         let mut tmp = self.tmp.borrow_mut();
         let c = self.c;
 
-        tmp.copy_from(phi);
-        tmp.axpy(c, x, Eqn::T::one());
+        tmp.for_each_elem([phi, x], move |tmp, [phi, x], _lane, i| {
+            *tmp = phi[i] + c * x[i]
+        });
     }
 
     // f_eval = phi + c * x
     pub fn get_f_eval(&self, x: &Eqn::V, f_eval: &mut Eqn::V) {
         let phi_ref = self.phi.borrow();
         let phi = phi_ref.deref();
-        f_eval.copy_from(phi);
-        f_eval.axpy(self.c, x, Eqn::T::one());
+        let c = self.c;
+        f_eval.for_each_elem([phi, x], move |f, [phi, x], _lane, i| {
+            *f = phi[i] + c * x[i]
+        });
     }
 
     pub fn set_jacobian_is_stale(&self) {

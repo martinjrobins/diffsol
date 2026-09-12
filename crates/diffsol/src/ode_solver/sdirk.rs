@@ -594,7 +594,7 @@ mod test {
                 exponential_decay_with_algebraic_adjoint_problem,
                 exponential_decay_with_algebraic_problem,
             },
-            heat2d::head2d_problem,
+            heat2d::{head2d_problem, heat2d_elem_problem},
             robertson::{robertson, robertson_sens},
             robertson_ode::robertson_ode,
         },
@@ -991,6 +991,31 @@ mod test {
     fn test_tr_bdf2_faer_sparse_heat2d() {
         let (problem, soln) = head2d_problem::<FaerSparseMat<f64>, 10>();
         let mut s = problem.tr_bdf2::<FaerSparseLU<f64>>().unwrap();
+        test_ode_solver(&mut s, soln, None, false, false);
+    }
+
+    #[test]
+    fn test_tr_bdf2_faer_sparse_heat2d_elem() {
+        let (problem, soln) = heat2d_elem_problem::<FaerSparseMat<f64>, 10>(1);
+        let mut s = problem.tr_bdf2::<FaerSparseLU<f64>>().unwrap();
+        test_ode_solver(&mut s, soln, None, false, false);
+    }
+
+    #[cfg(feature = "cuda-oxide")]
+    #[test]
+    fn test_tr_bdf2_cuda_oxide_heat2d_elem() {
+        use crate::{OxideLU, OxideMat};
+        let (problem, soln) = heat2d_elem_problem::<OxideMat, 10>(1);
+        let mut s = problem.tr_bdf2::<OxideLU>().unwrap();
+        test_ode_solver(&mut s, soln, None, false, false);
+    }
+
+    #[cfg(feature = "cuda-oxide")]
+    #[test]
+    fn test_tr_bdf2_cuda_oxide_heat2d_elem_batched() {
+        use crate::{OxideLU, OxideMat};
+        let (problem, soln) = heat2d_elem_problem::<OxideMat, 10>(2);
+        let mut s = problem.tr_bdf2::<OxideLU>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
     }
 

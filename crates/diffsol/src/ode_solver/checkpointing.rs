@@ -151,20 +151,18 @@ where
         let f0 = &self.ydots[idx - 1];
         let f1 = &self.ydots[idx];
 
-        y.copy_from(u0);
-        y.axpy(V::T::one(), u1, -V::T::one());
-        y.axpy(
-            h * (theta - V::T::from_f64(1.0).unwrap()),
-            f0,
-            V::T::one() - V::T::from_f64(2.0).unwrap() * theta,
-        );
-        y.axpy(h * theta, f1, V::T::one());
-        y.axpy(
-            V::T::from_f64(1.0).unwrap() - theta,
-            u0,
-            theta * (theta - V::T::from_f64(1.0).unwrap()),
-        );
-        y.axpy(theta, u1, V::T::one());
+        // p(theta) = theta * (theta - 1) * Q(theta) + (1 - theta) * u0 + theta * u1, where
+        // Q(theta) = (1 - 2 theta) (u1 - u0) + h (theta - 1) f0 + h theta f1
+        let two = V::T::from_f64(2.0).unwrap();
+        let c_du = V::T::one() - two * theta;
+        let c_f0 = h * (theta - V::T::one());
+        let c_f1 = h * theta;
+        let c_q = theta * (theta - V::T::one());
+        let c_u0 = V::T::one() - theta;
+        y.for_each_elem([u0, u1, f0, f1], move |y, [u0, u1, f0, f1], _lane, i| {
+            let q = c_f0 * f0[i] + c_du * (u1[i] - u0[i]) + c_f1 * f1[i];
+            *y = c_u0 * u0[i] + c_q * q + theta * u1[i];
+        });
         Some(())
     }
 }

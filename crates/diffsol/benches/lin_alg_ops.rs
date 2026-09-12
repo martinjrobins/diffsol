@@ -1,15 +1,29 @@
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
-#[cfg(feature = "cuda")]
-use diffsol::{CudaMat, CudaVec};
 use diffsol::{
-    DenseMatrix, FaerMat, FaerSparseMat, FaerVec, Matrix, MatrixCommon, NalgebraMat, NalgebraVec,
-    Scale, Vector,
+    Context, DenseMatrix, FaerLU, FaerMat, FaerSparseMat, FaerVec, IndexType, Matrix, MatrixCommon,
+    NalgebraLU, NalgebraMat, NalgebraVec, Scale, Vector,
+};
+#[cfg(feature = "cuda")]
+use diffsol::{CudaLU, CudaMat, CudaVec};
+#[cfg(feature = "cuda-oxide")]
+use diffsol::{OxideLU, OxideMat, OxideVec};
+use diffsol_la::{LinearOp as LaLinearOp, LinearSolver as LaLinearSolver};
+use diffsol_nl::{
+    Convergence, NewtonNonlinearSolver, NoLineSearch, NonLinearOp, NonLinearOpJacobian,
+    NonLinearSolver,
 };
 use std::hint::black_box;
 
 const VSIZES: &[usize] = &[2, 10, 100, 500];
 const MSIZES: &[usize] = &[10, 100, 500];
 const ONE_SIZE: &[usize] = &[50];
+
+// Note: Every `b.iter` body ends with `ctx.synchronize()` so device backends do the work.
+// This means the device backends have a launch-plus-sync timing floor (~8.5us on an A40).
+
+/// Sizes the `for_each_*` benches run: a one-thread-per-lane launch only shows its cost at a
+/// lane long enough to be worth splitting.
+const LANE_SIZES: &[usize] = &[50, 10_000];
 
 // ─────────────────────────────────────────────────────────
 // Helper: binary mutating op on two owned vectors
@@ -28,6 +42,7 @@ where
             b.iter(|| {
                 op(&mut y, &x);
                 black_box(&y);
+                ctx.synchronize();
             });
         });
     }
@@ -66,6 +81,7 @@ where
             b.iter(|| {
                 op(&mut v);
                 black_box(&v);
+                ctx.synchronize();
             });
         });
     }
@@ -101,7 +117,11 @@ fn bench_vector_construct<V>(
     for &ns in sizes {
         group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
             let ctx = V::C::default();
-            b.iter(|| op(ns, ctx.clone()));
+            b.iter(|| {
+                let v = op(ns, ctx.clone());
+                ctx.synchronize();
+                v
+            });
         });
     }
     group.finish();
@@ -150,6 +170,7 @@ fn bench_matrix_op<M>(
             b.iter(|| {
                 op(&mat, &x, &mut y);
                 black_box(&y);
+                ctx.synchronize();
             });
         });
     }
@@ -225,6 +246,7 @@ where
             b.iter(|| {
                 y.axpy_v(1.0, &x_view, 0.5);
                 black_box(&y);
+                ctx.synchronize();
             });
         });
     }
@@ -246,6 +268,7 @@ where
             b.iter(|| {
                 y.copy_from_view(&x_view);
                 black_box(&y);
+                ctx.synchronize();
             });
         });
     }
@@ -266,6 +289,7 @@ where
             let x = V::from_element(ns, 2.0, ctx.clone());
             b.iter(|| {
                 black_box(&y + &x);
+                ctx.synchronize();
             });
         });
     }
@@ -286,6 +310,7 @@ where
             let x = V::from_element(ns, 2.0, ctx.clone());
             b.iter(|| {
                 black_box(&y - &x);
+                ctx.synchronize();
             });
         });
     }
@@ -305,9 +330,15 @@ where
             let y = V::from_element(ns, 1.0, ctx.clone());
             let x = V::from_element(ns, 2.0, ctx.clone());
             b.iter_batched(
-                || y.clone(),
+                || {
+                    let y = y.clone();
+                    // the clone enqueues too, so let it land before the timed body starts
+                    ctx.synchronize();
+                    y
+                },
                 |y| {
                     black_box(y + &x);
+                    ctx.synchronize();
                 },
                 BatchSize::SmallInput,
             );
@@ -329,9 +360,15 @@ where
             let y = V::from_element(ns, 1.0, ctx.clone());
             let x = V::from_element(ns, 2.0, ctx.clone());
             b.iter_batched(
-                || y.clone(),
+                || {
+                    let y = y.clone();
+                    // the clone enqueues too, so let it land before the timed body starts
+                    ctx.synchronize();
+                    y
+                },
                 |y| {
                     black_box(y - &x);
+                    ctx.synchronize();
                 },
                 BatchSize::SmallInput,
             );
@@ -351,6 +388,61 @@ where
     });
 }
 
+/// `(states, lanes)` cells the wide-sensitivity gemv bench sweeps.
+const GEMV_WIDE_CELLS: &[(usize, usize)] = &[(3, 10), (32, 10), (100, 10), (256, 10)];
+
+/// 🔴 gemv (batched) — the same multiply over many lanes. `nparams > 1` is the grouped broadcast
+/// the sensitivity equations run: `nbatch * nparams` right-hand-side lanes over `nbatch` matrices.
+/// `grouped_x` flips which operand is wide -- `nbatch * nparams` matrix lanes against `nbatch`
+/// lanes of `x`, the shape a user's `jac_mul_inplace` makes when it multiplies a matrix it built
+/// at the augmented width by a state-width vector.
+fn bench_gemv_batched<M: Matrix<T = f64> + 'static>(
+    c: &mut Criterion,
+    label: &str,
+    cells: &[(usize, usize)],
+    nparams: usize,
+    grouped_x: bool,
+) where
+    M::C: Default + Clone,
+    M::V: Vector<T = f64, C = M::C> + Clone,
+{
+    let mut group = c.benchmark_group(label);
+    group.sample_size(20);
+    for &(ns, nb) in cells {
+        let id = if nparams == 1 {
+            format!("n{ns}_nbatch{nb}")
+        } else {
+            format!("n{ns}_nbatch{nb}x{nparams}")
+        };
+        // the setup is inside the closure so that a filtered-out cell costs nothing
+        group.bench_function(id, |b| {
+            let ctx = M::C::default()
+                .clone_with_nbatch(nb)
+                .expect("backend declined nbatch");
+            let wide = ctx
+                .clone_with_nbatch(nb * nparams)
+                .expect("backend declined nbatch");
+            // `y` always carries every lane; the other wide operand is the matrix or `x`
+            let (mat_ctx, x_ctx) = if grouped_x {
+                (wide.clone(), ctx.clone())
+            } else {
+                (ctx.clone(), wide.clone())
+            };
+            let mut mat = M::zeros(ns, ns, mat_ctx);
+            fill_dense(&mut mat, ns);
+            let x = M::V::from_element(ns, 1.0, x_ctx);
+            let mut y = M::V::zeros(ns, wide);
+            b.iter(|| {
+                // beta = 0, so repeated iterations neither drift nor overflow
+                mat.gemv(1.0, &x, 0.0, &mut y);
+                black_box(&y);
+                ctx.synchronize();
+            })
+        });
+    }
+    group.finish();
+}
+
 /// 🔴 matrix_column — Extract a vector view of one matrix column per batch.
 /// Called every RK stage (diff.column(i)) and every BDF Nordsieck/diff update.
 fn bench_matrix_column<M: Matrix<T = f64> + DenseMatrix + 'static>(c: &mut Criterion, label: &str)
@@ -362,9 +454,10 @@ where
     for &ns in MSIZES {
         group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
             let ctx = M::C::default();
-            let mat = M::zeros(ns, ns + 1, ctx);
+            let mat = M::zeros(ns, ns + 1, ctx.clone());
             b.iter(|| {
                 black_box(mat.column(0));
+                ctx.synchronize();
             });
         });
     }
@@ -391,6 +484,7 @@ where
             b.iter(|| {
                 mat.gemv_cols(0, weights.len(), 1.0, &weights, 0.0, &mut v);
                 black_box(&v);
+                ctx.synchronize();
             });
         });
     }
@@ -433,6 +527,7 @@ fn bench_stage_accumulate<M: Matrix<T = f64> + DenseMatrix + 'static>(
                 y.copy_from(&y0);
                 mat.gemv(1.0, &w_full, 1.0, &mut y);
                 black_box(&y);
+                ctx.synchronize();
             });
         });
         group.bench_with_input(BenchmarkId::new("gemv_cols", ns), &ns, |b, _| {
@@ -440,6 +535,7 @@ fn bench_stage_accumulate<M: Matrix<T = f64> + DenseMatrix + 'static>(
                 y.copy_from(&y0);
                 mat.gemv_cols(0, k, 1.0, &weights, 1.0, &mut y);
                 black_box(&y);
+                ctx.synchronize();
             });
         });
     }
@@ -472,11 +568,12 @@ where
         for &ns in MUL_COLS_SIZES {
             group.bench_with_input(BenchmarkId::new(format!("k{k}"), ns), &ns, |b, &ns| {
                 let ctx = M::C::default();
-                let mut mat = M::zeros(ns, k + 3, ctx);
+                let mut mat = M::zeros(ns, k + 3, ctx.clone());
                 fill_dense(&mut mat, ns);
                 b.iter(|| {
                     mat.mul_cols_by(k, &rhs);
                     black_box(&mat);
+                    ctx.synchronize();
                 });
             });
         }
@@ -517,6 +614,7 @@ where
             let y = V::from_element(ns, 1.0, ctx.clone());
             b.iter(|| {
                 black_box(&y * Scale(2.0));
+                ctx.synchronize();
             });
         });
     }
@@ -535,6 +633,7 @@ where
             let y = V::from_element(ns, 1.0, ctx.clone());
             b.iter(|| {
                 black_box(y.clone() / Scale(2.0));
+                ctx.synchronize();
             });
         });
     }
@@ -580,6 +679,7 @@ where
             b.iter(|| {
                 mat.set_column(0, &v);
                 black_box(&mat);
+                ctx.synchronize();
             });
         });
     }
@@ -602,6 +702,7 @@ where
             b.iter(|| {
                 mat.scale_add_and_assign(&x, 2.0, &y);
                 black_box(&mat);
+                ctx.synchronize();
             });
         });
     }
@@ -623,6 +724,7 @@ where
             b.iter(|| {
                 mat.copy_from(&other);
                 black_box(&mat);
+                ctx.synchronize();
             });
         });
     }
@@ -653,6 +755,7 @@ where
             let v = V::from_element(ns, 1.0, ctx.clone());
             b.iter(|| {
                 black_box(v.get_index(0));
+                ctx.synchronize();
             });
         });
     }
@@ -713,6 +816,7 @@ where
             let v = V::from_element(ns, 1.0, ctx.clone());
             b.iter(|| {
                 black_box(v.clone());
+                ctx.synchronize();
             });
         });
     }
@@ -731,6 +835,7 @@ where
             let v = V::from_element(ns, 1.0, ctx.clone());
             b.iter(|| {
                 black_box(v.as_view());
+                ctx.synchronize();
             });
         });
     }
@@ -749,6 +854,7 @@ where
             let mut v = V::from_element(ns, 1.0, ctx.clone());
             b.iter(|| {
                 black_box(v.as_view_mut());
+                ctx.synchronize();
             });
         });
     }
@@ -779,28 +885,79 @@ where
     group.finish();
 }
 
-/// 🟢 for_each_batch — Per-batch slice access
+/// 🟢 for_each_batch — Per-batch slice access, on the device where the backend has one
 fn bench_for_each_batch<V: Vector<T = f64> + 'static>(c: &mut Criterion, label: &str)
 where
     V::C: Default + Clone,
 {
     let mut group = c.benchmark_group(label);
-    for &ns in ONE_SIZE {
+    for &ns in LANE_SIZES {
         group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
             let ctx = V::C::default();
             let x = V::from_element(ns, 1.0, ctx.clone());
             let mut y = V::from_element(ns, 1.0, ctx.clone());
             b.iter(|| {
-                y.for_each_batch([&x], |y, [x], _| {
-                    for (y, x) in y.iter_mut().zip(x.iter()) {
-                        *y = *x;
-                    }
-                });
+                y.for_each_batch([&x], copy_lane);
+                ctx.synchronize();
                 black_box(&y);
             });
         });
     }
     group.finish();
+}
+
+/// 🟢 for_each_batch_host — the same lane loop, always staged through host memory
+fn bench_for_each_batch_host<V: Vector<T = f64> + 'static>(c: &mut Criterion, label: &str)
+where
+    V::C: Default + Clone,
+{
+    let mut group = c.benchmark_group(label);
+    for &ns in LANE_SIZES {
+        group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
+            let ctx = V::C::default();
+            let x = V::from_element(ns, 1.0, ctx.clone());
+            let mut y = V::from_element(ns, 1.0, ctx.clone());
+            b.iter(|| {
+                y.for_each_batch_host([&x], copy_lane);
+                ctx.synchronize();
+                black_box(&y);
+            });
+        });
+    }
+    group.finish();
+}
+
+/// 🟢 for_each_elem — the same copy, a thread per element on the device where the backend has one
+fn bench_for_each_elem<V: Vector<T = f64> + 'static>(c: &mut Criterion, label: &str)
+where
+    V::C: Default + Clone,
+{
+    let mut group = c.benchmark_group(label);
+    for &ns in LANE_SIZES {
+        group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
+            let ctx = V::C::default();
+            let x = V::from_element(ns, 1.0, ctx.clone());
+            let mut y = V::from_element(ns, 1.0, ctx.clone());
+            b.iter(|| {
+                y.for_each_elem([&x], copy_elem);
+                ctx.synchronize();
+                black_box(&y);
+            });
+        });
+    }
+    group.finish();
+}
+
+/// The lane body both `for_each_batch` benches run, so the two price the same work.
+fn copy_lane(y: &mut [f64], [x]: [&[f64]; 1], _lane: usize) {
+    for (y, x) in y.iter_mut().zip(x.iter()) {
+        *y = *x;
+    }
+}
+
+/// The element body of the same copy, so `for_each_elem` prices the work `copy_lane` does.
+fn copy_elem(y: &mut f64, [x]: [&[f64]; 1], _lane: usize, i: usize) {
+    *y = x[i];
 }
 
 /// 🟢 from_diagonal — Diagonal matrix creation
@@ -814,7 +971,11 @@ where
         group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
             let ctx = M::C::default();
             let v = M::V::from_element(ns, 2.0, ctx.clone());
-            b.iter(|| M::from_diagonal(&v));
+            b.iter(|| {
+                let m = M::from_diagonal(&v);
+                ctx.synchronize();
+                m
+            });
         });
     }
     group.finish();
@@ -836,7 +997,296 @@ where
             b.iter(|| {
                 mat.add_column_to_vector(0, &mut v);
                 black_box(&v);
+                ctx.synchronize();
             });
+        });
+    }
+    group.finish();
+}
+
+// ═════════════════════════════════════════════════════════
+// 🔴 LU — one factorisation per Jacobian update, one solve per Newton iteration
+// ═════════════════════════════════════════════════════════
+
+/// `(states, lanes)` cells the LU benches sweep. `robertson_ode` is 3 states per lane,
+/// `heat2d` and `foodweb` 25 to 1800, so the cells bracket the point where per-lane work
+/// starts to dominate launch overhead -- and no cell costs more than about a GFLOP, so the
+/// CPU backends stay affordable.
+const LU_CELLS: &[(usize, usize)] = &[
+    (3, 1),
+    (8, 1),
+    (16, 1),
+    (64, 1),
+    (256, 1),
+    (500, 1),
+    (3, 100),
+    (3, 1000),
+    (32, 1),
+    (32, 100),
+    (32, 1000),
+    (100, 1),
+    (100, 100),
+    (256, 100),
+    (500, 10),
+];
+/// Parameters the grouped-broadcast solve mimics: the sensitivity equations run on
+/// `nbatch * nparams` lanes against `nbatch` factorisations.
+const LU_NPARAMS: usize = 4;
+
+/// `A_b = I`, so a solve leaves the right-hand side unchanged and repeated `b.iter` solves
+/// neither drift nor underflow. Factorisation cost does not depend on the values.
+struct IdentityOp<M: Matrix> {
+    matrix: M,
+}
+
+impl<M: Matrix> LaLinearOp for IdentityOp<M> {
+    type T = M::T;
+    type V = M::V;
+    type M = M;
+    type C = M::C;
+
+    fn nrows(&self) -> IndexType {
+        self.matrix.nrows()
+    }
+    fn ncols(&self) -> IndexType {
+        self.matrix.ncols()
+    }
+    fn context(&self) -> &Self::C {
+        self.matrix.context()
+    }
+    fn matrix_inplace(&self, y: &mut Self::M) {
+        y.copy_from(&self.matrix);
+    }
+}
+
+fn identity_op<M>(ns: usize, ctx: M::C) -> IdentityOp<M>
+where
+    M: Matrix<T = f64>,
+    M::V: Vector<T = f64, C = M::C>,
+{
+    let diag = M::V::from_element(ns, 1.0, ctx);
+    IdentityOp {
+        matrix: M::from_diagonal(&diag),
+    }
+}
+
+/// 🔴 lu_factor — refactorise on every Jacobian update
+fn bench_lu_factor<M, LS>(c: &mut Criterion, label: &str)
+where
+    M: Matrix<T = f64> + 'static,
+    M::C: Default + Clone,
+    M::V: Vector<T = f64, C = M::C>,
+    LS: LaLinearSolver<M>,
+{
+    let mut group = c.benchmark_group(label);
+    group.sample_size(20);
+    for &(ns, nb) in LU_CELLS {
+        // the setup is inside the closure so that a filtered-out cell costs nothing
+        group.bench_function(format!("n{ns}_nbatch{nb}"), |b| {
+            let ctx = M::C::default()
+                .clone_with_nbatch(nb)
+                .expect("backend declined nbatch");
+            let op = identity_op::<M>(ns, ctx.clone());
+            let mut s = LS::default();
+            s.set_sparsity(&op);
+            b.iter(|| {
+                s.set_linearisation(&op);
+                ctx.synchronize();
+            })
+        });
+    }
+    group.finish();
+}
+
+/// 🔴 lu_solve — one solve per Newton iteration. `nparams > 1` is the grouped broadcast the
+/// sensitivity equations run: `nbatch * nparams` right-hand side lanes over `nbatch`
+/// factorisations.
+fn bench_lu_solve<M, LS>(c: &mut Criterion, label: &str, nparams: usize)
+where
+    M: Matrix<T = f64> + 'static,
+    M::C: Default + Clone,
+    M::V: Vector<T = f64, C = M::C>,
+    LS: LaLinearSolver<M>,
+{
+    let mut group = c.benchmark_group(label);
+    group.sample_size(20);
+    for &(ns, nb) in LU_CELLS {
+        let id = if nparams == 1 {
+            format!("n{ns}_nbatch{nb}")
+        } else {
+            format!("n{ns}_nbatch{nb}x{nparams}")
+        };
+        // the setup is inside the closure so that a filtered-out cell costs nothing
+        group.bench_function(id, |b| {
+            let ctx = M::C::default()
+                .clone_with_nbatch(nb)
+                .expect("backend declined nbatch");
+            let rhs_ctx = ctx
+                .clone_with_nbatch(nb * nparams)
+                .expect("backend declined nbatch");
+            let op = identity_op::<M>(ns, ctx.clone());
+            let mut s = LS::default();
+            s.set_sparsity(&op);
+            s.set_linearisation(&op);
+            let mut x = M::V::from_element(ns, 1.0, rhs_ctx);
+            b.iter(|| {
+                s.solve_in_place(&mut x).unwrap();
+                black_box(&x);
+                ctx.synchronize();
+            })
+        });
+    }
+    group.finish();
+}
+
+/// 🔴 lu_solve_sens — the solve pattern of a sensitivity step: the state's lanes and the
+/// augmented `nbatch * nparams` lanes alternate against one factorisation, each with its own
+/// vector, so a solver caching anything per right-hand side has to survive the switch
+fn bench_lu_solve_sens<M, LS>(c: &mut Criterion, label: &str)
+where
+    M: Matrix<T = f64> + 'static,
+    M::C: Default + Clone,
+    M::V: Vector<T = f64, C = M::C>,
+    LS: LaLinearSolver<M>,
+{
+    let mut group = c.benchmark_group(label);
+    group.sample_size(20);
+    for &(ns, nb) in LU_CELLS {
+        group.bench_function(format!("n{ns}_nbatch{nb}x{LU_NPARAMS}"), |b| {
+            let ctx = M::C::default()
+                .clone_with_nbatch(nb)
+                .expect("backend declined nbatch");
+            let aug_ctx = ctx
+                .clone_with_nbatch(nb * LU_NPARAMS)
+                .expect("backend declined nbatch");
+            let op = identity_op::<M>(ns, ctx.clone());
+            let mut s = LS::default();
+            s.set_sparsity(&op);
+            s.set_linearisation(&op);
+            let mut x = M::V::from_element(ns, 1.0, ctx.clone());
+            let mut x_aug = M::V::from_element(ns, 1.0, aug_ctx);
+            b.iter(|| {
+                s.solve_in_place(&mut x).unwrap();
+                s.solve_in_place(&mut x_aug).unwrap();
+                black_box((&x, &x_aug));
+                ctx.synchronize();
+            })
+        });
+    }
+    group.finish();
+}
+
+/// `(states, lanes)` cells the Newton bench sweeps. The switch cost it prices is a fixed
+/// per-solve overhead, so wide matrices would only bury it.
+const NEWTON_CELLS: &[(usize, usize)] = &[(3, 100), (3, 1000), (32, 100)];
+
+/// `F(x) = 2 x .* x - 8`, elementwise so that every operation is one launch whatever the lane
+/// count.
+///
+/// Elementwise on purpose: the sensitivity test models are host-slice closures that stage
+/// through host memory on a device backend, and a `gemv`-based operator would price
+/// `OxideMat::gemv`'s per-lane cuBLAS loop instead -- either would bury what this bench is
+/// for, which is the per-solve overhead of switching lane counts.
+struct SquareOp<M: DenseMatrix> {
+    nstates: IndexType,
+    eights: M::V,
+    ctx: M::C,
+}
+
+impl<M: DenseMatrix<T = f64>> SquareOp<M>
+where
+    M::V: Vector<T = f64, C = M::C>,
+    M::C: Clone,
+{
+    fn new(nstates: usize, ctx: M::C) -> Self {
+        let eights = M::V::from_element(nstates, 8.0, ctx.clone());
+        Self {
+            nstates,
+            eights,
+            ctx,
+        }
+    }
+}
+
+impl<M: DenseMatrix<T = f64>> NonLinearOp for SquareOp<M>
+where
+    M::V: Vector<T = f64, C = M::C>,
+{
+    type T = f64;
+    type V = M::V;
+    type M = M;
+    type C = M::C;
+
+    fn nstates(&self) -> IndexType {
+        self.nstates
+    }
+    fn nout(&self) -> IndexType {
+        self.nstates
+    }
+    fn context(&self) -> &Self::C {
+        &self.ctx
+    }
+    fn call_inplace(&self, x: &Self::V, y: &mut Self::V) {
+        // y = 2 x .* x - 8
+        y.copy_from(x);
+        y.component_mul_assign(x);
+        *y *= Scale(2.0);
+        y.axpy(-1.0, &self.eights, 1.0);
+    }
+}
+
+impl<M: DenseMatrix<T = f64>> NonLinearOpJacobian for SquareOp<M>
+where
+    M::V: Vector<T = f64, C = M::C>,
+{
+    fn jac_mul_inplace(&self, x: &Self::V, v: &Self::V, y: &mut Self::V) {
+        // J v = 4 x .* v
+        y.copy_from(x);
+        y.component_mul_assign(v);
+        *y *= Scale(4.0);
+    }
+}
+
+/// 🔴 newton_sens — a sensitivity step's two Newton solves: the state's lanes then the
+/// augmented `nbatch * nparams`, against one Jacobian, sharing one solver
+fn bench_newton_sens<M, LS>(c: &mut Criterion, label: &str)
+where
+    M: DenseMatrix<T = f64> + 'static,
+    M::C: Default + Clone,
+    M::V: Vector<T = f64, C = M::C>,
+    LS: LaLinearSolver<M>,
+{
+    let mut group = c.benchmark_group(label);
+    group.sample_size(20);
+    for &(ns, nb) in NEWTON_CELLS {
+        group.bench_function(format!("n{ns}_nbatch{nb}x{LU_NPARAMS}"), |b| {
+            let ctx = M::C::default()
+                .clone_with_nbatch(nb)
+                .expect("backend declined nbatch");
+            let aug_ctx = ctx
+                .clone_with_nbatch(nb * LU_NPARAMS)
+                .expect("backend declined nbatch");
+            let op = SquareOp::<M>::new(ns, ctx.clone());
+            let atol = M::V::from_element(ns, 1e-6, ctx.clone());
+            let x0 = M::V::from_element(ns, 2.1, ctx.clone());
+            let x0_aug = M::V::from_element(ns, 2.1, aug_ctx.clone());
+            let mut s =
+                NewtonNonlinearSolver::<M, LS, NoLineSearch>::new(LS::default(), NoLineSearch);
+            s.set_problem(&op);
+            s.reset_jacobian(&op, &x0);
+            let mut x = x0.clone();
+            let mut x_aug = x0_aug.clone();
+            let mut convergence = Convergence::new(1e-6, &atol);
+            b.iter(|| {
+                x.copy_from(&x0);
+                x_aug.copy_from(&x0_aug);
+                s.solve_in_place(&op, &mut x, &x0, &mut convergence)
+                    .unwrap();
+                s.solve_in_place(&op, &mut x_aug, &x0_aug, &mut convergence)
+                    .unwrap();
+                black_box((&x, &x_aug));
+                ctx.synchronize();
+            })
         });
     }
     group.finish();
@@ -878,6 +1328,8 @@ macro_rules! bench_vector_backend {
         bench_len::<$V>($c, concat!("len/", $label));
         bench_clone_as_vec::<$V>($c, concat!("clone_as_vec/", $label));
         bench_for_each_batch::<$V>($c, concat!("for_each_batch/", $label));
+        bench_for_each_batch_host::<$V>($c, concat!("for_each_batch_host/", $label));
+        bench_for_each_elem::<$V>($c, concat!("for_each_elem/", $label));
     };
 }
 
@@ -892,6 +1344,34 @@ macro_rules! bench_matrix_backend {
     };
 }
 
+/// Backends whose context takes `nbatch > 1`; the sparse backend is not one of them.
+macro_rules! bench_batched_matrix_backend {
+    ($c:expr, $label:expr, $M:ty) => {
+        bench_gemv_batched::<$M>($c, concat!("gemv_batched/", $label), LU_CELLS, 1, false);
+        bench_gemv_batched::<$M>(
+            $c,
+            concat!("gemv_batched_grouped/", $label),
+            LU_CELLS,
+            LU_NPARAMS,
+            false,
+        );
+        bench_gemv_batched::<$M>(
+            $c,
+            concat!("gemv_batched_grouped_x/", $label),
+            LU_CELLS,
+            LU_NPARAMS,
+            true,
+        );
+        bench_gemv_batched::<$M>(
+            $c,
+            concat!("gemv_batched_grouped100/", $label),
+            GEMV_WIDE_CELLS,
+            100,
+            false,
+        );
+    };
+}
+
 macro_rules! bench_dense_matrix_backend {
     ($c:expr, $label:expr, $M:ty) => {
         bench_matrix_column::<$M>($c, concat!("matrix_column/", $label));
@@ -901,14 +1381,28 @@ macro_rules! bench_dense_matrix_backend {
     };
 }
 
+macro_rules! bench_lu_backend {
+    ($c:expr, $label:expr, $M:ty, $LS:ty) => {
+        bench_lu_factor::<$M, $LS>($c, concat!("lu_factor/", $label));
+        bench_lu_solve::<$M, $LS>($c, concat!("lu_solve/", $label), 1);
+        bench_lu_solve::<$M, $LS>($c, concat!("lu_solve_grouped/", $label), LU_NPARAMS);
+        bench_lu_solve_sens::<$M, $LS>($c, concat!("lu_solve_sens/", $label));
+        bench_newton_sens::<$M, $LS>($c, concat!("newton_sens/", $label));
+    };
+}
+
 fn criterion_benchmark(c: &mut Criterion) {
     bench_vector_backend!(c, "nalgebra", NalgebraVec<f64>);
     bench_matrix_backend!(c, "nalgebra", NalgebraMat<f64>);
     bench_dense_matrix_backend!(c, "nalgebra", NalgebraMat<f64>);
+    bench_batched_matrix_backend!(c, "nalgebra", NalgebraMat<f64>);
+    bench_lu_backend!(c, "nalgebra", NalgebraMat<f64>, NalgebraLU<f64>);
 
     bench_vector_backend!(c, "faer", FaerVec<f64>);
     bench_matrix_backend!(c, "faer", FaerMat<f64>);
     bench_dense_matrix_backend!(c, "faer", FaerMat<f64>);
+    bench_batched_matrix_backend!(c, "faer", FaerMat<f64>);
+    bench_lu_backend!(c, "faer", FaerMat<f64>, FaerLU<f64>);
 
     bench_matrix_backend!(c, "faer_sparse", FaerSparseMat<f64>);
 
@@ -917,6 +1411,17 @@ fn criterion_benchmark(c: &mut Criterion) {
         bench_vector_backend!(c, "cuda", CudaVec<f64>);
         bench_matrix_backend!(c, "cuda", CudaMat<f64>);
         bench_dense_matrix_backend!(c, "cuda", CudaMat<f64>);
+        bench_batched_matrix_backend!(c, "cuda", CudaMat<f64>);
+        bench_lu_backend!(c, "cuda", CudaMat<f64>, CudaLU<f64>);
+    }
+
+    #[cfg(feature = "cuda-oxide")]
+    {
+        bench_vector_backend!(c, "cuda_oxide", OxideVec);
+        bench_matrix_backend!(c, "cuda_oxide", OxideMat);
+        bench_dense_matrix_backend!(c, "cuda_oxide", OxideMat);
+        bench_batched_matrix_backend!(c, "cuda_oxide", OxideMat);
+        bench_lu_backend!(c, "cuda_oxide", OxideMat, OxideLU);
     }
 }
 

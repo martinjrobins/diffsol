@@ -105,7 +105,7 @@ mod autodiff_impl {
     {
         fn gemv_inplace(&self, x: &M::V, t: M::T, beta: M::T, y: &mut M::V) {
             self.op.statistics.borrow_mut().increment_call();
-            y.for_each_batch([x, self.p], |y, [x, p], _| {
+            y.for_each_batch_host([x, self.p], |y, [x, p], _| {
                 self.op.call_func(x, p, t, beta, y)
             });
         }
@@ -119,7 +119,7 @@ mod autodiff_impl {
             let mut tmp_output = self.op.tmp_output.borrow_mut();
             let mut tmp_input_adjoint = self.op.tmp_input_adjoint.borrow_mut();
             let mut tmp_output_adjoint = self.op.tmp_output_adjoint.borrow_mut();
-            <M::V as Vector>::for_each_batch_mut(
+            <M::V as Vector>::for_each_batch_mut_host(
                 [
                     y,
                     &mut tmp_input_adjoint,

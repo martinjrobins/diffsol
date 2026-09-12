@@ -109,7 +109,7 @@ where
     J: Fn(&[M::T], M::T, &[M::T], &mut [M::T]),
 {
     fn call_inplace(&self, t: Self::T, y: &mut Self::V) {
-        y.for_each_batch([self.p], |y, [p], _| (self.op.func)(p, t, y));
+        y.for_each_batch_host([self.p], |y, [p], _| (self.op.func)(p, t, y));
     }
 }
 
@@ -120,7 +120,7 @@ where
     J: Fn(&[M::T], M::T, &[M::T], &mut [M::T]),
 {
     fn sens_mul_inplace(&self, t: Self::T, v: &Self::V, y: &mut Self::V) {
-        y.for_each_batch([self.p, v], |y, [p, v], _| (self.op.func_sens)(p, t, v, y));
+        y.for_each_batch_host([self.p, v], |y, [p, v], _| (self.op.func_sens)(p, t, v, y));
     }
 
     fn sens_inplace(&self, t: Self::T, y: &mut Self::M) {

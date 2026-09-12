@@ -6,7 +6,8 @@ use std::{
 use cuda_core::{
     simt::memory::{memcpy_dtod_async, memcpy_dtoh_async, memcpy_htod_async},
     sys::CUdeviceptr,
-    CudaContext, CudaStream, DeviceBuffer, DriverError, LaunchConfig1D, LaunchConfig2D,
+    CudaContext, CudaEvent, CudaStream, DeviceBuffer, DriverError, LaunchConfig1D, LaunchConfig2D,
+    PinnedHostBuffer,
 };
 use cuda_device::atomic::DeviceAtomicU64;
 
@@ -29,6 +30,12 @@ pub(crate) struct ReduceScratch {
     pub(crate) out: DeviceBuffer<DeviceAtomicU64>,
     /// Per-lane partial sums, for the large kernels.
     pub(crate) partials: DeviceBuffer<f64>,
+    /// Where [`Self::out`] is read back to. Pinned, so the copy is a straight DMA rather than a
+    /// stage through a driver-internal buffer.
+    pub(crate) readback: PinnedHostBuffer<u64>,
+    /// Recorded after that copy, so the wait is on the copy rather than on everything else
+    /// queued on the stream.
+    pub(crate) done: CudaEvent,
 }
 
 impl ReduceScratch {
@@ -40,6 +47,9 @@ impl ReduceScratch {
                 .cast_elem(),
             partials: DeviceBuffer::zeroed(stream, nbatch.max(target_blocks as usize))
                 .map_err(fail)?,
+            readback: PinnedHostBuffer::zeroed(stream.context(), 1).map_err(fail)?,
+            // no timing, so the event is the cheap kind
+            done: stream.context().new_event(None).map_err(fail)?,
         })
     }
 }
@@ -159,6 +169,11 @@ impl crate::Context for OxideContext {
     }
     fn clone_with_nbatch(&self, nbatch: usize) -> Result<Self, LaError> {
         self.clone_with_nbatch_inner(nbatch)
+    }
+    fn synchronize(&self) {
+        self.stream
+            .synchronize()
+            .expect("Failed to synchronize stream");
     }
 }
 

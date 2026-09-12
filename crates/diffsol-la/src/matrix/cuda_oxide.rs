@@ -193,22 +193,9 @@ thread_local! {
 }
 
 impl OxideContext {
-    /// `y = alpha * a * x + beta * y`, column-major, unit increments.
-    ///
-    /// The pointers are raw so that a per-batch slice needs no view type; each
-    /// must address at least `nrows * ncols`, `ncols` and `nrows` elements
-    /// respectively.
-    #[allow(clippy::too_many_arguments)]
-    fn gemv(
-        &self,
-        nrows: IndexType,
-        ncols: IndexType,
-        alpha: f64,
-        beta: f64,
-        a: u64,
-        x: u64,
-        y: u64,
-    ) {
+    /// Runs `f` with this thread's cuBLAS handle for this device, bound to the
+    /// context's stream so cuBLAS work is ordered against the kernel launches.
+    pub(crate) fn with_blas<R>(&self, f: impl FnOnce(cublas::cublasHandle_t) -> R) -> R {
         let ordinal = self.stream.context().ordinal();
         let cu_stream = self.stream.cu_stream() as cublas::cudaStream_t;
         BLAS.with(|handles| {
@@ -225,31 +212,195 @@ impl OxideContext {
                 };
                 BlasHandle(handle)
             });
-            // SAFETY: the pointers are device pointers in this context, sized
-            // as documented above; `nrows`/`ncols` fit in `c_int` for any
-            // matrix that fits in device memory.
+            // SAFETY: the handle is live and the stream belongs to this context.
             unsafe {
                 cublas::cublasSetStream_v2(handle.0, cu_stream)
                     .result()
                     .expect("Failed to set cuBLAS stream");
-                cublas::cublasDgemv_v2(
-                    handle.0,
+            }
+            f(handle.0)
+        })
+    }
+
+    /// `y = alpha * a * x + beta * y` over `count` lanes, column-major with unit increments,
+    /// consecutive lanes `stride_*` elements apart. A stride of zero feeds every lane from the
+    /// same operand.
+    ///
+    /// The pointers are raw so that a per-batch slice needs no view type; each must address at
+    /// least `nrows * ncols`, `ncols` and `nrows` elements per lane.
+    #[allow(clippy::too_many_arguments)]
+    fn gemv_batched(
+        &self,
+        nrows: IndexType,
+        ncols: IndexType,
+        alpha: f64,
+        beta: f64,
+        a: u64,
+        stride_a: i64,
+        x: u64,
+        stride_x: i64,
+        y: u64,
+        stride_y: i64,
+        count: IndexType,
+    ) {
+        self.with_blas(|handle| {
+            // SAFETY: the pointers are device pointers in this context, sized as documented
+            // above, and each stride walks `count` lanes inside its own buffer; `nrows`/`ncols`
+            // fit in `c_int` for any matrix that fits in device memory.
+            unsafe {
+                cublas::cublasDgemvStridedBatched(
+                    handle,
                     cublas::cublasOperation_t::CUBLAS_OP_N,
                     nrows as c_int,
                     ncols as c_int,
                     &alpha as *const f64,
                     a as *const f64,
                     nrows as c_int,
+                    stride_a,
                     x as *const f64,
                     1,
+                    stride_x,
                     &beta as *const f64,
                     y as *mut f64,
                     1,
+                    stride_y,
+                    count as c_int,
                 )
                 .result()
-                .expect("Failed to launch gemv");
+                .expect("Failed to launch batched gemv");
             }
         });
+    }
+
+    /// [`Self::gemv_batched`] where each lane's `x` and `y` hold `k` columns: one matrix product
+    /// per lane, column-major throughout.
+    #[allow(clippy::too_many_arguments)]
+    fn gemm_batched(
+        &self,
+        nrows: IndexType,
+        k: IndexType,
+        ncols: IndexType,
+        alpha: f64,
+        beta: f64,
+        a: u64,
+        stride_a: i64,
+        x: u64,
+        stride_x: i64,
+        y: u64,
+        stride_y: i64,
+        count: IndexType,
+    ) {
+        self.with_blas(|handle| {
+            // SAFETY: as `Self::gemv_batched`, with `x` and `y` holding `k` columns per lane.
+            unsafe {
+                cublas::cublasDgemmStridedBatched(
+                    handle,
+                    cublas::cublasOperation_t::CUBLAS_OP_N,
+                    cublas::cublasOperation_t::CUBLAS_OP_N,
+                    nrows as c_int,
+                    k as c_int,
+                    ncols as c_int,
+                    &alpha as *const f64,
+                    a as *const f64,
+                    nrows as c_int,
+                    stride_a,
+                    x as *const f64,
+                    ncols as c_int,
+                    stride_x,
+                    &beta as *const f64,
+                    y as *mut f64,
+                    nrows as c_int,
+                    stride_y,
+                    count as c_int,
+                )
+                .result()
+                .expect("Failed to launch batched gemm");
+            }
+        });
+    }
+}
+
+/// Group width at which one batched gemm beats `k` batched gemvs whatever the matrix size.
+const GEMM_MIN_GROUP: usize = 16;
+
+/// Matrix size below which one batched gemm wins at any group width.
+const GEMM_MAX_NROWS: usize = 128;
+
+/// Whether a grouped broadcast of `k` result lanes per matrix lane goes through one batched gemm
+/// rather than `k` batched gemvs.
+///
+/// A gemm reads the matrix once per group instead of once per result lane, but cuBLAS pays for a
+/// full tile width whatever `k` is, so a narrow group over a large matrix is faster as `k` gemvs
+/// (A40, k = 4: 2.4x at 256 rows, 2.2x at 500; the gemm wins everywhere by k = 16).
+fn grouped_as_gemm(nrows: IndexType, k: IndexType) -> bool {
+    k >= GEMM_MIN_GROUP || nrows <= GEMM_MAX_NROWS
+}
+
+/// The cuBLAS calls a [`Matrix::gemv`] maps onto, chosen by [`GemvPlan::choose`].
+#[derive(Debug, PartialEq, Eq)]
+enum GemvPlan {
+    /// `k` batched gemvs, sub-batch `j` covering result lanes `j, j + k, j + 2k, ...`: `count`
+    /// lanes with each operand walking `stride_*` elements per lane. `k == 1` is the whole batch
+    /// in one launch.
+    Strided {
+        k: IndexType,
+        count: IndexType,
+        stride_a: i64,
+        stride_x: i64,
+    },
+    /// One batched gemm per matrix lane, `k` result lanes wide.
+    Gemm { k: IndexType },
+}
+
+impl GemvPlan {
+    /// How `nbatch` lanes of an `nrows x ncols` matrix and `x_nbatch` lanes of `x` multiply into
+    /// `y_nbatch` result lanes, which `assert_broadcastable_into` has already checked are a whole
+    /// multiple of both.
+    fn choose(
+        nrows: IndexType,
+        ncols: IndexType,
+        nbatch: IndexType,
+        x_nbatch: IndexType,
+        y_nbatch: IndexType,
+    ) -> Self {
+        // a grouped operand repeats each of its lanes over `k_src` contiguous result lanes; read
+        // once per result lane, or broadcast over all of them, is `k_src == 1`
+        let group_width = |src_nbatch: IndexType| {
+            if src_nbatch == 1 || src_nbatch == y_nbatch {
+                1
+            } else {
+                y_nbatch / src_nbatch
+            }
+        };
+        let (k_a, k_x) = (group_width(nbatch), group_width(x_nbatch));
+        // a grouped matrix against one `x` lane per result: a group's result lanes are
+        // contiguous, and so are their `x` lanes, so the group is one `nrows x k_a` matrix product
+        if k_a > 1 && x_nbatch == y_nbatch && grouped_as_gemm(nrows, k_a) {
+            return Self::Gemm { k: k_a };
+        }
+        // otherwise, the result lanes sharing a source lane are contiguous, so splitting the
+        // launch into `k` interleaved sub-batches gives every operand a constant stride again
+        let k = k_a / gcd(k_a, k_x) * k_x;
+        let stride = |src_nbatch: IndexType, lane: IndexType| match src_nbatch {
+            // one source lane over every result lane
+            1 => 0,
+            // `k / k_src` source lanes per sub-batch lane, exactly because `k_src` divides `k`
+            _ => (k * src_nbatch / y_nbatch * lane) as i64,
+        };
+        Self::Strided {
+            k,
+            count: y_nbatch / k,
+            stride_a: stride(nbatch, nrows * ncols),
+            stride_x: stride(x_nbatch, ncols),
+        }
+    }
+}
+
+fn gcd(a: IndexType, b: IndexType) -> IndexType {
+    if b == 0 {
+        a
+    } else {
+        gcd(b, a % b)
     }
 }
 
@@ -741,24 +892,60 @@ impl Matrix for OxideMat {
         let nbatch = self.context.nbatch();
         let x_nbatch = x.context.nbatch();
         let y_nbatch = y.context.nbatch();
+        // `y` is the destination, so it carries the batch count of the result
         y.context.assert_broadcastable_into(nbatch, "gemv");
         y.context.assert_broadcastable_into(x_nbatch, "gemv");
-        // `y` is the destination, so it carries the batch count of the result
-        for b in 0..y_nbatch {
-            let self_b = broadcast_batch(b, nbatch, y_nbatch);
-            let x_b = broadcast_batch(b, x_nbatch, y_nbatch);
-            let a_start = self_b * self.batch_len();
-            let x_start = x_b * self.ncols;
-            let y_start = b * self.nrows;
-            self.context.gemv(
-                self.nrows,
-                self.ncols,
+        if y_nbatch == 0 {
+            return;
+        }
+        let (nrows, ncols, batch_len) = (self.nrows, self.ncols, self.batch_len());
+        let (a, xp, yp) = (
+            self.data.cu_deviceptr(),
+            x.data.cu_deviceptr(),
+            y.data.cu_deviceptr(),
+        );
+        let elem = size_of::<f64>() as u64;
+        match GemvPlan::choose(nrows, ncols, nbatch, x_nbatch, y_nbatch) {
+            GemvPlan::Strided {
+                k,
+                count,
+                stride_a,
+                stride_x,
+            } => {
+                for j in 0..k {
+                    // sub-batch `j` starts at result lane `j`, so each operand starts at the lane
+                    // that one reads
+                    let a_off = broadcast_batch(j, nbatch, y_nbatch) * batch_len;
+                    let x_off = broadcast_batch(j, x_nbatch, y_nbatch) * ncols;
+                    self.context.gemv_batched(
+                        nrows,
+                        ncols,
+                        alpha,
+                        beta,
+                        a + a_off as u64 * elem,
+                        stride_a,
+                        xp + x_off as u64 * elem,
+                        stride_x,
+                        yp + (j * nrows) as u64 * elem,
+                        (k * nrows) as i64,
+                        count,
+                    );
+                }
+            }
+            GemvPlan::Gemm { k } => self.context.gemm_batched(
+                nrows,
+                k,
+                ncols,
                 alpha,
                 beta,
-                self.data.cu_deviceptr() + (a_start * size_of::<f64>()) as u64,
-                x.data.cu_deviceptr() + (x_start * size_of::<f64>()) as u64,
-                y.data.cu_deviceptr() + (y_start * size_of::<f64>()) as u64,
-            );
+                a,
+                batch_len as i64,
+                xp,
+                (k * ncols) as i64,
+                yp,
+                (k * nrows) as i64,
+                nbatch,
+            ),
         }
     }
 
@@ -931,6 +1118,54 @@ impl Matrix for OxideMat {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The shapes `GemvPlan` has to tell apart. Correctness of each variant is covered by the
+    /// generated `gemv` tests below; this pins which one a shape picks.
+    #[test]
+    fn test_gemv_plan_cuda_oxide() {
+        let strided = |k, count, stride_a, stride_x| GemvPlan::Strided {
+            k,
+            count,
+            stride_a,
+            stride_x,
+        };
+        // 4 lanes of a 200x200 matrix against 4 lanes of x: one launch, a lane per result
+        assert_eq!(
+            GemvPlan::choose(200, 200, 4, 4, 4),
+            strided(1, 4, 200 * 200, 200)
+        );
+        // one matrix, one x, broadcast over 4 result lanes: one launch, nothing striding
+        assert_eq!(GemvPlan::choose(200, 200, 1, 1, 4), strided(1, 4, 0, 0));
+        // grouped matrix: 2 lanes over 8 results, x per lane
+        assert_eq!(GemvPlan::choose(100, 100, 2, 8, 8), GemvPlan::Gemm { k: 4 });
+        // the same grouping, but a matrix too large for a 4-column gemm tile: 4 launches of 2
+        // lanes, the matrix striding once per sub-batch lane and x four times
+        assert_eq!(
+            GemvPlan::choose(500, 500, 2, 8, 8),
+            strided(4, 2, 500 * 500, 4 * 500)
+        );
+        // wide groups always go through the gemm
+        assert_eq!(
+            GemvPlan::choose(500, 500, 2, 32, 32),
+            GemvPlan::Gemm { k: 16 }
+        );
+        // grouped x against a matrix lane per result: the mirror image, 4 launches of 2 lanes
+        assert_eq!(
+            GemvPlan::choose(500, 500, 8, 2, 8),
+            strided(4, 2, 4 * 500 * 500, 500)
+        );
+        // grouped matrix, x broadcast from one lane: no gemm (x has no columns to multiply), so
+        // 4 sub-batches of 2 lanes with x held still
+        assert_eq!(
+            GemvPlan::choose(500, 500, 2, 1, 8),
+            strided(4, 2, 500 * 500, 0)
+        );
+        // both grouped, different widths: `lcm(4, 2) = 4` sub-batches of 2 lanes
+        assert_eq!(
+            GemvPlan::choose(500, 500, 2, 4, 8),
+            strided(4, 2, 500 * 500, 2 * 500)
+        );
+    }
 
     super::super::generate_matrix_tests_nonbatched!(cuda_oxide, OxideMat);
 

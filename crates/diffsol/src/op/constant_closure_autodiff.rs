@@ -83,7 +83,7 @@ mod autodiff_impl {
         for ParameterisedOp<'_, ConstantClosureAutodiff<M, F>>
     {
         fn call_inplace(&self, t: Self::T, y: &mut Self::V) {
-            y.for_each_batch([self.p], |y, [p], _| self.op.call_func(p, t, y));
+            y.for_each_batch_host([self.p], |y, [p], _| self.op.call_func(p, t, y));
         }
     }
 
@@ -93,7 +93,7 @@ mod autodiff_impl {
         fn sens_transpose_mul_inplace(&self, t: Self::T, v: &Self::V, y: &mut Self::V) {
             let mut tmp_nstates = self.op.tmp_nstates.borrow_mut();
             let mut tmp_nstates2 = self.op.tmp_nstates2.borrow_mut();
-            <M::V as Vector>::for_each_batch_mut(
+            <M::V as Vector>::for_each_batch_mut_host(
                 [y, &mut tmp_nstates, &mut tmp_nstates2],
                 [v, self.p],
                 |[y, tmp_nstates, tmp_nstates2], [v, p], _| {
