@@ -7,7 +7,7 @@ use num_traits::{One, ToPrimitive, Zero};
 use std::ops::MulAssign;
 use std::{
     cell::{Ref, RefCell},
-    ops::{AddAssign, Deref, SubAssign},
+    ops::{Deref, SubAssign},
 };
 
 /// A NonLinearOp implementation of the BDF implicit equation system.
@@ -247,15 +247,19 @@ impl<Eqn: OdeEquationsImplicit> NonLinearOp for BdfCallable<Eqn> {
 
         self.eqn.rhs().call_inplace(x, t, y);
 
-        let mut tmp = self.tmp.borrow_mut();
-        tmp.copy_from(x);
-        tmp.add_assign(psi_neg_y0);
         let c = *self.c.borrow().deref();
-        // y = M tmp - c * y
+        // y = M tmp - c * y, for tmp = x + psi_neg_y0
         if let Some(mass) = self.eqn.mass() {
+            let mut tmp = self.tmp.borrow_mut();
+            tmp.for_each_elem([x, psi_neg_y0], |tmp, [x, psi], _lane, i| {
+                *tmp = x[i] + psi[i]
+            });
             mass.gemv_inplace(&tmp, t, -c, y);
         } else {
-            y.axpy(Eqn::T::one(), &tmp, -c);
+            // no mass matrix, so don't need `tmp`
+            Eqn::V::for_each_elem_mut([y], [x, psi_neg_y0], move |[y], [x, psi], _lane, i| {
+                *y = x[i] + psi[i] - c * *y
+            });
         }
     }
 }
