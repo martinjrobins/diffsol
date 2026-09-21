@@ -1,14 +1,15 @@
 //! The ensemble driver: sampling, the device fold, both solve paths, and the plots.
-//!
-//! The whole module is gated on the `cuda-oxide` feature by its declaration in `main.rs`, so
-//! nothing in here needs a `cfg` of its own.
 
 use crate::swing::swing_problem;
 
 use diffsol::{
     NalgebraMat, NalgebraVec, OdeEquations, OdeSolverMethod, OdeSolverStopReason, Op, Vector,
 };
-use plotly::{common::Mode, layout::Axis, Histogram, Layout, Plot, Scatter};
+use plotly::{
+    common::{Mode, Title},
+    layout::Axis,
+    Histogram, Layout, Plot, Scatter,
+};
 use rand::SeedableRng;
 use rand_chacha::ChaCha12Rng;
 use rand_distr::{Distribution, Normal};
@@ -35,9 +36,6 @@ const BENCH_REPEATS: usize = 15;
 
 // ANCHOR: reduce
 /// Worst speed deviation of any generator over the whole run, one value per grid.
-///
-/// The solver is stepped by hand and each state folded straight into a running per-lane
-/// maximum, so no trajectory is ever stored.
 fn max_deviation_hz<'a, Solver, Eqn>(solver: &mut Solver, nbuses: usize, t_final: f64) -> Vec<f64>
 where
     Solver: OdeSolverMethod<'a, Eqn>,
@@ -54,8 +52,7 @@ where
             [y, worst],
             0.0,
             move |[x, w], _lane, i| {
-                // the second `nbuses` states are speed deviations.
-                // Those are in rad/s in the rotating frame, so Hz is omega / 2*pi
+                // rad/s in the rotating frame, so Hz is omega / 2*pi
                 if i >= nbuses {
                     f64::max(x[i].abs() / (2.0 * PI), w[0])
                 } else {
@@ -137,6 +134,9 @@ fn plot_scaling(grids: &[f64], cpu: &[f64], gpu: &[f64]) -> Plot {
     );
     plot.set_layout(
         Layout::new()
+            .title(Title::with_text(
+                "CPU: 2x AMD EPYC 7343 (32 cores) | GPU: NVIDIA A40 (46 GiB)",
+            ))
             .x_axis(
                 Axis::new()
                     .title("grids in the ensemble")
@@ -211,13 +211,18 @@ pub fn run() {
 
     // Sweep over n_samples and time gpu and cpu, plot results
     let sweep = [1usize, 2, 5, 10, 20, 50, 100, 200, 500, N_SAMPLES];
+    let max_threads = rayon::current_num_threads();
     let (mut grids, mut cpu_times, mut gpu_times) = (Vec::new(), Vec::new(), Vec::new());
     println!("\ngrids   CPU (s)   GPU (s)   speedup");
     for n in sweep {
         let lanes = &demands[..n];
+        let cpu_pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(n.min(max_threads))
+            .build()
+            .unwrap();
         // one untimed pass first: the first run at a new size pays for buffers
         solve_gpu(N_BUSES, lanes, T_FINAL);
-        solve_cpu(N_BUSES, lanes, T_FINAL);
+        cpu_pool.install(|| solve_cpu(N_BUSES, lanes, T_FINAL));
         // the two paths are interleaved so both see the same machine conditions
         let (mut cpu_runs, mut gpu_runs) = (Vec::new(), Vec::new());
         for _ in 0..BENCH_REPEATS {
@@ -225,7 +230,7 @@ pub fn run() {
             let g = solve_gpu(N_BUSES, lanes, T_FINAL);
             gpu_runs.push(start.elapsed().as_secs_f64());
             let start = Instant::now();
-            let c = solve_cpu(N_BUSES, lanes, T_FINAL);
+            let c = cpu_pool.install(|| solve_cpu(N_BUSES, lanes, T_FINAL));
             cpu_runs.push(start.elapsed().as_secs_f64());
             assert_eq!(g.len(), c.len());
         }

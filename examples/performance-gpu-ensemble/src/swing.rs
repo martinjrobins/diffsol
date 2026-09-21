@@ -10,21 +10,17 @@ use diffsol::{
 };
 use num_traits::{FromPrimitive, Zero};
 
-// ANCHOR: constants
 /// Generator inertia `M`, damping `D` and per-line susceptance `B`, all per unit.
+// ANCHOR: constants
 pub const INERTIA: f64 = 4.0;
 pub const DAMPING: f64 = 0.6;
 pub const SUSCEPTANCE: f64 = 0.25;
 // ANCHOR_END: constants
 
-// ANCHOR: equations
 /// `nbuses` generators, each tied to every other through the network. State `i < nbuses` is the
 /// rotor angle of bus `i` and state `nbuses + g` is the speed deviation of bus `g`, so a lane
 /// holds `2 * nbuses` states.
-///
-/// The extra load at bus 0 -- the quantity the ensemble is uncertain about -- is the model's
-/// one parameter, so each lane carries its own value and the builder sets them through
-/// [`OdeEquations::set_params`].
+// ANCHOR: equations
 pub struct SwingEqn<M: Matrix> {
     ctx: M::C,
     demand: M::V,
@@ -63,7 +59,8 @@ pub struct SwingInit<'a, M: Matrix> {
 
 impl<M: Matrix> NonLinearOp for SwingRhs<'_, M> {
     fn call_inplace(&self, x: &M::V, _t: M::T, y: &mut M::V) {
-        // captured by value so the closure stays `Copy + Send` and compiles for the device
+        // captured by value so the closure stays `Copy + Send`
+        // and compiles for the device
         let n = self.eqn.nbuses;
         let (m, d, b) = (self.eqn.inertia, self.eqn.damping, self.eqn.susceptance);
         y.for_each_elem(
