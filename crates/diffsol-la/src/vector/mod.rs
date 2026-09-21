@@ -385,6 +385,123 @@ pub trait Vector:
         });
     }
 
+    /// Reduce `args` over the batch dimension, elementwise, **on the host**.
+    ///
+    /// `dest[i]` becomes `map(.., b, i)` folded over every lane `b` with `combine`, starting
+    /// from `init`. `dest` is the one operand the batch dimension is removed from, so it must
+    /// be unbatched (`context().nbatch() == 1`); its length is the element range. The lane
+    /// count comes from `args[0]`, and the other operands broadcast into it.
+    ///
+    /// `combine` must be associative with `init` as its identity. This host path folds in lane
+    /// order, but [`Self::reduce_batch`] folds on a device and needs commutativity too.
+    ///
+    /// `dest` must not alias any of `args`.
+    ///
+    /// ```ignore
+    /// // dest_i = max_b |x[b, i]|
+    /// V::reduce_batch_host(&mut dest, [x], T::zero(),
+    ///     |[x], _lane, i| x[i].abs(),
+    ///     |a, b| a.max(b));
+    /// ```
+    fn reduce_batch_host<const N: usize>(
+        dest: &mut Self,
+        args: [&Self; N],
+        init: Self::T,
+        mut map: impl FnMut([&[Self::T]; N], usize, usize) -> Self::T,
+        mut combine: impl FnMut(Self::T, Self::T) -> Self::T,
+    ) {
+        assert!(N > 0, "reduce_batch takes the lane count from args[0]");
+        assert_eq!(
+            dest.context().nbatch(),
+            1,
+            "reduce_batch removes the batch dimension, so dest must be unbatched"
+        );
+        dest.fill(init);
+        // `for_each_batch_mut_host` takes its lane count from `mut_args[0]`, and `dest` is
+        // deliberately narrower than the operands, so a scalar per lane drives the iteration
+        // and `dest` rides along as a broadcast output seeing the same slice every lane
+        let mut lanes = Self::zeros(1, args[0].context().clone());
+        Self::for_each_batch_mut_host([&mut lanes, dest], args, |[_, d], ins, lane| {
+            for (i, d) in d.iter_mut().enumerate() {
+                *d = combine(*d, map(ins, lane, i));
+            }
+        });
+    }
+
+    /// Reduce `args` over the batch dimension, elementwise, **on the device where the backend
+    /// has one**, falling back to [`Self::reduce_batch_host`] otherwise.
+    ///
+    /// Same shape and broadcast rules; `map` and `combine` must be device-compilable Rust, as
+    /// for [`Self::for_each_batch_mut`]. `combine` must also be associative *and commutative*:
+    /// the device folds with warp shuffles that pair a lane with `lane ^ delta`, so neither the
+    /// order nor the grouping of the operands is the caller's. Sum, max and min all qualify.
+    fn reduce_batch<const N: usize>(
+        dest: &mut Self,
+        args: [&Self; N],
+        init: Self::T,
+        map: impl Fn([&[Self::T]; N], usize, usize) -> Self::T + Copy + Send,
+        combine: impl Fn(Self::T, Self::T) -> Self::T + Copy + Send,
+    ) {
+        Self::reduce_batch_host(dest, args, init, map, combine);
+    }
+
+    /// Reduce each batch lane of `args` over its elements, **on the host**.
+    ///
+    /// Lane `b` of `dest` becomes `map(.., b, i)` folded over every element `i` with
+    /// `combine`, starting from `init`. `dest` is a batched scalar — `len() == 1` with the
+    /// operands' lane count — the same shape [`Self::batched_axpy`] takes. The element range
+    /// comes from `args[0]`, and the other operands broadcast into the lanes.
+    ///
+    /// `combine` must be associative with `init` as its identity. This host path folds in
+    /// index order, but [`Self::reduce_elem`] folds on a device and needs commutativity too.
+    ///
+    /// `dest` must not alias any of `args`.
+    ///
+    /// ```ignore
+    /// // dest_b = sum_i x[b, i] * v[b, i]
+    /// V::reduce_elem_host(&mut dest, [x, v], T::zero(),
+    ///     |[x, v], _lane, i| x[i] * v[i],
+    ///     |a, b| a + b);
+    /// ```
+    fn reduce_elem_host<const N: usize>(
+        dest: &mut Self,
+        args: [&Self; N],
+        init: Self::T,
+        mut map: impl FnMut([&[Self::T]; N], usize, usize) -> Self::T,
+        mut combine: impl FnMut(Self::T, Self::T) -> Self::T,
+    ) {
+        assert!(N > 0, "reduce_elem takes the element range from args[0]");
+        assert_eq!(
+            dest.len(),
+            1,
+            "reduce_elem removes the element dimension, so dest must be a batched scalar"
+        );
+        Self::for_each_batch_mut_host([dest], args, |[d], ins, lane| {
+            let mut acc = init;
+            for i in 0..ins[0].len() {
+                acc = combine(acc, map(ins, lane, i));
+            }
+            d[0] = acc;
+        });
+    }
+
+    /// Reduce each batch lane of `args` over its elements, **on the device where the backend
+    /// has one**, falling back to [`Self::reduce_elem_host`] otherwise.
+    ///
+    /// Same shape and broadcast rules; `map` and `combine` must be device-compilable Rust, as
+    /// for [`Self::for_each_elem_mut`]. `combine` must also be associative *and commutative*:
+    /// the device folds with warp shuffles that pair a lane with `lane ^ delta`, so neither the
+    /// order nor the grouping of the operands is the caller's. Sum, max and min all qualify.
+    fn reduce_elem<const N: usize>(
+        dest: &mut Self,
+        args: [&Self; N],
+        init: Self::T,
+        map: impl Fn([&[Self::T]; N], usize, usize) -> Self::T + Copy + Send,
+        combine: impl Fn(Self::T, Self::T) -> Self::T + Copy + Send,
+    ) {
+        Self::reduce_elem_host(dest, args, init, map, combine);
+    }
+
     /// Copy all values from `other` into this vector.
     fn copy_from(&mut self, other: &Self);
 
@@ -583,6 +700,10 @@ macro_rules! generate_vector_tests_nonbatched {
             #[test]
             fn [<test_for_each_elem_mut_ $suffix>]() {
                 $crate::vector::tests::test_for_each_elem_mut::<$V>();
+            }
+            #[test]
+            fn [<test_reduce_unbatched_ $suffix>]() {
+                $crate::vector::tests::test_reduce_unbatched::<$V>();
             }
             #[test]
             fn [<test_set_index_ $suffix>]() {
@@ -801,6 +922,36 @@ macro_rules! generate_vector_tests_batched {
             #[should_panic(expected = "for_each_batch")]
             fn [<test_batched_for_each_batch_bad_nbatch_ $suffix>]() {
                 $crate::vector::tests::test_batched_for_each_batch_bad_nbatch::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_reduce_batch_ $suffix>]() {
+                $crate::vector::tests::test_batched_reduce_batch::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_reduce_elem_ $suffix>]() {
+                $crate::vector::tests::test_batched_reduce_elem::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_reduce_broadcast_ $suffix>]() {
+                $crate::vector::tests::test_batched_reduce_broadcast::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_reduce_host_stateful_ $suffix>]() {
+                $crate::vector::tests::test_batched_reduce_host_stateful::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_reduce_long_lane_ $suffix>]() {
+                $crate::vector::tests::test_batched_reduce_long_lane::<$V>($ctx3);
+            }
+            #[test]
+            #[should_panic(expected = "dest must be unbatched")]
+            fn [<test_batched_reduce_batch_bad_dest_ $suffix>]() {
+                $crate::vector::tests::test_batched_reduce_batch_bad_dest::<$V>($ctx2);
+            }
+            #[test]
+            #[should_panic(expected = "batched scalar")]
+            fn [<test_batched_reduce_elem_bad_dest_ $suffix>]() {
+                $crate::vector::tests::test_batched_reduce_elem_bad_dest::<$V>($ctx2);
             }
             #[test]
             fn [<test_batched_axpy_broadcast_ $suffix>]() {
@@ -1148,6 +1299,7 @@ pub(crate) mod tests {
 
     use super::{Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
     use crate::context::nalgebra::NalgebraContext;
+    use crate::scalar::Scalar as _;
     use crate::scalar::Scale;
     use crate::vector::nalgebra_serial::NalgebraVec;
     use crate::Context;
@@ -1736,6 +1888,188 @@ pub(crate) mod tests {
         dot_host.for_each_batch_host([&x, &v], reduce);
         assert_eq!(dot.clone_as_vec(), fv::<V>(&[11.0, 110.0]));
         assert_eq!(dot_host.clone_as_vec(), dot.clone_as_vec());
+    }
+
+    #[cfg_attr(not(any(feature = "cuda", feature = "cuda-oxide")), allow(dead_code))]
+    /// Both reductions on an unbatched vector: `reduce_batch` degenerates to the map, and
+    /// `reduce_elem` folds the whole vector to one value.
+    pub fn test_reduce_unbatched<V: Vector>() {
+        let x = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0]), V::C::default());
+        let sum = |a: V::T, b: V::T| a + b;
+
+        let mut dest = V::zeros(3, V::C::default());
+        let mut dest_host = V::zeros(3, V::C::default());
+        let double = |[x]: [&[V::T]; 1], _lane: usize, i: usize| x[i] + x[i];
+        V::reduce_batch(&mut dest, [&x], f::<V>(0.0), double, sum);
+        V::reduce_batch_host(&mut dest_host, [&x], f::<V>(0.0), double, sum);
+        assert_eq!(dest.clone_as_vec(), fv::<V>(&[2.0, 4.0, 6.0]));
+        assert_eq!(dest_host.clone_as_vec(), dest.clone_as_vec());
+
+        let mut total = V::zeros(1, V::C::default());
+        let mut total_host = V::zeros(1, V::C::default());
+        let pick = |[x]: [&[V::T]; 1], _lane: usize, i: usize| x[i];
+        V::reduce_elem(&mut total, [&x], f::<V>(0.0), pick, sum);
+        V::reduce_elem_host(&mut total_host, [&x], f::<V>(0.0), pick, sum);
+        assert_eq!(total.clone_as_vec(), fv::<V>(&[6.0]));
+        assert_eq!(total_host.clone_as_vec(), total.clone_as_vec());
+    }
+
+    /// `reduce_batch` collapses the lanes elementwise, leaving an unbatched vector.
+    pub fn test_batched_reduce_batch<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let x = V::from_vec(fv::<V>(&[1.0, 2.0, 10.0, 20.0]), ctx.clone());
+        let pick = |[x]: [&[V::T]; 1], _lane: usize, i: usize| x[i];
+
+        let mut sum = V::zeros(2, V::C::default());
+        let mut sum_host = V::zeros(2, V::C::default());
+        V::reduce_batch(&mut sum, [&x], f::<V>(0.0), pick, |a, b| a + b);
+        V::reduce_batch_host(&mut sum_host, [&x], f::<V>(0.0), pick, |a, b| a + b);
+        assert_eq!(sum.clone_as_vec(), fv::<V>(&[11.0, 22.0]));
+        assert_eq!(sum_host.clone_as_vec(), sum.clone_as_vec());
+
+        let mut max = V::zeros(2, V::C::default());
+        let mut max_host = V::zeros(2, V::C::default());
+        V::reduce_batch(&mut max, [&x], f::<V>(0.0), pick, |a, b| a.max(b));
+        V::reduce_batch_host(&mut max_host, [&x], f::<V>(0.0), pick, |a, b| a.max(b));
+        assert_eq!(max.clone_as_vec(), fv::<V>(&[10.0, 20.0]));
+        assert_eq!(max_host.clone_as_vec(), max.clone_as_vec());
+    }
+
+    /// `reduce_elem` collapses each lane to one value, leaving a batched scalar.
+    ///
+    /// The dot product here is the one `test_batched_for_each_batch` builds by hand, so the
+    /// expected values are pinned by an independent route.
+    pub fn test_batched_reduce_elem<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let x = V::from_vec(fv::<V>(&[1.0, 2.0, 10.0, 20.0]), ctx.clone());
+        let v = V::from_vec(fv::<V>(&[3.0, 4.0]), V::C::default());
+
+        let mut dot = V::zeros(1, ctx.clone());
+        let mut dot_host = V::zeros(1, ctx.clone());
+        let prod = |[x, v]: [&[V::T]; 2], _lane: usize, i: usize| x[i] * v[i];
+        V::reduce_elem(&mut dot, [&x, &v], f::<V>(0.0), prod, |a, b| a + b);
+        V::reduce_elem_host(&mut dot_host, [&x, &v], f::<V>(0.0), prod, |a, b| a + b);
+        assert_eq!(dot.clone_as_vec(), fv::<V>(&[11.0, 110.0]));
+        assert_eq!(dot_host.clone_as_vec(), dot.clone_as_vec());
+
+        let mut max = V::zeros(1, ctx.clone());
+        let mut max_host = V::zeros(1, ctx);
+        let pick = |[x]: [&[V::T]; 1], _lane: usize, i: usize| x[i];
+        V::reduce_elem(&mut max, [&x], f::<V>(0.0), pick, |a, b| a.max(b));
+        V::reduce_elem_host(&mut max_host, [&x], f::<V>(0.0), pick, |a, b| a.max(b));
+        assert_eq!(max.clone_as_vec(), fv::<V>(&[2.0, 20.0]));
+        assert_eq!(max_host.clone_as_vec(), max.clone_as_vec());
+    }
+
+    /// An `nbatch == 1` operand broadcasts into every lane of a reduction.
+    pub fn test_batched_reduce_broadcast<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let x = V::from_vec(fv::<V>(&[1.0, 2.0, 10.0, 20.0]), ctx.clone());
+        let v = V::from_vec(fv::<V>(&[3.0, 4.0]), V::C::default());
+        let sum = |a: V::T, b: V::T| a + b;
+        let add = |[x, v]: [&[V::T]; 2], _lane: usize, i: usize| x[i] + v[i];
+
+        // (1+3) + (10+3) = 17, (2+4) + (20+4) = 30
+        let mut dest = V::zeros(2, V::C::default());
+        let mut dest_host = V::zeros(2, V::C::default());
+        V::reduce_batch(&mut dest, [&x, &v], f::<V>(0.0), add, sum);
+        V::reduce_batch_host(&mut dest_host, [&x, &v], f::<V>(0.0), add, sum);
+        assert_eq!(dest.clone_as_vec(), fv::<V>(&[17.0, 30.0]));
+        assert_eq!(dest_host.clone_as_vec(), dest.clone_as_vec());
+
+        // (1+3) + (2+4) = 10, (10+3) + (20+4) = 37
+        let mut lane = V::zeros(1, ctx.clone());
+        let mut lane_host = V::zeros(1, ctx);
+        V::reduce_elem(&mut lane, [&x, &v], f::<V>(0.0), add, sum);
+        V::reduce_elem_host(&mut lane_host, [&x, &v], f::<V>(0.0), add, sum);
+        assert_eq!(lane.clone_as_vec(), fv::<V>(&[10.0, 37.0]));
+        assert_eq!(lane_host.clone_as_vec(), lane.clone_as_vec());
+    }
+
+    /// A lane longer than a device block, so the strided load and the in-block tree both run.
+    pub fn test_batched_reduce_long_lane<V: Vector>(ctx: V::C) {
+        let nbatch = ctx.nbatch();
+        assert_eq!(nbatch, 3);
+        // past `REDUCE_BATCH_SMALL_NSTATES` as well as `SMALL_NSTATES`, so that the device
+        // backends run the large arm of both reductions here and the small arm of both in the
+        // tests above
+        let nstates = 13_000;
+        let data: Vec<f64> = (0..nstates * nbatch).map(|i| (i % 97) as f64).collect();
+        let x = V::from_vec(fv::<V>(&data), ctx.clone());
+        let pick = |[x]: [&[V::T]; 1], _lane: usize, i: usize| x[i];
+        let sum = |a: V::T, b: V::T| a + b;
+
+        let mut per_elem = V::zeros(nstates, V::C::default());
+        let mut per_elem_host = V::zeros(nstates, V::C::default());
+        V::reduce_batch(&mut per_elem, [&x], f::<V>(0.0), pick, sum);
+        V::reduce_batch_host(&mut per_elem_host, [&x], f::<V>(0.0), pick, sum);
+        assert_eq!(per_elem.clone_as_vec(), per_elem_host.clone_as_vec());
+
+        let mut per_lane = V::zeros(1, ctx.clone());
+        let mut per_lane_host = V::zeros(1, ctx.clone());
+        // max is exact whatever order the fold takes, unlike a sum of many terms
+        V::reduce_elem(&mut per_lane, [&x], f::<V>(0.0), pick, |a, b| a.max(b));
+        V::reduce_elem_host(&mut per_lane_host, [&x], f::<V>(0.0), pick, |a, b| a.max(b));
+        assert_eq!(per_lane.clone_as_vec(), per_lane_host.clone_as_vec());
+
+        // the sums agree to rounding, the device folding in tree order and the host in index
+        // order
+        let mut sums = V::zeros(1, ctx.clone());
+        let mut sums_host = V::zeros(1, ctx);
+        V::reduce_elem(&mut sums, [&x], f::<V>(0.0), pick, sum);
+        V::reduce_elem_host(&mut sums_host, [&x], f::<V>(0.0), pick, sum);
+        sums.assert_eq_st(&sums_host, f::<V>(1e-9));
+    }
+
+    /// The host reductions take `FnMut`, so a closure may carry state across calls.
+    ///
+    /// This cannot compile against the device-preferring methods, whose closures must be
+    /// `Fn + Copy + Send` to be monomorphised into a kernel.
+    pub fn test_batched_reduce_host_stateful<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let x = V::from_vec(fv::<V>(&[1.0, 2.0, 10.0, 20.0]), ctx.clone());
+
+        let mut calls = 0usize;
+        let mut dest = V::zeros(1, ctx);
+        V::reduce_elem_host(
+            &mut dest,
+            [&x],
+            f::<V>(0.0),
+            |[x], _lane, i| {
+                calls += 1;
+                x[i]
+            },
+            |a, b| a + b,
+        );
+        assert_eq!(dest.clone_as_vec(), fv::<V>(&[3.0, 30.0]));
+        // two lanes of two elements, each mapped once
+        assert_eq!(calls, 4);
+    }
+
+    /// `reduce_batch` removes the batch dimension, so a batched `dest` is a mistake.
+    pub fn test_batched_reduce_batch_bad_dest<V: Vector>(ctx: V::C) {
+        let x = V::from_vec(fv::<V>(&[1.0, 2.0, 10.0, 20.0]), ctx.clone());
+        let mut dest = V::zeros(2, ctx);
+        V::reduce_batch(
+            &mut dest,
+            [&x],
+            f::<V>(0.0),
+            |[x], _lane, i| x[i],
+            |a, b| a + b,
+        );
+    }
+
+    /// `reduce_elem` removes the element dimension, so `dest` has to be a batched scalar.
+    pub fn test_batched_reduce_elem_bad_dest<V: Vector>(ctx: V::C) {
+        let x = V::from_vec(fv::<V>(&[1.0, 2.0, 10.0, 20.0]), ctx.clone());
+        let mut dest = V::zeros(2, ctx);
+        V::reduce_elem(
+            &mut dest,
+            [&x],
+            f::<V>(0.0),
+            |[x], _lane, i| x[i],
+            |a, b| a + b,
+        );
     }
 
     #[cfg_attr(not(any(feature = "cuda", feature = "cuda-oxide")), allow(dead_code))]

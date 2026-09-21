@@ -233,10 +233,9 @@
 //!
 //! When solving ODEs, you will need to choose a matrix and vector type to use. diffsol uses the
 //! following types:
-//!   - [NalgebraVec] and [NalgebraMat] (wrappers around `nalgebra::DMatrix` and
-//!     `nalgebra::DVector` from the [nalgebra](https://nalgebra.org) library).
+//!   - [NalgebraVec] and [NalgebraMat] (wrappers around `nalgebra::DMatrix` type from the [nalgebra](https://nalgebra.org) library).
 //!   - [FaerVec], [FaerMat] and [FaerSparseMat]
-//!     (wrappers around `faer::Mat`, `faer::Col` and `faer::sparse::SparseColMat`
+//!     (wrappers around `faer::Mat` and `faer::sparse::SparseColMat`
 //!     from the [faer](https://github.com/sarah-ek/faer-rs) library).
 //!
 //! If you wish to use your own matrix and vector types, you will need to implement the following
@@ -245,6 +244,14 @@
 //!     [MatrixCommon].
 //!   - For vectors: [Vector], [VectorIndex], [VectorView], [VectorViewMut], and
 //!     [VectorCommon].
+//!
+//! ## Vector batching
+//!
+//! The [Context] trait specifies the batch size of each vector using [Context::nbatch].
+//! The [`Vector::for_each_batch_host`] and [`Vector::for_each_batch`] methods run an operation once
+//! per batch lane, while [`Vector::for_each_elem`] runs it once per element in every lane. Use
+//! [`Vector::reduce_elem`] to reduce elements within each lane and [`Vector::reduce_batch`] to
+//! reduce across lanes.
 //!
 
 #[cfg(feature = "diffsl")]

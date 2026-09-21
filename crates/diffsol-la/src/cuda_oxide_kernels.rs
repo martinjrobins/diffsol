@@ -11,20 +11,23 @@ pub(crate) const BLOCK_SIZE: u32 = 256;
 /// Warps in a block. Every kernel's launch contract pins the block to
 /// `(BLOCK_SIZE, 1, 1)`, so a block is always this many *whole* warps -- which
 /// is what lets the block reductions shuffle with the full-warp mask.
-const WARPS_PER_BLOCK: usize = BLOCK_SIZE as usize / 32;
+pub(crate) const WARPS_PER_BLOCK: usize = BLOCK_SIZE as usize / 32;
 
 /// Above this `nstates`, the reductions switch from several-lanes-per-block to
 /// one-block-per-lane.
-///
-/// the crossing moves with the block shape and with how many SMs the
-/// device has. `timing_threshold` in `crate::vector::cuda_oxide`'s tests
-/// re-derives it; this is the only number to change.
-///
-/// 85 is where `cols_per_block = BLOCK_SIZE / nstates` falls from 3 to 2, and
-/// measurement lands on the same step: at `nbatch = 10_000` on an A40 the small
-/// kernels take 61us at 85 against the large path's 80us, and 85us at 86
-/// against its 80us.
 pub(crate) const SMALL_NSTATES: u32 = 85;
+
+/// Above this `nstates`, the [`kernels::vec_reduce_elem`] reduction switch from
+/// one-lane-per-thread to one-warp-per-lane.
+///
+/// TODO: should be one-block-per-lane to match other reductions
+/// but shared memory bug in cuda-oxide currently prevents this
+/// (https://github.com/NVlabs/cuda-oxide/issues/1277)
+pub(crate) const REDUCE_ELEM_SMALL_NSTATES: u32 = 16;
+
+/// Below this `nstates`, [`kernels::vec_reduce_batch`] gives each element a whole warp instead
+/// of a single thread.
+pub(crate) const REDUCE_BATCH_SMALL_NSTATES: u32 = 12_288;
 
 /// Batch lane and element for flat work item `i`.
 /// Note: The host guarantees `nstates > 0`.
@@ -1540,5 +1543,206 @@ pub mod kernels {
             core::slice::from_raw_parts(ins.ptr[k].add(base), len)
         });
         f(o, a, b, elem);
+    }
+
+    /// Folds `val` across the warp with `combine`, leaving the total in every lane.
+    ///
+    /// The generalisation of [`warp::reduce_sum_f64`] to a caller's combiner, built from the
+    /// same butterfly shuffles. Because a butterfly pairs lane `i` with `i ^ delta`, half the
+    /// lanes see their operands in the opposite order, so `combine` has to be commutative as
+    /// well as associative -- which sum, max and min all are.
+    fn warp_reduce<G>(mut val: f64, combine: G) -> f64
+    where
+        G: Fn(f64, f64) -> f64 + Copy,
+    {
+        val = combine(val, warp::shuffle_xor_f64(val, 16));
+        val = combine(val, warp::shuffle_xor_f64(val, 8));
+        val = combine(val, warp::shuffle_xor_f64(val, 4));
+        val = combine(val, warp::shuffle_xor_f64(val, 2));
+        val = combine(val, warp::shuffle_xor_f64(val, 1));
+        val
+    }
+
+    /// Reduce `ins` over the batch dimension, elementwise, into `dest`.
+    ///
+    /// One thread per element: each thread folds its own element over every lane.
+    /// Each thread therefore owns one element of `dest`.
+    #[kernel]
+    #[launch_bounds(256)]
+    #[launch_contract(domain = 1, block = (256, 1, 1), requires = (dest.len() == nstates))]
+    #[allow(clippy::too_many_arguments)]
+    pub fn vec_reduce_batch<const N: usize, F, G>(
+        f: F,
+        g: G,
+        mut dest: DisjointSlice<f64>,
+        ins: LaneArgs<N>,
+        init: f64,
+        nstates: u32,
+        nbatch: u32,
+    ) where
+        F: Fn([&[f64]; N], usize, usize) -> f64 + Copy,
+        G: Fn(f64, f64) -> f64 + Copy,
+    {
+        let idx = thread::index_1d();
+        let i = idx.get();
+        if i >= nstates as usize {
+            return;
+        }
+        let mut acc = init;
+        let mut b = 0usize;
+        while b < nbatch as usize {
+            // SAFETY: each pointer is read out of a `Copy` byval struct; a read operand with a
+            // smaller lane count is broadcast, so several threads may read the same lane, and
+            // none of them writes.
+            let a = core::array::from_fn(|k| unsafe {
+                let len = ins.nstates[k] as usize;
+                let base = broadcast_src(b, ins.nstates[k], ins.nbatch[k], nbatch, 0);
+                core::slice::from_raw_parts(ins.ptr[k].add(base), len)
+            });
+            acc = g(acc, f(a, b, i));
+            b += 1;
+        }
+        if let Some(elem) = dest.get_mut(idx) {
+            *elem = acc;
+        }
+    }
+
+    /// [`Self::vec_reduce_batch`] for a small `nstates` below [`REDUCE_BATCH_SMALL_NSTATES`], .
+    ///
+    /// One warp per element, a whole warp takes one element and strides over the
+    /// lanes instead. The fold is pure warp shuffles.
+    ///
+    /// The reads are strided by `nstates` rather than coalesced.
+    #[kernel]
+    #[launch_bounds(256)]
+    #[launch_contract(domain = 1, block = (256, 1, 1))]
+    pub fn vec_reduce_batch_small<const N: usize, F, G>(
+        f: F,
+        g: G,
+        mut dest: DisjointSlice<f64>,
+        ins: LaneArgs<N>,
+        init: f64,
+        nstates: u32,
+        nbatch: u32,
+    ) where
+        F: Fn([&[f64]; N], usize, usize) -> f64 + Copy,
+        G: Fn(f64, f64) -> f64 + Copy,
+    {
+        let warps = thread::gridDim_x() as usize * WARPS_PER_BLOCK;
+        let lane = warp::lane_id() as usize;
+        let mut i = thread::blockIdx_x() as usize * WARPS_PER_BLOCK + warp::warp_id() as usize;
+        // the element loop is uniform across the warp, so every lane reaches every shuffle
+        while i < nstates as usize {
+            let mut acc = init;
+            let mut b = lane;
+            while b < nbatch as usize {
+                // SAFETY: as in `vec_reduce_batch`; every operand is read-only here.
+                let a = core::array::from_fn(|k| unsafe {
+                    let len = ins.nstates[k] as usize;
+                    let base = broadcast_src(b, ins.nstates[k], ins.nbatch[k], nbatch, 0);
+                    core::slice::from_raw_parts(ins.ptr[k].add(base), len)
+                });
+                acc = g(acc, f(a, b, i));
+                b += 32;
+            }
+            let total = warp_reduce(acc, g);
+            if lane == 0 && i < dest.len() {
+                // SAFETY: bounds checked. The slot is owned by this warp, and only its lane 0
+                // writes, so no `get_mut` witness can express it.
+                unsafe {
+                    *dest.as_mut_ptr().add(i) = total;
+                }
+            }
+            i += warps;
+        }
+    }
+
+    /// Reduce each batch lane of `ins` over its elements, into lane `b` of `dest`.
+    ///
+    /// One warp per lane, striding over the lane's elements into a register and folding those
+    /// with [`warp_reduce`], so a long lane is reduced in five shuffle rounds rather than by a
+    /// single thread
+    #[kernel]
+    #[launch_bounds(256)]
+    #[launch_contract(domain = 1, block = (256, 1, 1))]
+    pub fn vec_reduce_elem<const N: usize, F, G>(
+        f: F,
+        g: G,
+        mut dest: DisjointSlice<f64>,
+        ins: LaneArgs<N>,
+        init: f64,
+        nstates: u32,
+        nbatch: u32,
+    ) where
+        F: Fn([&[f64]; N], usize, usize) -> f64 + Copy,
+        G: Fn(f64, f64) -> f64 + Copy,
+    {
+        let warps = thread::gridDim_x() as usize * WARPS_PER_BLOCK;
+        let lane = warp::lane_id() as usize;
+        let mut b = thread::blockIdx_x() as usize * WARPS_PER_BLOCK + warp::warp_id() as usize;
+        // the lane loop is uniform across the warp, so every thread reaches every shuffle
+        while b < nbatch as usize {
+            // SAFETY: as in `vec_reduce_batch`; every operand is read-only here.
+            let a = core::array::from_fn(|k| unsafe {
+                let len = ins.nstates[k] as usize;
+                let base = broadcast_src(b, ins.nstates[k], ins.nbatch[k], nbatch, 0);
+                core::slice::from_raw_parts(ins.ptr[k].add(base), len)
+            });
+            let mut acc = init;
+            let mut i = lane;
+            while i < nstates as usize {
+                acc = g(acc, f(a, b, i));
+                i += 32;
+            }
+            let total = warp_reduce(acc, g);
+            if lane == 0 && b < dest.len() {
+                // SAFETY: bounds checked. The slot is owned by this warp, and only its lane 0
+                // writes it.
+                unsafe {
+                    *dest.as_mut_ptr().add(b) = total;
+                }
+            }
+            b += warps;
+        }
+    }
+
+    /// [`Self::vec_reduce_elem`] for a lane short enough that a warp per lane would waste it.
+    /// See [`REDUCE_ELEM_SMALL_NSTATES`].
+    ///
+    /// One thread per lane, walking that lane's elements itself.
+    #[kernel]
+    #[launch_bounds(256)]
+    #[launch_contract(domain = 1, block = (256, 1, 1))]
+    #[allow(clippy::too_many_arguments)]
+    pub fn vec_reduce_elem_small<const N: usize, F, G>(
+        f: F,
+        g: G,
+        mut dest: DisjointSlice<f64>,
+        ins: LaneArgs<N>,
+        init: f64,
+        nstates: u32,
+        nbatch: u32,
+    ) where
+        F: Fn([&[f64]; N], usize, usize) -> f64 + Copy,
+        G: Fn(f64, f64) -> f64 + Copy,
+    {
+        let idx = thread::index_1d();
+        let b = idx.get();
+        if b >= nbatch as usize {
+            return;
+        }
+        // SAFETY: as in `vec_reduce_elem`; every operand is read-only here.
+        let a = core::array::from_fn(|k| unsafe {
+            let len = ins.nstates[k] as usize;
+            let base = broadcast_src(b, ins.nstates[k], ins.nbatch[k], nbatch, 0);
+            core::slice::from_raw_parts(ins.ptr[k].add(base), len)
+        });
+        let mut acc = init;
+        for i in 0..nstates as usize {
+            acc = g(acc, f(a, b, i));
+        }
+        if let Some(elem) = dest.get_mut(idx) {
+            *elem = acc;
+        }
     }
 }

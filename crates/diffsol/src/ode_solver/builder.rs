@@ -1965,12 +1965,17 @@ where
             nparams,
             self.ctx.clone(),
         )?;
-        if self.p.len() != nparams {
+        // `nparams` is per batch, as every count in the op layer is, while `self.p` holds every
+        // lane's block end to end -- so a batched problem supplies `nparams * nbatch` values
+        let nbatch = self.ctx.nbatch();
+        if self.p.len() != nparams * nbatch {
             return Err(ode_solver_error!(
                 BuilderError,
                 format!(
-                    "Number of parameters on builder does not match number of parameters in equations. Expected {}, got {}.",
+                    "Number of parameters on builder does not match number of parameters in equations. Expected {} ({} per batch x {} batches), got {}.",
+                    nparams * nbatch,
                     nparams,
+                    nbatch,
                     self.p.len()
                 )
             ));

@@ -26,7 +26,10 @@ use cuda_host::RowWidth;
 use super::{VectorIndex, VectorView, VectorViewMut};
 use crate::context::broadcast_batch;
 use crate::context::cuda_oxide::{copy_at, read_at, write_at};
-use crate::cuda_oxide_kernels::{LaneArgs, LaneArgsMut, BLOCK_SIZE, SMALL_NSTATES};
+use crate::cuda_oxide_kernels::{
+    LaneArgs, LaneArgsMut, BLOCK_SIZE, REDUCE_BATCH_SMALL_NSTATES, REDUCE_ELEM_SMALL_NSTATES,
+    SMALL_NSTATES, WARPS_PER_BLOCK,
+};
 use crate::{
     Context, DefaultDenseMatrix, IndexType, OxideContext, OxideMat, Scale, Vector, VectorCommon,
 };
@@ -219,6 +222,203 @@ pub(crate) fn launch_for_each_elem<const M: usize, const N: usize, F>(
         .expect("prepare vec_for_each_elem");
     m.vec_for_each_elem::<M, N, F>(&ctx.stream, &p, f, outs, ins, n, nstates, nbatch)
         .expect("launch vec_for_each_elem");
+}
+
+/// Reduces over the batch dimension on the device, picking the arm for this `nstates`.
+///
+/// A free function for the same reason as [`launch_for_each_batch`]. The per-arm helpers are
+/// separate so the timing tests can run both at the same shape.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn launch_reduce_batch<const N: usize, F, G>(
+    ctx: &OxideContext,
+    f: F,
+    g: G,
+    dest: OperandMut<'_>,
+    ins: LaneArgs<N>,
+    init: f64,
+    nstates: u32,
+    nbatch: u32,
+) where
+    F: Fn([&[f64]; N], usize, usize) -> f64 + Copy + Send,
+    G: Fn(f64, f64) -> f64 + Copy + Send,
+{
+    if nstates < REDUCE_BATCH_SMALL_NSTATES {
+        launch_reduce_batch_small(ctx, f, g, dest, ins, init, nstates, nbatch);
+    } else {
+        launch_reduce_batch_large(ctx, f, g, dest, ins, init, nstates, nbatch);
+    }
+}
+
+/// One thread per element, each folding every lane. Enough parallelism only when `nstates` is
+/// itself large.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn launch_reduce_batch_large<const N: usize, F, G>(
+    ctx: &OxideContext,
+    f: F,
+    g: G,
+    mut dest: OperandMut<'_>,
+    ins: LaneArgs<N>,
+    init: f64,
+    nstates: u32,
+    nbatch: u32,
+) where
+    F: Fn([&[f64]; N], usize, usize) -> f64 + Copy + Send,
+    G: Fn(f64, f64) -> f64 + Copy + Send,
+{
+    // the kernel writes through `get_mut`, so the grid has to cover every element
+    let cfg = OxideContext::config_1d(nstates);
+    let m = &ctx.module;
+    let p = m
+        .prepare_vec_reduce_batch::<N, F, G>(cfg)
+        .expect("prepare vec_reduce_batch");
+    m.vec_reduce_batch::<N, F, G>(
+        &ctx.stream,
+        &p,
+        f,
+        g,
+        &mut dest.window,
+        ins,
+        init,
+        nstates,
+        nbatch,
+    )
+    .expect("launch vec_reduce_batch");
+}
+
+/// One warp per element, its threads striding over the lanes.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn launch_reduce_batch_small<const N: usize, F, G>(
+    ctx: &OxideContext,
+    f: F,
+    g: G,
+    mut dest: OperandMut<'_>,
+    ins: LaneArgs<N>,
+    init: f64,
+    nstates: u32,
+    nbatch: u32,
+) where
+    F: Fn([&[f64]; N], usize, usize) -> f64 + Copy + Send,
+    G: Fn(f64, f64) -> f64 + Copy + Send,
+{
+    // one warp per element, capped so a large `nstates` grid-strides instead of over-launching
+    let blocks = nstates
+        .div_ceil(WARPS_PER_BLOCK as u32)
+        .min(ctx.target_blocks);
+    let cfg = OxideContext::config_1d_blocks(blocks);
+    let m = &ctx.module;
+    let p = m
+        .prepare_vec_reduce_batch_small::<N, F, G>(cfg)
+        .expect("prepare vec_reduce_batch_small");
+    m.vec_reduce_batch_small::<N, F, G>(
+        &ctx.stream,
+        &p,
+        f,
+        g,
+        &mut dest.window,
+        ins,
+        init,
+        nstates,
+        nbatch,
+    )
+    .expect("launch vec_reduce_batch_small");
+}
+
+/// Reduces each lane over its elements on the device, picking the arm for this `nstates`.
+///
+/// A free function for the same reason as [`launch_for_each_batch`]. The per-arm helpers are
+/// separate so the timing tests can run both at the same shape.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn launch_reduce_elem<const N: usize, F, G>(
+    ctx: &OxideContext,
+    f: F,
+    g: G,
+    dest: OperandMut<'_>,
+    ins: LaneArgs<N>,
+    init: f64,
+    nstates: u32,
+    nbatch: u32,
+) where
+    F: Fn([&[f64]; N], usize, usize) -> f64 + Copy + Send,
+    G: Fn(f64, f64) -> f64 + Copy + Send,
+{
+    if nstates <= REDUCE_ELEM_SMALL_NSTATES {
+        launch_reduce_elem_small(ctx, f, g, dest, ins, init, nstates, nbatch);
+    } else {
+        launch_reduce_elem_large(ctx, f, g, dest, ins, init, nstates, nbatch);
+    }
+}
+
+/// One warp per lane, its threads striding over that lane's elements.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn launch_reduce_elem_large<const N: usize, F, G>(
+    ctx: &OxideContext,
+    f: F,
+    g: G,
+    mut dest: OperandMut<'_>,
+    ins: LaneArgs<N>,
+    init: f64,
+    nstates: u32,
+    nbatch: u32,
+) where
+    F: Fn([&[f64]; N], usize, usize) -> f64 + Copy + Send,
+    G: Fn(f64, f64) -> f64 + Copy + Send,
+{
+    // one warp per lane, capped so a large `nbatch` grid-strides instead of over-launching
+    let blocks = nbatch
+        .div_ceil(WARPS_PER_BLOCK as u32)
+        .min(ctx.target_blocks);
+    let cfg = OxideContext::config_1d_blocks(blocks);
+    let m = &ctx.module;
+    let p = m
+        .prepare_vec_reduce_elem::<N, F, G>(cfg)
+        .expect("prepare vec_reduce_elem");
+    m.vec_reduce_elem::<N, F, G>(
+        &ctx.stream,
+        &p,
+        f,
+        g,
+        &mut dest.window,
+        ins,
+        init,
+        nstates,
+        nbatch,
+    )
+    .expect("launch vec_reduce_elem");
+}
+
+/// One thread per lane, walking that lane itself.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn launch_reduce_elem_small<const N: usize, F, G>(
+    ctx: &OxideContext,
+    f: F,
+    g: G,
+    mut dest: OperandMut<'_>,
+    ins: LaneArgs<N>,
+    init: f64,
+    nstates: u32,
+    nbatch: u32,
+) where
+    F: Fn([&[f64]; N], usize, usize) -> f64 + Copy + Send,
+    G: Fn(f64, f64) -> f64 + Copy + Send,
+{
+    // one thread per lane, so the grid has to cover every lane
+    let cfg = OxideContext::config_1d(nbatch);
+    let m = &ctx.module;
+    let p = m
+        .prepare_vec_reduce_elem_small::<N, F, G>(cfg)
+        .expect("prepare vec_reduce_elem_small");
+    m.vec_reduce_elem_small::<N, F, G>(
+        &ctx.stream,
+        &p,
+        f,
+        g,
+        &mut dest.window,
+        ins,
+        init,
+        nstates,
+        nbatch,
+    )
+    .expect("launch vec_reduce_elem_small");
 }
 
 /// One source operand of a launch: where its data starts, how far apart its
@@ -1593,6 +1793,85 @@ impl Vector for OxideVec {
         let ins = lane_args_in(&args);
         launch_for_each_elem(&ctx, f, outs, ins, nstates as u32, nbatch as u32);
     }
+
+    /// The reduction runs on the device, so no operand travels through host memory.
+    ///
+    /// Panics if `dest` is batched, or if `N == 0`.
+    fn reduce_batch<const N: usize>(
+        dest: &mut Self,
+        args: [&Self; N],
+        init: Self::T,
+        map: impl Fn([&[Self::T]; N], usize, usize) -> Self::T + Copy + Send,
+        combine: impl Fn(Self::T, Self::T) -> Self::T + Copy + Send,
+    ) {
+        assert!(N > 0, "reduce_batch takes the lane count from args[0]");
+        assert_eq!(
+            dest.context.nbatch(),
+            1,
+            "reduce_batch removes the batch dimension, so dest must be unbatched"
+        );
+        let nstates = dest.len();
+        let nbatch = args[0].context.nbatch();
+        for arg in args.iter() {
+            args[0]
+                .context
+                .assert_broadcastable_into(arg.context.nbatch(), "reduce_batch");
+        }
+        if nstates == 0 || nbatch == 0 {
+            return;
+        }
+        let ctx = dest.context.clone();
+        let ins = lane_args_in(&args);
+        launch_reduce_batch(
+            &ctx,
+            map,
+            combine,
+            dest.operand_mut(),
+            ins,
+            init,
+            nstates as u32,
+            nbatch as u32,
+        );
+    }
+
+    /// The reduction runs on the device, so no operand travels through host memory.
+    ///
+    /// Panics if `dest` is not a batched scalar, or if `N == 0`.
+    fn reduce_elem<const N: usize>(
+        dest: &mut Self,
+        args: [&Self; N],
+        init: Self::T,
+        map: impl Fn([&[Self::T]; N], usize, usize) -> Self::T + Copy + Send,
+        combine: impl Fn(Self::T, Self::T) -> Self::T + Copy + Send,
+    ) {
+        assert!(N > 0, "reduce_elem takes the element range from args[0]");
+        assert_eq!(
+            dest.len(),
+            1,
+            "reduce_elem removes the element dimension, so dest must be a batched scalar"
+        );
+        let nbatch = dest.context.nbatch();
+        for arg in args.iter() {
+            dest.context
+                .assert_broadcastable_into(arg.context.nbatch(), "reduce_elem");
+        }
+        let nstates = args[0].len();
+        if nstates == 0 || nbatch == 0 {
+            return;
+        }
+        let ctx = dest.context.clone();
+        let ins = lane_args_in(&args);
+        launch_reduce_elem(
+            &ctx,
+            map,
+            combine,
+            dest.operand_mut(),
+            ins,
+            init,
+            nstates as u32,
+            nbatch as u32,
+        );
+    }
 }
 
 /// The operand shapes a device lane closure needs, and the lane count it runs at.
@@ -1796,6 +2075,7 @@ impl<'a> VectorViewMut<'a> for OxideVecMut<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{Duration, Instant};
 
     /// A mutable operand shared by several lanes is a host-loop shape, and the device method
     /// says so rather than quietly staging it through host memory.
@@ -2024,6 +2304,121 @@ mod tests {
     /// that constant's docs was built exactly that way.
     ///
     /// Run with
+    /// Time one arm of `reduce_batch` at a fixed shape.
+    ///
+    /// The launches are asynchronous and neither arm reads anything back, so the stream has to
+    /// be synchronized before the clock is stopped.
+    fn time_reduce_batch(small: bool, nstates: usize, nbatch: usize, reps: u32) -> Duration {
+        let ctx = OxideContext::default().with_nbatch(nbatch);
+        let x = OxideVec::from_element(nstates, 2.0, ctx.clone());
+        let mut dest = OxideVec::zeros(nstates, OxideContext::default());
+        let map = |[x]: [&[f64]; 1], _lane: usize, i: usize| x[i];
+        let combine = |a: f64, b: f64| a + b;
+        let run = |dest: &mut OxideVec| {
+            let ins = lane_args_in(&[&x]);
+            let arm = if small {
+                launch_reduce_batch_small::<1, _, _>
+            } else {
+                launch_reduce_batch_large::<1, _, _>
+            };
+            arm(
+                &ctx,
+                map,
+                combine,
+                dest.operand_mut(),
+                ins,
+                0.0,
+                nstates as u32,
+                nbatch as u32,
+            );
+        };
+        for _ in 0..20 {
+            run(&mut dest);
+        }
+        ctx.synchronize();
+        let start = Instant::now();
+        for _ in 0..reps {
+            run(&mut dest);
+        }
+        ctx.synchronize();
+        start.elapsed() / reps
+    }
+
+    /// Time one arm of `reduce_elem` at a fixed shape.
+    fn time_reduce_elem(small: bool, nstates: usize, nbatch: usize, reps: u32) -> Duration {
+        let ctx = OxideContext::default().with_nbatch(nbatch);
+        let x = OxideVec::from_element(nstates, 2.0, ctx.clone());
+        let mut dest = OxideVec::zeros(1, ctx.clone());
+        let map = |[x]: [&[f64]; 1], _lane: usize, i: usize| x[i];
+        let combine = |a: f64, b: f64| a + b;
+        let run = |dest: &mut OxideVec| {
+            let ins = lane_args_in(&[&x]);
+            let arm = if small {
+                launch_reduce_elem_small::<1, _, _>
+            } else {
+                launch_reduce_elem_large::<1, _, _>
+            };
+            arm(
+                &ctx,
+                map,
+                combine,
+                dest.operand_mut(),
+                ins,
+                0.0,
+                nstates as u32,
+                nbatch as u32,
+            );
+        };
+        for _ in 0..20 {
+            run(&mut dest);
+        }
+        ctx.synchronize();
+        let start = Instant::now();
+        for _ in 0..reps {
+            run(&mut dest);
+        }
+        ctx.synchronize();
+        start.elapsed() / reps
+    }
+
+    /// Where `reduce_elem`'s two arms cross, which sets [`SMALL_NSTATES`]'s use here.
+    ///
+    /// Run with
+    /// `just oxide-test --release -- --ignored --nocapture timing_reduce_elem_threshold`.
+    #[test]
+    #[ignore = "timing only"]
+    fn timing_reduce_elem_threshold() {
+        const REPS: u32 = 200;
+        for nbatch in [10_000usize, 100_000] {
+            for nstates in [2usize, 8, 16, 24, 32, 64, 128, 256] {
+                let small = time_reduce_elem(true, nstates, nbatch, REPS);
+                let large = time_reduce_elem(false, nstates, nbatch, REPS);
+                println!(
+                    "reduce_elem nbatch={nbatch:>7} nstates={nstates:>5}: small {small:>10?}  large {large:>10?}"
+                );
+            }
+        }
+    }
+
+    /// Where `reduce_batch`'s two arms cross, which sets [`REDUCE_BATCH_SMALL_NSTATES`].
+    ///
+    /// Run with
+    /// `just oxide-test --release -- --ignored --nocapture timing_reduce_batch_threshold`.
+    #[test]
+    #[ignore = "timing only"]
+    fn timing_reduce_batch_threshold() {
+        const REPS: u32 = 200;
+        for nbatch in [10_000usize, 100_000] {
+            for nstates in [3usize, 4096, 8192, 10_240, 11_264, 12_288, 16_384, 65_536] {
+                let small = time_reduce_batch(true, nstates, nbatch, REPS);
+                let large = time_reduce_batch(false, nstates, nbatch, REPS);
+                println!(
+                    "reduce_batch nbatch={nbatch:>7} nstates={nstates:>5}: small {small:>10?}  large {large:>10?}"
+                );
+            }
+        }
+    }
+
     /// `just oxide-test --release -- --ignored --nocapture timing_threshold`.
     #[test]
     #[ignore = "timing only"]

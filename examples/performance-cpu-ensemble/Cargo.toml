@@ -1,0 +1,13 @@
+[package]
+name = "performance-cpu-ensemble"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[dependencies]
+diffsol = { path = "../../crates/diffsol" }
+plotly = { workspace = true }
+rayon = "1.10"
+rand = "0.9"
+rand_chacha = "0.9"
+rand_distr = "0.5"

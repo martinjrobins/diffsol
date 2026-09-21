@@ -63,6 +63,18 @@ oxide-test-diffsol *ARGS:
         cargo +{{oxide_nightly}} oxide test --arch {{oxide_arch}} -- \
         -p diffsol --features cuda-oxide {{ARGS}}
 
+# Run the GPU ensemble example (examples/performance-gpu-ensemble) on the device.
+#
+# `cargo oxide run` takes the package after `--`, and the workspace release profile enables
+# thin LTO, which the CUDA codegen backend cannot read bitcode through ("Can't find section
+# .llvmbc"). So this builds the dev profile with optimisations turned up instead.
+gpu-ensemble *ARGS:
+    CARGO_PROFILE_DEV_OPT_LEVEL=3 CARGO_PROFILE_DEV_DEBUG=0 \
+        CUDA_OXIDE_BACKEND="{{oxide_backend}}" RUSTFLAGS="{{oxide_flags}}" \
+        cargo +{{oxide_nightly}} oxide build --arch {{oxide_arch}} -- \
+        -p performance-gpu-ensemble --features cuda-oxide {{ARGS}}
+    ./target/debug/performance-gpu-ensemble
+
 oxide-build *ARGS:
     CUDA_OXIDE_BACKEND="{{oxide_backend}}" RUSTFLAGS="{{oxide_flags}}" \
         cargo +{{oxide_nightly}} oxide build --arch {{oxide_arch}} -- \
