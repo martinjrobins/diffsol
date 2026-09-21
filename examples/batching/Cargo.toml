@@ -1,0 +1,8 @@
+[package]
+name = "batching"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[dependencies]
+diffsol = { path = "../../crates/diffsol" }
