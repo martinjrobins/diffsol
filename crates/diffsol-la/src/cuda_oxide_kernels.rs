@@ -1570,6 +1570,7 @@ pub mod kernels {
     #[kernel]
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1), requires = (dest.len() == nstates))]
+    #[allow(clippy::too_many_arguments)]
     pub fn vec_reduce_batch<const N: usize, F, G>(
         f: F,
         g: G,
@@ -1712,6 +1713,7 @@ pub mod kernels {
     #[kernel]
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1))]
+    #[allow(clippy::too_many_arguments)]
     pub fn vec_reduce_elem_small<const N: usize, F, G>(
         f: F,
         g: G,
