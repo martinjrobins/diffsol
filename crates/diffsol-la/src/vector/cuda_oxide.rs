@@ -301,7 +301,9 @@ pub(crate) fn launch_reduce_batch_small<const N: usize, F, G>(
     G: Fn(f64, f64) -> f64 + Copy + Send,
 {
     // one warp per element, capped so a large `nstates` grid-strides instead of over-launching
-    let blocks = nstates.div_ceil(WARPS_PER_BLOCK as u32).min(ctx.target_blocks);
+    let blocks = nstates
+        .div_ceil(WARPS_PER_BLOCK as u32)
+        .min(ctx.target_blocks);
     let cfg = OxideContext::config_1d_blocks(blocks);
     let m = &ctx.module;
     let p = m
@@ -362,7 +364,9 @@ pub(crate) fn launch_reduce_elem_large<const N: usize, F, G>(
     G: Fn(f64, f64) -> f64 + Copy + Send,
 {
     // one warp per lane, capped so a large `nbatch` grid-strides instead of over-launching
-    let blocks = nbatch.div_ceil(WARPS_PER_BLOCK as u32).min(ctx.target_blocks);
+    let blocks = nbatch
+        .div_ceil(WARPS_PER_BLOCK as u32)
+        .min(ctx.target_blocks);
     let cfg = OxideContext::config_1d_blocks(blocks);
     let m = &ctx.module;
     let p = m

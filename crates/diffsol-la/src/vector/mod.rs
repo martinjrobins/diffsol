@@ -1299,11 +1299,11 @@ pub(crate) mod tests {
 
     use super::{Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
     use crate::context::nalgebra::NalgebraContext;
+    use crate::scalar::Scalar as _;
     use crate::scalar::Scale;
     use crate::vector::nalgebra_serial::NalgebraVec;
     use crate::Context;
     use crate::IndexType;
-    use crate::scalar::Scalar as _;
     use num_traits::FromPrimitive;
     use std::ops::{Index, IndexMut};
 
