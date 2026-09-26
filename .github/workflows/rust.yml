@@ -279,7 +279,7 @@ jobs:
     timeout-minutes: 75
     env:
       OXIDE_NIGHTLY: nightly-2026-08-28
-      # Same rev as the cuda-device/cuda-host pin in crates/diffsol-la/Cargo.toml
+      # Same rev as the (commented-out) cuda-device/cuda-host pin in crates/diffsol-la/Cargo.toml
       # and as `oxide_rev` in the Justfile
       OXIDE_REV: 26754ae52c26c097dc1c465a1e42c4c5d05a3d40
       OXIDE_ARCH: sm_86
@@ -288,6 +288,9 @@ jobs:
       RUSTFLAGS: -Znext-solver=coherence
     steps:
     - uses: actions/checkout@v4
+    # git-only deps are commented out so the crate can be published
+    - name: Enable cuda-oxide git dependencies
+      run: sed -i -e '/^cuda-oxide = /d' -e 's/^#oxide# //' crates/diffsol-la/Cargo.toml
     - name: Free Disk Space (Ubuntu)
       uses: jlumbroso/free-disk-space@main
       with:

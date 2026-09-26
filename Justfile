@@ -2,7 +2,9 @@
 #
 # Prerequisites (`cargo oxide doctor` checks them): 
 # the pinned nightly with `rust-src`/`rustc-dev`/`llvm-tools`,
-# CUDA Toolkit 13+, LLVM 21+ with NVPTX, driver 580+, an Ampere+ GPU.
+# CUDA Toolkit 13+, LLVM 21+ with NVPTX, driver 580+, an Ampere+ GPU,
+# cuda-oxide git dependencies enabled in crates/diffsol-la/Cargo.toml:
+#   sed -i -e '/^cuda-oxide = /d' -e 's/^#oxide# //' crates/diffsol-la/Cargo.toml
 #
 # RUSTFLAGS works around a rustc ICE on this nightly:
 # https://github.com/rust-lang/rust/issues/162323
