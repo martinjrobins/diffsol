@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.1](https://github.com/martinjrobins/diffsol/compare/diffsol-v0.17.0...diffsol-v0.17.1) - 2026-09-28
+
+### Added
+
+- *(docs.rs)* remove llvm feature on docs build to fix OOM ([#379](https://github.com/martinjrobins/diffsol/pull/379))
+
 ## [0.17.0](https://github.com/martinjrobins/diffsol/compare/diffsol-v0.16.2...diffsol-v0.17.0) - 2026-09-21
 
 ### Added
