@@ -149,9 +149,9 @@ impl OxideMat {
         let cfg = OxideContext::config_1d(total);
         let m = &ctx.module;
         let p = m
-            .prepare_mat_get_diagonal(cfg)
+            .prepare_mat_get_diagonal::<f64>(cfg)
             .expect("prepare mat_get_diagonal");
-        m.mat_get_diagonal(
+        m.mat_get_diagonal::<f64>(
             &ctx.stream,
             &p,
             &mut dest.window,
@@ -614,8 +614,10 @@ impl DenseMatrix for OxideMat {
         let n = (nrows * nbatch) as u32;
         let cfg = OxideContext::config_1d(n);
         let m = &ctx.module;
-        let p = m.prepare_mul_cols_by(cfg).expect("prepare mul_cols_by");
-        m.mul_cols_by(
+        let p = m
+            .prepare_mul_cols_by::<f64>(cfg)
+            .expect("prepare mul_cols_by");
+        m.mul_cols_by::<f64>(
             &ctx.stream,
             &p,
             &mut dest.window,
@@ -644,9 +646,9 @@ impl DenseMatrix for OxideMat {
         let cfg = OxideContext::config_1d(n);
         let m = &ctx.module;
         let p = m
-            .prepare_backward_diff_update(cfg)
+            .prepare_backward_diff_update::<f64>(cfg)
             .expect("prepare backward_diff_update");
-        m.backward_diff_update(
+        m.backward_diff_update::<f64>(
             &ctx.stream,
             &p,
             &mut dest.window,
@@ -709,8 +711,8 @@ impl DenseMatrix for OxideMat {
         let n = y_nstates * dest.nbatch;
         let cfg = OxideContext::config_1d(n);
         let m = &ctx.module;
-        let p = m.prepare_gemv_cols(cfg).expect("prepare gemv_cols");
-        m.gemv_cols(
+        let p = m.prepare_gemv_cols::<f64>(cfg).expect("prepare gemv_cols");
+        m.gemv_cols::<f64>(
             &ctx.stream,
             &p,
             &mut dest.window,
@@ -791,8 +793,10 @@ impl Matrix for OxideMat {
         let n = nindices_u32 * nbatch_u32;
         let cfg = OxideContext::config_1d(n);
         let m = &ctx.module;
-        let p = m.prepare_vec_gather(cfg).expect("prepare vec_gather");
-        m.vec_gather(
+        let p = m
+            .prepare_vec_gather::<f64>(cfg)
+            .expect("prepare vec_gather");
+        m.vec_gather::<f64>(
             &ctx.stream,
             &p,
             &mut dest.window,
@@ -833,9 +837,9 @@ impl Matrix for OxideMat {
         let cfg = OxideContext::config_1d(n);
         let m = &ctx.module;
         let p = m
-            .prepare_mat_set_data_with_indices(cfg)
+            .prepare_mat_set_data_with_indices::<f64>(cfg)
             .expect("prepare mat_set_data_with_indices");
-        m.mat_set_data_with_indices(
+        m.mat_set_data_with_indices::<f64>(
             &ctx.stream,
             &p,
             &mut dest.window,
@@ -964,9 +968,9 @@ impl Matrix for OxideMat {
         let cfg = OxideContext::config_1d(total);
         let m = &ctx.module;
         let p = m
-            .prepare_mat_from_diagonal(cfg)
+            .prepare_mat_from_diagonal::<f64>(cfg)
             .expect("prepare mat_from_diagonal");
-        m.mat_from_diagonal(
+        m.mat_from_diagonal::<f64>(
             &ctx.stream,
             &p,
             &mut dest.window,
@@ -1016,9 +1020,9 @@ impl Matrix for OxideMat {
         let cfg = OxideContext::config_1d(total);
         let m = &ctx.module;
         let p = m
-            .prepare_mat_scale_add_assign(cfg)
+            .prepare_mat_scale_add_assign::<f64>(cfg)
             .expect("prepare mat_scale_add_assign");
-        m.mat_scale_add_assign(
+        m.mat_scale_add_assign::<f64>(
             &ctx.stream,
             &p,
             &mut dest.window,

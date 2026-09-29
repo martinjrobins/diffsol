@@ -1,9 +1,13 @@
 //! GPU kernels for the `cuda-oxide` backend.
+// `#[cuda_module]`'s host launchers for generic kernels do not inherit
+// per-kernel attributes, so this cannot be scoped per kernel.
+#![allow(clippy::too_many_arguments)]
 use cuda_device::atomic::{AtomicOrdering, DeviceAtomicU64};
 use cuda_device::{cuda_module, kernel, launch_bounds, launch_contract, thread, warp};
 use cuda_device::{DisjointSlice, Runtime2DIndex, SharedArray};
 
 use crate::matrix::MAX_SMALL_COLS;
+use crate::ScalarCuda;
 
 const MAX_SMALL_COLS_SQ: usize = MAX_SMALL_COLS * MAX_SMALL_COLS;
 pub(crate) const BLOCK_SIZE: u32 = 256;
@@ -20,9 +24,9 @@ pub(crate) const SMALL_NSTATES: u32 = 85;
 /// Above this `nstates`, the [`kernels::vec_reduce_elem`] reduction switch from
 /// one-lane-per-thread to one-warp-per-lane.
 ///
-/// TODO: should be one-block-per-lane to match other reductions
-/// but shared memory bug in cuda-oxide currently prevents this
-/// (https://github.com/NVlabs/cuda-oxide/issues/1277)
+/// TODO: should be one-block-per-lane to match other reductions; the
+/// cuda-oxide shared memory bug that blocked this is fixed at the pinned rev
+/// (https://github.com/NVIDIA/cuda-rust/issues/1277)
 pub(crate) const REDUCE_ELEM_SMALL_NSTATES: u32 = 16;
 
 /// Below this `nstates`, [`kernels::vec_reduce_batch`] gives each element a whole warp instead
@@ -115,16 +119,16 @@ fn lane_start(blk: usize) -> usize {
 /// Device addresses and lane geometry of the read-only operands of one
 /// [`kernels::vec_for_each_batch`] launch.
 #[derive(Clone, Copy)]
-pub struct LaneArgs<const K: usize> {
-    pub ptr: [*const f64; K],
+pub struct LaneArgs<T, const K: usize> {
+    pub ptr: [*const T; K],
     pub nstates: [u32; K],
     pub nbatch: [u32; K],
 }
 
 /// Mutable counterpart of [`LaneArgs`], for the operands the closure writes.
 #[derive(Clone, Copy)]
-pub struct LaneArgsMut<const K: usize> {
-    pub ptr: [*mut f64; K],
+pub struct LaneArgsMut<T, const K: usize> {
+    pub ptr: [*mut T; K],
     pub nstates: [u32; K],
 }
 
@@ -136,6 +140,10 @@ pub mod kernels {
     /// here, and a `const` item reads as one in MIR where an inline variant
     /// path does not.
     const RELAXED: AtomicOrdering = AtomicOrdering::Relaxed;
+
+    /// Never launched, workaround for https://github.com/NVIDIA/cuda-rust/issues/1365
+    #[kernel]
+    pub fn bundle_anchor() {}
 
     // ========================================================================
     // Elementwise, contiguous destination (Tier 1)
@@ -149,7 +157,7 @@ pub mod kernels {
     #[kernel]
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1), requires = (lhs.len() == n))]
-    pub fn vec_fill(mut lhs: DisjointSlice<f64>, value: f64, n: u32) {
+    pub fn vec_fill<T: ScalarCuda>(mut lhs: DisjointSlice<T>, value: T, n: u32) {
         let idx = thread::index_1d();
         if idx.get() < n as usize {
             if let Some(elem) = lhs.get_mut(idx) {
@@ -165,10 +173,9 @@ pub mod kernels {
     #[kernel]
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1), requires = (lhs.len() == n))]
-    #[allow(clippy::too_many_arguments)]
-    pub fn vec_sub_assign_rev(
-        mut lhs: DisjointSlice<f64>,
-        rhs: &[f64],
+    pub fn vec_sub_assign_rev<T: ScalarCuda>(
+        mut lhs: DisjointSlice<T>,
+        rhs: &[T],
         n: u32,
         nstates: u32,
         rhs_stride: u32,
@@ -190,10 +197,9 @@ pub mod kernels {
     #[kernel]
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1), requires = (lhs.len() == n))]
-    #[allow(clippy::too_many_arguments)]
-    pub fn vec_mul_assign(
-        mut lhs: DisjointSlice<f64>,
-        rhs: &[f64],
+    pub fn vec_mul_assign<T: ScalarCuda>(
+        mut lhs: DisjointSlice<T>,
+        rhs: &[T],
         n: u32,
         nstates: u32,
         rhs_stride: u32,
@@ -215,10 +221,9 @@ pub mod kernels {
     #[kernel]
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1), requires = (lhs.len() == n))]
-    #[allow(clippy::too_many_arguments)]
-    pub fn vec_div_assign(
-        mut lhs: DisjointSlice<f64>,
-        rhs: &[f64],
+    pub fn vec_div_assign<T: ScalarCuda>(
+        mut lhs: DisjointSlice<T>,
+        rhs: &[T],
         n: u32,
         nstates: u32,
         rhs_stride: u32,
@@ -243,11 +248,10 @@ pub mod kernels {
     #[kernel]
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1), requires = (ret.len() == n))]
-    #[allow(clippy::too_many_arguments)]
-    pub fn vec_add(
-        mut ret: DisjointSlice<f64>,
-        lhs: &[f64],
-        rhs: &[f64],
+    pub fn vec_add<T: ScalarCuda>(
+        mut ret: DisjointSlice<T>,
+        lhs: &[T],
+        rhs: &[T],
         n: u32,
         nstates: u32,
         lhs_stride: u32,
@@ -272,11 +276,10 @@ pub mod kernels {
     #[kernel]
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1), requires = (ret.len() == n))]
-    #[allow(clippy::too_many_arguments)]
-    pub fn vec_sub(
-        mut ret: DisjointSlice<f64>,
-        lhs: &[f64],
-        rhs: &[f64],
+    pub fn vec_sub<T: ScalarCuda>(
+        mut ret: DisjointSlice<T>,
+        lhs: &[T],
+        rhs: &[T],
         n: u32,
         nstates: u32,
         lhs_stride: u32,
@@ -301,11 +304,10 @@ pub mod kernels {
     #[kernel]
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1), requires = (ret.len() == n))]
-    #[allow(clippy::too_many_arguments)]
-    pub fn vec_mul_scalar(
-        mut ret: DisjointSlice<f64>,
-        src: &[f64],
-        scalar: f64,
+    pub fn vec_mul_scalar<T: ScalarCuda>(
+        mut ret: DisjointSlice<T>,
+        src: &[T],
+        scalar: T,
         n: u32,
         nstates: u32,
         src_stride: u32,
@@ -328,12 +330,11 @@ pub mod kernels {
     #[kernel]
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1), requires = (y.len() == n))]
-    #[allow(clippy::too_many_arguments)]
-    pub fn vec_batched_axpy(
-        mut y: DisjointSlice<f64>,
-        x: &[f64],
-        alpha: &[f64],
-        beta: f64,
+    pub fn vec_batched_axpy<T: ScalarCuda>(
+        mut y: DisjointSlice<T>,
+        x: &[T],
+        alpha: &[T],
+        beta: T,
         n: u32,
         nstates: u32,
         x_stride: u32,
@@ -371,10 +372,9 @@ pub mod kernels {
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1),
                       requires = (lhs.len() >= (nbatch - 1) * lhs_stride + nstates))]
-    #[allow(clippy::too_many_arguments)]
-    pub fn vec_copy(
-        mut lhs: DisjointSlice<f64>,
-        rhs: &[f64],
+    pub fn vec_copy<T: ScalarCuda>(
+        mut lhs: DisjointSlice<T>,
+        rhs: &[T],
         n: u32,
         nstates: u32,
         lhs_stride: u32,
@@ -402,10 +402,9 @@ pub mod kernels {
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1),
                       requires = (lhs.len() >= (nbatch - 1) * lhs_stride + nstates))]
-    #[allow(clippy::too_many_arguments)]
-    pub fn vec_add_assign(
-        mut lhs: DisjointSlice<f64>,
-        rhs: &[f64],
+    pub fn vec_add_assign<T: ScalarCuda>(
+        mut lhs: DisjointSlice<T>,
+        rhs: &[T],
         n: u32,
         nstates: u32,
         lhs_stride: u32,
@@ -434,10 +433,9 @@ pub mod kernels {
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1),
                       requires = (lhs.len() >= (nbatch - 1) * lhs_stride + nstates))]
-    #[allow(clippy::too_many_arguments)]
-    pub fn vec_sub_assign(
-        mut lhs: DisjointSlice<f64>,
-        rhs: &[f64],
+    pub fn vec_sub_assign<T: ScalarCuda>(
+        mut lhs: DisjointSlice<T>,
+        rhs: &[T],
         n: u32,
         nstates: u32,
         lhs_stride: u32,
@@ -469,9 +467,9 @@ pub mod kernels {
     // `nbatch` is read by the `requires` clause above, which the host evaluates;
     // the body has no source operand to broadcast, so it never needs it.
     #[allow(unused_variables)]
-    pub fn vec_mul_assign_scalar(
-        mut lhs: DisjointSlice<f64>,
-        scalar: f64,
+    pub fn vec_mul_assign_scalar<T: ScalarCuda>(
+        mut lhs: DisjointSlice<T>,
+        scalar: T,
         n: u32,
         nstates: u32,
         lhs_stride: u32,
@@ -497,12 +495,11 @@ pub mod kernels {
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1),
                       requires = (y.len() >= (nbatch - 1) * y_stride + nstates))]
-    #[allow(clippy::too_many_arguments)]
-    pub fn vec_axpy(
-        mut y: DisjointSlice<f64>,
-        x: &[f64],
-        alpha: f64,
-        beta: f64,
+    pub fn vec_axpy<T: ScalarCuda>(
+        mut y: DisjointSlice<T>,
+        x: &[T],
+        alpha: T,
+        beta: T,
         n: u32,
         nstates: u32,
         y_stride: u32,
@@ -541,10 +538,9 @@ pub mod kernels {
     #[kernel]
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1))]
-    #[allow(clippy::too_many_arguments)]
-    pub fn vec_gather(
-        mut dest: DisjointSlice<f64>,
-        src: &[f64],
+    pub fn vec_gather<T: ScalarCuda>(
+        mut dest: DisjointSlice<T>,
+        src: &[T],
         indices: &[i32],
         n: u32,
         nindices: u32,
@@ -573,10 +569,9 @@ pub mod kernels {
     #[kernel]
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1))]
-    #[allow(clippy::too_many_arguments)]
-    pub fn vec_scatter(
-        mut dest: DisjointSlice<f64>,
-        src: &[f64],
+    pub fn vec_scatter<T: ScalarCuda>(
+        mut dest: DisjointSlice<T>,
+        src: &[T],
         indices: &[i32],
         n: u32,
         nindices: u32,
@@ -604,10 +599,9 @@ pub mod kernels {
     #[kernel]
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1))]
-    #[allow(clippy::too_many_arguments)]
-    pub fn vec_copy_from_indices(
-        mut dest: DisjointSlice<f64>,
-        src: &[f64],
+    pub fn vec_copy_from_indices<T: ScalarCuda>(
+        mut dest: DisjointSlice<T>,
+        src: &[T],
         indices: &[i32],
         n: u32,
         nindices: u32,
@@ -636,10 +630,10 @@ pub mod kernels {
     #[kernel]
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1))]
-    pub fn vec_assign_at_indices(
-        mut dest: DisjointSlice<f64>,
+    pub fn vec_assign_at_indices<T: ScalarCuda>(
+        mut dest: DisjointSlice<T>,
         indices: &[i32],
-        value: f64,
+        value: T,
         n: u32,
         nindices: u32,
         dest_stride: u32,
@@ -689,10 +683,10 @@ pub mod kernels {
                       requires = (out.len() == 1,
                                   partials.len() >= blocks_per_lane * nbatch,
                                   x.len() >= (nbatch - 1) * x_stride + nstates))]
-    pub fn vec_norm(
+    pub fn vec_norm<T: ScalarCuda>(
         out: &[DeviceAtomicU64],
-        mut partials: DisjointSlice<f64>,
-        x: &[f64],
+        mut partials: DisjointSlice<T>,
+        x: &[T],
         nstates: u32,
         nbatch: u32,
         x_stride: u32,
@@ -700,7 +694,7 @@ pub mod kernels {
     ) {
         let (mut b, blk, lane_step, step) = lane_loop(blocks_per_lane);
         while b < nbatch as usize {
-            let mut local = 0.0f64;
+            let mut local = T::zero();
             let mut i = lane_start(blk);
             while i < nstates as usize {
                 let v = x[b * x_stride as usize + i];
@@ -724,9 +718,9 @@ pub mod kernels {
     #[launch_contract(domain = 1, block = (256, 1, 1),
                       requires = (out.len() == 1,
                                   x.len() >= (nbatch - 1) * x_stride + nstates))]
-    pub fn vec_norm_small(
+    pub fn vec_norm_small<T: ScalarCuda>(
         out: &[DeviceAtomicU64],
-        x: &[f64],
+        x: &[T],
         nstates: u32,
         nbatch: u32,
         x_stride: u32,
@@ -739,7 +733,7 @@ pub mod kernels {
                 let v = x[b * x_stride as usize + elem];
                 v * v
             }
-            None => 0.0,
+            None => T::zero(),
         };
         block_max_into(out, small_lane_sum(term, first, nstates, cols, nbatch));
     }
@@ -751,24 +745,22 @@ pub mod kernels {
                       requires = (out.len() == 1,
                                   partials.len() >= blocks_per_lane * nbatch,
                                   x.len() >= (nbatch - 1) * x_stride + nstates))]
-    #[allow(clippy::too_many_arguments)]
-    pub fn vec_norm_lk(
+    pub fn vec_norm_lk<T: ScalarCuda>(
         out: &[DeviceAtomicU64],
-        mut partials: DisjointSlice<f64>,
-        x: &[f64],
+        mut partials: DisjointSlice<T>,
+        x: &[T],
         nstates: u32,
         nbatch: u32,
         x_stride: u32,
         blocks_per_lane: u32,
         k: i32,
     ) {
-        let k_f64 = k as f64;
         let (mut b, blk, lane_step, step) = lane_loop(blocks_per_lane);
         while b < nbatch as usize {
-            let mut local = 0.0f64;
+            let mut local = T::zero();
             let mut i = lane_start(blk);
             while i < nstates as usize {
-                local += x[b * x_stride as usize + i].abs().powf(k_f64);
+                local += x[b * x_stride as usize + i].abs().pow(k);
                 i += step;
             }
             publish_block_sum(
@@ -788,10 +780,9 @@ pub mod kernels {
     #[launch_contract(domain = 1, block = (256, 1, 1),
                       requires = (out.len() == 1,
                                   x.len() >= (nbatch - 1) * x_stride + nstates))]
-    #[allow(clippy::too_many_arguments)]
-    pub fn vec_norm_lk_small(
+    pub fn vec_norm_lk_small<T: ScalarCuda>(
         out: &[DeviceAtomicU64],
-        x: &[f64],
+        x: &[T],
         nstates: u32,
         nbatch: u32,
         x_stride: u32,
@@ -801,8 +792,8 @@ pub mod kernels {
         let tid = thread::threadIdx_x() as usize;
         let (first, nstates, cols) = lane_block(nstates, cols_per_block);
         let term = match lane_element(first, nstates, cols, nbatch, tid) {
-            Some((b, elem)) => x[b * x_stride as usize + elem].abs().powf(k as f64),
-            None => 0.0,
+            Some((b, elem)) => x[b * x_stride as usize + elem].abs().pow(k),
+            None => T::zero(),
         };
         block_max_into(out, small_lane_sum(term, first, nstates, cols, nbatch));
     }
@@ -814,14 +805,13 @@ pub mod kernels {
                       requires = (out.len() == 1,
                                   partials.len() >= blocks_per_lane * nbatch,
                                   y.len() >= (nbatch - 1) * y_stride + nstates))]
-    #[allow(clippy::too_many_arguments)]
-    pub fn vec_squared_norm(
+    pub fn vec_squared_norm<T: ScalarCuda>(
         out: &[DeviceAtomicU64],
-        mut partials: DisjointSlice<f64>,
-        y: &[f64],
-        y0: &[f64],
-        atol: &[f64],
-        rtol: f64,
+        mut partials: DisjointSlice<T>,
+        y: &[T],
+        y0: &[T],
+        atol: &[T],
+        rtol: T,
         nstates: u32,
         nbatch: u32,
         y_stride: u32,
@@ -833,7 +823,7 @@ pub mod kernels {
     ) {
         let (mut b, blk, lane_step, step) = lane_loop(blocks_per_lane);
         while b < nbatch as usize {
-            let mut local = 0.0f64;
+            let mut local = T::zero();
             let mut i = lane_start(blk);
             while i < nstates as usize {
                 let denom = y0[broadcast_src(b, y0_stride, y0_nbatch, nbatch, i)].abs() * rtol
@@ -859,13 +849,12 @@ pub mod kernels {
     #[launch_contract(domain = 1, block = (256, 1, 1),
                       requires = (out.len() == 1,
                                   y.len() >= (nbatch - 1) * y_stride + nstates))]
-    #[allow(clippy::too_many_arguments)]
-    pub fn vec_squared_norm_small(
+    pub fn vec_squared_norm_small<T: ScalarCuda>(
         out: &[DeviceAtomicU64],
-        y: &[f64],
-        y0: &[f64],
-        atol: &[f64],
-        rtol: f64,
+        y: &[T],
+        y0: &[T],
+        atol: &[T],
+        rtol: T,
         nstates: u32,
         nbatch: u32,
         y_stride: u32,
@@ -884,7 +873,7 @@ pub mod kernels {
                 let ratio = y[b * y_stride as usize + elem] / denom;
                 ratio * ratio
             }
-            None => 0.0,
+            None => T::zero(),
         };
         block_max_into(out, small_lane_sum(term, first, nstates_u, cols, nbatch));
     }
@@ -900,18 +889,18 @@ pub mod kernels {
     #[launch_contract(domain = 1, block = (256, 1, 1),
                       requires = (out.len() == 1,
                                   partials.len() >= blocks_per_lane * nbatch))]
-    pub fn lane_sum_max(
+    pub fn lane_sum_max<T: ScalarCuda>(
         out: &[DeviceAtomicU64],
-        partials: &[f64],
+        partials: &[T],
         nbatch: u32,
         blocks_per_lane: u32,
     ) {
         let bpl = blocks_per_lane as usize;
         let step = grid_stride();
         let mut b = thread::index_1d().get();
-        let mut local = 0.0f64;
+        let mut local = T::zero();
         while b < nbatch as usize {
-            let mut sum = 0.0f64;
+            let mut sum = T::zero();
             let base = b * bpl;
             for j in 0..bpl {
                 sum += partials[base + j];
@@ -933,13 +922,12 @@ pub mod kernels {
     #[kernel]
     #[launch_bounds(256)]
     #[launch_contract(domain = 2, block = (256, 1, 1))]
-    #[allow(clippy::too_many_arguments)]
-    pub fn vec_root_finding(
-        mut max_vals: DisjointSlice<f64, Runtime2DIndex>,
+    pub fn vec_root_finding<T: ScalarCuda>(
+        mut max_vals: DisjointSlice<T, Runtime2DIndex>,
         mut max_idxs: DisjointSlice<i32, Runtime2DIndex>,
         mut flags: DisjointSlice<i32, Runtime2DIndex>,
-        g0: &[f64],
-        g1: &[f64],
+        g0: &[T],
+        g1: &[T],
         nstates: u32,
         nbatch: u32,
         g0_stride: u32,
@@ -947,11 +935,13 @@ pub mod kernels {
         g1_nbatch: u32,
     ) {
         static mut SVALS: SharedArray<f64, { BLOCK_SIZE as usize }> = SharedArray::UNINIT;
+        // SAFETY: only takes the address of this block's shared storage.
+        let svals: *mut T = shared_as(unsafe { SharedArray::as_raw_mut_ptr(&raw mut SVALS) });
         static mut SIDXS: SharedArray<i32, { BLOCK_SIZE as usize }> = SharedArray::UNINIT;
         static mut SFLAGS: SharedArray<i32, { BLOCK_SIZE as usize }> = SharedArray::UNINIT;
 
         let b = thread::index_2d_row();
-        let mut local_max = 0.0f64;
+        let mut local_max = T::zero();
         let mut local_idx = -1i32;
         let mut local_flag = 0i32;
         let mut i = thread::index_2d_col();
@@ -959,10 +949,10 @@ pub mod kernels {
         while i < nstates as usize {
             let v0 = g0[b * g0_stride as usize + i];
             let v1 = g1[broadcast_src(b, g1_stride, g1_nbatch, nbatch, i)];
-            if v1 == 0.0 {
+            if v1 == T::zero() {
                 local_flag = 1;
             }
-            if v0 * v1 < 0.0 {
+            if v0 * v1 < T::zero() {
                 let val = (v1 / (v1 - v0)).abs();
                 if val > local_max {
                     local_max = val;
@@ -976,7 +966,7 @@ pub mod kernels {
         // SAFETY: each thread writes only its own slot, and the barrier below
         // separates these writes from any other thread's reads.
         unsafe {
-            SVALS[tid] = local_max;
+            *svals.add(tid) = local_max;
             SIDXS[tid] = local_idx;
             SFLAGS[tid] = local_flag;
         }
@@ -992,8 +982,8 @@ pub mod kernels {
                 // active thread owns. The barrier below closes the round before
                 // the next one reads.
                 unsafe {
-                    if SVALS[tid] < SVALS[tid + s] {
-                        SVALS[tid] = SVALS[tid + s];
+                    if *svals.add(tid) < *svals.add(tid + s) {
+                        *svals.add(tid) = *svals.add(tid + s);
                         SIDXS[tid] = SIDXS[tid + s];
                     }
                     if SFLAGS[tid + s] != 0 {
@@ -1011,7 +1001,7 @@ pub mod kernels {
             // no two threads in the grid write the same element. Bounds hold
             // because the host sizes all three arrays as `nbatch * gridDim.x`.
             unsafe {
-                *max_vals.as_mut_ptr().add(slot) = SVALS[0];
+                *max_vals.as_mut_ptr().add(slot) = *svals.add(0);
                 *max_idxs.as_mut_ptr().add(slot) = SIDXS[0];
                 *flags.as_mut_ptr().add(slot) = SFLAGS[0];
             }
@@ -1032,10 +1022,9 @@ pub mod kernels {
     #[kernel]
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1), requires = (diag.len() == n))]
-    #[allow(clippy::too_many_arguments)]
-    pub fn mat_get_diagonal(
-        mut diag: DisjointSlice<f64>,
-        mat: &[f64],
+    pub fn mat_get_diagonal<T: ScalarCuda>(
+        mut diag: DisjointSlice<T>,
+        mat: &[T],
         n: u32,
         nrows: u32,
         mat_stride: u32,
@@ -1058,10 +1047,9 @@ pub mod kernels {
     #[kernel]
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1))]
-    #[allow(clippy::too_many_arguments)]
-    pub fn mat_from_diagonal(
-        mut mat: DisjointSlice<f64>,
-        diag: &[f64],
+    pub fn mat_from_diagonal<T: ScalarCuda>(
+        mut mat: DisjointSlice<T>,
+        diag: &[T],
         n: u32,
         nrows: u32,
         mat_stride: u32,
@@ -1090,10 +1078,9 @@ pub mod kernels {
     #[kernel]
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1))]
-    #[allow(clippy::too_many_arguments)]
-    pub fn mat_set_data_with_indices(
-        mut dest: DisjointSlice<f64>,
-        src: &[f64],
+    pub fn mat_set_data_with_indices<T: ScalarCuda>(
+        mut dest: DisjointSlice<T>,
+        src: &[T],
         dst_indices: &[i32],
         src_indices: &[i32],
         n: u32,
@@ -1123,12 +1110,11 @@ pub mod kernels {
     #[kernel]
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1), requires = (dest.len() == n))]
-    #[allow(clippy::too_many_arguments)]
-    pub fn mat_scale_add_assign(
-        mut dest: DisjointSlice<f64>,
-        x: &[f64],
-        y: &[f64],
-        beta: f64,
+    pub fn mat_scale_add_assign<T: ScalarCuda>(
+        mut dest: DisjointSlice<T>,
+        x: &[T],
+        y: &[T],
+        beta: T,
         n: u32,
         nstates: u32,
         x_stride: u32,
@@ -1158,14 +1144,13 @@ pub mod kernels {
     #[kernel]
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1), requires = (y.len() == n))]
-    #[allow(clippy::too_many_arguments)]
-    pub fn gemv_cols(
-        mut y: DisjointSlice<f64>,
-        mat: &[f64],
-        w: [f64; MAX_SMALL_COLS],
+    pub fn gemv_cols<T: ScalarCuda>(
+        mut y: DisjointSlice<T>,
+        mat: &[T],
+        w: [T; MAX_SMALL_COLS],
         nc: u32,
-        alpha: f64,
-        beta: f64,
+        alpha: T,
+        beta: T,
         n: u32,
         nstates: u32,
         nrows: u32,
@@ -1185,13 +1170,13 @@ pub mod kernels {
         let base = broadcast_src(b, mat_stride, mat_nbatch, nbatch, row);
         // consecutive threads are consecutive rows within a column, so each
         // read is coalesced
-        let mut acc = 0.0f64;
+        let mut acc = T::zero();
         for k in 0..nc as usize {
             acc += w[k] * mat[base + k * nrows as usize];
         }
         if let Some(elem) = y.get_mut(idx) {
             // beta == 0 must not read y: it may hold uninitialised values
-            *elem = if beta == 0.0 {
+            *elem = if beta == T::zero() {
                 alpha * acc
             } else {
                 alpha * acc + beta * *elem
@@ -1209,9 +1194,9 @@ pub mod kernels {
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1))]
     #[allow(clippy::needless_range_loop)]
-    pub fn mul_cols_by(
-        mut mat: DisjointSlice<f64>,
-        rhs: [f64; MAX_SMALL_COLS_SQ],
+    pub fn mul_cols_by<T: ScalarCuda>(
+        mut mat: DisjointSlice<T>,
+        rhs: [T; MAX_SMALL_COLS_SQ],
         n: u32,
         ncols: u32,
         nrows: u32,
@@ -1233,7 +1218,7 @@ pub mod kernels {
         }
         let ptr = mat.as_mut_ptr();
 
-        let mut old = [0.0f64; MAX_SMALL_COLS];
+        let mut old = [T::zero(); MAX_SMALL_COLS];
         // SAFETY: bounds checked above. Every access below is at
         // `base + l * nrows` for `l < ncols`, and `base` is unique to this
         // thread's `(b, row)`, so the columns this thread reads and writes are
@@ -1243,7 +1228,7 @@ pub mod kernels {
                 old[l] = *ptr.add(base + l * stride);
             }
             for j in 0..ncols {
-                let mut acc = 0.0f64;
+                let mut acc = T::zero();
                 for l in 0..ncols {
                     acc += old[l] * rhs[j * ncols + l];
                 }
@@ -1264,10 +1249,9 @@ pub mod kernels {
     #[kernel]
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1))]
-    #[allow(clippy::too_many_arguments)]
-    pub fn backward_diff_update(
-        mut diff: DisjointSlice<f64>,
-        d: &[f64],
+    pub fn backward_diff_update<T: ScalarCuda>(
+        mut diff: DisjointSlice<T>,
+        d: &[T],
         order: u32,
         n: u32,
         nrows: u32,
@@ -1307,20 +1291,34 @@ pub mod kernels {
         }
     }
 
+    /// Views a shared `f64` array as `T` slots. Rust statics cannot name a
+    /// generic parameter, so the generic helpers declare their shared storage
+    /// as `f64`, which is at least as large and aligned as any `ScalarCuda`.
+    #[inline(always)]
+    fn shared_as<T: ScalarCuda>(p: *mut f64) -> *mut T {
+        const {
+            assert!(
+                core::mem::size_of::<T>() <= core::mem::size_of::<f64>()
+                    && core::mem::align_of::<T>() <= core::mem::align_of::<f64>()
+            )
+        };
+        p.cast()
+    }
+
     /// Folds a non-negative `value` into `out[0]`, the reductions' one output.
     ///
     /// `out` is a single `f64` reinterpreted as a `u64`: for non-negative
     /// doubles the IEEE bit pattern is monotonic in the value, so an unsigned
-    /// atomic max is an `f64` max. That detour exists because the float atomics
-    /// have no `fetch_max` -- only load, store, `fetch_add`, `fetch_sub` and
+    /// atomic max is an `f64` max (see [`ScalarCuda::to_max_bits`]). That
+    /// detour exists because the float atomics have no `fetch_max` -- only load, store, `fetch_add`, `fetch_sub` and
     /// `swap`. Every value reaching here is a sum of squares or of `|x|^k`, so
     /// it is `>= 0` and never `-0.0`.
     ///
-    /// The `> 0.0` guard skips both the identity and NaN, which is what the
+    /// The `> 0` guard skips both the identity and NaN, which is what the
     /// host's `if norm > max_norm` starting from zero used to do.
-    fn atomic_max_into(out: &[DeviceAtomicU64], value: f64) {
-        if value > 0.0 {
-            out[0].fetch_max(value.to_bits(), RELAXED);
+    fn atomic_max_into<T: ScalarCuda>(out: &[DeviceAtomicU64], value: T) {
+        if value > T::zero() {
+            out[0].fetch_max(value.to_max_bits(), RELAXED);
         }
     }
 
@@ -1328,14 +1326,16 @@ pub mod kernels {
     ///
     /// For callers whose threads each hold a finished lane sum: the small
     /// kernels and `lane_sum_max`.
-    fn block_max_into(out: &[DeviceAtomicU64], value: f64) {
+    fn block_max_into<T: ScalarCuda>(out: &[DeviceAtomicU64], value: T) {
         static mut SMAX: SharedArray<f64, { BLOCK_SIZE as usize }> = SharedArray::UNINIT;
+        // SAFETY: only takes the address of this block's shared storage.
+        let smax: *mut T = shared_as(unsafe { SharedArray::as_raw_mut_ptr(&raw mut SMAX) });
 
         let tid = thread::threadIdx_x() as usize;
         // SAFETY: each thread writes only its own slot, and the barrier below
         // separates it from any other thread's read.
         unsafe {
-            SMAX[tid] = value;
+            *smax.add(tid) = value;
         }
         thread::sync_threads();
 
@@ -1346,8 +1346,8 @@ pub mod kernels {
                 // which no other active thread holds -- and barriers between
                 // rounds.
                 unsafe {
-                    if SMAX[tid] < SMAX[tid + s] {
-                        SMAX[tid] = SMAX[tid + s];
+                    if *smax.add(tid) < *smax.add(tid + s) {
+                        *smax.add(tid) = *smax.add(tid + s);
                     }
                 }
             }
@@ -1358,7 +1358,7 @@ pub mod kernels {
         if tid == 0 {
             // SAFETY: slot 0 is written only by this thread, and the barrier
             // above closed the last round that wrote it.
-            atomic_max_into(out, unsafe { SMAX[0] });
+            atomic_max_into(out, unsafe { *smax.add(0) });
         }
     }
 
@@ -1372,12 +1372,12 @@ pub mod kernels {
     ///
     /// The caller computes the slot: a block can visit several lanes, so it is
     /// not derivable from `blockIdx.x` alone.
-    fn publish_block_sum(
+    fn publish_block_sum<T: ScalarCuda>(
         out: &[DeviceAtomicU64],
-        partials: &mut DisjointSlice<f64>,
+        partials: &mut DisjointSlice<T>,
         blocks_per_lane: u32,
         slot: usize,
-        local: f64,
+        local: T,
     ) {
         if let Some(total) = block_sum(local) {
             if blocks_per_lane == 1 {
@@ -1396,28 +1396,36 @@ pub mod kernels {
 
     /// Second phase of a small reduction: publishes every thread's `term` to
     /// shared memory, then gives thread `c` the sum of lane `first + c` in
-    /// index order, or `0.0` when it owns no lane.
+    /// index order, or zero when it owns no lane.
     ///
     /// Phase 1 is the load, which differs per kernel; the block geometry comes
     /// from [`lane_block`] and the `term` from [`lane_element`].
-    fn small_lane_sum(term: f64, first: usize, nstates: usize, cols: usize, nbatch: u32) -> f64 {
+    fn small_lane_sum<T: ScalarCuda>(
+        term: T,
+        first: usize,
+        nstates: usize,
+        cols: usize,
+        nbatch: u32,
+    ) -> T {
         static mut SDATA: SharedArray<f64, { BLOCK_SIZE as usize }> = SharedArray::UNINIT;
+        // SAFETY: only takes the address of this block's shared storage.
+        let sdata: *mut T = shared_as(unsafe { SharedArray::as_raw_mut_ptr(&raw mut SDATA) });
 
         let tid = thread::threadIdx_x() as usize;
         // SAFETY: each thread writes only its own slot, and the barrier below
         // separates it from the segment reads.
         unsafe {
-            SDATA[tid] = term;
+            *sdata.add(tid) = term;
         }
         thread::sync_threads();
 
-        let mut sum = 0.0f64;
+        let mut sum = T::zero();
         if tid < cols && first + tid < nbatch as usize {
             let base = tid * nstates;
             for j in 0..nstates {
                 // SAFETY: shared memory is read-only after the barrier, and
                 // `base + j < cols * nstates <= BLOCK_SIZE`.
-                sum += unsafe { SDATA[base + j] };
+                sum += unsafe { *sdata.add(base + j) };
             }
         }
         sum
@@ -1430,18 +1438,20 @@ pub mod kernels {
     /// 0 folds those the same way.
     ///
     /// Trailing barrier means that this is safe to call repeatedly in a lane loop
-    fn block_sum(local: f64) -> Option<f64> {
+    fn block_sum<T: ScalarCuda>(local: T) -> Option<T> {
         static mut SWARP: SharedArray<f64, WARPS_PER_BLOCK> = SharedArray::UNINIT;
+        // SAFETY: only takes the address of this block's shared storage.
+        let swarp: *mut T = shared_as(unsafe { SharedArray::as_raw_mut_ptr(&raw mut SWARP) });
 
         let lane = warp::lane_id() as usize;
         let w = warp::warp_id() as usize;
 
-        let warp_total = warp::reduce_sum_f64(local);
+        let warp_total = local.warp_reduce_sum();
         if lane == 0 {
             // SAFETY: one slot per warp, written by its lane 0 only, and the
             // barrier below separates it from warp 0's read.
             unsafe {
-                SWARP[w] = warp_total;
+                *swarp.add(w) = warp_total;
             }
         }
         thread::sync_threads();
@@ -1452,11 +1462,11 @@ pub mod kernels {
             // under the guard. The 32 - `WARPS_PER_BLOCK` lanes with no slot
             // still join the shuffle, with the identity.
             let slot = if lane < WARPS_PER_BLOCK {
-                unsafe { SWARP[lane] }
+                unsafe { *swarp.add(lane) }
             } else {
-                0.0
+                T::zero()
             };
-            let sum = warp::reduce_sum_f64(slot);
+            let sum = slot.warp_reduce_sum();
             if lane == 0 {
                 total = Some(sum);
             }
@@ -1477,13 +1487,13 @@ pub mod kernels {
     #[kernel]
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1))]
-    pub fn vec_for_each_batch<const M: usize, const N: usize, F>(
+    pub fn vec_for_each_batch<T: ScalarCuda, const M: usize, const N: usize, F>(
         f: F,
-        outs: LaneArgsMut<M>,
-        ins: LaneArgs<N>,
+        outs: LaneArgsMut<T, M>,
+        ins: LaneArgs<T, N>,
         nbatch: u32,
     ) where
-        F: Fn([&mut [f64]; M], [&[f64]; N], usize) + Copy,
+        F: Fn([&mut [T]; M], [&[T]; N], usize) + Copy,
     {
         let b = thread::index_1d().get();
         if b >= nbatch as usize {
@@ -1515,15 +1525,15 @@ pub mod kernels {
     #[kernel]
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1))]
-    pub fn vec_for_each_elem<const M: usize, const N: usize, F>(
+    pub fn vec_for_each_elem<T: ScalarCuda, const M: usize, const N: usize, F>(
         f: F,
-        outs: LaneArgsMut<M>,
-        ins: LaneArgs<N>,
+        outs: LaneArgsMut<T, M>,
+        ins: LaneArgs<T, N>,
         n: u32,
         nstates: u32,
         nbatch: u32,
     ) where
-        F: Fn([&mut f64; M], [&[f64]; N], usize, usize) + Copy,
+        F: Fn([&mut T; M], [&[T]; N], usize, usize) + Copy,
     {
         let i = thread::index_1d().get();
         if i >= n as usize {
@@ -1547,19 +1557,19 @@ pub mod kernels {
 
     /// Folds `val` across the warp with `combine`, leaving the total in every lane.
     ///
-    /// The generalisation of [`warp::reduce_sum_f64`] to a caller's combiner, built from the
+    /// The generalisation of [`ScalarCuda::warp_reduce_sum`] to a caller's combiner, built from the
     /// same butterfly shuffles. Because a butterfly pairs lane `i` with `i ^ delta`, half the
     /// lanes see their operands in the opposite order, so `combine` has to be commutative as
     /// well as associative -- which sum, max and min all are.
-    fn warp_reduce<G>(mut val: f64, combine: G) -> f64
+    fn warp_reduce<T: ScalarCuda, G>(mut val: T, combine: G) -> T
     where
-        G: Fn(f64, f64) -> f64 + Copy,
+        G: Fn(T, T) -> T + Copy,
     {
-        val = combine(val, warp::shuffle_xor_f64(val, 16));
-        val = combine(val, warp::shuffle_xor_f64(val, 8));
-        val = combine(val, warp::shuffle_xor_f64(val, 4));
-        val = combine(val, warp::shuffle_xor_f64(val, 2));
-        val = combine(val, warp::shuffle_xor_f64(val, 1));
+        val = combine(val, val.shuffle_xor(16));
+        val = combine(val, val.shuffle_xor(8));
+        val = combine(val, val.shuffle_xor(4));
+        val = combine(val, val.shuffle_xor(2));
+        val = combine(val, val.shuffle_xor(1));
         val
     }
 
@@ -1570,18 +1580,17 @@ pub mod kernels {
     #[kernel]
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1), requires = (dest.len() == nstates))]
-    #[allow(clippy::too_many_arguments)]
-    pub fn vec_reduce_batch<const N: usize, F, G>(
+    pub fn vec_reduce_batch<T: ScalarCuda, const N: usize, F, G>(
         f: F,
         g: G,
-        mut dest: DisjointSlice<f64>,
-        ins: LaneArgs<N>,
-        init: f64,
+        mut dest: DisjointSlice<T>,
+        ins: LaneArgs<T, N>,
+        init: T,
         nstates: u32,
         nbatch: u32,
     ) where
-        F: Fn([&[f64]; N], usize, usize) -> f64 + Copy,
-        G: Fn(f64, f64) -> f64 + Copy,
+        F: Fn([&[T]; N], usize, usize) -> T + Copy,
+        G: Fn(T, T) -> T + Copy,
     {
         let idx = thread::index_1d();
         let i = idx.get();
@@ -1616,17 +1625,17 @@ pub mod kernels {
     #[kernel]
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1))]
-    pub fn vec_reduce_batch_small<const N: usize, F, G>(
+    pub fn vec_reduce_batch_small<T: ScalarCuda, const N: usize, F, G>(
         f: F,
         g: G,
-        mut dest: DisjointSlice<f64>,
-        ins: LaneArgs<N>,
-        init: f64,
+        mut dest: DisjointSlice<T>,
+        ins: LaneArgs<T, N>,
+        init: T,
         nstates: u32,
         nbatch: u32,
     ) where
-        F: Fn([&[f64]; N], usize, usize) -> f64 + Copy,
-        G: Fn(f64, f64) -> f64 + Copy,
+        F: Fn([&[T]; N], usize, usize) -> T + Copy,
+        G: Fn(T, T) -> T + Copy,
     {
         let warps = thread::gridDim_x() as usize * WARPS_PER_BLOCK;
         let lane = warp::lane_id() as usize;
@@ -1665,17 +1674,17 @@ pub mod kernels {
     #[kernel]
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1))]
-    pub fn vec_reduce_elem<const N: usize, F, G>(
+    pub fn vec_reduce_elem<T: ScalarCuda, const N: usize, F, G>(
         f: F,
         g: G,
-        mut dest: DisjointSlice<f64>,
-        ins: LaneArgs<N>,
-        init: f64,
+        mut dest: DisjointSlice<T>,
+        ins: LaneArgs<T, N>,
+        init: T,
         nstates: u32,
         nbatch: u32,
     ) where
-        F: Fn([&[f64]; N], usize, usize) -> f64 + Copy,
-        G: Fn(f64, f64) -> f64 + Copy,
+        F: Fn([&[T]; N], usize, usize) -> T + Copy,
+        G: Fn(T, T) -> T + Copy,
     {
         let warps = thread::gridDim_x() as usize * WARPS_PER_BLOCK;
         let lane = warp::lane_id() as usize;
@@ -1713,18 +1722,17 @@ pub mod kernels {
     #[kernel]
     #[launch_bounds(256)]
     #[launch_contract(domain = 1, block = (256, 1, 1))]
-    #[allow(clippy::too_many_arguments)]
-    pub fn vec_reduce_elem_small<const N: usize, F, G>(
+    pub fn vec_reduce_elem_small<T: ScalarCuda, const N: usize, F, G>(
         f: F,
         g: G,
-        mut dest: DisjointSlice<f64>,
-        ins: LaneArgs<N>,
-        init: f64,
+        mut dest: DisjointSlice<T>,
+        ins: LaneArgs<T, N>,
+        init: T,
         nstates: u32,
         nbatch: u32,
     ) where
-        F: Fn([&[f64]; N], usize, usize) -> f64 + Copy,
-        G: Fn(f64, f64) -> f64 + Copy,
+        F: Fn([&[T]; N], usize, usize) -> T + Copy,
+        G: Fn(T, T) -> T + Copy,
     {
         let idx = thread::index_1d();
         let b = idx.get();

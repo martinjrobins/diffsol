@@ -281,7 +281,7 @@ jobs:
       OXIDE_NIGHTLY: nightly-2026-08-28
       # Same rev as the (commented-out) cuda-device/cuda-host pin in crates/diffsol-la/Cargo.toml
       # and as `oxide_rev` in the Justfile
-      OXIDE_REV: 26754ae52c26c097dc1c465a1e42c4c5d05a3d40
+      OXIDE_REV: ec4aa4797956534578a1af010f86252a0b6d8626
       OXIDE_ARCH: sm_86
       # Overrides the workflow-level RUSTFLAGS: -Znext-solver=coherence works
       # around a rustc ICE on this nightly (rust-lang/rust#162323)
@@ -322,12 +322,12 @@ jobs:
           ${{ env.CARGO_HOME }}/git
           ${{ env.CARGO_HOME }}/cuda-oxide-backend/librustc_codegen_cuda.so
           target
-        key: diffsol-oxide-${{ runner.os }}-nightly-2026-08-28-26754ae
+        key: diffsol-oxide-${{ runner.os }}-nightly-2026-08-28-ec4aa47
     - name: Install cargo-oxide
       if: steps.oxide-cache.outputs.cache-hit != 'true'
       run: |
         cargo +${OXIDE_NIGHTLY} install --locked \
-          --git https://github.com/NVlabs/cuda-oxide.git --rev ${OXIDE_REV} cargo-oxide
+          --git https://github.com/NVIDIA/cuda-rust.git --rev ${OXIDE_REV} cargo-oxide
     - name: Put cargo bin on PATH
       run: echo "${CARGO_HOME}/bin" >> $GITHUB_PATH
     # cargo-oxide normally locates the backend by resolving this project's
@@ -338,7 +338,7 @@ jobs:
       if: steps.oxide-cache.outputs.cache-hit != 'true'
       uses: actions/checkout@v4
       with:
-        repository: NVlabs/cuda-oxide
+        repository: NVIDIA/cuda-rust
         ref: ${{ env.OXIDE_REV }}
         path: cuda-oxide-src
     - name: Build the codegen backend

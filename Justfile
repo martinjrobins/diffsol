@@ -15,7 +15,7 @@
 # with:
 #
 #   cargo +nightly-2026-08-28 install --locked \
-#     --git https://github.com/NVlabs/cuda-oxide.git --rev <oxide_rev> cargo-oxide
+#     --git https://github.com/NVIDIA/cuda-rust.git --rev <oxide_rev> cargo-oxide
 #
 # and build the backend with `just oxide-backend`. 
 #
@@ -26,7 +26,7 @@
 # Bump oxide_nightly/oxide_rev here, in crates/diffsol-la/Cargo.toml and in
 # OXIDE_NIGHTLY/OXIDE_REV (.github/workflows/rust.yml) together.
 oxide_nightly := "nightly-2026-08-28"
-oxide_rev := "26754ae52c26c097dc1c465a1e42c4c5d05a3d40"
+oxide_rev := "ec4aa4797956534578a1af010f86252a0b6d8626"
 oxide_flags := "-Znext-solver=coherence"
 oxide_arch := "sm_86"
 oxide_backend := justfile_directory() / "target/cuda-oxide-backend/librustc_codegen_cuda.so"
@@ -36,7 +36,7 @@ oxide_backend := justfile_directory() / "target/cuda-oxide-backend/librustc_code
 oxide-backend:
     rm -rf target/cuda-oxide-src
     git clone --filter=blob:none --no-checkout \
-        https://github.com/NVlabs/cuda-oxide.git target/cuda-oxide-src
+        https://github.com/NVIDIA/cuda-rust.git target/cuda-oxide-src
     git -C target/cuda-oxide-src checkout {{oxide_rev}}
     cd target/cuda-oxide-src && cargo +{{oxide_nightly}} oxide setup
     mkdir -p target/cuda-oxide-backend
