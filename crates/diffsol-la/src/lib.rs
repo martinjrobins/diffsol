@@ -107,7 +107,7 @@ pub use context::cuda::CudaContext;
 pub use linear_solver::cuda::lu::CudaLU;
 #[cfg(feature = "cuda")]
 pub use matrix::cuda::CudaMat;
-#[cfg(feature = "cuda")]
+#[cfg(any(feature = "cuda", feature = "cuda-oxide"))]
 pub use scalar::cuda::{CudaType, ScalarCuda};
 #[cfg(feature = "cuda")]
 pub use vector::cuda::{CudaIndex, CudaVec, CudaVecMut, CudaVecRef};

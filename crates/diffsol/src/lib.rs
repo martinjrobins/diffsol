@@ -474,7 +474,7 @@ pub use diffsol_la::CudaContext;
 pub use diffsol_la::CudaMat;
 #[cfg(feature = "cuda")]
 pub use diffsol_la::{CudaIndex, CudaVec, CudaVecMut, CudaVecRef};
-#[cfg(feature = "cuda")]
+#[cfg(any(feature = "cuda", feature = "cuda-oxide"))]
 pub use diffsol_la::{CudaType, ScalarCuda};
 #[cfg(feature = "cuda")]
 pub use linear_solver::CudaLU;

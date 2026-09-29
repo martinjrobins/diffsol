@@ -14,7 +14,7 @@ default = ["nalgebra", "faer"]
 faer = []
 nalgebra = []
 cuda = ["dep:cudarc"]
-# CUDA backend with kernels written in Rust via NVlabs cuda-oxide. Requires
+# CUDA backend with kernels written in Rust via NVIDIA cuda-oxide. Requires
 # `cargo oxide` on the pinned nightly; see README.
 cuda-oxide = ["dep:cuda-core", "dep:cudarc"]
 #oxide# cuda-oxide = ["dep:cuda-device", "dep:cuda-host", "dep:cuda-core", "dep:cudarc"]
@@ -43,8 +43,8 @@ cudarc = { workspace = true, optional = true, default-features = false, features
 # cuda-oxide: device/host glue is git-only (not on crates.io), so these lines are
 # commented out for publishing. Enable with:
 #   sed -i -e '/^cuda-oxide = /d' -e 's/^#oxide# //' crates/diffsol-la/Cargo.toml
-#oxide# cuda-device = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "26754ae52c26c097dc1c465a1e42c4c5d05a3d40", optional = true }
-#oxide# cuda-host = { git = "https://github.com/NVlabs/cuda-oxide.git", rev = "26754ae52c26c097dc1c465a1e42c4c5d05a3d40", optional = true }
+#oxide# cuda-device = { git = "https://github.com/NVIDIA/cuda-rust.git", rev = "ec4aa4797956534578a1af010f86252a0b6d8626", optional = true }
+#oxide# cuda-host = { git = "https://github.com/NVIDIA/cuda-rust.git", rev = "ec4aa4797956534578a1af010f86252a0b6d8626", optional = true }
 cuda-core = { version = "0.3.1", optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

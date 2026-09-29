@@ -5,11 +5,9 @@
 //! device memory is a [`cuda_core::DeviceBuffer`] and the kernels are the Rust
 //! ones in [`crate::cuda_oxide_kernels`].
 //!
-//! The backend is `f64`-only, as the `cuda` one effectively is: its kernels are
-//! all `_f64` and `ScalarCuda` has a single implementation. Dropping the type
-//! parameter also keeps the launch calls free of turbofish, because
-//! `#[cuda_module]` generates one host method per kernel rather than a generic
-//! one.
+//! The host types are `f64`-only, as the `cuda` backend effectively is:
+//! `ScalarCuda` has a single implementation. The kernels are generic over
+//! `ScalarCuda`, so every launch names its `f64` instance by turbofish.
 
 use std::fmt::{self, Debug};
 use std::marker::PhantomData;
@@ -185,8 +183,8 @@ fn launch_window(
 pub(crate) fn launch_for_each_batch<const M: usize, const N: usize, F>(
     ctx: &OxideContext,
     f: F,
-    outs: LaneArgsMut<M>,
-    ins: LaneArgs<N>,
+    outs: LaneArgsMut<f64, M>,
+    ins: LaneArgs<f64, N>,
     nbatch: u32,
 ) where
     F: Fn([&mut [f64]; M], [&[f64]; N], usize) + Copy + Send,
@@ -194,9 +192,9 @@ pub(crate) fn launch_for_each_batch<const M: usize, const N: usize, F>(
     let cfg = OxideContext::config_1d(nbatch);
     let m = &ctx.module;
     let p = m
-        .prepare_vec_for_each_batch::<M, N, F>(cfg)
+        .prepare_vec_for_each_batch::<f64, M, N, F>(cfg)
         .expect("prepare vec_for_each_batch");
-    m.vec_for_each_batch::<M, N, F>(&ctx.stream, &p, f, outs, ins, nbatch)
+    m.vec_for_each_batch::<f64, M, N, F>(&ctx.stream, &p, f, outs, ins, nbatch)
         .expect("launch vec_for_each_batch");
 }
 
@@ -207,8 +205,8 @@ pub(crate) fn launch_for_each_batch<const M: usize, const N: usize, F>(
 pub(crate) fn launch_for_each_elem<const M: usize, const N: usize, F>(
     ctx: &OxideContext,
     f: F,
-    outs: LaneArgsMut<M>,
-    ins: LaneArgs<N>,
+    outs: LaneArgsMut<f64, M>,
+    ins: LaneArgs<f64, N>,
     nstates: u32,
     nbatch: u32,
 ) where
@@ -218,9 +216,9 @@ pub(crate) fn launch_for_each_elem<const M: usize, const N: usize, F>(
     let cfg = OxideContext::config_1d(n);
     let m = &ctx.module;
     let p = m
-        .prepare_vec_for_each_elem::<M, N, F>(cfg)
+        .prepare_vec_for_each_elem::<f64, M, N, F>(cfg)
         .expect("prepare vec_for_each_elem");
-    m.vec_for_each_elem::<M, N, F>(&ctx.stream, &p, f, outs, ins, n, nstates, nbatch)
+    m.vec_for_each_elem::<f64, M, N, F>(&ctx.stream, &p, f, outs, ins, n, nstates, nbatch)
         .expect("launch vec_for_each_elem");
 }
 
@@ -234,7 +232,7 @@ pub(crate) fn launch_reduce_batch<const N: usize, F, G>(
     f: F,
     g: G,
     dest: OperandMut<'_>,
-    ins: LaneArgs<N>,
+    ins: LaneArgs<f64, N>,
     init: f64,
     nstates: u32,
     nbatch: u32,
@@ -257,7 +255,7 @@ pub(crate) fn launch_reduce_batch_large<const N: usize, F, G>(
     f: F,
     g: G,
     mut dest: OperandMut<'_>,
-    ins: LaneArgs<N>,
+    ins: LaneArgs<f64, N>,
     init: f64,
     nstates: u32,
     nbatch: u32,
@@ -269,9 +267,9 @@ pub(crate) fn launch_reduce_batch_large<const N: usize, F, G>(
     let cfg = OxideContext::config_1d(nstates);
     let m = &ctx.module;
     let p = m
-        .prepare_vec_reduce_batch::<N, F, G>(cfg)
+        .prepare_vec_reduce_batch::<f64, N, F, G>(cfg)
         .expect("prepare vec_reduce_batch");
-    m.vec_reduce_batch::<N, F, G>(
+    m.vec_reduce_batch::<f64, N, F, G>(
         &ctx.stream,
         &p,
         f,
@@ -292,7 +290,7 @@ pub(crate) fn launch_reduce_batch_small<const N: usize, F, G>(
     f: F,
     g: G,
     mut dest: OperandMut<'_>,
-    ins: LaneArgs<N>,
+    ins: LaneArgs<f64, N>,
     init: f64,
     nstates: u32,
     nbatch: u32,
@@ -307,9 +305,9 @@ pub(crate) fn launch_reduce_batch_small<const N: usize, F, G>(
     let cfg = OxideContext::config_1d_blocks(blocks);
     let m = &ctx.module;
     let p = m
-        .prepare_vec_reduce_batch_small::<N, F, G>(cfg)
+        .prepare_vec_reduce_batch_small::<f64, N, F, G>(cfg)
         .expect("prepare vec_reduce_batch_small");
-    m.vec_reduce_batch_small::<N, F, G>(
+    m.vec_reduce_batch_small::<f64, N, F, G>(
         &ctx.stream,
         &p,
         f,
@@ -333,7 +331,7 @@ pub(crate) fn launch_reduce_elem<const N: usize, F, G>(
     f: F,
     g: G,
     dest: OperandMut<'_>,
-    ins: LaneArgs<N>,
+    ins: LaneArgs<f64, N>,
     init: f64,
     nstates: u32,
     nbatch: u32,
@@ -355,7 +353,7 @@ pub(crate) fn launch_reduce_elem_large<const N: usize, F, G>(
     f: F,
     g: G,
     mut dest: OperandMut<'_>,
-    ins: LaneArgs<N>,
+    ins: LaneArgs<f64, N>,
     init: f64,
     nstates: u32,
     nbatch: u32,
@@ -370,9 +368,9 @@ pub(crate) fn launch_reduce_elem_large<const N: usize, F, G>(
     let cfg = OxideContext::config_1d_blocks(blocks);
     let m = &ctx.module;
     let p = m
-        .prepare_vec_reduce_elem::<N, F, G>(cfg)
+        .prepare_vec_reduce_elem::<f64, N, F, G>(cfg)
         .expect("prepare vec_reduce_elem");
-    m.vec_reduce_elem::<N, F, G>(
+    m.vec_reduce_elem::<f64, N, F, G>(
         &ctx.stream,
         &p,
         f,
@@ -393,7 +391,7 @@ pub(crate) fn launch_reduce_elem_small<const N: usize, F, G>(
     f: F,
     g: G,
     mut dest: OperandMut<'_>,
-    ins: LaneArgs<N>,
+    ins: LaneArgs<f64, N>,
     init: f64,
     nstates: u32,
     nbatch: u32,
@@ -405,9 +403,9 @@ pub(crate) fn launch_reduce_elem_small<const N: usize, F, G>(
     let cfg = OxideContext::config_1d(nbatch);
     let m = &ctx.module;
     let p = m
-        .prepare_vec_reduce_elem_small::<N, F, G>(cfg)
+        .prepare_vec_reduce_elem_small::<f64, N, F, G>(cfg)
         .expect("prepare vec_reduce_elem_small");
-    m.vec_reduce_elem_small::<N, F, G>(
+    m.vec_reduce_elem_small::<f64, N, F, G>(
         &ctx.stream,
         &p,
         f,
@@ -604,9 +602,9 @@ pub(crate) fn launch_assign(
     macro_rules! contiguous {
         ($kernel:ident, $prepare:ident) => {{
             let p = m
-                .$prepare(cfg)
+                .$prepare::<f64>(cfg)
                 .expect(concat!("prepare ", stringify!($kernel)));
-            m.$kernel(
+            m.$kernel::<f64>(
                 stream,
                 &p,
                 d,
@@ -623,9 +621,9 @@ pub(crate) fn launch_assign(
     macro_rules! strided {
         ($kernel:ident, $prepare:ident) => {{
             let p = m
-                .$prepare(cfg)
+                .$prepare::<f64>(cfg)
                 .expect(concat!("prepare ", stringify!($kernel)));
-            m.$kernel(
+            m.$kernel::<f64>(
                 stream,
                 &p,
                 d,
@@ -670,8 +668,8 @@ pub(crate) fn launch_binary(
     let stream = &ctx.stream;
     let d = &mut *ret.window;
     if add {
-        let p = m.prepare_vec_add(cfg).expect("prepare vec_add");
-        m.vec_add(
+        let p = m.prepare_vec_add::<f64>(cfg).expect("prepare vec_add");
+        m.vec_add::<f64>(
             stream,
             &p,
             d,
@@ -687,8 +685,8 @@ pub(crate) fn launch_binary(
         )
         .expect("launch vec_add");
     } else {
-        let p = m.prepare_vec_sub(cfg).expect("prepare vec_sub");
-        m.vec_sub(
+        let p = m.prepare_vec_sub::<f64>(cfg).expect("prepare vec_sub");
+        m.vec_sub::<f64>(
             stream,
             &p,
             d,
@@ -723,8 +721,8 @@ pub(crate) fn launch_axpy(
     let n = nstates * nbatch;
     let cfg = OxideContext::config_1d(n);
     let m = &ctx.module;
-    let p = m.prepare_vec_axpy(cfg).expect("prepare vec_axpy");
-    m.vec_axpy(
+    let p = m.prepare_vec_axpy::<f64>(cfg).expect("prepare vec_axpy");
+    m.vec_axpy::<f64>(
         &ctx.stream,
         &p,
         &mut dest.window,
@@ -757,9 +755,9 @@ pub(crate) fn launch_mul_assign_scalar(
     let cfg = OxideContext::config_1d(n);
     let m = &ctx.module;
     let p = m
-        .prepare_vec_mul_assign_scalar(cfg)
+        .prepare_vec_mul_assign_scalar::<f64>(cfg)
         .expect("prepare vec_mul_assign_scalar");
-    m.vec_mul_assign_scalar(
+    m.vec_mul_assign_scalar::<f64>(
         &ctx.stream,
         &p,
         &mut dest.window,
@@ -789,9 +787,9 @@ pub(crate) fn launch_mul_scalar(
     let cfg = OxideContext::config_1d(n);
     let m = &ctx.module;
     let p = m
-        .prepare_vec_mul_scalar(cfg)
+        .prepare_vec_mul_scalar::<f64>(cfg)
         .expect("prepare vec_mul_scalar");
-    m.vec_mul_scalar(
+    m.vec_mul_scalar::<f64>(
         &ctx.stream,
         &p,
         &mut ret.window,
@@ -819,8 +817,8 @@ pub(crate) fn launch_fill(
     let n = nstates as u32 * dest.nbatch;
     let cfg = OxideContext::config_1d(n);
     let m = &ctx.module;
-    let p = m.prepare_vec_fill(cfg).expect("prepare vec_fill");
-    m.vec_fill(&ctx.stream, &p, &mut dest.window, value, n)
+    let p = m.prepare_vec_fill::<f64>(cfg).expect("prepare vec_fill");
+    m.vec_fill::<f64>(&ctx.stream, &p, &mut dest.window, value, n)
         .expect("launch vec_fill");
 }
 
@@ -908,8 +906,10 @@ where
             // lanes spanned several blocks, so no block wrote a whole lane sum
             let m = &ctx.module;
             let cfg = OxideContext::config_1d(nbatch as u32);
-            let p = m.prepare_lane_sum_max(cfg).expect("prepare lane_sum_max");
-            m.lane_sum_max(stream, &p, out, partials, nbatch as u32, blocks_per_lane)
+            let p = m
+                .prepare_lane_sum_max::<f64>(cfg)
+                .expect("prepare lane_sum_max");
+            m.lane_sum_max::<f64>(stream, &p, out, partials, nbatch as u32, blocks_per_lane)
                 .expect("launch lane_sum_max");
         }
     }
@@ -944,9 +944,9 @@ impl OxideContext {
             } => {
                 if k == 2 {
                     let p = m
-                        .prepare_vec_norm_small(cfg)
+                        .prepare_vec_norm_small::<f64>(cfg)
                         .expect("prepare vec_norm_small");
-                    m.vec_norm_small(
+                    m.vec_norm_small::<f64>(
                         &self.stream,
                         &p,
                         out,
@@ -959,9 +959,9 @@ impl OxideContext {
                     .expect("launch vec_norm_small");
                 } else {
                     let p = m
-                        .prepare_vec_norm_lk_small(cfg)
+                        .prepare_vec_norm_lk_small::<f64>(cfg)
                         .expect("prepare vec_norm_lk_small");
-                    m.vec_norm_lk_small(
+                    m.vec_norm_lk_small::<f64>(
                         &self.stream,
                         &p,
                         out,
@@ -982,8 +982,8 @@ impl OxideContext {
                 blocks_per_lane,
             } => {
                 if k == 2 {
-                    let p = m.prepare_vec_norm(cfg).expect("prepare vec_norm");
-                    m.vec_norm(
+                    let p = m.prepare_vec_norm::<f64>(cfg).expect("prepare vec_norm");
+                    m.vec_norm::<f64>(
                         &self.stream,
                         &p,
                         out,
@@ -996,8 +996,10 @@ impl OxideContext {
                     )
                     .expect("launch vec_norm");
                 } else {
-                    let p = m.prepare_vec_norm_lk(cfg).expect("prepare vec_norm_lk");
-                    m.vec_norm_lk(
+                    let p = m
+                        .prepare_vec_norm_lk::<f64>(cfg)
+                        .expect("prepare vec_norm_lk");
+                    m.vec_norm_lk::<f64>(
                         &self.stream,
                         &p,
                         out,
@@ -1457,9 +1459,9 @@ impl Vector for OxideVec {
         let cfg = OxideContext::config_1d(n);
         let m = &ctx.module;
         let p = m
-            .prepare_vec_batched_axpy(cfg)
+            .prepare_vec_batched_axpy::<f64>(cfg)
             .expect("prepare vec_batched_axpy");
-        m.vec_batched_axpy(
+        m.vec_batched_axpy::<f64>(
             &ctx.stream,
             &p,
             &mut dest.window,
@@ -1528,9 +1530,9 @@ impl Vector for OxideVec {
             let cfg = OxideContext::config_2d(n, nbatch as u32);
             let m = &ctx.module;
             let p = m
-                .prepare_vec_root_finding(cfg)
+                .prepare_vec_root_finding::<f64>(cfg)
                 .expect("prepare vec_root_finding");
-            m.vec_root_finding(
+            m.vec_root_finding::<f64>(
                 stream,
                 &p,
                 RowWidth::new(&mut max_vals, blocks_per_batch),
@@ -1590,9 +1592,9 @@ impl Vector for OxideVec {
         let cfg = OxideContext::config_1d(n);
         let m = &ctx.module;
         let p = m
-            .prepare_vec_assign_at_indices(cfg)
+            .prepare_vec_assign_at_indices::<f64>(cfg)
             .expect("prepare vec_assign_at_indices");
-        m.vec_assign_at_indices(
+        m.vec_assign_at_indices::<f64>(
             &ctx.stream,
             &p,
             &mut dest.window,
@@ -1619,9 +1621,9 @@ impl Vector for OxideVec {
         let cfg = OxideContext::config_1d(n);
         let m = &ctx.module;
         let p = m
-            .prepare_vec_copy_from_indices(cfg)
+            .prepare_vec_copy_from_indices::<f64>(cfg)
             .expect("prepare vec_copy_from_indices");
-        m.vec_copy_from_indices(
+        m.vec_copy_from_indices::<f64>(
             &ctx.stream,
             &p,
             &mut dest.window,
@@ -1652,8 +1654,10 @@ impl Vector for OxideVec {
         let n = nindices_u32 * nbatch_u32;
         let cfg = OxideContext::config_1d(n);
         let m = &ctx.module;
-        let p = m.prepare_vec_gather(cfg).expect("prepare vec_gather");
-        m.vec_gather(
+        let p = m
+            .prepare_vec_gather::<f64>(cfg)
+            .expect("prepare vec_gather");
+        m.vec_gather::<f64>(
             &ctx.stream,
             &p,
             &mut dest.window,
@@ -1682,8 +1686,10 @@ impl Vector for OxideVec {
         let n = nindices_u32 * nbatch_u32;
         let cfg = OxideContext::config_1d(n);
         let m = &ctx.module;
-        let p = m.prepare_vec_scatter(cfg).expect("prepare vec_scatter");
-        m.vec_scatter(
+        let p = m
+            .prepare_vec_scatter::<f64>(cfg)
+            .expect("prepare vec_scatter");
+        m.vec_scatter::<f64>(
             &ctx.stream,
             &p,
             &mut dest.window,
@@ -1900,7 +1906,7 @@ fn check_lane_operands<const M: usize, const N: usize>(
 }
 
 /// The read-only operands of a lane-closure launch.
-fn lane_args_in<const N: usize>(args: &[&OxideVec; N]) -> LaneArgs<N> {
+fn lane_args_in<const N: usize>(args: &[&OxideVec; N]) -> LaneArgs<f64, N> {
     LaneArgs {
         ptr: args.map(|a| a.device_ptr() as *const f64),
         nstates: args.map(|a| a.len() as u32),
@@ -1970,9 +1976,9 @@ impl VectorView<'_> for OxideVecRef<'_> {
                 cols_per_block,
             } => {
                 let p = m
-                    .prepare_vec_squared_norm_small(cfg)
+                    .prepare_vec_squared_norm_small::<f64>(cfg)
                     .expect("prepare vec_squared_norm_small");
-                m.vec_squared_norm_small(
+                m.vec_squared_norm_small::<f64>(
                     &ctx.stream,
                     &p,
                     out,
@@ -1998,9 +2004,9 @@ impl VectorView<'_> for OxideVecRef<'_> {
                 blocks_per_lane,
             } => {
                 let p = m
-                    .prepare_vec_squared_norm(cfg)
+                    .prepare_vec_squared_norm::<f64>(cfg)
                     .expect("prepare vec_squared_norm");
-                m.vec_squared_norm(
+                m.vec_squared_norm::<f64>(
                     &ctx.stream,
                     &p,
                     out,
@@ -2498,21 +2504,21 @@ mod tests {
         let m = &ctx.module;
 
         for _ in 0..50 {
-            let _ = m.prepare_vec_axpy(cfg).unwrap();
+            let _ = m.prepare_vec_axpy::<f64>(cfg).unwrap();
         }
         let start = Instant::now();
         for _ in 0..REPS {
-            std::hint::black_box(m.prepare_vec_axpy(cfg).unwrap());
+            std::hint::black_box(m.prepare_vec_axpy::<f64>(cfg).unwrap());
         }
         println!("prepare only:        {:?}", start.elapsed() / REPS);
 
-        let prepared = m.prepare_vec_axpy(cfg).unwrap();
+        let prepared = m.prepare_vec_axpy::<f64>(cfg).unwrap();
         let mut dest = y.operand_mut();
         let src = x.operand();
         let (stride, nb) = (dest.stride, dest.nbatch);
         macro_rules! launch {
             () => {
-                m.vec_axpy(
+                m.vec_axpy::<f64>(
                     &ctx.stream,
                     &prepared,
                     &mut dest.window,
