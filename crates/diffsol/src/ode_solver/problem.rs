@@ -599,12 +599,17 @@ where
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
-    /// Create an initial state for the Rodas5P solver.
-    pub fn rodas5p_state(&self) -> Result<RkState<Eqn::V>, DiffsolError>
+    /// Create an initial state for the Rodas5P solver. A mass-matrix DAE
+    /// requires a consistent initial state, which may need a nonlinear solve.
+    pub fn rodas5p_state<LS: LinearSolver<Eqn::M>>(&self) -> Result<RkState<Eqn::V>, DiffsolError>
     where
         Eqn: OdeEquationsImplicit,
     {
-        RkState::new(self, 5)
+        if self.eqn.mass().is_some() {
+            RkState::new_and_consistent::<LS, _>(self, 5)
+        } else {
+            RkState::new(self, 5)
+        }
     }
 
     /// Create a Rodas5P solver from an existing state.
@@ -621,7 +626,8 @@ where
         crate::Rodas5P::new(self, state, LS::default())
     }
 
-    /// Create a fifth-order L-stable Rodas5P solver for an identity-mass ODE.
+    /// Create a fifth-order L-stable Rodas5P solver for an ODE or a
+    /// constant-mass-matrix DAE of index at most one.
     /// The right-hand side must provide a Jacobian action.
     pub fn rodas5p<LS: LinearSolver<Eqn::M>>(
         &self,
@@ -629,7 +635,7 @@ where
     where
         Eqn: OdeEquationsImplicit,
     {
-        let state = self.rodas5p_state()?;
+        let state = self.rodas5p_state::<LS>()?;
         self.rodas5p_solver::<LS, <Eqn::V as DefaultDenseMatrix>::M>(state)
     }
 
