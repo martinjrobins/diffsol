@@ -599,6 +599,40 @@ where
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
+    /// Create an initial state for the Rodas5P solver.
+    pub fn rodas5p_state(&self) -> Result<RkState<Eqn::V>, DiffsolError>
+    where
+        Eqn: OdeEquationsImplicit,
+    {
+        RkState::new(self, 5)
+    }
+
+    /// Create a Rodas5P solver from an existing state.
+    pub fn rodas5p_solver<
+        LS: LinearSolver<Eqn::M>,
+        DM: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
+    >(
+        &self,
+        state: RkState<Eqn::V>,
+    ) -> Result<crate::Rodas5P<'_, Eqn, LS, DM>, DiffsolError>
+    where
+        Eqn: OdeEquationsImplicit,
+    {
+        crate::Rodas5P::new(self, state, LS::default())
+    }
+
+    /// Create a fifth-order L-stable Rodas5P solver for an identity-mass ODE.
+    /// The right-hand side must provide a Jacobian action.
+    pub fn rodas5p<LS: LinearSolver<Eqn::M>>(
+        &self,
+    ) -> Result<crate::Rodas5P<'_, Eqn, LS>, DiffsolError>
+    where
+        Eqn: OdeEquationsImplicit,
+    {
+        let state = self.rodas5p_state()?;
+        self.rodas5p_solver::<LS, <Eqn::V as DefaultDenseMatrix>::M>(state)
+    }
+
     /// Create a new state for the Bdf solver. This will provide a consistent initial state,
     /// so might require solving a nonlinear system if a mass matrix is present.
     pub fn bdf_state<LS: LinearSolver<Eqn::M>>(&self) -> Result<BdfState<Eqn::V>, DiffsolError>

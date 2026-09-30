@@ -381,6 +381,22 @@ where
         &mut self.state
     }
 
+    /// Save the accepted Rosenbrock endpoint and its stage increments. The
+    /// increments feed the tableau's dense-output polynomial; `f_end` is the
+    /// endpoint derivative on the side chosen by the solver.
+    pub(crate) fn store_rosenbrock_stages(
+        &mut self,
+        y_end: &Eqn::V,
+        f_end: &Eqn::V,
+        stages: &[Eqn::V],
+    ) {
+        self.old_state.y.copy_from(y_end);
+        self.old_state.dy.copy_from(f_end);
+        for (i, stage) in stages.iter().enumerate() {
+            self.diff.column_mut(i).copy_from(stage);
+        }
+    }
+
     pub(crate) fn state_mut_back(
         &mut self,
         t: M::T,
@@ -459,13 +475,41 @@ where
         min_increase_factor: Eqn::T,
         max_increase_factor: Eqn::T,
     ) -> Eqn::T {
+        self.factor_with_error_order(
+            error_norm,
+            self.order() + 1,
+            safety_factor,
+            (
+                min_reduce_factor,
+                max_reduce_factor,
+                min_increase_factor,
+                max_increase_factor,
+            ),
+        )
+    }
+
+    /// Use the order of the *estimated local error*. For most RK pairs this is
+    /// the accepted order plus one; Rodas5P's 4th-order embedded estimate
+    /// produces a 5th-order local difference, so it passes 5 explicitly.
+    pub(crate) fn factor_with_error_order(
+        &self,
+        error_norm: Eqn::T,
+        error_order: usize,
+        safety_factor: f64,
+        (min_reduce_factor, max_reduce_factor, min_increase_factor, max_increase_factor): (
+            Eqn::T,
+            Eqn::T,
+            Eqn::T,
+            Eqn::T,
+        ),
+    ) -> Eqn::T {
         let safety = Eqn::T::from_f64(0.9 * safety_factor).unwrap();
         let raw = pi_controller_raw(
             error_norm,
             self.prev_error_norm,
             self.problem().ode_options.pi_control_integral,
             self.problem().ode_options.pi_control_proportional,
-            self.order() + 1,
+            error_order,
         );
 
         let mut factor = safety * raw;
