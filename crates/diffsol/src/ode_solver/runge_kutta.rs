@@ -381,6 +381,20 @@ where
         &mut self.state
     }
 
+    /// Store a Rosenbrock endpoint and its stage increments for dense output.
+    pub(crate) fn store_rosenbrock_stages(
+        &mut self,
+        y_end: &Eqn::V,
+        f_end: &Eqn::V,
+        stages: &[Eqn::V],
+    ) {
+        self.old_state.y.copy_from(y_end);
+        self.old_state.dy.copy_from(f_end);
+        for (i, stage) in stages.iter().enumerate() {
+            self.diff.column_mut(i).copy_from(stage);
+        }
+    }
+
     pub(crate) fn state_mut_back(
         &mut self,
         t: M::T,
