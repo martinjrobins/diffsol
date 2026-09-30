@@ -657,7 +657,7 @@ mod tests {
             test_checkpointing, test_config, test_interpolate, test_interpolate_dy,
             test_ode_solver, test_problem, test_state_mut,
         },
-        NalgebraLU, OdeBuilder,
+        FaerLU, FaerMat, NalgebraLU, OdeBuilder,
     };
 
     type Mat = NalgebraMat<f64>;
@@ -1046,6 +1046,40 @@ mod tests {
     }
 
     #[test]
+    fn index_one_dae_with_faer_backend() {
+        let problem = OdeBuilder::<FaerMat<f64>>::new()
+            .rtol(1e-8)
+            .atol([1e-10, 1e-10])
+            .rhs_implicit(
+                |x, _, _, f| {
+                    f[0] = 1.0;
+                    f[1] = x[0] / 2.0 - x[1];
+                },
+                |_, _, _, v, jv| {
+                    jv[0] = 0.0;
+                    jv[1] = v[0] / 2.0 - v[1];
+                },
+            )
+            .mass(|v, _, _, beta, y| {
+                y[0] = v[0] + beta * y[0];
+                y[1] *= beta;
+            })
+            .init(
+                |_, _, y| {
+                    y[0] = 1.0;
+                    y[1] = 0.5;
+                },
+                2,
+            )
+            .build()
+            .unwrap();
+        let mut solver = problem.rodas5p::<FaerLU<f64>>().unwrap();
+        advance_to(&mut solver, 1.0);
+        assert!((solver.state().y[0] - 2.0).abs() < 1e-7);
+        assert!((solver.state().y[1] - 1.0).abs() < 1e-7);
+    }
+
+    #[test]
     fn dae_constructor_makes_initial_algebraic_state_consistent() {
         let problem = OdeBuilder::<Mat>::new()
             .rhs_implicit(
@@ -1112,6 +1146,11 @@ mod tests {
             solver.step().unwrap();
             assert!((solver.state().y[0] - 2.0_f64.powi(degree)).abs() < 1e-9);
             assert!((solver.state().y[1] - 2.0_f64.powi(degree)).abs() < 1e-9);
+            let exact_derivative = f64::from(degree) * 2.0_f64.powi(degree - 1);
+            if degree <= 4 {
+                assert!((solver.state().dy[0] - exact_derivative).abs() < 1e-9);
+                assert!((solver.state().dy[1] - exact_derivative).abs() < 1e-9);
+            }
             for t in [0.25_f64, 0.5, 1.0, 1.5, 1.75] {
                 let y = solver.interpolate(t).unwrap();
                 let exact = t.powi(degree);
