@@ -1005,7 +1005,7 @@ mod test {
     #[test]
     fn test_tr_bdf2_cuda_oxide_heat2d_elem() {
         use crate::{OxideLU, OxideMat};
-        let (problem, soln) = heat2d_elem_problem::<OxideMat, 10>(1);
+        let (problem, soln) = heat2d_elem_problem::<OxideMat<f64>, 10>(1);
         let mut s = problem.tr_bdf2::<OxideLU>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
     }
@@ -1014,7 +1014,7 @@ mod test {
     #[test]
     fn test_tr_bdf2_cuda_oxide_heat2d_elem_batched() {
         use crate::{OxideLU, OxideMat};
-        let (problem, soln) = heat2d_elem_problem::<OxideMat, 10>(2);
+        let (problem, soln) = heat2d_elem_problem::<OxideMat<f64>, 10>(2);
         let mut s = problem.tr_bdf2::<OxideLU>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
     }

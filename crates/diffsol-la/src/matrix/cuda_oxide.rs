@@ -31,8 +31,9 @@ use crate::vector::cuda_oxide::{
 };
 use crate::{
     context::broadcast_batch, error::LaError, linear_solver::cuda_oxide::lu::OxideLU,
-    matrix::default_solver::DefaultSolver, matrix_error, Context, IndexType, MatrixCommon,
-    OxideContext, OxideVec, OxideVecMut, OxideVecRef, Scale, Vector, VectorIndex,
+    matrix::default_solver::DefaultSolver, matrix_error, Context, CudaType, IndexType,
+    MatrixCommon, OxideContext, OxideVec, OxideVecMut, OxideVecRef, ScalarCuda, Scale, Vector,
+    VectorIndex,
 };
 
 use super::{
@@ -41,14 +42,14 @@ use super::{
 };
 
 /// Dense matrix in GPU memory. See the module docs for the layout.
-pub struct OxideMat {
-    pub(crate) data: DeviceBuffer<f64>,
+pub struct OxideMat<T: ScalarCuda> {
+    pub(crate) data: DeviceBuffer<T>,
     pub(crate) context: OxideContext,
     nrows: IndexType,
     ncols: IndexType,
 }
 
-impl Debug for OxideMat {
+impl<T: ScalarCuda> Debug for OxideMat<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OxideMat")
             .field("nrows", &self.nrows)
@@ -58,7 +59,7 @@ impl Debug for OxideMat {
     }
 }
 
-impl Clone for OxideMat {
+impl<T: ScalarCuda> Clone for OxideMat<T> {
     fn clone(&self) -> Self {
         let mut data = DeviceBuffer::zeroed(&self.context.stream, self.data.len())
             .expect("Failed to allocate device memory");
@@ -73,7 +74,7 @@ impl Clone for OxideMat {
     }
 }
 
-impl OxideMat {
+impl<T: ScalarCuda> OxideMat<T> {
     pub fn nrows(&self) -> IndexType {
         self.nrows
     }
@@ -86,18 +87,18 @@ impl OxideMat {
     }
     /// The whole matrix as a launch source: `nrows * ncols` elements per
     /// batch.
-    pub(crate) fn operand(&self) -> Operand<'_> {
+    pub(crate) fn operand(&self) -> Operand<'_, T> {
         let n = self.batch_len();
         Operand::new(&self.data, 0, n, n, self.context.nbatch())
     }
     /// The whole matrix as a launch destination.
-    pub(crate) fn operand_mut(&mut self) -> OperandMut<'_> {
+    pub(crate) fn operand_mut(&mut self) -> OperandMut<'_, T> {
         let (n, nbatch) = (self.batch_len(), self.context.nbatch());
         OperandMut::new(&mut self.data, 0, n, n, nbatch)
     }
     /// Columns `start..start + ncols` of every batch, as a launch source of
     /// `ncols * nrows` elements starting at that column.
-    fn cols_operand(&self, start: IndexType, ncols: IndexType) -> Operand<'_> {
+    fn cols_operand(&self, start: IndexType, ncols: IndexType) -> Operand<'_, T> {
         Operand::new(
             &self.data,
             start * self.nrows,
@@ -107,7 +108,7 @@ impl OxideMat {
         )
     }
     /// [`Self::cols_operand`] as a launch destination.
-    fn cols_operand_mut(&mut self, start: IndexType, ncols: IndexType) -> OperandMut<'_> {
+    fn cols_operand_mut(&mut self, start: IndexType, ncols: IndexType) -> OperandMut<'_, T> {
         let (offset, stride) = (start * self.nrows, self.batch_len());
         let (nstates, nbatch) = (ncols * self.nrows, self.context.nbatch());
         OperandMut::new(&mut self.data, offset, stride, nstates, nbatch)
@@ -115,8 +116,8 @@ impl OxideMat {
     fn col_major_index(&self, i: IndexType, j: IndexType) -> IndexType {
         i + j * self.nrows
     }
-    fn get_index_impl(&self, i: IndexType, j: IndexType) -> f64 {
-        let mut out = [0.0f64];
+    fn get_index_impl(&self, i: IndexType, j: IndexType) -> T {
+        let mut out = [T::zero()];
         read_at(
             &self.context.stream,
             &self.data,
@@ -126,12 +127,12 @@ impl OxideMat {
         .expect("Failed to copy data from device to host");
         out[0]
     }
-    fn set_index_impl(&mut self, i: IndexType, j: IndexType, value: f64) {
+    fn set_index_impl(&mut self, i: IndexType, j: IndexType, value: T) {
         let index = self.col_major_index(i, j);
         write_at(&self.context.stream, &self.data, index, &[value])
             .expect("Failed to copy data from host to device");
     }
-    fn diagonal(&self) -> OxideVec {
+    fn diagonal(&self) -> OxideVec<T> {
         assert_eq!(
             self.nrows, self.ncols,
             "Matrix must be square to get diagonal"
@@ -149,9 +150,9 @@ impl OxideMat {
         let cfg = OxideContext::config_1d(total);
         let m = &ctx.module;
         let p = m
-            .prepare_mat_get_diagonal::<f64>(cfg)
+            .prepare_mat_get_diagonal::<T>(cfg)
             .expect("prepare mat_get_diagonal");
-        m.mat_get_diagonal::<f64>(
+        m.mat_get_diagonal::<T>(
             &ctx.stream,
             &p,
             &mut dest.window,
@@ -229,12 +230,12 @@ impl OxideContext {
     /// The pointers are raw so that a per-batch slice needs no view type; each must address at
     /// least `nrows * ncols`, `ncols` and `nrows` elements per lane.
     #[allow(clippy::too_many_arguments)]
-    fn gemv_batched(
+    fn gemv_batched<T: ScalarCuda>(
         &self,
         nrows: IndexType,
         ncols: IndexType,
-        alpha: f64,
-        beta: f64,
+        alpha: T,
+        beta: T,
         a: u64,
         stride_a: i64,
         x: u64,
@@ -243,6 +244,10 @@ impl OxideContext {
         stride_y: i64,
         count: IndexType,
     ) {
+        // cuBLAS has one entry point per scalar type
+        let (alpha, beta) = match T::as_enum() {
+            CudaType::F64 => (alpha.as_f64(), beta.as_f64()),
+        };
         self.with_blas(|handle| {
             // SAFETY: the pointers are device pointers in this context, sized as documented
             // above, and each stride walks `count` lanes inside its own buffer; `nrows`/`ncols`
@@ -275,13 +280,13 @@ impl OxideContext {
     /// [`Self::gemv_batched`] where each lane's `x` and `y` hold `k` columns: one matrix product
     /// per lane, column-major throughout.
     #[allow(clippy::too_many_arguments)]
-    fn gemm_batched(
+    fn gemm_batched<T: ScalarCuda>(
         &self,
         nrows: IndexType,
         k: IndexType,
         ncols: IndexType,
-        alpha: f64,
-        beta: f64,
+        alpha: T,
+        beta: T,
         a: u64,
         stride_a: i64,
         x: u64,
@@ -290,6 +295,9 @@ impl OxideContext {
         stride_y: i64,
         count: IndexType,
     ) {
+        let (alpha, beta) = match T::as_enum() {
+            CudaType::F64 => (alpha.as_f64(), beta.as_f64()),
+        };
         self.with_blas(|handle| {
             // SAFETY: as `Self::gemv_batched`, with `x` and `y` holding `k` columns per lane.
             unsafe {
@@ -404,15 +412,15 @@ fn gcd(a: IndexType, b: IndexType) -> IndexType {
     }
 }
 
-impl DefaultSolver for OxideMat {
+impl DefaultSolver for OxideMat<f64> {
     type LS = OxideLU;
 }
 
-impl MatrixCommon for OxideMat {
-    type T = f64;
-    type V = OxideVec;
+impl<T: ScalarCuda> MatrixCommon for OxideMat<T> {
+    type T = T;
+    type V = OxideVec<T>;
     type C = OxideContext;
-    type Inner = DeviceBuffer<f64>;
+    type Inner = DeviceBuffer<T>;
 
     fn nrows(&self) -> IndexType {
         self.nrows
@@ -430,9 +438,9 @@ impl MatrixCommon for OxideMat {
 // over `nrows * ncols` elements.
 // ============================================================
 
-impl Mul<Scale<f64>> for OxideMat {
-    type Output = OxideMat;
-    fn mul(mut self, rhs: Scale<f64>) -> Self::Output {
+impl<T: ScalarCuda> Mul<Scale<T>> for OxideMat<T> {
+    type Output = OxideMat<T>;
+    fn mul(mut self, rhs: Scale<T>) -> Self::Output {
         let ctx = self.context.clone();
         let n = self.batch_len();
         let dest = self.operand_mut();
@@ -441,9 +449,9 @@ impl Mul<Scale<f64>> for OxideMat {
     }
 }
 
-impl Mul<Scale<f64>> for &OxideMat {
-    type Output = OxideMat;
-    fn mul(self, rhs: Scale<f64>) -> Self::Output {
+impl<T: ScalarCuda> Mul<Scale<T>> for &OxideMat<T> {
+    type Output = OxideMat<T>;
+    fn mul(self, rhs: Scale<T>) -> Self::Output {
         let ctx = self.context.clone();
         let mut ret = OxideMat::zeros(self.nrows, self.ncols, ctx.clone());
         let n = self.batch_len();
@@ -456,8 +464,8 @@ impl Mul<Scale<f64>> for &OxideMat {
 
 macro_rules! impl_mat_assign {
     ($Op:ident, $method:ident, $op:expr, $label:expr) => {
-        impl $Op<&OxideMat> for OxideMat {
-            fn $method(&mut self, rhs: &OxideMat) {
+        impl<T: ScalarCuda> $Op<&OxideMat<T>> for OxideMat<T> {
+            fn $method(&mut self, rhs: &OxideMat<T>) {
                 let ctx = self.context.clone();
                 // `self` is the destination, so `rhs` broadcasts into it
                 ctx.assert_broadcastable_into(rhs.context.nbatch(), $label);
@@ -473,17 +481,17 @@ macro_rules! impl_mat_assign {
 impl_mat_assign!(AddAssign, add_assign, AssignOp::Add, "add_assign");
 impl_mat_assign!(SubAssign, sub_assign, AssignOp::Sub, "sub_assign");
 
-impl Add<&OxideMat> for OxideMat {
-    type Output = OxideMat;
-    fn add(mut self, rhs: &OxideMat) -> Self::Output {
+impl<T: ScalarCuda> Add<&OxideMat<T>> for OxideMat<T> {
+    type Output = OxideMat<T>;
+    fn add(mut self, rhs: &OxideMat<T>) -> Self::Output {
         AddAssign::add_assign(&mut self, rhs);
         self
     }
 }
 
-impl Sub<&OxideMat> for OxideMat {
-    type Output = OxideMat;
-    fn sub(mut self, rhs: &OxideMat) -> Self::Output {
+impl<T: ScalarCuda> Sub<&OxideMat<T>> for OxideMat<T> {
+    type Output = OxideMat<T>;
+    fn sub(mut self, rhs: &OxideMat<T>) -> Self::Output {
         SubAssign::sub_assign(&mut self, rhs);
         self
     }
@@ -493,7 +501,7 @@ impl Sub<&OxideMat> for OxideMat {
 // DenseMatrix
 // ============================================================
 
-impl DenseMatrix for OxideMat {
+impl<T: ScalarCuda> DenseMatrix for OxideMat<T> {
     fn resize_cols(&mut self, new_ncols: IndexType) {
         if new_ncols == self.ncols {
             return;
@@ -607,7 +615,7 @@ impl DenseMatrix for OxideMat {
             return;
         }
         let ctx = self.context.clone();
-        let mut kernel_rhs = [0.0f64; MAX_SMALL_COLS * MAX_SMALL_COLS];
+        let mut kernel_rhs = [T::zero(); MAX_SMALL_COLS * MAX_SMALL_COLS];
         kernel_rhs[..rhs.len()].copy_from_slice(rhs);
         let mut dest = self.operand_mut();
         let dest_stride = dest.stride;
@@ -615,9 +623,9 @@ impl DenseMatrix for OxideMat {
         let cfg = OxideContext::config_1d(n);
         let m = &ctx.module;
         let p = m
-            .prepare_mul_cols_by::<f64>(cfg)
+            .prepare_mul_cols_by::<T>(cfg)
             .expect("prepare mul_cols_by");
-        m.mul_cols_by::<f64>(
+        m.mul_cols_by::<T>(
             &ctx.stream,
             &p,
             &mut dest.window,
@@ -646,9 +654,9 @@ impl DenseMatrix for OxideMat {
         let cfg = OxideContext::config_1d(n);
         let m = &ctx.module;
         let p = m
-            .prepare_backward_diff_update::<f64>(cfg)
+            .prepare_backward_diff_update::<T>(cfg)
             .expect("prepare backward_diff_update");
-        m.backward_diff_update::<f64>(
+        m.backward_diff_update::<T>(
             &ctx.stream,
             &p,
             &mut dest.window,
@@ -688,9 +696,9 @@ impl DenseMatrix for OxideMat {
             .assert_broadcastable_into(self.context.nbatch(), "gemv_cols");
         // an empty column range contributes nothing, leaving y = beta * y
         if nc == 0 {
-            if beta == 0.0 {
-                y.fill(0.0);
-            } else if beta != 1.0 {
+            if beta == T::zero() {
+                y.fill(T::zero());
+            } else if beta != T::one() {
                 y.mul_assign(Scale(beta));
             }
             return;
@@ -701,7 +709,7 @@ impl DenseMatrix for OxideMat {
         }
         let ctx = self.context.clone();
         let y_nbatch = y.context.nbatch();
-        let mut weights = [0.0f64; MAX_SMALL_COLS];
+        let mut weights = [T::zero(); MAX_SMALL_COLS];
         weights[..nc].copy_from_slice(&x[..nc]);
         // the column range's start rides in the window, so the kernel indexes
         // from column zero
@@ -711,8 +719,8 @@ impl DenseMatrix for OxideMat {
         let n = y_nstates * dest.nbatch;
         let cfg = OxideContext::config_1d(n);
         let m = &ctx.module;
-        let p = m.prepare_gemv_cols::<f64>(cfg).expect("prepare gemv_cols");
-        m.gemv_cols::<f64>(
+        let p = m.prepare_gemv_cols::<T>(cfg).expect("prepare gemv_cols");
+        m.gemv_cols::<T>(
             &ctx.stream,
             &p,
             &mut dest.window,
@@ -736,7 +744,7 @@ impl DenseMatrix for OxideMat {
 // Matrix
 // ============================================================
 
-impl Matrix for OxideMat {
+impl<T: ScalarCuda> Matrix for OxideMat<T> {
     type Sparsity = Dense<Self>;
     type SparsityRef<'a> = DenseRef<'a, Self>;
 
@@ -793,10 +801,8 @@ impl Matrix for OxideMat {
         let n = nindices_u32 * nbatch_u32;
         let cfg = OxideContext::config_1d(n);
         let m = &ctx.module;
-        let p = m
-            .prepare_vec_gather::<f64>(cfg)
-            .expect("prepare vec_gather");
-        m.vec_gather::<f64>(
+        let p = m.prepare_vec_gather::<T>(cfg).expect("prepare vec_gather");
+        m.vec_gather::<T>(
             &ctx.stream,
             &p,
             &mut dest.window,
@@ -837,9 +843,9 @@ impl Matrix for OxideMat {
         let cfg = OxideContext::config_1d(n);
         let m = &ctx.module;
         let p = m
-            .prepare_mat_set_data_with_indices::<f64>(cfg)
+            .prepare_mat_set_data_with_indices::<T>(cfg)
             .expect("prepare mat_set_data_with_indices");
-        m.mat_set_data_with_indices::<f64>(
+        m.mat_set_data_with_indices::<T>(
             &ctx.stream,
             &p,
             &mut dest.window,
@@ -866,7 +872,7 @@ impl Matrix for OxideMat {
         // a plain axpy
         let col = self.cols_operand(j, 1);
         let dest = v.operand_mut();
-        launch_axpy(&ctx, dest, nrows, 1.0, &col, 1.0);
+        launch_axpy(&ctx, dest, nrows, T::one(), &col, T::one());
     }
 
     fn add_columns_to_batched_vector(&self, v: &mut Self::V) {
@@ -889,7 +895,7 @@ impl Matrix for OxideMat {
             stride: nrows,
             col_offset: 0,
         };
-        v.axpy_v(1.0, &columns_as_lanes, 1.0);
+        v.axpy_v(T::one(), &columns_as_lanes, T::one());
     }
 
     fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
@@ -908,7 +914,7 @@ impl Matrix for OxideMat {
             x.data.cu_deviceptr(),
             y.data.cu_deviceptr(),
         );
-        let elem = size_of::<f64>() as u64;
+        let elem = size_of::<T>() as u64;
         match GemvPlan::choose(nrows, ncols, nbatch, x_nbatch, y_nbatch) {
             GemvPlan::Strided {
                 k,
@@ -968,9 +974,9 @@ impl Matrix for OxideMat {
         let cfg = OxideContext::config_1d(total);
         let m = &ctx.module;
         let p = m
-            .prepare_mat_from_diagonal::<f64>(cfg)
+            .prepare_mat_from_diagonal::<T>(cfg)
             .expect("prepare mat_from_diagonal");
-        m.mat_from_diagonal::<f64>(
+        m.mat_from_diagonal::<T>(
             &ctx.stream,
             &p,
             &mut dest.window,
@@ -1020,9 +1026,9 @@ impl Matrix for OxideMat {
         let cfg = OxideContext::config_1d(total);
         let m = &ctx.module;
         let p = m
-            .prepare_mat_scale_add_assign::<f64>(cfg)
+            .prepare_mat_scale_add_assign::<T>(cfg)
             .expect("prepare mat_scale_add_assign");
-        m.mat_scale_add_assign::<f64>(
+        m.mat_scale_add_assign::<T>(
             &ctx.stream,
             &p,
             &mut dest.window,
@@ -1047,7 +1053,7 @@ impl Matrix for OxideMat {
         let (zero_indices, nonzero_indices) = (0..self.nrows).fold(
             (Vec::new(), Vec::new()),
             |(mut zero_indices, mut nonzero_indices), i| {
-                if diagonal[i] == 0.0 {
+                if diagonal[i] == T::zero() {
                     zero_indices.push(i);
                 } else {
                     nonzero_indices.push(i);
@@ -1105,7 +1111,7 @@ impl Matrix for OxideMat {
             nbatch,
             values.len()
         );
-        let mut m = vec![0.0f64; nrows * ncols * nbatch];
+        let mut m = vec![T::zero(); nrows * ncols * nbatch];
         for b in 0..nbatch {
             let batch_offset = b * nrows * ncols;
             for (k, &(i, j)) in indices.iter().enumerate() {
@@ -1171,20 +1177,20 @@ mod tests {
         );
     }
 
-    super::super::generate_matrix_tests_nonbatched!(cuda_oxide, OxideMat);
+    super::super::generate_matrix_tests_nonbatched!(cuda_oxide, OxideMat<f64>);
 
     super::super::generate_matrix_tests_batched!(
         cuda_oxide,
-        OxideMat,
+        OxideMat<f64>,
         OxideContext::default(),
         OxideContext::default().with_nbatch(2)
     );
 
-    super::super::generate_dense_matrix_tests_nonbatched!(cuda_oxide, OxideMat);
+    super::super::generate_dense_matrix_tests_nonbatched!(cuda_oxide, OxideMat<f64>);
 
     super::super::generate_dense_matrix_tests_batched!(
         cuda_oxide,
-        OxideMat,
+        OxideMat<f64>,
         OxideContext::default(),
         OxideContext::default().with_nbatch(2)
     );

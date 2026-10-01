@@ -100,7 +100,7 @@ fn solve_cpu(nbuses: usize, demands: &[f64], t_final: f64) -> Vec<f64> {
 /// Every grid in one batched solve.
 fn solve_gpu(nbuses: usize, demands: &[f64], t_final: f64) -> Vec<f64> {
     use diffsol::OxideMat;
-    let problem = swing_problem::<OxideMat>(nbuses, demands);
+    let problem = swing_problem::<OxideMat<f64>>(nbuses, demands);
     let mut solver = problem.tsit45().unwrap();
     max_deviation_hz(&mut solver, nbuses, t_final)
 }

@@ -2,11 +2,19 @@ use cudarc::driver::{DeviceRepr, ValidAsZeroBits};
 
 use super::Scalar;
 
+/// `cuda_core::DeviceBuffer<T>` needs `T: DeviceCopy`; a no-op without `cuda-oxide`.
+#[cfg(feature = "cuda-oxide")]
+pub use cuda_core::DeviceCopy as OxideCopy;
+#[cfg(not(feature = "cuda-oxide"))]
+pub trait OxideCopy {}
+#[cfg(not(feature = "cuda-oxide"))]
+impl<T> OxideCopy for T {}
+
 pub enum CudaType {
     F64,
 }
 
-pub trait ScalarCuda: Scalar + ValidAsZeroBits + DeviceRepr {
+pub trait ScalarCuda: Scalar + ValidAsZeroBits + DeviceRepr + OxideCopy {
     fn as_enum() -> CudaType;
     fn as_f64(self) -> f64 {
         panic!("Unsupported type for as_f64");

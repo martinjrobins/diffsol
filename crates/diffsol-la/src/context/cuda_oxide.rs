@@ -28,8 +28,9 @@ static DEVICES: LazyLock<Mutex<HashMap<usize, DeviceEntry>>> =
 pub(crate) struct ReduceScratch {
     /// The one cell the cross-lane maximum lands in, as an IEEE bit pattern.
     pub(crate) out: DeviceBuffer<DeviceAtomicU64>,
-    /// Per-lane partial sums, for the large kernels.
-    pub(crate) partials: DeviceBuffer<f64>,
+    /// Per-lane partial sums, for the large kernels. Raw bytes, viewed as the
+    /// reduction's scalar type, sized for the widest (`f64`).
+    pub(crate) partials: DeviceBuffer<u8>,
     /// Where [`Self::out`] is read back to. Pinned, so the copy is a straight DMA rather than a
     /// stage through a driver-internal buffer.
     pub(crate) readback: PinnedHostBuffer<u64>,
@@ -41,12 +42,22 @@ pub(crate) struct ReduceScratch {
 impl ReduceScratch {
     fn new(stream: &CudaStream, nbatch: usize, target_blocks: u32) -> Result<Self, LaError> {
         let fail = |e| cuda_error!(Other, format!("Failed to allocate scratch: {}", e));
+        let partials: DeviceBuffer<u8> = DeviceBuffer::zeroed(
+            stream,
+            nbatch.max(target_blocks as usize) * size_of::<f64>(),
+        )
+        .map_err(fail)?;
+        // `reduce` views these bytes as any `ScalarCuda`, none aligned stricter than `f64`
+        assert_eq!(
+            partials.cu_deviceptr() % align_of::<f64>() as u64,
+            0,
+            "reduction scratch is not aligned for f64"
+        );
         Ok(Self {
             out: DeviceBuffer::<u64>::zeroed(stream, 1)
                 .map_err(fail)?
                 .cast_elem(),
-            partials: DeviceBuffer::zeroed(stream, nbatch.max(target_blocks as usize))
-                .map_err(fail)?,
+            partials,
             readback: PinnedHostBuffer::zeroed(stream.context(), 1).map_err(fail)?,
             // no timing, so the event is the cheap kind
             done: stream.context().new_event(None).map_err(fail)?,

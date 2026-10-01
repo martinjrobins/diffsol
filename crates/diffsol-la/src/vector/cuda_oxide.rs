@@ -5,9 +5,7 @@
 //! device memory is a [`cuda_core::DeviceBuffer`] and the kernels are the Rust
 //! ones in [`crate::cuda_oxide_kernels`].
 //!
-//! The host types are `f64`-only, as the `cuda` backend effectively is:
-//! `ScalarCuda` has a single implementation. The kernels are generic over
-//! `ScalarCuda`, so every launch names its `f64` instance by turbofish.
+//! Both the host types and the kernels are generic over [`ScalarCuda`].
 
 use std::fmt::{self, Debug};
 use std::marker::PhantomData;
@@ -29,7 +27,8 @@ use crate::cuda_oxide_kernels::{
     SMALL_NSTATES, WARPS_PER_BLOCK,
 };
 use crate::{
-    Context, DefaultDenseMatrix, IndexType, OxideContext, OxideMat, Scale, Vector, VectorCommon,
+    Context, DefaultDenseMatrix, IndexType, OxideContext, OxideMat, ScalarCuda, Scale, Vector,
+    VectorCommon,
 };
 
 /// Dense vector in GPU memory.
@@ -39,8 +38,8 @@ use crate::{
 /// When `nbatch > 1`, data is a flat contiguous array of `nstates * nbatch`
 /// elements. Batch *b* occupies `[b * nstates, (b+1) * nstates)`. [`len`](Vector::len)
 /// returns the per-batch length `nstates`.
-pub struct OxideVec {
-    pub(crate) data: DeviceBuffer<f64>,
+pub struct OxideVec<T: ScalarCuda> {
+    pub(crate) data: DeviceBuffer<T>,
     pub(crate) context: OxideContext,
 }
 
@@ -55,8 +54,8 @@ pub struct OxideIndex {
 /// `stride` is the distance between batches and `col_offset` where each
 /// batch's `nstates` elements start within it, which is what makes a column of
 /// a batched matrix a zero-copy vector view.
-pub struct OxideVecRef<'a> {
-    pub(crate) data: &'a DeviceBuffer<f64>,
+pub struct OxideVecRef<'a, T: ScalarCuda> {
+    pub(crate) data: &'a DeviceBuffer<T>,
     pub(crate) context: OxideContext,
     pub(crate) nstates: IndexType,
     pub(crate) stride: IndexType,
@@ -64,8 +63,8 @@ pub struct OxideVecRef<'a> {
 }
 
 /// Mutable counterpart of [`OxideVecRef`].
-pub struct OxideVecMut<'a> {
-    pub(crate) data: &'a mut DeviceBuffer<f64>,
+pub struct OxideVecMut<'a, T: ScalarCuda> {
+    pub(crate) data: &'a mut DeviceBuffer<T>,
     pub(crate) context: OxideContext,
     pub(crate) nstates: IndexType,
     pub(crate) stride: IndexType,
@@ -75,7 +74,7 @@ pub struct OxideVecMut<'a> {
 // `DeviceBuffer` is not `Debug`, and `VectorCommon` requires it. Print the
 // shape rather than the contents: reading the contents would need a device
 // copy.
-impl Debug for OxideVec {
+impl<T: ScalarCuda> Debug for OxideVec<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OxideVec")
             .field("nstates", &self.len())
@@ -90,7 +89,7 @@ impl Debug for OxideIndex {
             .finish()
     }
 }
-impl Debug for OxideVecRef<'_> {
+impl<T: ScalarCuda> Debug for OxideVecRef<'_, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OxideVecRef")
             .field("nstates", &self.nstates)
@@ -100,7 +99,7 @@ impl Debug for OxideVecRef<'_> {
             .finish()
     }
 }
-impl Debug for OxideVecMut<'_> {
+impl<T: ScalarCuda> Debug for OxideVecMut<'_, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OxideVecMut")
             .field("nstates", &self.nstates)
@@ -111,7 +110,7 @@ impl Debug for OxideVecMut<'_> {
     }
 }
 
-impl Clone for OxideVec {
+impl<T: ScalarCuda> Clone for OxideVec<T> {
     fn clone(&self) -> Self {
         let mut data = DeviceBuffer::zeroed(&self.context.stream, self.data.len())
             .expect("Failed to allocate device memory");
@@ -154,13 +153,13 @@ impl Clone for OxideIndex {
 /// borrow of the buffer it points into, and `ManuallyDrop` is what keeps the
 /// ownership transfer [`DeviceBuffer::from_raw_parts`] documents from turning
 /// into a double free.
-fn launch_window(
-    data: &DeviceBuffer<f64>,
+fn launch_window<T: ScalarCuda>(
+    data: &DeviceBuffer<T>,
     col_offset: IndexType,
     stride: IndexType,
     nstates: IndexType,
     nbatch: IndexType,
-) -> ManuallyDrop<DeviceBuffer<f64>> {
+) -> ManuallyDrop<DeviceBuffer<T>> {
     // the highest element any lane touches is `(nbatch - 1) * stride + nstates - 1`
     let len = (nbatch - 1) * stride + nstates;
     assert!(
@@ -169,9 +168,9 @@ fn launch_window(
         col_offset + len,
         data.len()
     );
-    let ptr = data.cu_deviceptr() + (col_offset * std::mem::size_of::<f64>()) as u64;
+    let ptr = data.cu_deviceptr() + (col_offset * std::mem::size_of::<T>()) as u64;
     // SAFETY: `ptr` is inside `data`'s allocation, so it is a `cuMemAlloc*`
-    // pointer in `data`'s context with at least `len * size_of::<f64>()` bytes
+    // pointer in `data`'s context with at least `len * size_of::<T>()` bytes
     // behind it.
     ManuallyDrop::new(unsafe { DeviceBuffer::from_raw_parts(ptr, len, data.context().clone()) })
 }
@@ -180,21 +179,21 @@ fn launch_window(
 ///
 /// A free function rather than the trait method's body because the kernel's
 /// closure type parameter has to be named to be turbofished at the launch.
-pub(crate) fn launch_for_each_batch<const M: usize, const N: usize, F>(
+pub(crate) fn launch_for_each_batch<T: ScalarCuda, const M: usize, const N: usize, F>(
     ctx: &OxideContext,
     f: F,
-    outs: LaneArgsMut<f64, M>,
-    ins: LaneArgs<f64, N>,
+    outs: LaneArgsMut<T, M>,
+    ins: LaneArgs<T, N>,
     nbatch: u32,
 ) where
-    F: Fn([&mut [f64]; M], [&[f64]; N], usize) + Copy + Send,
+    F: Fn([&mut [T]; M], [&[T]; N], usize) + Copy + Send,
 {
     let cfg = OxideContext::config_1d(nbatch);
     let m = &ctx.module;
     let p = m
-        .prepare_vec_for_each_batch::<f64, M, N, F>(cfg)
+        .prepare_vec_for_each_batch::<T, M, N, F>(cfg)
         .expect("prepare vec_for_each_batch");
-    m.vec_for_each_batch::<f64, M, N, F>(&ctx.stream, &p, f, outs, ins, nbatch)
+    m.vec_for_each_batch::<T, M, N, F>(&ctx.stream, &p, f, outs, ins, nbatch)
         .expect("launch vec_for_each_batch");
 }
 
@@ -202,23 +201,23 @@ pub(crate) fn launch_for_each_batch<const M: usize, const N: usize, F>(
 /// `(lane, element)` pair.
 ///
 /// A free function for the same reason as [`launch_for_each_batch`].
-pub(crate) fn launch_for_each_elem<const M: usize, const N: usize, F>(
+pub(crate) fn launch_for_each_elem<T: ScalarCuda, const M: usize, const N: usize, F>(
     ctx: &OxideContext,
     f: F,
-    outs: LaneArgsMut<f64, M>,
-    ins: LaneArgs<f64, N>,
+    outs: LaneArgsMut<T, M>,
+    ins: LaneArgs<T, N>,
     nstates: u32,
     nbatch: u32,
 ) where
-    F: Fn([&mut f64; M], [&[f64]; N], usize, usize) + Copy + Send,
+    F: Fn([&mut T; M], [&[T]; N], usize, usize) + Copy + Send,
 {
     let n = nstates * nbatch;
     let cfg = OxideContext::config_1d(n);
     let m = &ctx.module;
     let p = m
-        .prepare_vec_for_each_elem::<f64, M, N, F>(cfg)
+        .prepare_vec_for_each_elem::<T, M, N, F>(cfg)
         .expect("prepare vec_for_each_elem");
-    m.vec_for_each_elem::<f64, M, N, F>(&ctx.stream, &p, f, outs, ins, n, nstates, nbatch)
+    m.vec_for_each_elem::<T, M, N, F>(&ctx.stream, &p, f, outs, ins, n, nstates, nbatch)
         .expect("launch vec_for_each_elem");
 }
 
@@ -227,18 +226,18 @@ pub(crate) fn launch_for_each_elem<const M: usize, const N: usize, F>(
 /// A free function for the same reason as [`launch_for_each_batch`]. The per-arm helpers are
 /// separate so the timing tests can run both at the same shape.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn launch_reduce_batch<const N: usize, F, G>(
+pub(crate) fn launch_reduce_batch<T: ScalarCuda, const N: usize, F, G>(
     ctx: &OxideContext,
     f: F,
     g: G,
-    dest: OperandMut<'_>,
-    ins: LaneArgs<f64, N>,
-    init: f64,
+    dest: OperandMut<'_, T>,
+    ins: LaneArgs<T, N>,
+    init: T,
     nstates: u32,
     nbatch: u32,
 ) where
-    F: Fn([&[f64]; N], usize, usize) -> f64 + Copy + Send,
-    G: Fn(f64, f64) -> f64 + Copy + Send,
+    F: Fn([&[T]; N], usize, usize) -> T + Copy + Send,
+    G: Fn(T, T) -> T + Copy + Send,
 {
     if nstates < REDUCE_BATCH_SMALL_NSTATES {
         launch_reduce_batch_small(ctx, f, g, dest, ins, init, nstates, nbatch);
@@ -250,26 +249,26 @@ pub(crate) fn launch_reduce_batch<const N: usize, F, G>(
 /// One thread per element, each folding every lane. Enough parallelism only when `nstates` is
 /// itself large.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn launch_reduce_batch_large<const N: usize, F, G>(
+pub(crate) fn launch_reduce_batch_large<T: ScalarCuda, const N: usize, F, G>(
     ctx: &OxideContext,
     f: F,
     g: G,
-    mut dest: OperandMut<'_>,
-    ins: LaneArgs<f64, N>,
-    init: f64,
+    mut dest: OperandMut<'_, T>,
+    ins: LaneArgs<T, N>,
+    init: T,
     nstates: u32,
     nbatch: u32,
 ) where
-    F: Fn([&[f64]; N], usize, usize) -> f64 + Copy + Send,
-    G: Fn(f64, f64) -> f64 + Copy + Send,
+    F: Fn([&[T]; N], usize, usize) -> T + Copy + Send,
+    G: Fn(T, T) -> T + Copy + Send,
 {
     // the kernel writes through `get_mut`, so the grid has to cover every element
     let cfg = OxideContext::config_1d(nstates);
     let m = &ctx.module;
     let p = m
-        .prepare_vec_reduce_batch::<f64, N, F, G>(cfg)
+        .prepare_vec_reduce_batch::<T, N, F, G>(cfg)
         .expect("prepare vec_reduce_batch");
-    m.vec_reduce_batch::<f64, N, F, G>(
+    m.vec_reduce_batch::<T, N, F, G>(
         &ctx.stream,
         &p,
         f,
@@ -285,18 +284,18 @@ pub(crate) fn launch_reduce_batch_large<const N: usize, F, G>(
 
 /// One warp per element, its threads striding over the lanes.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn launch_reduce_batch_small<const N: usize, F, G>(
+pub(crate) fn launch_reduce_batch_small<T: ScalarCuda, const N: usize, F, G>(
     ctx: &OxideContext,
     f: F,
     g: G,
-    mut dest: OperandMut<'_>,
-    ins: LaneArgs<f64, N>,
-    init: f64,
+    mut dest: OperandMut<'_, T>,
+    ins: LaneArgs<T, N>,
+    init: T,
     nstates: u32,
     nbatch: u32,
 ) where
-    F: Fn([&[f64]; N], usize, usize) -> f64 + Copy + Send,
-    G: Fn(f64, f64) -> f64 + Copy + Send,
+    F: Fn([&[T]; N], usize, usize) -> T + Copy + Send,
+    G: Fn(T, T) -> T + Copy + Send,
 {
     // one warp per element, capped so a large `nstates` grid-strides instead of over-launching
     let blocks = nstates
@@ -305,9 +304,9 @@ pub(crate) fn launch_reduce_batch_small<const N: usize, F, G>(
     let cfg = OxideContext::config_1d_blocks(blocks);
     let m = &ctx.module;
     let p = m
-        .prepare_vec_reduce_batch_small::<f64, N, F, G>(cfg)
+        .prepare_vec_reduce_batch_small::<T, N, F, G>(cfg)
         .expect("prepare vec_reduce_batch_small");
-    m.vec_reduce_batch_small::<f64, N, F, G>(
+    m.vec_reduce_batch_small::<T, N, F, G>(
         &ctx.stream,
         &p,
         f,
@@ -326,18 +325,18 @@ pub(crate) fn launch_reduce_batch_small<const N: usize, F, G>(
 /// A free function for the same reason as [`launch_for_each_batch`]. The per-arm helpers are
 /// separate so the timing tests can run both at the same shape.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn launch_reduce_elem<const N: usize, F, G>(
+pub(crate) fn launch_reduce_elem<T: ScalarCuda, const N: usize, F, G>(
     ctx: &OxideContext,
     f: F,
     g: G,
-    dest: OperandMut<'_>,
-    ins: LaneArgs<f64, N>,
-    init: f64,
+    dest: OperandMut<'_, T>,
+    ins: LaneArgs<T, N>,
+    init: T,
     nstates: u32,
     nbatch: u32,
 ) where
-    F: Fn([&[f64]; N], usize, usize) -> f64 + Copy + Send,
-    G: Fn(f64, f64) -> f64 + Copy + Send,
+    F: Fn([&[T]; N], usize, usize) -> T + Copy + Send,
+    G: Fn(T, T) -> T + Copy + Send,
 {
     if nstates <= REDUCE_ELEM_SMALL_NSTATES {
         launch_reduce_elem_small(ctx, f, g, dest, ins, init, nstates, nbatch);
@@ -348,18 +347,18 @@ pub(crate) fn launch_reduce_elem<const N: usize, F, G>(
 
 /// One warp per lane, its threads striding over that lane's elements.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn launch_reduce_elem_large<const N: usize, F, G>(
+pub(crate) fn launch_reduce_elem_large<T: ScalarCuda, const N: usize, F, G>(
     ctx: &OxideContext,
     f: F,
     g: G,
-    mut dest: OperandMut<'_>,
-    ins: LaneArgs<f64, N>,
-    init: f64,
+    mut dest: OperandMut<'_, T>,
+    ins: LaneArgs<T, N>,
+    init: T,
     nstates: u32,
     nbatch: u32,
 ) where
-    F: Fn([&[f64]; N], usize, usize) -> f64 + Copy + Send,
-    G: Fn(f64, f64) -> f64 + Copy + Send,
+    F: Fn([&[T]; N], usize, usize) -> T + Copy + Send,
+    G: Fn(T, T) -> T + Copy + Send,
 {
     // one warp per lane, capped so a large `nbatch` grid-strides instead of over-launching
     let blocks = nbatch
@@ -368,9 +367,9 @@ pub(crate) fn launch_reduce_elem_large<const N: usize, F, G>(
     let cfg = OxideContext::config_1d_blocks(blocks);
     let m = &ctx.module;
     let p = m
-        .prepare_vec_reduce_elem::<f64, N, F, G>(cfg)
+        .prepare_vec_reduce_elem::<T, N, F, G>(cfg)
         .expect("prepare vec_reduce_elem");
-    m.vec_reduce_elem::<f64, N, F, G>(
+    m.vec_reduce_elem::<T, N, F, G>(
         &ctx.stream,
         &p,
         f,
@@ -386,26 +385,26 @@ pub(crate) fn launch_reduce_elem_large<const N: usize, F, G>(
 
 /// One thread per lane, walking that lane itself.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn launch_reduce_elem_small<const N: usize, F, G>(
+pub(crate) fn launch_reduce_elem_small<T: ScalarCuda, const N: usize, F, G>(
     ctx: &OxideContext,
     f: F,
     g: G,
-    mut dest: OperandMut<'_>,
-    ins: LaneArgs<f64, N>,
-    init: f64,
+    mut dest: OperandMut<'_, T>,
+    ins: LaneArgs<T, N>,
+    init: T,
     nstates: u32,
     nbatch: u32,
 ) where
-    F: Fn([&[f64]; N], usize, usize) -> f64 + Copy + Send,
-    G: Fn(f64, f64) -> f64 + Copy + Send,
+    F: Fn([&[T]; N], usize, usize) -> T + Copy + Send,
+    G: Fn(T, T) -> T + Copy + Send,
 {
     // one thread per lane, so the grid has to cover every lane
     let cfg = OxideContext::config_1d(nbatch);
     let m = &ctx.module;
     let p = m
-        .prepare_vec_reduce_elem_small::<f64, N, F, G>(cfg)
+        .prepare_vec_reduce_elem_small::<T, N, F, G>(cfg)
         .expect("prepare vec_reduce_elem_small");
-    m.vec_reduce_elem_small::<f64, N, F, G>(
+    m.vec_reduce_elem_small::<T, N, F, G>(
         &ctx.stream,
         &p,
         f,
@@ -421,29 +420,29 @@ pub(crate) fn launch_reduce_elem_small<const N: usize, F, G>(
 
 /// One source operand of a launch: where its data starts, how far apart its
 /// batches are, and how many batches it has.
-pub(crate) struct Operand<'a> {
-    pub(crate) window: ManuallyDrop<DeviceBuffer<f64>>,
-    _base: PhantomData<&'a DeviceBuffer<f64>>,
+pub(crate) struct Operand<'a, T: ScalarCuda> {
+    pub(crate) window: ManuallyDrop<DeviceBuffer<T>>,
+    _base: PhantomData<&'a DeviceBuffer<T>>,
     pub(crate) stride: u32,
     pub(crate) nbatch: u32,
 }
 
 /// The destination operand of a launch.
 ///
-/// Same handle as [`Operand`], built from `&'a mut DeviceBuffer<f64>`: the
+/// Same handle as [`Operand`], built from `&'a mut DeviceBuffer<T>`: the
 /// launchers take a destination as `&mut DeviceBuffer<T>` and the device write
 /// wants exclusive authority over the range, so the borrow it is built from
 /// says so too.
-pub(crate) struct OperandMut<'a> {
-    pub(crate) window: ManuallyDrop<DeviceBuffer<f64>>,
-    _base: PhantomData<&'a mut DeviceBuffer<f64>>,
+pub(crate) struct OperandMut<'a, T: ScalarCuda> {
+    pub(crate) window: ManuallyDrop<DeviceBuffer<T>>,
+    _base: PhantomData<&'a mut DeviceBuffer<T>>,
     pub(crate) stride: u32,
     pub(crate) nbatch: u32,
 }
 
-impl<'a> Operand<'a> {
+impl<'a, T: ScalarCuda> Operand<'a, T> {
     pub(crate) fn new(
-        data: &'a DeviceBuffer<f64>,
+        data: &'a DeviceBuffer<T>,
         col_offset: IndexType,
         stride: IndexType,
         nstates: IndexType,
@@ -458,9 +457,9 @@ impl<'a> Operand<'a> {
     }
 }
 
-impl<'a> OperandMut<'a> {
+impl<'a, T: ScalarCuda> OperandMut<'a, T> {
     pub(crate) fn new(
-        data: &'a mut DeviceBuffer<f64>,
+        data: &'a mut DeviceBuffer<T>,
         col_offset: IndexType,
         stride: IndexType,
         nstates: IndexType,
@@ -475,14 +474,14 @@ impl<'a> OperandMut<'a> {
     }
 }
 
-impl OxideVec {
+impl<T: ScalarCuda> OxideVec<T> {
     /// This vector as a launch source.
-    pub(crate) fn operand(&self) -> Operand<'_> {
+    pub(crate) fn operand(&self) -> Operand<'_, T> {
         let nstates = self.len();
         Operand::new(&self.data, 0, nstates, nstates, self.context.nbatch())
     }
     /// This vector as a launch destination.
-    pub(crate) fn operand_mut(&mut self) -> OperandMut<'_> {
+    pub(crate) fn operand_mut(&mut self) -> OperandMut<'_, T> {
         let (nstates, nbatch) = (self.len(), self.context.nbatch());
         OperandMut::new(&mut self.data, 0, nstates, nstates, nbatch)
     }
@@ -490,20 +489,20 @@ impl OxideVec {
     ///
     /// An empty operand's buffer has no address to give, and a zero-length slice still has to be
     /// built from a non-null aligned pointer.
-    pub(crate) fn device_ptr(&self) -> *mut f64 {
+    pub(crate) fn device_ptr(&self) -> *mut T {
         if self.is_empty() {
-            std::ptr::NonNull::<f64>::dangling().as_ptr()
+            std::ptr::NonNull::<T>::dangling().as_ptr()
         } else {
-            self.data.cu_deviceptr() as *mut f64
+            self.data.cu_deviceptr() as *mut T
         }
     }
 }
 
-impl OxideVecRef<'_> {
+impl<T: ScalarCuda> OxideVecRef<'_, T> {
     pub(crate) fn len(&self) -> IndexType {
         self.nstates
     }
-    pub(crate) fn operand(&self) -> Operand<'_> {
+    pub(crate) fn operand(&self) -> Operand<'_, T> {
         Operand::new(
             self.data,
             self.col_offset,
@@ -514,11 +513,11 @@ impl OxideVecRef<'_> {
     }
 }
 
-impl OxideVecMut<'_> {
+impl<T: ScalarCuda> OxideVecMut<'_, T> {
     pub(crate) fn len(&self) -> IndexType {
         self.nstates
     }
-    pub(crate) fn operand(&self) -> Operand<'_> {
+    pub(crate) fn operand(&self) -> Operand<'_, T> {
         Operand::new(
             self.data,
             self.col_offset,
@@ -527,7 +526,7 @@ impl OxideVecMut<'_> {
             self.context.nbatch(),
         )
     }
-    pub(crate) fn operand_mut(&mut self) -> OperandMut<'_> {
+    pub(crate) fn operand_mut(&mut self) -> OperandMut<'_, T> {
         let (col_offset, stride, nstates) = (self.col_offset, self.stride, self.nstates);
         let nbatch = self.context.nbatch();
         OperandMut::new(&mut *self.data, col_offset, stride, nstates, nbatch)
@@ -582,12 +581,12 @@ pub(crate) enum AssignOp {
 /// take its stride and write through a raw pointer; the other three can only
 /// ever have a contiguous destination and stay on the checked path. See the
 /// tier discussion in [`crate::cuda_oxide_kernels`].
-pub(crate) fn launch_assign(
+pub(crate) fn launch_assign<T: ScalarCuda>(
     ctx: &OxideContext,
     op: AssignOp,
-    mut dest: OperandMut<'_>,
+    mut dest: OperandMut<'_, T>,
     nstates: IndexType,
-    rhs: &Operand<'_>,
+    rhs: &Operand<'_, T>,
 ) {
     if nstates == 0 {
         return;
@@ -602,9 +601,9 @@ pub(crate) fn launch_assign(
     macro_rules! contiguous {
         ($kernel:ident, $prepare:ident) => {{
             let p = m
-                .$prepare::<f64>(cfg)
+                .$prepare::<T>(cfg)
                 .expect(concat!("prepare ", stringify!($kernel)));
-            m.$kernel::<f64>(
+            m.$kernel::<T>(
                 stream,
                 &p,
                 d,
@@ -621,9 +620,9 @@ pub(crate) fn launch_assign(
     macro_rules! strided {
         ($kernel:ident, $prepare:ident) => {{
             let p = m
-                .$prepare::<f64>(cfg)
+                .$prepare::<T>(cfg)
                 .expect(concat!("prepare ", stringify!($kernel)));
-            m.$kernel::<f64>(
+            m.$kernel::<T>(
                 stream,
                 &p,
                 d,
@@ -649,13 +648,13 @@ pub(crate) fn launch_assign(
 }
 
 /// `ret = lhs + rhs` or `ret = lhs - rhs`, allocating into `ret`.
-pub(crate) fn launch_binary(
+pub(crate) fn launch_binary<T: ScalarCuda>(
     ctx: &OxideContext,
     add: bool,
-    mut ret: OperandMut<'_>,
+    mut ret: OperandMut<'_, T>,
     nstates: IndexType,
-    lhs: &Operand<'_>,
-    rhs: &Operand<'_>,
+    lhs: &Operand<'_, T>,
+    rhs: &Operand<'_, T>,
 ) {
     if nstates == 0 {
         return;
@@ -668,8 +667,8 @@ pub(crate) fn launch_binary(
     let stream = &ctx.stream;
     let d = &mut *ret.window;
     if add {
-        let p = m.prepare_vec_add::<f64>(cfg).expect("prepare vec_add");
-        m.vec_add::<f64>(
+        let p = m.prepare_vec_add::<T>(cfg).expect("prepare vec_add");
+        m.vec_add::<T>(
             stream,
             &p,
             d,
@@ -685,8 +684,8 @@ pub(crate) fn launch_binary(
         )
         .expect("launch vec_add");
     } else {
-        let p = m.prepare_vec_sub::<f64>(cfg).expect("prepare vec_sub");
-        m.vec_sub::<f64>(
+        let p = m.prepare_vec_sub::<T>(cfg).expect("prepare vec_sub");
+        m.vec_sub::<T>(
             stream,
             &p,
             d,
@@ -705,13 +704,13 @@ pub(crate) fn launch_binary(
 }
 
 /// `dest = alpha * x + beta * dest`
-pub(crate) fn launch_axpy(
+pub(crate) fn launch_axpy<T: ScalarCuda>(
     ctx: &OxideContext,
-    mut dest: OperandMut<'_>,
+    mut dest: OperandMut<'_, T>,
     nstates: IndexType,
-    alpha: f64,
-    x: &Operand<'_>,
-    beta: f64,
+    alpha: T,
+    x: &Operand<'_, T>,
+    beta: T,
 ) {
     if nstates == 0 {
         return;
@@ -721,8 +720,8 @@ pub(crate) fn launch_axpy(
     let n = nstates * nbatch;
     let cfg = OxideContext::config_1d(n);
     let m = &ctx.module;
-    let p = m.prepare_vec_axpy::<f64>(cfg).expect("prepare vec_axpy");
-    m.vec_axpy::<f64>(
+    let p = m.prepare_vec_axpy::<T>(cfg).expect("prepare vec_axpy");
+    m.vec_axpy::<T>(
         &ctx.stream,
         &p,
         &mut dest.window,
@@ -740,11 +739,11 @@ pub(crate) fn launch_axpy(
 }
 
 /// `dest *= scalar`
-pub(crate) fn launch_mul_assign_scalar(
+pub(crate) fn launch_mul_assign_scalar<T: ScalarCuda>(
     ctx: &OxideContext,
-    mut dest: OperandMut<'_>,
+    mut dest: OperandMut<'_, T>,
     nstates: IndexType,
-    scalar: f64,
+    scalar: T,
 ) {
     if nstates == 0 {
         return;
@@ -755,9 +754,9 @@ pub(crate) fn launch_mul_assign_scalar(
     let cfg = OxideContext::config_1d(n);
     let m = &ctx.module;
     let p = m
-        .prepare_vec_mul_assign_scalar::<f64>(cfg)
+        .prepare_vec_mul_assign_scalar::<T>(cfg)
         .expect("prepare vec_mul_assign_scalar");
-    m.vec_mul_assign_scalar::<f64>(
+    m.vec_mul_assign_scalar::<T>(
         &ctx.stream,
         &p,
         &mut dest.window,
@@ -771,12 +770,12 @@ pub(crate) fn launch_mul_assign_scalar(
 }
 
 /// `ret = scalar * src`
-pub(crate) fn launch_mul_scalar(
+pub(crate) fn launch_mul_scalar<T: ScalarCuda>(
     ctx: &OxideContext,
-    mut ret: OperandMut<'_>,
+    mut ret: OperandMut<'_, T>,
     nstates: IndexType,
-    src: &Operand<'_>,
-    scalar: f64,
+    src: &Operand<'_, T>,
+    scalar: T,
 ) {
     if nstates == 0 {
         return;
@@ -787,9 +786,9 @@ pub(crate) fn launch_mul_scalar(
     let cfg = OxideContext::config_1d(n);
     let m = &ctx.module;
     let p = m
-        .prepare_vec_mul_scalar::<f64>(cfg)
+        .prepare_vec_mul_scalar::<T>(cfg)
         .expect("prepare vec_mul_scalar");
-    m.vec_mul_scalar::<f64>(
+    m.vec_mul_scalar::<T>(
         &ctx.stream,
         &p,
         &mut ret.window,
@@ -805,11 +804,11 @@ pub(crate) fn launch_mul_scalar(
 }
 
 /// `dest = value`
-pub(crate) fn launch_fill(
+pub(crate) fn launch_fill<T: ScalarCuda>(
     ctx: &OxideContext,
-    mut dest: OperandMut<'_>,
+    mut dest: OperandMut<'_, T>,
     nstates: IndexType,
-    value: f64,
+    value: T,
 ) {
     if nstates == 0 {
         return;
@@ -817,8 +816,8 @@ pub(crate) fn launch_fill(
     let n = nstates as u32 * dest.nbatch;
     let cfg = OxideContext::config_1d(n);
     let m = &ctx.module;
-    let p = m.prepare_vec_fill::<f64>(cfg).expect("prepare vec_fill");
-    m.vec_fill::<f64>(&ctx.stream, &p, &mut dest.window, value, n)
+    let p = m.prepare_vec_fill::<T>(cfg).expect("prepare vec_fill");
+    m.vec_fill::<T>(&ctx.stream, &p, &mut dest.window, value, n)
         .expect("launch vec_fill");
 }
 
@@ -826,7 +825,7 @@ pub(crate) fn launch_fill(
 ///
 /// Which arm a reduction gets is decided by `nstates` against
 /// [`SMALL_NSTATES`]; see the section comment above the kernels.
-enum ReduceOut<'a> {
+enum ReduceOut<'a, T: ScalarCuda> {
     /// A block owns `cols_per_block` whole lanes, so a lane sum is complete
     /// inside one block and the cross-lane maximum is taken on the device.
     Small {
@@ -840,7 +839,7 @@ enum ReduceOut<'a> {
     /// `lane_sum_max`, so the kernel takes both.
     Large {
         out: &'a DeviceBuffer<DeviceAtomicU64>,
-        partials: &'a mut DeviceBuffer<f64>,
+        partials: &'a mut DeviceBuffer<T>,
         cfg: LaunchConfig1D,
         blocks_per_lane: u32,
     },
@@ -857,9 +856,14 @@ enum ReduceOut<'a> {
 /// The buffers come from the context's [`ReduceScratch`] rather than a fresh
 /// allocation, which is what makes this cost the kernel and one 8-byte readback
 /// instead of a `cuMemAlloc`/`cuMemFree` pair.
-fn reduce<F>(ctx: &OxideContext, nstates: IndexType, nbatch: IndexType, launch: F) -> f64
+fn reduce<T: ScalarCuda, F>(
+    ctx: &OxideContext,
+    nstates: IndexType,
+    nbatch: IndexType,
+    launch: F,
+) -> f64
 where
-    F: FnOnce(ReduceOut<'_>),
+    F: FnOnce(ReduceOut<'_, T>),
 {
     let stream = &ctx.stream;
     let mut guard = ctx.scratch.lock().expect("Reduction scratch poisoned");
@@ -896,9 +900,21 @@ where
         // The kernels write `blocks_per_lane * nbatch` slots, which is at most
         // `max(nbatch, target_blocks)` -- how `ReduceScratch` sizes `partials`.
         let partials = &mut scratch.partials;
+        // the scratch is sized and aligned for `f64`, the widest `ScalarCuda`
+        const { assert!(size_of::<T>() <= size_of::<f64>() && align_of::<T>() <= align_of::<f64>()) };
+        let len = partials.len() / size_of::<T>();
+        // SAFETY: the whole of `partials`' allocation, which `ReduceScratch::new` checks is
+        // aligned for `f64` and so for `T`, and `ManuallyDrop` leaves freeing it to `scratch`.
+        let mut partials = ManuallyDrop::new(unsafe {
+            DeviceBuffer::<T>::from_raw_parts(
+                partials.cu_deviceptr(),
+                len,
+                partials.context().clone(),
+            )
+        });
         launch(ReduceOut::Large {
             out,
-            partials: &mut *partials,
+            partials: &mut partials,
             cfg: OxideContext::config_1d_blocks(blocks_per_lane * lanes_per_pass),
             blocks_per_lane,
         });
@@ -907,9 +923,9 @@ where
             let m = &ctx.module;
             let cfg = OxideContext::config_1d(nbatch as u32);
             let p = m
-                .prepare_lane_sum_max::<f64>(cfg)
+                .prepare_lane_sum_max::<T>(cfg)
                 .expect("prepare lane_sum_max");
-            m.lane_sum_max::<f64>(stream, &p, out, partials, nbatch as u32, blocks_per_lane)
+            m.lane_sum_max::<T>(stream, &p, out, &partials, nbatch as u32, blocks_per_lane)
                 .expect("launch lane_sum_max");
         }
     }
@@ -932,7 +948,13 @@ where
 
 impl OxideContext {
     /// `max_b (sum_i |x_i|^k)^(1/k)`, over the batches of `x`.
-    fn lk_norm(&self, x: &Operand<'_>, nstates: IndexType, nbatch: IndexType, k: i32) -> f64 {
+    fn lk_norm<T: ScalarCuda>(
+        &self,
+        x: &Operand<'_, T>,
+        nstates: IndexType,
+        nbatch: IndexType,
+        k: i32,
+    ) -> T {
         let n = nstates as u32;
         let nb = nbatch as u32;
         let m = &self.module;
@@ -944,9 +966,9 @@ impl OxideContext {
             } => {
                 if k == 2 {
                     let p = m
-                        .prepare_vec_norm_small::<f64>(cfg)
+                        .prepare_vec_norm_small::<T>(cfg)
                         .expect("prepare vec_norm_small");
-                    m.vec_norm_small::<f64>(
+                    m.vec_norm_small::<T>(
                         &self.stream,
                         &p,
                         out,
@@ -959,9 +981,9 @@ impl OxideContext {
                     .expect("launch vec_norm_small");
                 } else {
                     let p = m
-                        .prepare_vec_norm_lk_small::<f64>(cfg)
+                        .prepare_vec_norm_lk_small::<T>(cfg)
                         .expect("prepare vec_norm_lk_small");
-                    m.vec_norm_lk_small::<f64>(
+                    m.vec_norm_lk_small::<T>(
                         &self.stream,
                         &p,
                         out,
@@ -982,8 +1004,8 @@ impl OxideContext {
                 blocks_per_lane,
             } => {
                 if k == 2 {
-                    let p = m.prepare_vec_norm::<f64>(cfg).expect("prepare vec_norm");
-                    m.vec_norm::<f64>(
+                    let p = m.prepare_vec_norm::<T>(cfg).expect("prepare vec_norm");
+                    m.vec_norm::<T>(
                         &self.stream,
                         &p,
                         out,
@@ -997,9 +1019,9 @@ impl OxideContext {
                     .expect("launch vec_norm");
                 } else {
                     let p = m
-                        .prepare_vec_norm_lk::<f64>(cfg)
+                        .prepare_vec_norm_lk::<T>(cfg)
                         .expect("prepare vec_norm_lk");
-                    m.vec_norm_lk::<f64>(
+                    m.vec_norm_lk::<T>(
                         &self.stream,
                         &p,
                         out,
@@ -1015,55 +1037,56 @@ impl OxideContext {
                 }
             }
         });
-        if k == 2 {
+        let norm = if k == 2 {
             max_sum.sqrt()
         } else {
             max_sum.powf(1.0 / k as f64)
-        }
+        };
+        T::from_f64(norm).unwrap()
     }
 }
 
-impl DefaultDenseMatrix for OxideVec {
-    type M = OxideMat;
+impl<T: ScalarCuda> DefaultDenseMatrix for OxideVec<T> {
+    type M = OxideMat<T>;
 }
 
 macro_rules! impl_vector_common {
     ($vec:ty) => {
-        impl VectorCommon for $vec {
-            type T = f64;
+        impl<T: ScalarCuda> VectorCommon for $vec {
+            type T = T;
             type C = OxideContext;
-            type Inner = DeviceBuffer<f64>;
+            type Inner = DeviceBuffer<T>;
             fn inner(&self) -> &Self::Inner {
                 self.data
             }
         }
     };
     (owned $vec:ty) => {
-        impl VectorCommon for $vec {
-            type T = f64;
+        impl<T: ScalarCuda> VectorCommon for $vec {
+            type T = T;
             type C = OxideContext;
-            type Inner = DeviceBuffer<f64>;
+            type Inner = DeviceBuffer<T>;
             fn inner(&self) -> &Self::Inner {
                 &self.data
             }
         }
     };
 }
-impl_vector_common!(owned OxideVec);
-impl_vector_common!(OxideVecRef<'_>);
-impl_vector_common!(OxideVecMut<'_>);
+impl_vector_common!(owned OxideVec<T>);
+impl_vector_common!(OxideVecRef<'_, T>);
+impl_vector_common!(OxideVecMut<'_, T>);
 
 // ============================================================
 // Operators, fanned out over the operand flavours. Mirrors the `cuda`
-// backend's macro set, minus the scalar type parameter.
+// backend's macro set.
 // ============================================================
 
 /// Allocating binary op: `&lhs + &rhs -> OxideVec`.
 macro_rules! impl_binary_ref_ref {
     ([$($g:tt)*], $Op:ident, $method:ident, $add:expr, $label:expr, $Lhs:ty, $Rhs:ty) => {
         impl<$($g)*> $Op<$Rhs> for $Lhs {
-            type Output = OxideVec;
-            fn $method(self, rhs: $Rhs) -> OxideVec {
+            type Output = OxideVec<T>;
+            fn $method(self, rhs: $Rhs) -> OxideVec<T> {
                 let ctx = self.context.clone();
                 // neither operand is owned, so the result carries the left-hand side's batch
                 // count and `rhs` broadcasts into it
@@ -1104,8 +1127,8 @@ macro_rules! impl_assign {
 /// the whole implementation.
 macro_rules! impl_binary_owned_lhs {
     ($Op:ident, $method:ident, $AssignOp:ident, $assign:ident, $Rhs:ty) => {
-        impl<'a> $Op<$Rhs> for OxideVec {
-            type Output = OxideVec;
+        impl<'a, T: ScalarCuda> $Op<$Rhs> for OxideVec<T> {
+            type Output = OxideVec<T>;
             fn $method(mut self, rhs: $Rhs) -> Self::Output {
                 $AssignOp::$assign(&mut self, rhs);
                 self
@@ -1119,18 +1142,18 @@ macro_rules! impl_binary_owned_lhs {
 /// the reversed assign kernel (`dest = src - dest`) instead.
 macro_rules! impl_binary_owned_rhs {
     (commutes, $Op:ident, $method:ident, $AssignOp:ident, $assign:ident, $Lhs:ty, $label:expr) => {
-        impl<'a> $Op<OxideVec> for $Lhs {
-            type Output = OxideVec;
-            fn $method(self, mut rhs: OxideVec) -> Self::Output {
+        impl<'a, T: ScalarCuda> $Op<OxideVec<T>> for $Lhs {
+            type Output = OxideVec<T>;
+            fn $method(self, mut rhs: OxideVec<T>) -> Self::Output {
                 $AssignOp::$assign(&mut rhs, self);
                 rhs
             }
         }
     };
     (noncommutes, $Op:ident, $method:ident, $AssignOp:ident, $assign:ident, $Lhs:ty, $label:expr) => {
-        impl<'a> $Op<OxideVec> for $Lhs {
-            type Output = OxideVec;
-            fn $method(self, mut rhs: OxideVec) -> Self::Output {
+        impl<'a, T: ScalarCuda> $Op<OxideVec<T>> for $Lhs {
+            type Output = OxideVec<T>;
+            fn $method(self, mut rhs: OxideVec<T>) -> Self::Output {
                 let ctx = rhs.context.clone();
                 ctx.assert_broadcastable_into(self.context.nbatch(), $label);
                 let nstates = self.len();
@@ -1146,18 +1169,18 @@ macro_rules! impl_binary_owned_rhs {
 /// Every operand flavour of one operator.
 macro_rules! impl_binary_set {
     ($Op:ident, $method:ident, $AssignOp:ident, $assign:ident, $commutes:ident, $add:expr, $label:expr) => {
-        impl_binary_owned_lhs!($Op, $method, $AssignOp, $assign, OxideVec);
-        impl_binary_owned_lhs!($Op, $method, $AssignOp, $assign, &OxideVec);
-        impl_binary_owned_lhs!($Op, $method, $AssignOp, $assign, OxideVecRef<'a>);
-        impl_binary_owned_lhs!($Op, $method, $AssignOp, $assign, &OxideVecRef<'a>);
-        impl_binary_owned_rhs!($commutes, $Op, $method, $AssignOp, $assign, OxideVecRef<'a>, $label);
-        impl_binary_owned_rhs!($commutes, $Op, $method, $AssignOp, $assign, &OxideVec, $label);
-        impl_binary_ref_ref!(['a], $Op, $method, $add, $label, OxideVecRef<'a>, &OxideVec);
-        impl_binary_ref_ref!(['a, 'b], $Op, $method, $add, $label, OxideVecRef<'a>, OxideVecRef<'b>);
-        impl_binary_ref_ref!(['a, 'b], $Op, $method, $add, $label, OxideVecRef<'a>, &OxideVecRef<'b>);
-        impl_binary_ref_ref!([], $Op, $method, $add, $label, &OxideVec, &OxideVec);
-        impl_binary_ref_ref!(['a], $Op, $method, $add, $label, &OxideVec, OxideVecRef<'a>);
-        impl_binary_ref_ref!(['a], $Op, $method, $add, $label, &OxideVec, &OxideVecRef<'a>);
+        impl_binary_owned_lhs!($Op, $method, $AssignOp, $assign, OxideVec<T>);
+        impl_binary_owned_lhs!($Op, $method, $AssignOp, $assign, &OxideVec<T>);
+        impl_binary_owned_lhs!($Op, $method, $AssignOp, $assign, OxideVecRef<'a, T>);
+        impl_binary_owned_lhs!($Op, $method, $AssignOp, $assign, &OxideVecRef<'a, T>);
+        impl_binary_owned_rhs!($commutes, $Op, $method, $AssignOp, $assign, OxideVecRef<'a, T>, $label);
+        impl_binary_owned_rhs!($commutes, $Op, $method, $AssignOp, $assign, &OxideVec<T>, $label);
+        impl_binary_ref_ref!(['a, T: ScalarCuda], $Op, $method, $add, $label, OxideVecRef<'a, T>, &OxideVec<T>);
+        impl_binary_ref_ref!(['a, 'b, T: ScalarCuda], $Op, $method, $add, $label, OxideVecRef<'a, T>, OxideVecRef<'b, T>);
+        impl_binary_ref_ref!(['a, 'b, T: ScalarCuda], $Op, $method, $add, $label, OxideVecRef<'a, T>, &OxideVecRef<'b, T>);
+        impl_binary_ref_ref!([T: ScalarCuda], $Op, $method, $add, $label, &OxideVec<T>, &OxideVec<T>);
+        impl_binary_ref_ref!(['a, T: ScalarCuda], $Op, $method, $add, $label, &OxideVec<T>, OxideVecRef<'a, T>);
+        impl_binary_ref_ref!(['a, T: ScalarCuda], $Op, $method, $add, $label, &OxideVec<T>, &OxideVecRef<'a, T>);
     };
 }
 
@@ -1165,12 +1188,12 @@ macro_rules! impl_binary_set {
 /// flavours.
 macro_rules! impl_assign_set {
     ($Op:ident, $method:ident, $op:expr, $label:expr) => {
-        impl_assign!([], $Op, $method, $op, $label, OxideVec, &OxideVec, OxideVec);
-        impl_assign!(['a], $Op, $method, $op, $label, OxideVec, &OxideVecRef<'a>, OxideVecRef<'a>);
-        impl_assign!(['a], $Op, $method, $op, $label, OxideVecMut<'a>, &OxideVec, OxideVec);
+        impl_assign!([T: ScalarCuda], $Op, $method, $op, $label, OxideVec<T>, &OxideVec<T>, OxideVec<T>);
+        impl_assign!(['a, T: ScalarCuda], $Op, $method, $op, $label, OxideVec<T>, &OxideVecRef<'a, T>, OxideVecRef<'a, T>);
+        impl_assign!(['a, T: ScalarCuda], $Op, $method, $op, $label, OxideVecMut<'a, T>, &OxideVec<T>, OxideVec<T>);
         impl_assign!(
-            ['a, 'b], $Op, $method, $op, $label,
-            OxideVecMut<'a>, &OxideVecRef<'b>, OxideVecRef<'b>
+            ['a, 'b, T: ScalarCuda], $Op, $method, $op, $label,
+            OxideVecMut<'a, T>, &OxideVecRef<'b, T>, OxideVecRef<'b, T>
         );
     };
 }
@@ -1186,9 +1209,9 @@ impl_assign_set!(SubAssign, sub_assign, AssignOp::Sub, "sub_assign");
 
 macro_rules! impl_mul_scalar_alloc {
     ([$($g:tt)*], $lhs:ty) => {
-        impl<$($g)*> Mul<Scale<f64>> for $lhs {
-            type Output = OxideVec;
-            fn mul(self, rhs: Scale<f64>) -> Self::Output {
+        impl<$($g)*> Mul<Scale<T>> for $lhs {
+            type Output = OxideVec<T>;
+            fn mul(self, rhs: Scale<T>) -> Self::Output {
                 let ctx = self.context.clone();
                 let nstates = self.len();
                 let mut ret = OxideVec::zeros(nstates, ctx.clone());
@@ -1201,14 +1224,14 @@ macro_rules! impl_mul_scalar_alloc {
     };
 }
 
-impl_mul_scalar_alloc!([], &OxideVec);
-impl_mul_scalar_alloc!(['a], OxideVecRef<'a>);
-impl_mul_scalar_alloc!(['a], OxideVecMut<'a>);
+impl_mul_scalar_alloc!([T: ScalarCuda], &OxideVec<T>);
+impl_mul_scalar_alloc!(['a, T: ScalarCuda], OxideVecRef<'a, T>);
+impl_mul_scalar_alloc!(['a, T: ScalarCuda], OxideVecMut<'a, T>);
 
 macro_rules! impl_mul_assign_scalar {
     ([$($g:tt)*], $ty:ty) => {
-        impl<$($g)*> MulAssign<Scale<f64>> for $ty {
-            fn mul_assign(&mut self, rhs: Scale<f64>) {
+        impl<$($g)*> MulAssign<Scale<T>> for $ty {
+            fn mul_assign(&mut self, rhs: Scale<T>) {
                 let ctx = self.context.clone();
                 let nstates = self.len();
                 let dest = self.operand_mut();
@@ -1218,21 +1241,21 @@ macro_rules! impl_mul_assign_scalar {
     };
 }
 
-impl_mul_assign_scalar!([], OxideVec);
-impl_mul_assign_scalar!(['a], OxideVecMut<'a>);
+impl_mul_assign_scalar!([T: ScalarCuda], OxideVec<T>);
+impl_mul_assign_scalar!(['a, T: ScalarCuda], OxideVecMut<'a, T>);
 
-impl Mul<Scale<f64>> for OxideVec {
-    type Output = OxideVec;
-    fn mul(mut self, rhs: Scale<f64>) -> Self::Output {
+impl<T: ScalarCuda> Mul<Scale<T>> for OxideVec<T> {
+    type Output = OxideVec<T>;
+    fn mul(mut self, rhs: Scale<T>) -> Self::Output {
         MulAssign::mul_assign(&mut self, rhs);
         self
     }
 }
 
-impl Div<Scale<f64>> for OxideVec {
-    type Output = OxideVec;
-    fn div(self, rhs: Scale<f64>) -> Self::Output {
-        self.mul(Scale(1.0 / rhs.value()))
+impl<T: ScalarCuda> Div<Scale<T>> for OxideVec<T> {
+    type Output = OxideVec<T>;
+    fn div(self, rhs: Scale<T>) -> Self::Output {
+        self.mul(Scale(T::one() / rhs.value()))
     }
 }
 
@@ -1272,9 +1295,9 @@ impl VectorIndex for OxideIndex {
 // Vector
 // ============================================================
 
-impl Vector for OxideVec {
-    type View<'a> = OxideVecRef<'a>;
-    type ViewMut<'a> = OxideVecMut<'a>;
+impl<T: ScalarCuda> Vector for OxideVec<T> {
+    type View<'a> = OxideVecRef<'a, T>;
+    type ViewMut<'a> = OxideVecMut<'a, T>;
     type Index = OxideIndex;
 
     fn context(&self) -> &Self::C {
@@ -1292,7 +1315,7 @@ impl Vector for OxideVec {
             1,
             "get_index not supported for batched vectors"
         );
-        let mut out = [0.0f64];
+        let mut out = [T::zero()];
         read_at(&self.context.stream, &self.data, index, &mut out)
             .expect("Failed to copy data from device to host");
         out[0]
@@ -1323,7 +1346,7 @@ impl Vector for OxideVec {
         let nbatch = self.context.nbatch();
         let nstates = self.len();
         if nstates == 0 {
-            return 0.0;
+            return T::zero();
         }
         self.context.lk_norm(&self.operand(), nstates, nbatch, k)
     }
@@ -1459,9 +1482,9 @@ impl Vector for OxideVec {
         let cfg = OxideContext::config_1d(n);
         let m = &ctx.module;
         let p = m
-            .prepare_vec_batched_axpy::<f64>(cfg)
+            .prepare_vec_batched_axpy::<T>(cfg)
             .expect("prepare vec_batched_axpy");
-        m.vec_batched_axpy::<f64>(
+        m.vec_batched_axpy::<T>(
             &ctx.stream,
             &p,
             &mut dest.window,
@@ -1500,7 +1523,7 @@ impl Vector for OxideVec {
     fn root_finding(&self, g1: &Self) -> (bool, Self::T, i32) {
         let nstates = self.len();
         if nstates == 0 {
-            return (false, 0.0, -1);
+            return (false, T::zero(), -1);
         }
         let ctx = self.context.clone();
         ctx.assert_broadcastable_into(g1.context.nbatch(), "root_finding");
@@ -1519,7 +1542,7 @@ impl Vector for OxideVec {
         let total = blocks_per_batch as usize * nbatch;
         let stream = &ctx.stream;
         let mut max_vals =
-            DeviceBuffer::<f64>::zeroed(stream, total).expect("Failed to allocate max_vals");
+            DeviceBuffer::<T>::zeroed(stream, total).expect("Failed to allocate max_vals");
         let mut max_idxs =
             DeviceBuffer::<i32>::zeroed(stream, total).expect("Failed to allocate max_idxs");
         let mut flags =
@@ -1530,9 +1553,9 @@ impl Vector for OxideVec {
             let cfg = OxideContext::config_2d(n, nbatch as u32);
             let m = &ctx.module;
             let p = m
-                .prepare_vec_root_finding::<f64>(cfg)
+                .prepare_vec_root_finding::<T>(cfg)
                 .expect("prepare vec_root_finding");
-            m.vec_root_finding::<f64>(
+            m.vec_root_finding::<T>(
                 stream,
                 &p,
                 RowWidth::new(&mut max_vals, blocks_per_batch),
@@ -1552,12 +1575,12 @@ impl Vector for OxideVec {
         let h_max_idxs = max_idxs.to_host_vec(stream).expect("copy max_idxs");
         let h_flags = flags.to_host_vec(stream).expect("copy flags");
 
-        let mut first_result: Option<(bool, f64, i32)> = None;
+        let mut first_result: Option<(bool, T, i32)> = None;
         for b in 0..nbatch {
             let start = b * blocks_per_batch as usize;
             let end = start + blocks_per_batch as usize;
             let found_root = h_flags[start..end].iter().any(|&f| f != 0);
-            let mut max_val = 0.0;
+            let mut max_val = T::zero();
             let mut max_idx = -1;
             for i in start..end {
                 if h_max_vals[i] > max_val {
@@ -1592,9 +1615,9 @@ impl Vector for OxideVec {
         let cfg = OxideContext::config_1d(n);
         let m = &ctx.module;
         let p = m
-            .prepare_vec_assign_at_indices::<f64>(cfg)
+            .prepare_vec_assign_at_indices::<T>(cfg)
             .expect("prepare vec_assign_at_indices");
-        m.vec_assign_at_indices::<f64>(
+        m.vec_assign_at_indices::<T>(
             &ctx.stream,
             &p,
             &mut dest.window,
@@ -1621,9 +1644,9 @@ impl Vector for OxideVec {
         let cfg = OxideContext::config_1d(n);
         let m = &ctx.module;
         let p = m
-            .prepare_vec_copy_from_indices::<f64>(cfg)
+            .prepare_vec_copy_from_indices::<T>(cfg)
             .expect("prepare vec_copy_from_indices");
-        m.vec_copy_from_indices::<f64>(
+        m.vec_copy_from_indices::<T>(
             &ctx.stream,
             &p,
             &mut dest.window,
@@ -1654,10 +1677,8 @@ impl Vector for OxideVec {
         let n = nindices_u32 * nbatch_u32;
         let cfg = OxideContext::config_1d(n);
         let m = &ctx.module;
-        let p = m
-            .prepare_vec_gather::<f64>(cfg)
-            .expect("prepare vec_gather");
-        m.vec_gather::<f64>(
+        let p = m.prepare_vec_gather::<T>(cfg).expect("prepare vec_gather");
+        m.vec_gather::<T>(
             &ctx.stream,
             &p,
             &mut dest.window,
@@ -1687,9 +1708,9 @@ impl Vector for OxideVec {
         let cfg = OxideContext::config_1d(n);
         let m = &ctx.module;
         let p = m
-            .prepare_vec_scatter::<f64>(cfg)
+            .prepare_vec_scatter::<T>(cfg)
             .expect("prepare vec_scatter");
-        m.vec_scatter::<f64>(
+        m.vec_scatter::<T>(
             &ctx.stream,
             &p,
             &mut dest.window,
@@ -1883,9 +1904,9 @@ impl Vector for OxideVec {
 /// The operand shapes a device lane closure needs, and the lane count it runs at.
 ///
 /// Shared by [`Vector::for_each_batch_mut`] and [`Vector::for_each_elem_mut`].
-fn check_lane_operands<const M: usize, const N: usize>(
-    mut_args: &[&mut OxideVec; M],
-    args: &[&OxideVec; N],
+fn check_lane_operands<T: ScalarCuda, const M: usize, const N: usize>(
+    mut_args: &[&mut OxideVec<T>; M],
+    args: &[&OxideVec<T>; N],
     name: &str,
 ) -> IndexType {
     assert!(M > 0, "{name} needs at least one mutable operand");
@@ -1906,9 +1927,9 @@ fn check_lane_operands<const M: usize, const N: usize>(
 }
 
 /// The read-only operands of a lane-closure launch.
-fn lane_args_in<const N: usize>(args: &[&OxideVec; N]) -> LaneArgs<f64, N> {
+fn lane_args_in<T: ScalarCuda, const N: usize>(args: &[&OxideVec<T>; N]) -> LaneArgs<T, N> {
     LaneArgs {
-        ptr: args.map(|a| a.device_ptr() as *const f64),
+        ptr: args.map(|a| a.device_ptr() as *const T),
         nstates: args.map(|a| a.len() as u32),
         nbatch: args.map(|a| a.context.nbatch() as u32),
     }
@@ -1918,15 +1939,15 @@ fn lane_args_in<const N: usize>(args: &[&OxideVec; N]) -> LaneArgs<f64, N> {
 // VectorView / VectorViewMut
 // ============================================================
 
-impl VectorView<'_> for OxideVecRef<'_> {
-    type Owned = OxideVec;
+impl<T: ScalarCuda> VectorView<'_> for OxideVecRef<'_, T> {
+    type Owned = OxideVec<T>;
     fn get_index(&self, index: IndexType) -> Self::T {
         assert_eq!(
             self.context.nbatch(),
             1,
             "get_index not supported for batched views"
         );
-        let mut out = [0.0f64];
+        let mut out = [T::zero()];
         read_at(
             &self.context.stream,
             self.data,
@@ -1955,7 +1976,7 @@ impl VectorView<'_> for OxideVecRef<'_> {
     fn squared_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: Self::T) -> Self::T {
         let nstates = self.nstates;
         if nstates == 0 {
-            return 0.0;
+            return T::zero();
         }
         let ctx = self.context.clone();
         ctx.assert_broadcastable_into(y.context.nbatch(), "squared_norm");
@@ -1976,9 +1997,9 @@ impl VectorView<'_> for OxideVecRef<'_> {
                 cols_per_block,
             } => {
                 let p = m
-                    .prepare_vec_squared_norm_small::<f64>(cfg)
+                    .prepare_vec_squared_norm_small::<T>(cfg)
                     .expect("prepare vec_squared_norm_small");
-                m.vec_squared_norm_small::<f64>(
+                m.vec_squared_norm_small::<T>(
                     &ctx.stream,
                     &p,
                     out,
@@ -2004,9 +2025,9 @@ impl VectorView<'_> for OxideVecRef<'_> {
                 blocks_per_lane,
             } => {
                 let p = m
-                    .prepare_vec_squared_norm::<f64>(cfg)
+                    .prepare_vec_squared_norm::<T>(cfg)
                     .expect("prepare vec_squared_norm");
-                m.vec_squared_norm::<f64>(
+                m.vec_squared_norm::<T>(
                     &ctx.stream,
                     &p,
                     out,
@@ -2027,13 +2048,13 @@ impl VectorView<'_> for OxideVecRef<'_> {
                 .expect("launch vec_squared_norm");
             }
         });
-        max_sum / nstates as f64
+        T::from_f64(max_sum / nstates as f64).unwrap()
     }
 }
 
-impl<'a> VectorViewMut<'a> for OxideVecMut<'a> {
-    type Owned = OxideVec;
-    type View = OxideVecRef<'a>;
+impl<'a, T: ScalarCuda> VectorViewMut<'a> for OxideVecMut<'a, T> {
+    type Owned = OxideVec<T>;
+    type View = OxideVecRef<'a, T>;
     type Index = OxideIndex;
     fn copy_from(&mut self, other: &Self::Owned) {
         let ctx = self.context.clone();
@@ -2320,12 +2341,12 @@ mod tests {
         let mut dest = OxideVec::zeros(nstates, OxideContext::default());
         let map = |[x]: [&[f64]; 1], _lane: usize, i: usize| x[i];
         let combine = |a: f64, b: f64| a + b;
-        let run = |dest: &mut OxideVec| {
+        let run = |dest: &mut OxideVec<f64>| {
             let ins = lane_args_in(&[&x]);
             let arm = if small {
-                launch_reduce_batch_small::<1, _, _>
+                launch_reduce_batch_small::<f64, 1, _, _>
             } else {
-                launch_reduce_batch_large::<1, _, _>
+                launch_reduce_batch_large::<f64, 1, _, _>
             };
             arm(
                 &ctx,
@@ -2357,12 +2378,12 @@ mod tests {
         let mut dest = OxideVec::zeros(1, ctx.clone());
         let map = |[x]: [&[f64]; 1], _lane: usize, i: usize| x[i];
         let combine = |a: f64, b: f64| a + b;
-        let run = |dest: &mut OxideVec| {
+        let run = |dest: &mut OxideVec<f64>| {
             let ins = lane_args_in(&[&x]);
             let arm = if small {
-                launch_reduce_elem_small::<1, _, _>
+                launch_reduce_elem_small::<f64, 1, _, _>
             } else {
-                launch_reduce_elem_large::<1, _, _>
+                launch_reduce_elem_large::<f64, 1, _, _>
             };
             arm(
                 &ctx,
@@ -2558,11 +2579,11 @@ mod tests {
         println!("Vector::axpy (both): {:?}", start.elapsed() / REPS);
     }
 
-    super::super::generate_vector_tests_nonbatched!(cuda_oxide, OxideVec);
+    super::super::generate_vector_tests_nonbatched!(cuda_oxide, OxideVec<f64>);
 
     super::super::generate_vector_tests_batched!(
         cuda_oxide,
-        OxideVec,
+        OxideVec<f64>,
         OxideContext::default().with_nbatch(2),
         OxideContext::default().with_nbatch(3)
     );
