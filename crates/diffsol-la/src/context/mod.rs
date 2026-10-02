@@ -1,6 +1,7 @@
 use crate::{error::LaError, DefaultDenseMatrix, Matrix, Vector};
 
 #[cfg(feature = "cuda")]
+#[allow(deprecated)]
 pub mod cuda;
 
 #[cfg(feature = "cuda-oxide")]

@@ -245,32 +245,37 @@ impl OxideContext {
         count: IndexType,
     ) {
         // cuBLAS has one entry point per scalar type
-        let (alpha, beta) = match T::as_enum() {
-            CudaType::F64 => (alpha.as_f64(), beta.as_f64()),
-        };
-        self.with_blas(|handle| {
-            // SAFETY: the pointers are device pointers in this context, sized as documented
-            // above, and each stride walks `count` lanes inside its own buffer; `nrows`/`ncols`
-            // fit in `c_int` for any matrix that fits in device memory.
-            unsafe {
-                cublas::cublasDgemvStridedBatched(
-                    handle,
+        macro_rules! gemv {
+            ($handle:expr, $f:ident, $t:ty) => {
+                cublas::$f(
+                    $handle,
                     cublas::cublasOperation_t::CUBLAS_OP_N,
                     nrows as c_int,
                     ncols as c_int,
-                    &alpha as *const f64,
-                    a as *const f64,
+                    &alpha as *const T as *const $t,
+                    a as *const $t,
                     nrows as c_int,
                     stride_a,
-                    x as *const f64,
+                    x as *const $t,
                     1,
                     stride_x,
-                    &beta as *const f64,
-                    y as *mut f64,
+                    &beta as *const T as *const $t,
+                    y as *mut $t,
                     1,
                     stride_y,
                     count as c_int,
                 )
+            };
+        }
+        self.with_blas(|handle| {
+            // SAFETY: the pointers are device pointers in this context, sized as documented
+            // above, and each stride walks `count` lanes inside its own buffer; `nrows`/`ncols`
+            // fit in `c_int` for any matrix that fits in device memory. Each arm casts to `T`.
+            unsafe {
+                match T::as_enum() {
+                    CudaType::F32 => gemv!(handle, cublasSgemvStridedBatched, f32),
+                    CudaType::F64 => gemv!(handle, cublasDgemvStridedBatched, f64),
+                }
                 .result()
                 .expect("Failed to launch batched gemv");
             }
@@ -295,32 +300,37 @@ impl OxideContext {
         stride_y: i64,
         count: IndexType,
     ) {
-        let (alpha, beta) = match T::as_enum() {
-            CudaType::F64 => (alpha.as_f64(), beta.as_f64()),
-        };
-        self.with_blas(|handle| {
-            // SAFETY: as `Self::gemv_batched`, with `x` and `y` holding `k` columns per lane.
-            unsafe {
-                cublas::cublasDgemmStridedBatched(
-                    handle,
+        macro_rules! gemm {
+            ($handle:expr, $f:ident, $t:ty) => {
+                cublas::$f(
+                    $handle,
                     cublas::cublasOperation_t::CUBLAS_OP_N,
                     cublas::cublasOperation_t::CUBLAS_OP_N,
                     nrows as c_int,
                     k as c_int,
                     ncols as c_int,
-                    &alpha as *const f64,
-                    a as *const f64,
+                    &alpha as *const T as *const $t,
+                    a as *const $t,
                     nrows as c_int,
                     stride_a,
-                    x as *const f64,
+                    x as *const $t,
                     ncols as c_int,
                     stride_x,
-                    &beta as *const f64,
-                    y as *mut f64,
+                    &beta as *const T as *const $t,
+                    y as *mut $t,
                     nrows as c_int,
                     stride_y,
                     count as c_int,
                 )
+            };
+        }
+        self.with_blas(|handle| {
+            // SAFETY: as `Self::gemv_batched`, with `x` and `y` holding `k` columns per lane.
+            unsafe {
+                match T::as_enum() {
+                    CudaType::F32 => gemm!(handle, cublasSgemmStridedBatched, f32),
+                    CudaType::F64 => gemm!(handle, cublasDgemmStridedBatched, f64),
+                }
                 .result()
                 .expect("Failed to launch batched gemm");
             }
@@ -412,8 +422,8 @@ fn gcd(a: IndexType, b: IndexType) -> IndexType {
     }
 }
 
-impl DefaultSolver for OxideMat<f64> {
-    type LS = OxideLU;
+impl<T: ScalarCuda> DefaultSolver for OxideMat<T> {
+    type LS = OxideLU<T>;
 }
 
 impl<T: ScalarCuda> MatrixCommon for OxideMat<T> {
@@ -1178,6 +1188,7 @@ mod tests {
     }
 
     super::super::generate_matrix_tests_nonbatched!(cuda_oxide, OxideMat<f64>);
+    super::super::generate_matrix_tests_nonbatched!(cuda_oxide_f32, OxideMat<f32>);
 
     super::super::generate_matrix_tests_batched!(
         cuda_oxide,
@@ -1185,12 +1196,25 @@ mod tests {
         OxideContext::default(),
         OxideContext::default().with_nbatch(2)
     );
+    super::super::generate_matrix_tests_batched!(
+        cuda_oxide_f32,
+        OxideMat<f32>,
+        OxideContext::default(),
+        OxideContext::default().with_nbatch(2)
+    );
 
     super::super::generate_dense_matrix_tests_nonbatched!(cuda_oxide, OxideMat<f64>);
+    super::super::generate_dense_matrix_tests_nonbatched!(cuda_oxide_f32, OxideMat<f32>);
 
     super::super::generate_dense_matrix_tests_batched!(
         cuda_oxide,
         OxideMat<f64>,
+        OxideContext::default(),
+        OxideContext::default().with_nbatch(2)
+    );
+    super::super::generate_dense_matrix_tests_batched!(
+        cuda_oxide_f32,
+        OxideMat<f32>,
         OxideContext::default(),
         OxideContext::default().with_nbatch(2)
     );

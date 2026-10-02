@@ -469,14 +469,18 @@ use op::{
 };
 
 #[cfg(feature = "cuda")]
+#[allow(deprecated)]
 pub use diffsol_la::CudaContext;
 #[cfg(feature = "cuda")]
+#[allow(deprecated)]
 pub use diffsol_la::CudaMat;
 #[cfg(feature = "cuda")]
+#[allow(deprecated)]
 pub use diffsol_la::{CudaIndex, CudaVec, CudaVecMut, CudaVecRef};
 #[cfg(any(feature = "cuda", feature = "cuda-oxide"))]
 pub use diffsol_la::{CudaType, ScalarCuda};
 #[cfg(feature = "cuda")]
+#[allow(deprecated)]
 pub use linear_solver::CudaLU;
 
 #[cfg(feature = "cuda-oxide")]

@@ -658,9 +658,16 @@ mod tests {
     }
 
     super::super::generate_matrix_tests_nonbatched!(faer_sparse, FaerSparseMat<f64>);
+    super::super::generate_matrix_tests_nonbatched!(faer_sparse_f32, FaerSparseMat<f32>);
     super::super::generate_matrix_tests_batched!(
         faer_sparse,
         FaerSparseMat<f64>,
+        FaerContext::default(),
+        FaerContext::with_nbatch(2)
+    );
+    super::super::generate_matrix_tests_batched!(
+        faer_sparse_f32,
+        FaerSparseMat<f32>,
         FaerContext::default(),
         FaerContext::with_nbatch(2)
     );

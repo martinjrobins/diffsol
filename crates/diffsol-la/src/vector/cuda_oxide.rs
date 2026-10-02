@@ -2580,10 +2580,17 @@ mod tests {
     }
 
     super::super::generate_vector_tests_nonbatched!(cuda_oxide, OxideVec<f64>);
+    super::super::generate_vector_tests_nonbatched!(cuda_oxide_f32, OxideVec<f32>);
 
     super::super::generate_vector_tests_batched!(
         cuda_oxide,
         OxideVec<f64>,
+        OxideContext::default().with_nbatch(2),
+        OxideContext::default().with_nbatch(3)
+    );
+    super::super::generate_vector_tests_batched!(
+        cuda_oxide_f32,
+        OxideVec<f32>,
         OxideContext::default().with_nbatch(2),
         OxideContext::default().with_nbatch(3)
     );

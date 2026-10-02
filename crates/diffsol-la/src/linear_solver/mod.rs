@@ -10,6 +10,7 @@ pub mod faer;
 pub mod suitesparse;
 
 #[cfg(feature = "cuda")]
+#[allow(deprecated)]
 pub mod cuda;
 
 #[cfg(feature = "cuda-oxide")]
@@ -44,6 +45,31 @@ pub trait LinearSolver<M: Matrix>: Default {
 
     fn solve_in_place(&self, b: &mut M::V) -> Result<(), LaError>;
 }
+
+/// The shared [LinearSolver] tests for solver `$LS` on matrix `$M`, with `$ctx2` a context of
+/// two batches.
+#[cfg(test)]
+macro_rules! generate_lu_tests {
+    ($suffix:ident, $M:ty, $LS:ty, $ctx2:expr) => {
+        paste::paste! {
+            #[test]
+            fn [<test_lu_ $suffix>]() {
+                $crate::linear_solver::tests::test_diagonal_lu_solve::<$M, $LS>();
+            }
+            #[test]
+            fn [<test_grouped_lu_ $suffix>]() {
+                $crate::linear_solver::tests::test_grouped_lu_solve::<$M, $LS>($ctx2);
+            }
+            #[test]
+            #[should_panic(expected = "incompatible nbatch")]
+            fn [<test_narrow_state_lu_ $suffix>]() {
+                $crate::linear_solver::tests::test_narrow_state_lu_solve::<$M, $LS>($ctx2);
+            }
+        }
+    };
+}
+#[cfg(test)]
+pub(crate) use generate_lu_tests;
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -92,6 +118,22 @@ pub(crate) mod tests {
         }
     }
 
+    /// Solve `diag(2, 2) x = (2, 4)`.
+    pub fn test_diagonal_lu_solve<M: Matrix, LS: LinearSolver<M>>() {
+        use num_traits::FromPrimitive;
+        let f = |x: f64| M::T::from_f64(x).unwrap();
+        let op = diagonal_op::<M>(2.0);
+        let mut s = LS::default();
+        s.set_sparsity(&op);
+        s.set_linearisation(&op);
+        let b = M::V::from_vec(vec![f(2.0), f(4.0)], Default::default());
+        let x = s.solve(&b).unwrap();
+        x.assert_eq_eps(
+            &M::V::from_vec(vec![f(1.0), f(2.0)], Default::default()),
+            100.0,
+        );
+    }
+
     /// One factorization per group: `A` carries 2 batches and the right-hand side 4, so
     /// batches 0 and 1 solve against `A_0` and batches 2 and 3 against `A_1`.  A cyclic
     /// mapping would pair batch 1 with `A_1` and fail.
@@ -118,7 +160,7 @@ pub(crate) mod tests {
             ],
             wide,
         );
-        x.assert_eq_st(&expected, f(1e-10));
+        x.assert_eq_eps(&expected, 100.0);
     }
 
     /// More factorizations than right-hand side batches would leave factorizations unused, so

@@ -11,6 +11,7 @@ pub mod faer_serial;
 pub mod nalgebra_serial;
 
 #[cfg(feature = "cuda")]
+#[allow(deprecated)]
 pub mod cuda;
 
 #[cfg(feature = "cuda-oxide")]
@@ -562,6 +563,14 @@ pub trait Vector:
     fn assert_eq_st(&self, other: &Self, tol: Self::T) {
         let tol = vec![tol; self.total_len()];
         Self::assert_eq_vec(self.clone_as_vec(), other.clone_as_vec(), tol);
+    }
+
+    /// Assert that this vector equals `other` within `factor` machine epsilons of `Self::T`.
+    fn assert_eq_eps(&self, other: &Self, factor: f64) {
+        self.assert_eq_st(
+            other,
+            Self::T::EPSILON * num_traits::FromPrimitive::from_f64(factor).unwrap(),
+        );
     }
 
     /// Assert that this vector equals `other` using a weighted norm (same as used by ODE solvers).
@@ -1315,6 +1324,11 @@ pub(crate) mod tests {
         xs.iter().map(|&x| f::<V>(x)).collect()
     }
 
+    /// `factor` machine epsilons of `V::T`.
+    fn eps<V: Vector>(factor: f64) -> V::T {
+        V::T::EPSILON * f::<V>(factor)
+    }
+
     /// `Index`/`IndexMut` operator syntax: only the host backends offer it, so this isn't wired
     /// into the shared (CUDA-inclusive) macro suite.
     pub fn test_host_only<V>()
@@ -1426,14 +1440,14 @@ pub(crate) mod tests {
         let v = V::from_vec(fv::<V>(&[3.0, 4.0]), Default::default());
         let norm = v.norm(2);
         let diff = norm - f::<V>(5.0);
-        assert!(num_traits::abs(diff) < f::<V>(1e-12));
+        assert!(num_traits::abs(diff) < eps::<V>(100.0));
     }
 
     pub fn test_norm_l1<V: Vector>() {
         let v = V::from_vec(fv::<V>(&[3.0, -4.0]), Default::default());
         let norm = v.norm(1);
         let diff = norm - f::<V>(7.0);
-        assert!(num_traits::abs(diff) < f::<V>(1e-12));
+        assert!(num_traits::abs(diff) < eps::<V>(100.0));
     }
 
     pub fn test_squared_norm<V: Vector>() {
@@ -1446,7 +1460,7 @@ pub(crate) mod tests {
         let err0 = f::<V>(1.0) / denom;
         let err1 = f::<V>(2.0) / denom;
         let expected = (err0 * err0 + err1 * err1) / f::<V>(2.0);
-        assert!(num_traits::abs(norm - expected) < f::<V>(1e-12));
+        assert!(num_traits::abs(norm - expected) < eps::<V>(100.0));
     }
 
     pub fn test_fill<V: Vector>() {
@@ -1599,7 +1613,7 @@ pub(crate) mod tests {
         let err0 = f::<V>(1.0) / denom;
         let err1 = f::<V>(2.0) / denom;
         let expected = (err0 * err0 + err1 * err1) / f::<V>(2.0);
-        assert!(num_traits::abs(norm - expected) < f::<V>(1e-12));
+        assert!(num_traits::abs(norm - expected) < eps::<V>(100.0));
     }
 
     pub fn test_view_into_owned<V: Vector>() {
@@ -1712,7 +1726,7 @@ pub(crate) mod tests {
         let v = V::from_vec(fv::<V>(&[1.0, 0.0, 0.0, 3.0]), ctx);
         let norm = v.norm(2);
         let diff = norm - f::<V>(3.0);
-        assert!(num_traits::abs(diff) < f::<V>(1e-12));
+        assert!(num_traits::abs(diff) < eps::<V>(100.0));
     }
 
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
@@ -1722,7 +1736,7 @@ pub(crate) mod tests {
         let norm = v.norm(1);
         // batch0: |1|+|-2| = 3, batch1: |3|+|0| = 3, max = 3
         let diff = norm - f::<V>(3.0);
-        assert!(num_traits::abs(diff) < f::<V>(1e-12));
+        assert!(num_traits::abs(diff) < eps::<V>(100.0));
     }
 
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
@@ -1738,7 +1752,7 @@ pub(crate) mod tests {
         let err4 = f::<V>(4.0) / denom;
         let batch1 = (err3 * err3 + err4 * err4) / f::<V>(2.0);
         let diff = norm - batch1;
-        assert!(num_traits::abs(diff) < f::<V>(1e-12));
+        assert!(num_traits::abs(diff) < eps::<V>(100.0));
     }
 
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
@@ -2018,7 +2032,7 @@ pub(crate) mod tests {
         let mut sums_host = V::zeros(1, ctx);
         V::reduce_elem(&mut sums, [&x], f::<V>(0.0), pick, sum);
         V::reduce_elem_host(&mut sums_host, [&x], f::<V>(0.0), pick, sum);
-        sums.assert_eq_st(&sums_host, f::<V>(1e-9));
+        sums.assert_eq_eps(&sums_host, 100.0);
     }
 
     /// The host reductions take `FnMut`, so a closure may carry state across calls.

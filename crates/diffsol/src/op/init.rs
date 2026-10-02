@@ -209,6 +209,7 @@ mod tests {
     }
 
     #[cfg(feature = "cuda")]
+    #[allow(deprecated)]
     #[test]
     fn test_initop_batched() {
         use crate::{

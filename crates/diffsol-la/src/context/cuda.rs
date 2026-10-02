@@ -9,7 +9,12 @@ use cudarc::{
     nvrtc::Ptx,
 };
 
-use crate::{cuda_error, error::LaError, ScalarCuda};
+use crate::{cuda_error, error::LaError, CudaType, ScalarCuda};
+
+/// The kernels and library calls of this backend are f64 only.
+pub(crate) fn assert_f64<T: ScalarCuda>() {
+    assert!(matches!(T::as_enum(), CudaType::F64), "f32 is not supported by the deprecated `cuda` backend, use `cuda-oxide` instead");
+}
 
 static DEVICES: LazyLock<Mutex<CudaGlobalContext>> =
     LazyLock::new(|| Mutex::new(CudaGlobalContext::new()));
@@ -38,6 +43,10 @@ impl CudaGlobalContext {
 /// launches.  All vectors and matrices created with this context share the
 /// same batch dimension.
 #[derive(Clone, Debug)]
+#[deprecated(
+    since = "0.2.1",
+    note = "the `cuda` backend is deprecated, use the `cuda-oxide` backend (`OxideContext`, `OxideVec`, `OxideMat`, `OxideLU`) instead"
+)]
 pub struct CudaContext {
     pub(crate) stream: Arc<CudaStream>,
     nbatch: usize,
@@ -109,6 +118,7 @@ impl CudaContext {
     }
 
     pub(crate) fn function<T: ScalarCuda>(&self, kernel_name: &str) -> CudaFunction {
+        assert_f64::<T>();
         let ordinal = self.stream.context().ordinal();
         let (_device, module) =
             Self::get_device_and_module(ordinal).expect("Failed to get device and module");

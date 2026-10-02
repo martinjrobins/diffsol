@@ -30,6 +30,10 @@ use super::{
 /// Device memory: [b0(all), b1(all), ..., bN(all)]
 /// ```
 #[derive(Clone, Debug)]
+#[deprecated(
+    since = "0.2.1",
+    note = "the `cuda` backend is deprecated, use the `cuda-oxide` backend (`OxideContext`, `OxideVec`, `OxideMat`, `OxideLU`) instead"
+)]
 pub struct CudaMat<T: ScalarCuda> {
     pub(crate) data: CudaSlice<T>,
     pub(crate) context: CudaContext,
@@ -49,6 +53,7 @@ impl CudaContext {
         x: &CudaView<'_, T>,
         y: &mut CudaViewMut<'_, T>,
     ) {
+        crate::context::cuda::assert_f64::<T>();
         let (a, _) = a.device_ptr(&self.stream);
         let (x, _) = x.device_ptr(&self.stream);
         let (y, _) = y.device_ptr_mut(&self.stream);
