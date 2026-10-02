@@ -28,7 +28,7 @@ mod oxide {
             $(
                 for &nbatch in NBATCH {
                     let (problem, t_evals) =
-                        common::setup_problem!($problem::<OxideMat, $n>(nbatch));
+                        common::setup_problem!($problem::<OxideMat<f64>, $n>(nbatch));
                     let id = format!("oxide_bdf/n{}_nbatch{}", $n, nbatch);
                     $g.bench_function(id, |b| {
                         b.iter(|| {
@@ -59,7 +59,7 @@ mod oxide {
             g.sample_size(20);
             for &nbatch in &[1usize, 10, 100, 1000] {
                 let (problem, t_evals) =
-                    common::setup_problem!(robertson_ode_elem_problem::<OxideMat>(nbatch));
+                    common::setup_problem!(robertson_ode_elem_problem::<OxideMat<f64>>(nbatch));
                 g.bench_function(format!("oxide_bdf/nbatch{nbatch}"), |b| {
                     b.iter(|| {
                         common::bdf::<_, OxideLU>(&problem, &t_evals);

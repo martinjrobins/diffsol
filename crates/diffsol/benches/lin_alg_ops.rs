@@ -1417,11 +1417,11 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     #[cfg(feature = "cuda-oxide")]
     {
-        bench_vector_backend!(c, "cuda_oxide", OxideVec);
-        bench_matrix_backend!(c, "cuda_oxide", OxideMat);
-        bench_dense_matrix_backend!(c, "cuda_oxide", OxideMat);
-        bench_batched_matrix_backend!(c, "cuda_oxide", OxideMat);
-        bench_lu_backend!(c, "cuda_oxide", OxideMat, OxideLU);
+        bench_vector_backend!(c, "cuda_oxide", OxideVec<f64>);
+        bench_matrix_backend!(c, "cuda_oxide", OxideMat<f64>);
+        bench_dense_matrix_backend!(c, "cuda_oxide", OxideMat<f64>);
+        bench_batched_matrix_backend!(c, "cuda_oxide", OxideMat<f64>);
+        bench_lu_backend!(c, "cuda_oxide", OxideMat<f64>, OxideLU);
     }
 }
 

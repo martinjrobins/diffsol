@@ -90,7 +90,7 @@ pub struct OxideLU {
     /// cuSOLVER's per-lane `info` output. Written by the device, so it needs
     /// interior mutability to be filled from `&self` in `solve_in_place`.
     nfo: Option<RefCell<DeviceBuffer<i32>>>,
-    matrix: Option<OxideMat>,
+    matrix: Option<OxideMat<f64>>,
     handle: cusolverDnHandle_t,
     linearisation_set: bool,
     /// One pointer per matrix lane, for the batched calls. Built in `set_sparsity`.
@@ -183,7 +183,13 @@ impl OxideLU {
     }
 
     /// Device array of `nbatch` pointers into `x`, one per lane.
-    fn solve_x_ptrs(&self, ctx: &OxideContext, x: &OxideVec, nstates: usize, nbatch: usize) -> u64 {
+    fn solve_x_ptrs(
+        &self,
+        ctx: &OxideContext,
+        x: &OxideVec<f64>,
+        nstates: usize,
+        nbatch: usize,
+    ) -> u64 {
         let base = x.data.cu_deviceptr();
         let mut slots = self.x_ptrs.borrow_mut();
         let slot = match slots.iter().position(|s| s.nbatch == nbatch) {
@@ -248,8 +254,10 @@ impl OxideLU {
     }
 }
 
-impl LinearSolver<OxideMat> for OxideLU {
-    fn set_sparsity<C: LinearOp<T = f64, V = OxideVec, M = OxideMat, C = OxideContext>>(
+impl LinearSolver<OxideMat<f64>> for OxideLU {
+    fn set_sparsity<
+        C: LinearOp<T = f64, V = OxideVec<f64>, M = OxideMat<f64>, C = OxideContext>,
+    >(
         &mut self,
         op: &C,
     ) {
@@ -297,7 +305,9 @@ impl LinearSolver<OxideMat> for OxideLU {
         self.linearisation_set = false;
     }
 
-    fn set_linearisation<C: LinearOp<T = f64, V = OxideVec, M = OxideMat, C = OxideContext>>(
+    fn set_linearisation<
+        C: LinearOp<T = f64, V = OxideVec<f64>, M = OxideMat<f64>, C = OxideContext>,
+    >(
         &mut self,
         op: &C,
     ) {
@@ -378,7 +388,7 @@ impl LinearSolver<OxideMat> for OxideLU {
         self.linearisation_set = true;
     }
 
-    fn solve_in_place(&self, x: &mut OxideVec) -> Result<(), LaError> {
+    fn solve_in_place(&self, x: &mut OxideVec<f64>) -> Result<(), LaError> {
         let matrix = if let Some(ref matrix) = self.matrix {
             if matrix.nrows() != matrix.ncols() {
                 Err(linear_solver_error!(LinearSolverMatrixNotSquare))?;
@@ -482,7 +492,7 @@ mod tests {
     #[test]
     fn test_lu() {
         let mut s = OxideLU::default();
-        let op = diagonal_op::<OxideMat>(2.0);
+        let op = diagonal_op::<OxideMat<f64>>(2.0);
         s.set_sparsity(&op);
         s.set_linearisation(&op);
         let b = OxideVec::from_vec(vec![2.0, 4.0], Default::default());
@@ -497,7 +507,7 @@ mod tests {
     #[test]
     fn test_batched_lu() {
         let ctx = OxideContext::default().with_nbatch(4);
-        let op = batched_diagonal_op::<OxideMat>(&[2.0, 4.0, 5.0, 8.0], ctx.clone());
+        let op = batched_diagonal_op::<OxideMat<f64>>(&[2.0, 4.0, 5.0, 8.0], ctx.clone());
         let mut s = OxideLU::default();
         s.set_sparsity(&op);
         s.set_linearisation(&op);
@@ -513,7 +523,7 @@ mod tests {
     #[test]
     fn test_cusolver_factor_batched_solve() {
         let ctx = OxideContext::default();
-        let op = diagonal_op_n::<OxideMat>(BATCHED_SMALL_N + 4, 2.0, ctx);
+        let op = diagonal_op_n::<OxideMat<f64>>(BATCHED_SMALL_N + 4, 2.0, ctx);
         let mut s = OxideLU::default();
         s.set_sparsity(&op);
         s.set_linearisation(&op);
@@ -529,11 +539,13 @@ mod tests {
     #[test]
     #[should_panic(expected = "incompatible nbatch")]
     fn test_narrow_state_lu() {
-        test_narrow_state_lu_solve::<OxideMat, OxideLU>(OxideContext::default().with_nbatch(2));
+        test_narrow_state_lu_solve::<OxideMat<f64>, OxideLU>(
+            OxideContext::default().with_nbatch(2),
+        );
     }
 
     #[test]
     fn test_grouped_lu() {
-        test_grouped_lu_solve::<OxideMat, OxideLU>(OxideContext::default().with_nbatch(2));
+        test_grouped_lu_solve::<OxideMat<f64>, OxideLU>(OxideContext::default().with_nbatch(2));
     }
 }
