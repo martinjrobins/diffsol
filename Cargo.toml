@@ -29,8 +29,6 @@ nalgebra = "0.35"
 faer = { version = "0.24", default-features = false, features = [
   "std",
   "sparse-linalg",
-  "rand",
-  "npy",
 ] }
 faer-traits = "0.24"
 cudarc = { version = "0.19", default-features = false }
