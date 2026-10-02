@@ -13,7 +13,10 @@ use crate::{cuda_error, error::LaError, CudaType, ScalarCuda};
 
 /// The kernels and library calls of this backend are f64 only.
 pub(crate) fn assert_f64<T: ScalarCuda>() {
-    assert!(matches!(T::as_enum(), CudaType::F64), "f32 is not supported by the deprecated `cuda` backend, use `cuda-oxide` instead");
+    assert!(
+        matches!(T::as_enum(), CudaType::F64),
+        "f32 is not supported by the deprecated `cuda` backend, use `cuda-oxide` instead"
+    );
 }
 
 static DEVICES: LazyLock<Mutex<CudaGlobalContext>> =
