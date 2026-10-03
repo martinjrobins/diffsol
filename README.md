@@ -119,6 +119,9 @@ Contributions are very welcome, as are bug reports! Please see the [contributing
   - [diffsl](https://github.com/martinjrobins/diffsl) - the DiffSL DSL compiler and JIT backends
   - [pydiffsol](https://github.com/alexallmont/pydiffsol) - Python bindings
 - Feel free to submit a pull request with your changes or improvements, but please open an issue first if the change is significant. The [contributing guidelines](CONTRIBUTING.md) describe how to set up a development environment, run tests, and format code.
+- You can use a chatbot or agent to help you, but:
+  - keep all communication on issues/PRs strictly human-only (including LLM output is fine but please mark it as such)
+  - you are expected to fully understand and take responsibility for all code submitted (including any relevant numerical methods)
 
 ## Wanted - Developers for higher-level language wrappers
 
