@@ -72,6 +72,8 @@ pub enum OdeSolverError {
     StepSizeTooSmall { time: f64 },
     #[error("Sensitivity requested but equations do not support it")]
     SensitivityNotSupported,
+    #[error("Integrated outputs are not supported by this solver")]
+    IntegratedOutputNotSupported,
     #[error("A reset operator requires a root operator to propagate sensitivities")]
     ResetRequiresRootOperator,
     #[error("Failed to get mutable reference to equations. If there is a solver created with this problem, call solver.take_state() to release the problem")]

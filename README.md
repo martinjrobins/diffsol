@@ -92,16 +92,16 @@ The following ODE solvers are available in diffsol
 1. A variable order Backwards Difference Formulae (BDF) solver, suitable for stiff problems and singular mass matrices. The basic algorithm is derived in [(Byrne & Hindmarsh, 1975)](#1), however this particular implementation follows that implemented in the Matlab routine ode15s [(Shampine & Reichelt, 1997)](#4) and the SciPy implementation [(Virtanen et al., 2020)](#5), which features the NDF formulas for improved stability
 2. A Singly Diagonally Implicit Runge-Kutta (SDIRK or ESDIRK) solver, suitable for moderately stiff problems and singular mass matrices. Two different butcher tableau are provided, TR-BDF2 [(Hosea & Shampine, 1996)](#2) and ESDIRK34 [(Jørgensen et al., 2018)](#3), or users can supply their own.
 3. A variable order Explict Runge-Kutta (ERK) solver, suitable for non-stiff problems. One butcher tableau is provided, the 4th order TSIT45 [(Tsitouras, 2011)](#5), or users can supply their own.
+4. Rodas5P, an eight-stage, fifth-order Rosenbrock-Wanner solver with a fourth-order embedded estimate and dense extension [(Steinebach, 2023)](https://doi.org/10.1007/s10543-023-00967-x). This implementation supports ODEs and constant-mass-matrix DAEs of index at most one with a Jacobian action. Its default constructor computes a consistent initial state for mass-matrix problems. Use `set_discontinuity_stop_time` for a known jump in the right-hand side; ordinary output times use `set_stop_time`. Integrated outputs and augmented sensitivities are not yet supported. The tests reproduce the paper's fixed-step index-1 DAE and Prothero-Robinson results and its DAE polynomial dense-output case.
 
-All solvers feature:
+Common solver capabilities include:
 
 - Linear algebra containers and linear solvers from the nalgebra or faer crates, including both dense and sparse matrix support.
-- Adaptive step-size control to given relative and absolute tolerances. Tolerances can be set separately for the main equations, quadrature of the output function, and sensitivity analysis.
+- Adaptive step-size control to given relative and absolute tolerances. The solvers that support integrated outputs and sensitivities also allow separate tolerances for those quantities.
 - Dense output, interpolating to times provided by the user.
 - Event handling, stopping when a given condition $g_e(t, y , p)$ is met or at a specific time.
-- Numerical quadrature of an optional output $g_o(t, y, p)$ function over time.
-- Forward sensitivity analysis, calculating the gradient of an output function or the solver states $y$ with respect to the parameters $p$.
-- Adjoint sensitivity analysis, calculating the gradient of cost function $G(p)$ with respect to the parameters $p$. The cost function can be the integral of a continuous output function $g(t, y, p)$ or a sum of a set of discrete functions $h_i(t_i, y_i, p)$ at time points $t_i$.
+
+BDF, SDIRK, and ERK also support numerical quadrature of an optional output $g_o(t, y, p)$, forward sensitivities of outputs or solver states with respect to parameters, and adjoint sensitivities of cost functions. Rodas5P does not currently expose those modes.
 
 ## Citation
 

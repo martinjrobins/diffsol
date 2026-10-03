@@ -4,6 +4,7 @@ Once you have defined the problem, you need to create a solver to solve the prob
 - [`diffsol::Bdf`](https://docs.rs/diffsol/latest/diffsol/ode_solver/bdf/struct.Bdf.html): A Backwards Difference Formulae solver, suitable for stiff problems and singular mass matrices.
 - [`diffsol::Sdirk`](https://docs.rs/diffsol/latest/diffsol/ode_solver/sdirk/struct.Sdirk.html) A Singly Diagonally Implicit Runge-Kutta (SDIRK or ESDIRK) solver. You can define your own butcher tableau using [`Tableau`](https://docs.rs/diffsol/latest/diffsol/ode_solver/tableau/struct.Tableau.html) or use one of the pre-defined tableaues.
 - [`diffsol::ExplicitRk`](https://docs.rs/diffsol/latest/diffsol/ode_solver/explicit_rk/struct.ExplicitRk.html): An explicit Runge-Kutta solver. You can define your own butcher tableau using [`Tableau`](https://docs.rs/diffsol/latest/diffsol/ode_solver/tableau/struct.Tableau.html) or use one of the pre-defined tableaues.
+- [`diffsol::Rodas5P`](https://docs.rs/diffsol/latest/diffsol/ode_solver/rodas5p/struct.Rodas5P.html): A fifth-order Rosenbrock-Wanner solver for stiff identity-mass ODEs. This implementation requires a Jacobian action and rejects mass matrices, integrated outputs, and augmented sensitivities. Its embedded estimate and dense output use the published Rodas5P coefficients. Use `set_discontinuity_stop_time(t)` for a known forcing jump at `t`; use `set_stop_time(t)` for ordinary output targets.
 
 For each solver, you will need to specify the linear solver type to use. The available linear solvers are:
 - [`diffsol::NalgebraLU`](https://docs.rs/diffsol/latest/diffsol/linear_solver/nalgebra_lu/struct.NalgebraLU.html): A LU decomposition solver using the [nalgebra](https://nalgebra.org) crate.
@@ -16,4 +17,3 @@ For example:
 ```rust,ignore
 {{#include ../../../examples/intro-logistic-closures/src/create_solvers.rs}}
 ```
-
