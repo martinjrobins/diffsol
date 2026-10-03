@@ -438,12 +438,13 @@ pub use ode_solver::{
     method::OdeSolverStopReason,
     no_checkpointing_solver::NoCheckpointingSolver,
     problem::{InitialConditionSolverOptions, OdeSolverOptions, OdeSolverProblem},
+    rosenbrock::Rosenbrock,
     sdirk::Sdirk,
     sdirk_state::RkState,
     sensitivities::SensitivitiesOdeSolverMethod,
     solution::Solution,
     state::OdeSolverState,
-    tableau::Tableau,
+    tableau::{RosenbrockTableau, Tableau},
     tableau::{TableauMat, TableauVec},
 };
 pub use op::constant_op::{ConstantOp, ConstantOpSens, ConstantOpSensAdjoint};

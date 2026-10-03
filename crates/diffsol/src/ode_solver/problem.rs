@@ -6,7 +6,7 @@ use crate::{
     AugmentedOdeEquationsImplicit, Bdf, BdfState, CheckpointingPath, Context, DefaultDenseMatrix,
     DenseMatrix, ExplicitRk, LinearSolver, MatrixRef, NewtonNonlinearSolver, NoLineSearch,
     OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
-    OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverState, RkState, Scalar, Sdirk,
+    OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverState, RkState, Rosenbrock, Scalar, Sdirk,
     SensEquations, Tableau, VectorRef,
 };
 
@@ -916,6 +916,45 @@ where
     {
         let linear_solver = LS::default();
         Sdirk::new(self, state, tableau, linear_solver)
+    }
+
+    /// Create a Rosenbrock solver with a caller-supplied state and tableau.
+    pub fn rosenbrock_solver<
+        LS: LinearSolver<Eqn::M>,
+        DM: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
+    >(
+        &self,
+        state: RkState<Eqn::V>,
+        tableau: Tableau<Eqn::T>,
+    ) -> Result<Rosenbrock<'_, Eqn, LS, DM>, DiffsolError>
+    where
+        Eqn: OdeEquationsImplicit,
+    {
+        Rosenbrock::new(self, state, tableau, LS::default())
+    }
+    /// Create a fifth-order Rodas5P Rosenbrock solver.
+    pub fn rodas5p<LS: LinearSolver<Eqn::M>>(&self) -> Result<Rosenbrock<'_, Eqn, LS>, DiffsolError>
+    where
+        Eqn: OdeEquationsImplicit,
+    {
+        self.rodas5p_solver(self.rodas5p_state::<LS>()?)
+    }
+    /// Restart a Rodas5P solver from a caller-supplied state.
+    pub fn rodas5p_solver<LS: LinearSolver<Eqn::M>>(
+        &self,
+        state: RkState<Eqn::V>,
+    ) -> Result<Rosenbrock<'_, Eqn, LS>, DiffsolError>
+    where
+        Eqn: OdeEquationsImplicit,
+    {
+        self.rosenbrock_solver(state, Tableau::rodas5p())
+    }
+    /// Create consistent initial conditions and an initial step size for Rodas5P.
+    pub fn rodas5p_state<LS: LinearSolver<Eqn::M>>(&self) -> Result<RkState<Eqn::V>, DiffsolError>
+    where
+        Eqn: OdeEquationsImplicit,
+    {
+        self.rk_state_and_consistent::<LS>(&Tableau::rodas5p())
     }
 
     pub(crate) fn sdirk_solver_aug<

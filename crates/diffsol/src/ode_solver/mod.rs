@@ -10,6 +10,7 @@ pub mod method;
 pub mod no_checkpointing_solver;
 pub mod pi_controller;
 pub mod problem;
+pub mod rosenbrock;
 pub mod runge_kutta;
 pub mod sde;
 pub mod sdirk;
