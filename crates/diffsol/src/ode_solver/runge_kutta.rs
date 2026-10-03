@@ -24,6 +24,18 @@ use super::pi_controller::pi_controller_raw;
 use super::OdeSolverStatistics;
 use std::ops::{MulAssign, SubAssign};
 
+// Five evaluations combine Gauss-3 and Gauss-2; their difference has local order five.
+const ROSENBROCK_OUTPUT_STAGES: usize = 5;
+const ROSENBROCK_OUTPUT_ERROR_ORDER: usize = 5;
+
+#[derive(Clone)]
+struct RosenbrockOutput<T: Scalar> {
+    nodes: [f64; ROSENBROCK_OUTPUT_STAGES],
+    weights: TableauVec<T>,
+    error_weights: TableauVec<T>,
+    beta: TableauMat<T>,
+}
+
 /// A Runge-Kutta method.
 ///
 /// The particular method is defined by the [Tableau] used to create the solver.
@@ -48,6 +60,7 @@ where
     sdiff: M,
     sgdiff: M,
     gdiff: M,
+    rosenbrock_output: Option<Box<RosenbrockOutput<Eqn::T>>>,
     old_state: Box<RkState<Eqn::V>>,
     is_state_mutated: bool,
 
@@ -90,6 +103,7 @@ where
             sdiff: self.sdiff.clone(),
             sgdiff: self.sgdiff.clone(),
             gdiff: self.gdiff.clone(),
+            rosenbrock_output: self.rosenbrock_output.clone(),
             error: self.error.clone(),
             out_error: self.out_error.clone(),
             sens_error: self.sens_error.clone(),
@@ -156,7 +170,7 @@ where
         let gdiff = M::zeros(
             gdiff_rows,
             if tableau.rosenbrock().is_some() {
-                5
+                ROSENBROCK_OUTPUT_STAGES
             } else {
                 order
             },
@@ -187,6 +201,16 @@ where
             is_state_mutated: false,
             diff,
             gdiff,
+            rosenbrock_output: (tableau.rosenbrock().is_some() && problem.integrate_out).then(
+                || {
+                    Box::new(RosenbrockOutput {
+                        nodes: Self::rosenbrock_output_nodes(),
+                        weights: Self::rosenbrock_output_weights(false),
+                        error_weights: Self::rosenbrock_output_weights(true),
+                        beta: Self::rosenbrock_output_beta(),
+                    })
+                },
+            ),
             sdiff: M::zeros(0, 0, ctx.clone()),
             sgdiff: M::zeros(0, 0, ctx.clone()),
             error,
@@ -482,7 +506,7 @@ where
             // Rosenbrock embedded differences have their own local order.
             self.tableau.rosenbrock().map_or(self.order() + 1, |row| {
                 if self.out_error.is_some() {
-                    row.error_order.min(5)
+                    row.error_order.min(ROSENBROCK_OUTPUT_ERROR_ORDER)
                 } else {
                     row.error_order
                 }
@@ -753,7 +777,14 @@ where
     /// Gauss-2 quadrature (local error order five), using preallocated vector storage.
     pub(crate) fn integrate_rosenbrock_outputs(&mut self, h: Eqn::T, scratch: &mut Eqn::V) {
         let out = self.problem.eqn.out().unwrap();
-        for (i, node) in Self::rosenbrock_output_nodes().into_iter().enumerate() {
+        for (i, node) in self
+            .rosenbrock_output
+            .as_ref()
+            .unwrap()
+            .nodes
+            .into_iter()
+            .enumerate()
+        {
             let theta = Eqn::T::from_f64(node).unwrap();
             let weights = Self::interpolate_beta_weights(
                 theta,
@@ -768,7 +799,7 @@ where
         }
         out.call_inplace(&self.old_state.y, self.state.t + h, &mut self.old_state.dg);
     }
-    fn rosenbrock_output_nodes() -> [f64; 5] {
+    fn rosenbrock_output_nodes() -> [f64; ROSENBROCK_OUTPUT_STAGES] {
         let a = (3.0_f64 / 5.0).sqrt() / 2.0;
         let b = 1.0 / (2.0 * 3.0_f64.sqrt());
         [0.5 - a, 0.5 - b, 0.5, 0.5 + b, 0.5 + a]
@@ -784,9 +815,13 @@ where
         // Integrate the Lagrange basis at the five nodes. The resulting polynomial
         // uses the existing beta interpolation path and matches Gauss-3 at theta=1.
         let nodes = Self::rosenbrock_output_nodes();
-        let mut beta = TableauMat::zeros(5, 5);
+        let mut beta = TableauMat::zeros(ROSENBROCK_OUTPUT_STAGES, ROSENBROCK_OUTPUT_STAGES);
         for (i, xi) in nodes.into_iter().enumerate() {
-            let mut coefficients = [1.0, 0.0, 0.0, 0.0, 0.0];
+            let mut coefficients = {
+                let mut c = [0.0; ROSENBROCK_OUTPUT_STAGES];
+                c[0] = 1.0;
+                c
+            };
             let mut degree = 0;
             for (j, xj) in nodes.into_iter().enumerate() {
                 if i == j {
@@ -982,7 +1017,7 @@ where
         if let Some(out_error) = self.out_error.as_mut() {
             // output errors
             let weights = if self.tableau.rosenbrock().is_some() {
-                Self::rosenbrock_output_weights(true)
+                self.rosenbrock_output.as_ref().unwrap().error_weights
             } else {
                 *self.tableau.d()
             };
@@ -1098,7 +1133,7 @@ where
         if self.problem.integrate_out {
             self.old_state.g.copy_from(&self.state.g);
             let weights = if self.tableau.rosenbrock().is_some() {
-                Self::rosenbrock_output_weights(false)
+                self.rosenbrock_output.as_ref().unwrap().weights
             } else {
                 *self.tableau.b()
             };
@@ -1405,11 +1440,12 @@ where
             (t - self.old_state.t) / dt
         };
         let scale_diff = Eqn::T::one();
-        let output_beta = self
-            .tableau
-            .rosenbrock()
-            .map(|_| Self::rosenbrock_output_beta());
-        if let Some(beta_t) = output_beta.as_ref().or_else(|| self.tableau.beta_t()) {
+        if let Some(beta_t) = self
+            .rosenbrock_output
+            .as_ref()
+            .map(|output| &output.beta)
+            .or_else(|| self.tableau.beta_t())
+        {
             let beta_f = Self::interpolate_beta_weights(theta, beta_t, scale_diff);
             Self::interpolate_from_diff(&self.old_state.g, beta_f.as_slice(), &self.gdiff, g);
         } else {

@@ -11,7 +11,10 @@ use num_traits::{One, Signed, ToPrimitive, Zero};
 /// Each attempted step freezes the Jacobian and reuses one linear factorization.
 /// A tableau's continuous extension supplies dense output; otherwise Hermite interpolation is used.
 /// Constant mass matrices are supported for index-1 DAEs with a continuous extension.
-/// Integrated outputs use quadrature along the state continuous extension, which is required.
+/// Integrated outputs use quadrature along the required state continuous extension;
+/// Rodas5P outputs have global order four.
+/// After mutating the state, keep `dy` consistent: Hermite interpolation uses it
+/// as the left-endpoint derivative for tableaus without a continuous extension.
 /// Forward and adjoint sensitivities are not yet implemented for this class.
 pub struct Rosenbrock<'a, Eqn, LS, M = <<Eqn as Op>::V as DefaultDenseMatrix>::M>
 where
@@ -24,6 +27,7 @@ where
     linear_solver: LS,
     op: SdirkCallable<&'a Eqn>,
     ft: Eqn::V,
+    scratch: Eqn::V,
     config: ExplicitRkConfig<Eqn::T>,
 }
 impl<Eqn, LS, M> Clone for Rosenbrock<'_, Eqn, LS, M>
@@ -42,6 +46,7 @@ where
             linear_solver,
             op,
             ft: self.ft.clone(),
+            scratch: self.scratch.clone(),
             config: self.config.clone(),
         }
     }
@@ -125,6 +130,7 @@ where
             rk: Rk::new(problem, state, tableau)?,
             linear_solver,
             op,
+            scratch: ft.clone(),
             ft,
             config: ExplicitRkConfig::new(&problem.ode_options),
         })
@@ -173,6 +179,7 @@ where
         self.rk.order()
     }
     fn jacobian(&self) -> Option<std::cell::Ref<'_, Eqn::M>> {
+        // Evaluate the RHS Jacobian at y, rather than the SDIRK stage phi + c*y.
         self.op.zero_phi();
         Some(self.op.rhs_jac(&self.rk.state().y, self.rk.state().t))
     }
@@ -223,8 +230,9 @@ where
             }
             self.rk.finish_step_rosenbrock(h);
             if self.problem().integrate_out {
-                self.rk.integrate_rosenbrock_outputs(h, &mut self.ft);
+                self.rk.integrate_rosenbrock_outputs(h, &mut self.scratch);
             }
+            // Use diffsol's shared RK error scaling at the starting state, not the endpoint.
             let error = self.rk.error_norm(h, None::<&mut NoAug<Eqn>>, |_| Ok(()))?;
             let factor = self.rk.factor(
                 error,
@@ -263,8 +271,8 @@ where
     fn interpolate_out_inplace(&self, t: Eqn::T, out: &mut Eqn::V) -> Result<(), DiffsolError> {
         self.rk.interpolate_out_inplace(t, out)
     }
-    fn interpolate_sens_inplace(&self, _t: Eqn::T, _out: &mut Eqn::V) -> Result<(), DiffsolError> {
-        self.rk.interpolate_sens_inplace(_t, _out)
+    fn interpolate_sens_inplace(&self, t: Eqn::T, out: &mut Eqn::V) -> Result<(), DiffsolError> {
+        self.rk.interpolate_sens_inplace(t, out)
     }
     fn state_mut_back(&mut self, t: Eqn::T) -> Result<(), DiffsolError> {
         self.rk.state_mut_back(t, self.rk.problem().integrate_out)
@@ -586,5 +594,370 @@ mod tests {
         advance(&mut s, 1.0);
         assert!(s.get_statistics().number_of_error_test_failures > 0);
         assert!((s.state().g[0] - (1.0f64.exp() - 1.0)).abs() < 1e-8);
+    }
+
+    #[test]
+    fn paper_prothero_robinson_problem_two() {
+        const LAMBDA: f64 = 1e5;
+        let g = |t: f64| 10.0 - (10.0 + t) * (-t).exp();
+        let problem = OdeBuilder::<Mat>::new()
+            .rtol(1e-8)
+            .atol([1e-10])
+            .rhs_implicit(
+                |x, _, t, f| {
+                    let g = 10.0 - (10.0 + t) * (-t).exp();
+                    let dg = (9.0 + t) * (-t).exp();
+                    f[0] = -LAMBDA * (x[0] - g) + dg;
+                },
+                |_, _, _, v, jv| jv[0] = -LAMBDA * v[0],
+            )
+            .init(|_, _, y| y[0] = 0.0, 1)
+            .build()
+            .unwrap();
+        let mut solver = problem.rodas5p::<LS>().unwrap();
+        advance(&mut solver, 2.0);
+        let error = (solver.state().y[0] - g(2.0)).abs();
+        assert!(error < 1e-7, "paper problem 2 error={error}");
+    }
+    #[test]
+    fn paper_table_six_fixed_step_errors_and_order() {
+        let published_errors = [1.26e-9, 1.47e-10, 1.78e-11, 2.17e-12];
+        let mut errors = Vec::new();
+        for (h, published) in [0.25, 0.125, 0.0625, 0.03125]
+            .into_iter()
+            .zip(published_errors)
+        {
+            let problem = OdeBuilder::<Mat>::new()
+                .rtol(10.0)
+                .atol([10.0])
+                .rhs_implicit(
+                    |x, _, t, f| {
+                        let g = 10.0 - (10.0 + t) * (-t).exp();
+                        let dg = (9.0 + t) * (-t).exp();
+                        f[0] = -1e5 * (x[0] - g) + dg;
+                    },
+                    |_, _, _, v, jv| jv[0] = -1e5 * v[0],
+                )
+                .init(|_, _, y| y[0] = 0.0, 1)
+                .build()
+                .unwrap();
+            let mut solver = problem.rodas5p::<LS>().unwrap();
+            *solver.state_mut().h = h;
+            solver.config_mut().minimum_timestep_growth = 1.0;
+            solver.config_mut().maximum_timestep_growth = 1.0;
+            advance(&mut solver, 2.0);
+            let exact = 10.0 - 12.0 * (-2.0_f64).exp();
+            let error = (solver.state().y[0] - exact).abs();
+            assert!(
+                (error - published).abs() < 0.2 * published,
+                "h={h}, error={error}, published={published}"
+            );
+            errors.push(error);
+        }
+        for pair in errors.windows(2) {
+            let order = (pair[0] / pair[1]).log2();
+            assert!((order - 3.0).abs() < 0.2, "observed order={order}");
+        }
+    }
+    #[test]
+    fn paper_table_eight_index_two_order_reduction() {
+        let published_errors = [9.00e-5, 2.33e-5, 5.94e-6];
+        let mut errors = Vec::new();
+        for (h, published) in [0.03125, 0.015625, 0.0078125]
+            .into_iter()
+            .zip(published_errors)
+        {
+            let problem = OdeBuilder::<Mat>::new()
+                .t0(1.0)
+                .rtol(10.0)
+                .atol([10.0, 10.0])
+                .rhs_implicit(
+                    |x, _, t, f| {
+                        f[0] = x[1];
+                        f[1] = x[0] * x[0] - 1.0 / (t * t);
+                    },
+                    |x, _, _, v, jv| {
+                        jv[0] = v[1];
+                        jv[1] = 2.0 * x[0] * v[0];
+                    },
+                )
+                .mass(|v, _, _, beta, y| {
+                    y[0] = v[0] + beta * y[0];
+                    y[1] *= beta;
+                })
+                .init(
+                    |_, _, y| {
+                        y[0] = -1.0;
+                        y[1] = 1.0;
+                    },
+                    2,
+                )
+                .build()
+                .unwrap();
+            let mut solver = problem
+                .rodas5p_solver::<LS>(RkState::new(&problem, 5).unwrap())
+                .unwrap();
+            *solver.state_mut().h = h;
+            solver.config_mut().minimum_timestep_growth = 1.0;
+            solver.config_mut().maximum_timestep_growth = 1.0;
+            advance(&mut solver, 2.0);
+            let y = solver.state().y;
+            let error = (y[0] + 0.5).abs().max((y[1] - 0.25).abs());
+            assert!(
+                (error - published).abs() < 0.2 * published,
+                "h={h}, error={error}, published={published}"
+            );
+            errors.push(error);
+        }
+        for pair in errors.windows(2) {
+            let order = (pair[0] / pair[1]).log2();
+            assert!((order - 2.0).abs() < 0.2, "observed order={order}");
+        }
+    }
+    #[test]
+    fn paper_polynomial_dense_output_ode_component() {
+        for degree in 1_i32..=4 {
+            let problem = OdeBuilder::<Mat>::new()
+                .rtol(10.0)
+                .atol([10.0])
+                .rhs_implicit(
+                    move |_, _, t, f| f[0] = f64::from(degree) * t.powi(degree - 1),
+                    |_, _, _, _, jv| jv[0] = 0.0,
+                )
+                .init(|_, _, y| y[0] = 0.0, 1)
+                .build()
+                .unwrap();
+            let mut solver = problem.rodas5p::<LS>().unwrap();
+            *solver.state_mut().h = 2.0;
+            solver.step().unwrap();
+            for t in [0.25_f64, 0.5, 1.0, 1.5, 1.75] {
+                let error = (solver.interpolate(t).unwrap()[0] - t.powi(degree)).abs();
+                assert!(error < 1e-9, "degree={degree}, t={t}, error={error}");
+            }
+        }
+    }
+    #[test]
+    fn paper_index_one_dae_problem_one() {
+        let problem = OdeBuilder::<Mat>::new()
+            .t0(2.0)
+            .rtol(1e-8)
+            .atol([1e-10, 1e-10])
+            .rhs_implicit(
+                |x, _, t, f| {
+                    f[0] = x[1] / x[0];
+                    f[1] = x[0] / x[1] - t;
+                },
+                |x, _, _, v, jv| {
+                    jv[0] = v[1] / x[0] - x[1] * v[0] / x[0].powi(2);
+                    jv[1] = v[0] / x[1] - x[0] * v[1] / x[1].powi(2);
+                },
+            )
+            .mass(|v, _, _, beta, y| {
+                y[0] = v[0] + beta * y[0];
+                y[1] *= beta;
+            })
+            .init(
+                |_, _, y| {
+                    y[0] = 2.0_f64.ln();
+                    y[1] = 2.0_f64.ln() / 2.0;
+                },
+                2,
+            )
+            .build()
+            .unwrap();
+        let mut solver = problem.rodas5p::<LS>().unwrap();
+        advance(&mut solver, 4.0);
+        let y = solver.state().y;
+        assert!((y[0] - 4.0_f64.ln()).abs() < 1e-7);
+        assert!((y[1] - 4.0_f64.ln() / 4.0).abs() < 1e-7);
+        assert!((y[0] / y[1] - 4.0).abs() < 1e-7);
+    }
+    #[test]
+    fn paper_table_five_fixed_step_dae_errors_and_order() {
+        let published_errors = [2.93e-8, 8.56e-10, 2.59e-11];
+        let mut errors = Vec::new();
+        for (h, published) in [0.125, 0.0625, 0.03125].into_iter().zip(published_errors) {
+            let problem = OdeBuilder::<Mat>::new()
+                .t0(2.0)
+                .rtol(10.0)
+                .atol([10.0, 10.0])
+                .rhs_implicit(
+                    |x, _, t, f| {
+                        f[0] = x[1] / x[0];
+                        f[1] = x[0] / x[1] - t;
+                    },
+                    |x, _, _, v, jv| {
+                        jv[0] = v[1] / x[0] - x[1] * v[0] / x[0].powi(2);
+                        jv[1] = v[0] / x[1] - x[0] * v[1] / x[1].powi(2);
+                    },
+                )
+                .mass(|v, _, _, beta, y| {
+                    y[0] = v[0] + beta * y[0];
+                    y[1] *= beta;
+                })
+                .init(
+                    |_, _, y| {
+                        y[0] = 2.0_f64.ln();
+                        y[1] = 2.0_f64.ln() / 2.0;
+                    },
+                    2,
+                )
+                .build()
+                .unwrap();
+            let mut solver = problem.rodas5p::<LS>().unwrap();
+            *solver.state_mut().h = h;
+            solver.config_mut().minimum_timestep_growth = 1.0;
+            solver.config_mut().maximum_timestep_growth = 1.0;
+            advance(&mut solver, 4.0);
+            let y = solver.state().y;
+            let error = (y[0] - 4.0_f64.ln())
+                .abs()
+                .max((y[1] - 4.0_f64.ln() / 4.0).abs());
+            assert!(
+                (error - published).abs() < 0.2 * published,
+                "h={h}, error={error}, published={published}"
+            );
+            errors.push(error);
+        }
+        for pair in errors.windows(2) {
+            let order = (pair[0] / pair[1]).log2();
+            assert!((order - 5.0).abs() < 0.25, "observed order={order}");
+        }
+    }
+    #[test]
+    fn paper_polynomial_dense_output_dae_problem_six() {
+        for degree in 1_i32..=5 {
+            let problem = OdeBuilder::<Mat>::new()
+                .rtol(10.0)
+                .atol([10.0, 10.0])
+                .rhs_implicit(
+                    move |x, _, t, f| {
+                        f[0] = f64::from(degree) * t.powi(degree - 1);
+                        f[1] = x[0] - x[1];
+                    },
+                    |_, _, _, v, jv| {
+                        jv[0] = 0.0;
+                        jv[1] = v[0] - v[1];
+                    },
+                )
+                .mass(|v, _, _, beta, y| {
+                    y[0] = v[0] + beta * y[0];
+                    y[1] *= beta;
+                })
+                .init(
+                    |_, _, y| {
+                        y[0] = 0.0;
+                        y[1] = 0.0;
+                    },
+                    2,
+                )
+                .build()
+                .unwrap();
+            let mut solver = problem.rodas5p::<LS>().unwrap();
+            *solver.state_mut().h = 2.0;
+            solver.step().unwrap();
+            assert!((solver.state().y[0] - 2.0_f64.powi(degree)).abs() < 1e-9);
+            assert!((solver.state().y[1] - 2.0_f64.powi(degree)).abs() < 1e-9);
+            let exact_derivative = f64::from(degree) * 2.0_f64.powi(degree - 1);
+            if degree <= 4 {
+                assert!((solver.state().dy[0] - exact_derivative).abs() < 1e-9);
+                assert!((solver.state().dy[1] - exact_derivative).abs() < 1e-9);
+            }
+            for t in [0.25_f64, 0.5, 1.0, 1.5, 1.75] {
+                let y = solver.interpolate(t).unwrap();
+                let exact = t.powi(degree);
+                for component in 0..2 {
+                    let error = (y[component] - exact).abs();
+                    if degree <= 4 {
+                        assert!(
+                            error < 1e-10,
+                            "degree={degree}, t={t}, component={component}, error={error}"
+                        );
+                    } else if t == 1.0 {
+                        // Table 9: fifth-order endpoint accuracy but only
+                        // fourth-order continuous interpolation.
+                        assert!(
+                            (error - 0.312).abs() < 0.02,
+                            "degree={degree}, component={component}, error={error}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn nonautonomous_constant_mass_dae() {
+        // y0 = sin(t), y1 = y0; f_t acts on the differential equation.
+        let p = OdeBuilder::<Mat>::new()
+            .rtol(1e-8)
+            .atol([1e-10, 1e-10])
+            .rhs_implicit(
+                |x, _, t, f| {
+                    f[0] = -x[0] + t.sin() + t.cos();
+                    f[1] = x[0] - x[1];
+                },
+                |_, _, _, v, jv| {
+                    jv[0] = -v[0];
+                    jv[1] = v[0] - v[1];
+                },
+            )
+            .mass(|v, _, _, beta, y| {
+                y[0] = v[0] + beta * y[0];
+                y[1] *= beta;
+            })
+            .init(
+                |_, _, y| {
+                    y[0] = 0.0;
+                    y[1] = 0.0;
+                },
+                2,
+            )
+            .build()
+            .unwrap();
+        let mut s = p.rodas5p::<LS>().unwrap();
+        advance(&mut s, 1.0);
+        for i in 0..2 {
+            assert!((s.state().y[i] - 1.0f64.sin()).abs() < 1e-7);
+        }
+    }
+    #[test]
+    fn integrated_output_requires_continuous_extension() {
+        let p = sine_problem(0.0, true);
+        let err = p
+            .rosenbrock_solver::<LS, Mat>(p.rodas5p_state::<LS>().unwrap(), euler(1.0, 0.0, 0.0))
+            .err()
+            .unwrap();
+        assert!(matches!(
+            err,
+            DiffsolError::OdeSolverError(OdeSolverError::InvalidTableau(_))
+        ));
+    }
+    fn stability_step(z: f64) -> f64 {
+        let p = OdeBuilder::<Mat>::new()
+            .rtol(1e30)
+            .atol([1e30])
+            .rhs_implicit(
+                move |x, _, _, f| f[0] = z * x[0],
+                move |_, _, _, v, jv| jv[0] = z * v[0],
+            )
+            .init(|_, _, y| y[0] = 1.0, 1)
+            .build()
+            .unwrap();
+        let mut s = p.rodas5p::<LS>().unwrap();
+        *s.state_mut().h = 1.0;
+        s.step().unwrap();
+        s.state().y[0]
+    }
+    #[test]
+    fn rodas5p_transformed_stiff_accuracy_and_l_stability() {
+        let t = Tableau::<f64>::rodas5p();
+        // In transformed form the final correction u8 completes the last stage state:
+        // b = A[7,:] + e8, not b = A[7,:] (the latter has a zero diagonal).
+        for i in 0..8 {
+            assert!((t.b()[i] - t.a(7, i) - if i == 7 { 1.0 } else { 0.0 }).abs() < 1e-15);
+        }
+        assert!(stability_step(-1e8).abs() < 1e-6);
+        assert!(stability_step(-1e14).abs() < 1e-10);
     }
 }
