@@ -11,6 +11,7 @@ pub trait OxideCopy {}
 impl<T> OxideCopy for T {}
 
 pub enum CudaType {
+    F32,
     F64,
 }
 
@@ -21,6 +22,7 @@ pub trait ScalarCuda: Scalar + ValidAsZeroBits + DeviceRepr + OxideCopy {
     }
     fn as_str() -> &'static str {
         match Self::as_enum() {
+            CudaType::F32 => "f32",
             CudaType::F64 => "f64",
         }
     }
@@ -59,5 +61,30 @@ impl ScalarCuda for f64 {
     #[inline(always)]
     fn to_max_bits(self) -> u64 {
         self.to_bits()
+    }
+}
+
+impl ScalarCuda for f32 {
+    fn as_enum() -> CudaType {
+        CudaType::F32
+    }
+    fn as_f64(self) -> f64 {
+        self as f64
+    }
+
+    #[cfg(feature = "cuda-oxide")]
+    #[inline(always)]
+    fn shuffle_xor(self, lane_mask: u32) -> Self {
+        cuda_device::warp::shuffle_xor_f32(self, lane_mask)
+    }
+    #[cfg(feature = "cuda-oxide")]
+    #[inline(always)]
+    fn warp_reduce_sum(self) -> Self {
+        cuda_device::warp::reduce_sum_f32(self)
+    }
+    #[cfg(feature = "cuda-oxide")]
+    #[inline(always)]
+    fn to_max_bits(self) -> u64 {
+        (self as f64).to_bits()
     }
 }

@@ -105,7 +105,7 @@
 //! Additional features:
 //! - `suitesparse` — enable the KLU sparse linear solver.
 //! - `sundials` — enable SUNDIALS support (via the core `diffsol` crate).
-//! - `cuda` — enable CUDA GPU support (via the core `diffsol` crate).
+//! - `cuda` — enable CUDA GPU support (via the core `diffsol` crate). Deprecated.
 //!
 //! ## Utility functions
 //!

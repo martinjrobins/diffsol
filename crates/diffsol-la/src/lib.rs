@@ -32,7 +32,7 @@ pub mod linear_op;
 /// This module defines the [LinearSolver] trait for solving linear systems and provides implementations:
 /// - Direct solvers: [NalgebraLU], [FaerLU], [FaerSparseLU]
 /// - Optional sparse solvers: `KLU` (requires `suitesparse` feature)
-/// - GPU solvers: `CudaLU` (requires `cuda` feature)
+/// - GPU solvers: `OxideLU` (requires `cuda-oxide` feature), `CudaLU` (deprecated, requires `cuda` feature)
 ///
 /// The linear solver is a critical component used internally by nonlinear solvers to solve Newton systems.
 pub mod linear_solver;
@@ -46,7 +46,7 @@ pub mod linear_solver;
 /// Implementations are provided for:
 /// - Dense matrices: [NalgebraMat], [FaerMat]
 /// - Sparse matrices: [FaerSparseMat]
-/// - GPU matrices: `CudaMat` (requires `cuda` feature)
+/// - GPU matrices: `OxideMat` (requires `cuda-oxide` feature), `CudaMat` (deprecated, requires `cuda` feature)
 pub mod matrix;
 
 /// Scalar types and traits.
@@ -55,7 +55,7 @@ pub mod matrix;
 /// It aggregates requirements from nalgebra, faer, and num_traits to ensure compatibility with linear algebra operations.
 ///
 /// Implementations are provided for `f32` and `f64`.
-/// GPU scalar types are available via `ScalarCuda` (requires `cuda` feature).
+/// GPU scalar types are available via `ScalarCuda` (requires `cuda-oxide` or `cuda` feature).
 pub mod scalar;
 
 /// Vector types and traits.
@@ -67,7 +67,7 @@ pub mod scalar;
 /// Implementations are provided for:
 /// - [NalgebraVec] using nalgebra vectors
 /// - [FaerVec] using faer vectors
-/// - `CudaVec` for GPU computation (requires `cuda` feature)
+/// - `OxideVec` for GPU computation (requires `cuda-oxide` feature), `CudaVec` (deprecated, requires `cuda` feature)
 pub mod vector;
 
 pub use error::LaError;
@@ -102,14 +102,18 @@ pub use vector::{
 };
 
 #[cfg(feature = "cuda")]
+#[allow(deprecated)]
 pub use context::cuda::CudaContext;
 #[cfg(feature = "cuda")]
+#[allow(deprecated)]
 pub use linear_solver::cuda::lu::CudaLU;
 #[cfg(feature = "cuda")]
+#[allow(deprecated)]
 pub use matrix::cuda::CudaMat;
 #[cfg(any(feature = "cuda", feature = "cuda-oxide"))]
 pub use scalar::cuda::{CudaType, ScalarCuda};
 #[cfg(feature = "cuda")]
+#[allow(deprecated)]
 pub use vector::cuda::{CudaIndex, CudaVec, CudaVecMut, CudaVecRef};
 
 #[cfg(feature = "cuda-oxide")]

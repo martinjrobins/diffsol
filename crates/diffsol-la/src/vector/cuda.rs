@@ -125,6 +125,10 @@ impl CudaContext {
 /// elements. Batch *b* occupies the range `[b * nstates, (b+1) * nstates)`.
 /// The `len()` method returns the per-batch length `nstates`.
 #[derive(Debug, Clone)]
+#[deprecated(
+    since = "0.2.1",
+    note = "the `cuda` backend is deprecated, use the `cuda-oxide` backend (`OxideContext`, `OxideVec`, `OxideMat`, `OxideLU`) instead"
+)]
 pub struct CudaVec<T: ScalarCuda> {
     pub(crate) data: CudaSlice<T>,
     pub(crate) context: CudaContext,
@@ -133,6 +137,10 @@ pub struct CudaVec<T: ScalarCuda> {
 /// Stores integer indices in GPU memory used by gather/scatter operations.
 /// Indices are shared across all batches.
 #[derive(Debug, Clone)]
+#[deprecated(
+    since = "0.2.1",
+    note = "the `cuda` backend is deprecated, use the `cuda-oxide` backend (`OxideContext`, `OxideVec`, `OxideMat`, `OxideLU`) instead"
+)]
 pub struct CudaIndex {
     pub(crate) data: CudaSlice<c_int>,
     pub(crate) context: CudaContext,
@@ -146,6 +154,10 @@ pub struct CudaIndex {
 /// stride (computed as `data.len() / nbatch`), this enables zero-copy
 /// column views of batched matrices.
 #[derive(Debug)]
+#[deprecated(
+    since = "0.2.1",
+    note = "the `cuda` backend is deprecated, use the `cuda-oxide` backend (`OxideContext`, `OxideVec`, `OxideMat`, `OxideLU`) instead"
+)]
 pub struct CudaVecRef<'a, T: ScalarCuda> {
     pub(crate) data: CudaView<'a, T>,
     pub(crate) context: CudaContext,
@@ -158,6 +170,10 @@ pub struct CudaVecRef<'a, T: ScalarCuda> {
 /// See [`CudaVecRef`] for the layout description; this type adds mutable
 /// access.
 #[derive(Debug)]
+#[deprecated(
+    since = "0.2.1",
+    note = "the `cuda` backend is deprecated, use the `cuda-oxide` backend (`OxideContext`, `OxideVec`, `OxideMat`, `OxideLU`) instead"
+)]
 pub struct CudaVecMut<'a, T: ScalarCuda> {
     pub(crate) data: CudaViewMut<'a, T>,
     pub(crate) context: CudaContext,
@@ -743,6 +759,7 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
                     .expect("Failed to call cublasDnrm2_v2");
                     T::from_f64(result_f64).unwrap()
                 }
+                CudaType::F32 => unimplemented!("f32 is not supported by the deprecated `cuda` backend, use `cuda-oxide` instead"),
             };
             return result;
         }

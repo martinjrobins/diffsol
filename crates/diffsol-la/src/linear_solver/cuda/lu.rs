@@ -13,6 +13,10 @@ use cudarc::{
     driver::{CudaSlice, DevicePtr, DevicePtrMut},
 };
 
+#[deprecated(
+    since = "0.2.1",
+    note = "the `cuda` backend is deprecated, use the `cuda-oxide` backend (`OxideContext`, `OxideVec`, `OxideMat`, `OxideLU`) instead"
+)]
 pub struct CudaLU<T>
 where
     T: ScalarCuda,
@@ -155,6 +159,7 @@ impl<T: ScalarCuda> LinearSolver<CudaMat<T>> for CudaLU<T> {
         &mut self,
         op: &C,
     ) {
+        crate::context::cuda::assert_f64::<T>();
         let ncols = op.ncols();
         let nrows = op.nrows();
         let nbatch = op.context().nbatch();

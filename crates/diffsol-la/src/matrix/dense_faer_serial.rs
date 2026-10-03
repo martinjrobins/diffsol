@@ -735,16 +735,30 @@ mod tests {
     }
 
     super::super::generate_matrix_tests_nonbatched!(faer, FaerMat<f64>);
+    super::super::generate_matrix_tests_nonbatched!(faer_f32, FaerMat<f32>);
     super::super::generate_matrix_tests_batched!(
         faer,
         FaerMat<f64>,
         FaerContext::default(),
         FaerContext::with_nbatch(2)
     );
+    super::super::generate_matrix_tests_batched!(
+        faer_f32,
+        FaerMat<f32>,
+        FaerContext::default(),
+        FaerContext::with_nbatch(2)
+    );
     super::super::generate_dense_matrix_tests_nonbatched!(faer, FaerMat<f64>);
+    super::super::generate_dense_matrix_tests_nonbatched!(faer_f32, FaerMat<f32>);
     super::super::generate_dense_matrix_tests_batched!(
         faer,
         FaerMat<f64>,
+        FaerContext::default(),
+        FaerContext::with_nbatch(2)
+    );
+    super::super::generate_dense_matrix_tests_batched!(
+        faer_f32,
+        FaerMat<f32>,
         FaerContext::default(),
         FaerContext::with_nbatch(2)
     );

@@ -283,6 +283,7 @@ where
 #[cfg(test)]
 mod test {
     #[cfg(feature = "cuda")]
+    #[allow(deprecated)]
     use crate::ode_equations::test_models::exponential_decay::exponential_decay_problem_batched;
     use crate::{
         matrix::dense_nalgebra_serial::NalgebraMat,
@@ -419,6 +420,7 @@ mod test {
     }
 
     #[cfg(feature = "cuda")]
+    #[allow(deprecated)]
     #[test]
     fn test_tsit45_cuda_exponential_decay() {
         let (problem, soln) = exponential_decay_problem::<crate::CudaMat<f64>>(false);
@@ -543,6 +545,7 @@ mod test {
     }
 
     #[cfg(feature = "cuda")]
+    #[allow(deprecated)]
     #[test]
     fn test_tsit45_cuda_exponential_decay_batched() {
         use crate::CudaMat;

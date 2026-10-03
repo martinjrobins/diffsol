@@ -9,6 +9,7 @@ use extract_block::combine;
 use sparsity::{Dense, MatrixSparsity, MatrixSparsityRef};
 
 #[cfg(feature = "cuda")]
+#[allow(deprecated)]
 pub mod cuda;
 
 #[cfg(feature = "cuda-oxide")]

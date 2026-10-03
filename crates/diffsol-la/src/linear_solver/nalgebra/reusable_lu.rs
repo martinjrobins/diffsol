@@ -152,29 +152,19 @@ impl<T: NalgebraScalar> LinearSolver<NalgebraMat<T>> for ReusableLU<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        linear_solver::tests::{diagonal_op, test_grouped_lu_solve, test_narrow_state_lu_solve},
-        Vector,
-    };
 
-    #[test]
-    fn test_grouped_lu() {
-        test_grouped_lu_solve::<NalgebraMat<f64>, ReusableLU<f64>>(NalgebraContext::with_nbatch(2));
-    }
-
-    #[test]
-    fn test_lu() {
-        let mut s = ReusableLU::<f64>::default();
-        let op = diagonal_op::<NalgebraMat<f64>>(2.0);
-        s.set_sparsity(&op);
-        s.set_linearisation(&op);
-        let b = NalgebraVec::from_vec(vec![2.0, 4.0], Default::default());
-        let x = s.solve(&b).unwrap();
-        x.assert_eq_st(
-            &NalgebraVec::from_vec(vec![1.0, 2.0], Default::default()),
-            1e-10,
-        );
-    }
+    crate::linear_solver::generate_lu_tests!(
+        f64,
+        NalgebraMat<f64>,
+        ReusableLU<f64>,
+        NalgebraContext::with_nbatch(2)
+    );
+    crate::linear_solver::generate_lu_tests!(
+        f32,
+        NalgebraMat<f32>,
+        ReusableLU<f32>,
+        NalgebraContext::with_nbatch(2)
+    );
 
     /// A square matrix stored as a [NalgebraMat], built by direct indexing.
     fn make_mat(n: usize, data: &[f64]) -> NalgebraMat<f64> {
@@ -248,13 +238,5 @@ mod tests {
         lu.factor();
         let mut b = nalgebra::DMatrix::<f64>::from_row_slice(2, 1, &[1.0, 2.0]);
         assert!(!lu.solve_block(0, &mut b));
-    }
-
-    #[test]
-    #[should_panic(expected = "incompatible nbatch")]
-    fn test_narrow_state_lu() {
-        test_narrow_state_lu_solve::<NalgebraMat<f64>, ReusableLU<f64>>(
-            NalgebraContext::with_nbatch(2),
-        );
     }
 }

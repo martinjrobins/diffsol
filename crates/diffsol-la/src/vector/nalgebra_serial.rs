@@ -916,9 +916,16 @@ mod tests {
     }
 
     super::super::generate_vector_tests_nonbatched!(nalgebra, NalgebraVec<f64>);
+    super::super::generate_vector_tests_nonbatched!(nalgebra_f32, NalgebraVec<f32>);
     super::super::generate_vector_tests_batched!(
         nalgebra,
         NalgebraVec<f64>,
+        NalgebraContext::with_nbatch(2),
+        NalgebraContext::with_nbatch(3)
+    );
+    super::super::generate_vector_tests_batched!(
+        nalgebra_f32,
+        NalgebraVec<f32>,
         NalgebraContext::with_nbatch(2),
         NalgebraContext::with_nbatch(3)
     );

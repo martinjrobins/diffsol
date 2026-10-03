@@ -8,6 +8,7 @@ pub use diffsol_la::{FaerLU, FaerSparseLU, NalgebraLU, NalgebraNativeLU};
 pub use diffsol_la::KLU;
 
 #[cfg(feature = "cuda")]
+#[allow(deprecated)]
 pub use diffsol_la::CudaLU;
 
 #[cfg(feature = "cuda-oxide")]
@@ -21,6 +22,7 @@ pub use diffsol_la::linear_solver::{faer, nalgebra};
 pub use diffsol_la::linear_solver::suitesparse;
 
 #[cfg(feature = "cuda")]
+#[allow(deprecated)]
 pub use diffsol_la::linear_solver::cuda;
 
 #[cfg(feature = "cuda-oxide")]
@@ -316,6 +318,7 @@ pub mod tests {
     }
 
     #[cfg(feature = "cuda")]
+    #[allow(deprecated)]
     #[test]
     fn test_lu_cuda() {
         use crate::{CudaLU, CudaMat};
@@ -326,6 +329,7 @@ pub mod tests {
     }
 
     #[cfg(feature = "cuda")]
+    #[allow(deprecated)]
     #[test]
     fn test_lu_cuda_batched() {
         use crate::{CudaContext, CudaLU, CudaMat};

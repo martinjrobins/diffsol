@@ -73,6 +73,12 @@ It is useful to compare the GPU batch solves against a CPU parallel implementati
 
 To show the relative performance, we loop over different ensemble sizes and, for each size, time the GPU and CPU solves. We take the median of 15 runs to reduce noise. The results are plotted below.
 
+### Double precision
+
 Below an ensemble size of 100, fixed costs such as kernel launches, allocation, and setup dominate, so GPU execution time is approximately flat for this workload. Between 100 and 500 samples, computation becomes a larger part of the runtime. At 1000 samples, the timing is approximately linear. In this case, the GPU appears to reach its throughput limit before all of its theoretical resident threads are occupied, GPU profiling would be required to confirm the limiting factor here. CPU scaling becomes linear at smaller ensemble sizes because the CPU has fewer workers available for parallel work. Once both CPU and GPU are in the linear regime, the GPU is about twice as fast as the CPU. The A40's relatively low FP64 peak rate, approximately 1/64 of its FP32 rate, is one factor that limits its advantage, others include memory access, kernel structure, and launch overhead.
+
+### Single precision
+
+Here we run the solves with lower tolerances that can be resolved using f32 (`rtol = 1e-4` and `atol = 1e-6` for f32 versus `rtol = 1e-6` and `atol = 1e-8` for f64), so the solver takes fewer steps and is faster than the f64 results for both CPU and GPU. Below an ensemble size of 50 the relative performance of both hardware is similar, but above this value the CPUs are saturated and the scaling moves into the linear regime. The GPU is able to maintain its flat profile at significantly higher ensemble sizes than with f64, and so when it transitions to the linear regime it is almost an order of magnitude faster than the CPU solves, reflecting the A40's much higher FP32 throughput.
 
 {{#include images/gpu_ensemble_scaling.html}}

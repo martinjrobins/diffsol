@@ -1549,6 +1549,7 @@ mod test {
         exponential_decay_problem_batched_sens, exponential_decay_problem_batched_sens_with_reset,
     };
     #[cfg(feature = "cuda")]
+    #[allow(deprecated)]
     use crate::ode_equations::test_models::{
         exponential_decay::{
             exponential_decay_problem_batched, exponential_decay_problem_batched_adjoint,
@@ -1710,6 +1711,7 @@ mod test {
     }
 
     #[cfg(feature = "cuda")]
+    #[allow(deprecated)]
     #[test]
     fn bdf_test_cuda_exponential_decay() {
         use crate::{CudaLU, CudaMat};
@@ -1723,7 +1725,7 @@ mod test {
     fn bdf_test_cuda_oxide_exponential_decay() {
         use crate::{OxideLU, OxideMat};
         let (problem, soln) = exponential_decay_problem::<OxideMat<f64>>(false);
-        let mut s = problem.bdf::<OxideLU>().unwrap();
+        let mut s = problem.bdf::<OxideLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
     }
 
@@ -2462,7 +2464,7 @@ mod test {
     fn test_bdf_cuda_oxide_heat2d_elem() {
         use crate::{OxideLU, OxideMat};
         let (problem, soln) = heat2d_elem_problem::<OxideMat<f64>, 10>(1);
-        let mut s = problem.bdf::<OxideLU>().unwrap();
+        let mut s = problem.bdf::<OxideLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
     }
 
@@ -2471,7 +2473,7 @@ mod test {
     fn test_bdf_cuda_oxide_heat2d_elem_batched() {
         use crate::{OxideLU, OxideMat};
         let (problem, soln) = heat2d_elem_problem::<OxideMat<f64>, 10>(2);
-        let mut s = problem.bdf::<OxideLU>().unwrap();
+        let mut s = problem.bdf::<OxideLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
     }
 
@@ -2480,7 +2482,7 @@ mod test {
     fn test_bdf_cuda_oxide_foodweb_elem() {
         use crate::{OxideLU, OxideMat};
         let (problem, soln) = foodweb_elem_problem::<OxideMat<f64>, 10>(1);
-        let mut s = problem.bdf::<OxideLU>().unwrap();
+        let mut s = problem.bdf::<OxideLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
     }
 
@@ -2489,7 +2491,7 @@ mod test {
     fn test_bdf_cuda_oxide_foodweb_elem_batched() {
         use crate::{OxideLU, OxideMat};
         let (problem, soln) = foodweb_elem_problem::<OxideMat<f64>, 10>(2);
-        let mut s = problem.bdf::<OxideLU>().unwrap();
+        let mut s = problem.bdf::<OxideLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
     }
 
@@ -2498,7 +2500,7 @@ mod test {
     fn test_bdf_cuda_oxide_robertson_ode_elem() {
         use crate::{OxideLU, OxideMat};
         let (problem, soln) = robertson_ode_elem_problem::<OxideMat<f64>>(1);
-        let mut s = problem.bdf::<OxideLU>().unwrap();
+        let mut s = problem.bdf::<OxideLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
     }
 
@@ -2507,7 +2509,7 @@ mod test {
     fn test_bdf_cuda_oxide_robertson_ode_elem_batched() {
         use crate::{OxideLU, OxideMat};
         let (problem, soln) = robertson_ode_elem_problem::<OxideMat<f64>>(4);
-        let mut s = problem.bdf::<OxideLU>().unwrap();
+        let mut s = problem.bdf::<OxideLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
     }
 
@@ -2530,6 +2532,7 @@ mod test {
     }
 
     #[cfg(feature = "cuda")]
+    #[allow(deprecated)]
     #[test]
     fn test_bdf_cuda_exponential_decay_batched() {
         use crate::{CudaLU, CudaMat};
@@ -2544,11 +2547,12 @@ mod test {
         use crate::ode_equations::test_models::exponential_decay::exponential_decay_problem_batched;
         use crate::{OxideLU, OxideMat};
         let (problem, soln) = exponential_decay_problem_batched::<OxideMat<f64>>(2);
-        let mut s = problem.bdf::<OxideLU>().unwrap();
+        let mut s = problem.bdf::<OxideLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
     }
 
     #[cfg(feature = "cuda")]
+    #[allow(deprecated)]
     #[test]
     fn test_bdf_cuda_exponential_decay_batched_with_reset() {
         use crate::{CudaLU, CudaMat, OdeSolverStopReason};
@@ -2605,6 +2609,7 @@ mod test {
     }
 
     #[cfg(feature = "cuda")]
+    #[allow(deprecated)]
     #[test]
     fn test_bdf_cuda_exponential_decay_batched_sens() {
         use crate::{CudaLU, CudaMat};
@@ -2618,11 +2623,12 @@ mod test {
     fn test_bdf_cuda_oxide_exponential_decay_batched_sens() {
         use crate::{OxideLU, OxideMat};
         let (problem, soln) = exponential_decay_problem_batched_sens::<OxideMat<f64>>(2);
-        let mut s = problem.bdf_sens::<OxideLU>().unwrap();
+        let mut s = problem.bdf_sens::<OxideLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
     }
 
     #[cfg(feature = "cuda")]
+    #[allow(deprecated)]
     #[test]
     fn test_bdf_cuda_exponential_decay_batched_sens_with_reset() {
         use crate::{CudaLU, CudaMat};
@@ -2634,6 +2640,7 @@ mod test {
     }
 
     #[cfg(feature = "cuda")]
+    #[allow(deprecated)]
     #[test]
     fn test_bdf_cuda_exponential_decay_batched_adjoint() {
         use crate::{CudaLU, CudaMat};
@@ -2654,6 +2661,7 @@ mod test {
     }
 
     #[cfg(feature = "cuda")]
+    #[allow(deprecated)]
     #[test]
     fn test_bdf_cuda_exponential_decay_batched_adjoint_sum_squares() {
         use crate::{CudaLU, CudaMat};
@@ -2676,6 +2684,7 @@ mod test {
     }
 
     #[cfg(feature = "cuda")]
+    #[allow(deprecated)]
     #[test]
     fn test_bdf_cuda_exponential_decay_batched_adjoint_with_reset() {
         use crate::{CudaLU, CudaMat};
@@ -2694,6 +2703,7 @@ mod test {
     }
 
     #[cfg(feature = "cuda")]
+    #[allow(deprecated)]
     #[test]
     fn test_bdf_cuda_exponential_decay_with_algebraic_batched() {
         use crate::{CudaLU, CudaMat};

@@ -4,6 +4,7 @@ use diffsol::{
     NalgebraLU, NalgebraMat, NalgebraVec, Scale, Vector,
 };
 #[cfg(feature = "cuda")]
+#[allow(deprecated)]
 use diffsol::{CudaLU, CudaMat, CudaVec};
 #[cfg(feature = "cuda-oxide")]
 use diffsol::{OxideLU, OxideMat, OxideVec};
@@ -1407,6 +1408,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     bench_matrix_backend!(c, "faer_sparse", FaerSparseMat<f64>);
 
     #[cfg(feature = "cuda")]
+    #[allow(deprecated)]
     {
         bench_vector_backend!(c, "cuda", CudaVec<f64>);
         bench_matrix_backend!(c, "cuda", CudaMat<f64>);
@@ -1421,7 +1423,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         bench_matrix_backend!(c, "cuda_oxide", OxideMat<f64>);
         bench_dense_matrix_backend!(c, "cuda_oxide", OxideMat<f64>);
         bench_batched_matrix_backend!(c, "cuda_oxide", OxideMat<f64>);
-        bench_lu_backend!(c, "cuda_oxide", OxideMat<f64>, OxideLU);
+        bench_lu_backend!(c, "cuda_oxide", OxideMat<f64>, OxideLU<f64>);
     }
 }
 

@@ -243,9 +243,9 @@ mod tests {
         s.set_linearisation(&op);
         let b = FaerVec::from_vec(vec![2.0, 4.0], Default::default());
         let x = s.solve(&b).unwrap();
-        x.assert_eq_st(
+        x.assert_eq_eps(
             &FaerVec::from_vec(vec![1.0, 2.0], Default::default()),
-            1e-10,
+            100.0,
         );
     }
 

@@ -183,14 +183,16 @@ impl<M: Matrix> OdeEquations for SwingEqn<M> {
 pub fn swing_problem<M: Matrix + 'static>(
     nbuses: usize,
     demands: &[f64],
+    rtol: f64,
+    atol: f64,
 ) -> OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T, C = M::C>> {
     let ctx = M::C::default().clone_with_nbatch(demands.len()).unwrap();
     OdeBuilder::<M>::new()
         .context(ctx.clone())
         // one value per lane, so the parameter vector is `nparams * nbatch` long
         .p(demands.iter().copied())
-        .rtol(1e-6)
-        .atol([1e-8])
+        .rtol(rtol)
+        .atol([atol])
         .build_from_eqn(SwingEqn::new(nbuses, ctx))
         .unwrap()
 }
@@ -209,7 +211,7 @@ mod tests {
     fn settles_to_the_analytic_frequency_offset() {
         let nbuses = 8;
         let demand = 0.2;
-        let problem = swing_problem::<CpuM>(nbuses, &[demand]);
+        let problem = swing_problem::<CpuM>(nbuses, &[demand], 1e-6, 1e-8);
         let mut solver = problem.tsit45().unwrap();
         solver.set_stop_time(60.0).unwrap();
         while !matches!(solver.step().unwrap(), OdeSolverStopReason::TstopReached) {}

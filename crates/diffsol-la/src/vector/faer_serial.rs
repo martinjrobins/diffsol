@@ -990,9 +990,16 @@ mod tests {
     }
 
     super::super::generate_vector_tests_nonbatched!(faer, FaerVec<f64>);
+    super::super::generate_vector_tests_nonbatched!(faer_f32, FaerVec<f32>);
     super::super::generate_vector_tests_batched!(
         faer,
         FaerVec<f64>,
+        FaerContext::with_nbatch(2),
+        FaerContext::with_nbatch(3)
+    );
+    super::super::generate_vector_tests_batched!(
+        faer_f32,
+        FaerVec<f32>,
         FaerContext::with_nbatch(2),
         FaerContext::with_nbatch(3)
     );

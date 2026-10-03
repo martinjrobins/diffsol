@@ -136,33 +136,17 @@ impl<T: FaerScalar> LinearSolver<FaerMat<T>> for LU<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        linear_solver::tests::{diagonal_op, test_grouped_lu_solve, test_narrow_state_lu_solve},
-        Vector,
-    };
 
-    #[test]
-    fn test_lu() {
-        let mut s = LU::<f64>::default();
-        let op = diagonal_op::<FaerMat<f64>>(2.0);
-        s.set_sparsity(&op);
-        s.set_linearisation(&op);
-        let b = FaerVec::from_vec(vec![2.0, 4.0], Default::default());
-        let x = s.solve(&b).unwrap();
-        x.assert_eq_st(
-            &FaerVec::from_vec(vec![1.0, 2.0], Default::default()),
-            1e-10,
-        );
-    }
-
-    #[test]
-    fn test_grouped_lu() {
-        test_grouped_lu_solve::<FaerMat<f64>, LU<f64>>(FaerContext::with_nbatch(2));
-    }
-
-    #[test]
-    #[should_panic(expected = "incompatible nbatch")]
-    fn test_narrow_state_lu() {
-        test_narrow_state_lu_solve::<FaerMat<f64>, LU<f64>>(FaerContext::with_nbatch(2));
-    }
+    crate::linear_solver::generate_lu_tests!(
+        f64,
+        FaerMat<f64>,
+        LU<f64>,
+        FaerContext::with_nbatch(2)
+    );
+    crate::linear_solver::generate_lu_tests!(
+        f32,
+        FaerMat<f32>,
+        LU<f32>,
+        FaerContext::with_nbatch(2)
+    );
 }

@@ -745,16 +745,30 @@ mod tests {
     }
 
     super::super::generate_matrix_tests_nonbatched!(nalgebra, NalgebraMat<f64>);
+    super::super::generate_matrix_tests_nonbatched!(nalgebra_f32, NalgebraMat<f32>);
     super::super::generate_matrix_tests_batched!(
         nalgebra,
         NalgebraMat<f64>,
         NalgebraContext::default(),
         NalgebraContext::with_nbatch(2)
     );
+    super::super::generate_matrix_tests_batched!(
+        nalgebra_f32,
+        NalgebraMat<f32>,
+        NalgebraContext::default(),
+        NalgebraContext::with_nbatch(2)
+    );
     super::super::generate_dense_matrix_tests_nonbatched!(nalgebra, NalgebraMat<f64>);
+    super::super::generate_dense_matrix_tests_nonbatched!(nalgebra_f32, NalgebraMat<f32>);
     super::super::generate_dense_matrix_tests_batched!(
         nalgebra,
         NalgebraMat<f64>,
+        NalgebraContext::default(),
+        NalgebraContext::with_nbatch(2)
+    );
+    super::super::generate_dense_matrix_tests_batched!(
+        nalgebra_f32,
+        NalgebraMat<f32>,
         NalgebraContext::default(),
         NalgebraContext::with_nbatch(2)
     );

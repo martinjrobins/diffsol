@@ -13,7 +13,7 @@ directly. Use `diffsol-la` when you want to build on the linear algebra layer it
 - **Matrices**: `Matrix`, `DenseMatrix`, and sparsity handling.
 - **Linear operators and solvers**: the `LinearOp` trait describing a linear
   operator `A`, and the `LinearSolver` trait for solving `Ax = b`.
-- **Backends**: `NalgebraLU`, `FaerLU`, `FaerSparseLU`, `KLU` (suitesparse), and `CudaLU`.
+- **Backends**: `NalgebraLU`, `FaerLU`, `FaerSparseLU`, `KLU` (suitesparse), `OxideLU` (cuda-oxide) and `CudaLU` (deprecated).
 - **Support types**: `Context`, `Scalar`, `Scale`, and the `LaError` error type.
 
 ## Implementations
@@ -22,7 +22,10 @@ Each implementations is behind a feature flag:
 
 - `nalgebra`: nalgebra-backed containers and solvers (enabled by default).
 - `faer`: faer-backed containers and solvers (enabled by default).
-- `cuda`: in-built CUDA containers and solvers (disabled by default).
+- `cuda-oxide`: CUDA containers and solvers with kernels written in Rust via
+  [cuda-oxide](https://github.com/NVIDIA/cuda-rust), for `f32` and `f64` (disabled by default).
+- `cuda`: in-built C CUDA containers and solvers, `f64` only (disabled by default).
+  Deprecated, use `cuda-oxide` instead.
 - `suitesparse`: the KLU sparse direct solver from SuiteSparse (disabled by default).
 
 ## Links

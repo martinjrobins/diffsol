@@ -23,7 +23,8 @@ one of the matrix types included with diffsol:
 - [`NalgebraMat`](https://docs.rs/diffsol/latest/diffsol/struct.NalgebraMat.html), this is a thin wrapper around the `nalgebra` crate dense matrix.
 - [`FaerMat`](https://docs.rs/diffsol/latest/diffsol/struct.FaerMat.html), this is a thin wrapper around the `faer` crate dense matrix.
 - [`FaerSparseMat`](https://docs.rs/diffsol/latest/diffsol/struct.FaerSparseMat.html), this is a thin wrapper around the `faer` sparse matrix.
-- `CudaMat`, this is diffsol's CUDA matrix type (requires the `cuda` feature)
+- `OxideMat`, this is diffsol's CUDA matrix type (requires the `cuda-oxide` feature)
+- `CudaMat`, this is diffsol's deprecated C CUDA matrix type (requires the `cuda` feature), use `OxideMat` instead
 
 Each matrix type is parameterised by a scalar type that satisfies the [`Scalar`](https://docs.rs/diffsol/latest/diffsol/trait.Scalar.html) trait,
 each matrix type also has an associated type that defines its corresponding vector type (bounded by the [`Vector`](https://docs.rs/diffsol/latest/diffsol/trait.Vector.html) trait).

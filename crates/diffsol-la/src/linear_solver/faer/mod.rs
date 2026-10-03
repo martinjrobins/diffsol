@@ -27,7 +27,7 @@ mod tests {
         let a = M::from_diagonal(&b);
         let mut y = ctx.vector_zeros::<FaerVec<f64>>(n);
         a.gemv(1.0, &x, 0.0, &mut y);
-        y.assert_eq_st(&ctx.vector_from_element::<FaerVec<f64>>(n, 0.5), 1e-10);
+        y.assert_eq_eps(&ctx.vector_from_element::<FaerVec<f64>>(n, 0.5), 100.0);
     }
 
     /// `gemv_cols` is a second macro with its own `Par` argument, and dense only.
@@ -38,7 +38,7 @@ mod tests {
         let nc = crate::matrix::MAX_SMALL_COLS;
         a.gemv_cols(0, nc, 1.0, &vec![1.0; nc], 0.0, &mut y);
         let expected = (0..n).map(|i| if i < nc { 2.0 } else { 0.0 }).collect();
-        y.assert_eq_st(&ctx.vector_from_vec::<FaerVec<f64>>(expected), 1e-10);
+        y.assert_eq_eps(&ctx.vector_from_vec::<FaerVec<f64>>(expected), 100.0);
     }
 
     /// No faer call site may fall back on faer's process-global parallelism setting: they must all
