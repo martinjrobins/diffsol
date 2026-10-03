@@ -106,6 +106,50 @@ impl<T: Scalar> Tableau<T> {
     pub fn rosenbrock(&self) -> Option<&RosenbrockTableau<T>> {
         self.rosenbrock.as_ref()
     }
+    /// Three-stage second-order Rosenbrock23 (the third stage estimates the error).
+    /// Shampine & Reichelt (1997), section 3, <https://doi.org/10.1137/S1064827594276424>.
+    ///
+    /// With `g = 1/(2+sqrt(2))` and `q = 6+sqrt(2)`, eliminating reused RHS values
+    /// gives the ROW matrix `Gamma = g*[1,0,0; -1,1,0; q-2,-q,1]` and
+    /// `alpha = [0,0,0; 1/2,0,0; 0,1,0]`. Hairer & Wanner IV.7 transforms these
+    /// using `A = alpha*Gamma^-1`, `C = I/g-Gamma^-1`, `b = [0,1,0]*Gamma^-1`.
+    /// The embedded difference is `[1,-2,1]*Gamma^-1/6`; time weights are the
+    /// row sums of Gamma. This retains `g*h*f_t` in the direct third stage.
+    /// The quadratic continuous extension is the transformed `ntrp23s` polynomial.
+    pub fn rosenbrock23() -> Self {
+        let g = 1.0 / (2.0 + 2.0_f64.sqrt());
+        let q = 6.0 + 2.0_f64.sqrt();
+        let cv = |x| T::from_f64(x).unwrap();
+        let mut a = TableauMat::zeros(3, 3);
+        a[(1, 0)] = cv(0.5 / g);
+        a[(2, 0)] = cv(1.0 / g);
+        a[(2, 1)] = cv(1.0 / g);
+        let mut coupling = TableauMat::zeros(3, 3);
+        coupling[(1, 0)] = cv(-1.0 / g);
+        coupling[(2, 0)] = cv(-2.0 / g);
+        coupling[(2, 1)] = cv(-q / g);
+        let mut beta = TableauMat::zeros(3, 2);
+        beta[(0, 0)] = cv(1.0 / g);
+        beta[(1, 0)] = cv(-2.0 / (1.0 - 2.0 * g));
+        beta[(1, 1)] = cv(1.0 / (g * (1.0 - 2.0 * g)));
+        Self::new_rosenbrock(
+            a,
+            TableauVec::from_slice(&[cv(1.0 / g), cv(1.0 / g), T::zero()]),
+            TableauVec::from_slice(&[T::zero(), cv(0.5), T::one()]),
+            TableauVec::from_slice(&[
+                cv(1.0 / (6.0 * g)),
+                cv((q - 2.0) / (6.0 * g)),
+                cv(1.0 / (6.0 * g)),
+            ]),
+            2,
+            Some(beta),
+            coupling,
+            cv(g),
+            TableauVec::from_slice(&[cv(g), T::zero(), cv(-g)]),
+            3,
+        )
+    }
+
     /// Eight-stage fifth-order Rodas5P, with a fourth-order continuous extension.
     /// Steinebach (2023), <https://doi.org/10.1007/s10543-023-00967-x>.
     pub fn rodas5p() -> Self {

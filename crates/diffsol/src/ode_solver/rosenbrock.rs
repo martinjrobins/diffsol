@@ -974,6 +974,39 @@ mod tests {
         assert!(stability_step(-1e14).abs() < 1e-10);
     }
 
+    #[test]
+    fn rosenbrock23_shared_contract() {
+        macro_rules! check {
+            ($mat:ty,$ls:ty) => {{
+                test_state_mut(test_problem::<$mat>(false).rosenbrock23::<$ls>().unwrap());
+                test_interpolate(test_problem::<$mat>(false).rosenbrock23::<$ls>().unwrap());
+                test_interpolate(test_problem::<$mat>(true).rosenbrock23::<$ls>().unwrap());
+                test_config(
+                    robertson_ode::<$mat>(false, 1)
+                        .0
+                        .rosenbrock23::<$ls>()
+                        .unwrap(),
+                );
+                let (p, sol) = exponential_decay_problem::<$mat>(false);
+                test_checkpointing(
+                    sol,
+                    p.rosenbrock23::<$ls>().unwrap(),
+                    p.rosenbrock23::<$ls>().unwrap(),
+                );
+                let (p, sol) = robertson_ode::<$mat>(false, 1);
+                let mut s = p.rosenbrock23::<$ls>().unwrap();
+                test_ode_solver(&mut s, sol, None, false, false);
+                assert_eq!(
+                    s.get_statistics().number_of_linear_solver_setups,
+                    s.get_statistics().number_of_steps
+                        + s.get_statistics().number_of_error_test_failures
+                );
+                assert_eq!(s.get_statistics().number_of_nonlinear_solver_iterations, 0);
+            }};
+        }
+        check!(Mat, LS);
+        check!(FaerMat<f64>, FaerLU<f64>);
+    }
     // Isolate the method from the existing, non-overridable blanket central f_t helper.
     // Test-only: production continues to use NonLinearOpTimePartial unchanged.
     fn analytic_step<
@@ -1016,6 +1049,99 @@ mod tests {
     }
     // Direct implementation 2a255e1, with analytic f_t to isolate stage arithmetic.
     // Its within-step finite difference belongs to the downstream event policy.
+    #[test]
+    fn rosenbrock23_matches_direct_stage_oracles() {
+        let p = OdeBuilder::<Mat>::new()
+            .rtol(10.0)
+            .atol([10.0])
+            .rhs_implicit(
+                |x, _, _, f| f[0] = -x[0] * x[0],
+                |x, _, _, v, jv| jv[0] = -2.0 * x[0] * v[0],
+            )
+            .init(|_, _, y| y[0] = 2.0, 1)
+            .build()
+            .unwrap();
+        let mut s = p.rosenbrock23::<LS>().unwrap();
+        *s.state_mut().h = 0.01;
+        s.step().unwrap();
+        let estimate =
+            s.rk.error_norm(0.01, None::<&mut NoAug<_>>, |_| Ok(()))
+                .unwrap()
+                .sqrt()
+                * (10.0 + 10.0 * s.state().y[0].abs());
+        assert!((s.state().y[0] - 1.9607830804516306).abs() < 1e-14);
+        assert!((estimate - 1.2234237241393055e-6).abs() < 1e-14);
+        let p = sine_problem(-1000.0, false);
+        let mut s = p.rosenbrock23::<LS>().unwrap();
+        let estimate = analytic_step(&mut s, 0.01, 1000.0);
+        assert!(
+            (s.state().y[0] - 0.009999915159438611).abs() < 1e-14,
+            "actual={} estimate={estimate}",
+            s.state().y[0]
+        );
+        assert!((estimate - 1.0579454445214243e-7).abs() < 1e-14);
+    }
+    #[test]
+    fn rosenbrock23_second_order_and_quadratic_dense_output() {
+        let error = |h: f64, midpoint: bool| {
+            let p = OdeBuilder::<Mat>::new()
+                .rtol(10.0)
+                .atol([10.0])
+                .rhs_implicit(|x, _, _, f| f[0] = -x[0], |_, _, _, v, jv| jv[0] = -v[0])
+                .init(|_, _, y| y[0] = 1.0, 1)
+                .build()
+                .unwrap();
+            let mut s = p.rosenbrock23::<LS>().unwrap();
+            *s.state_mut().h = h;
+            s.config_mut().minimum_timestep_growth = 1.0;
+            s.config_mut().maximum_timestep_growth = 1.0;
+            if midpoint {
+                s.step().unwrap();
+                (s.interpolate(h / 2.0).unwrap()[0] - (-h / 2.0).exp()).abs()
+            } else {
+                advance(&mut s, 1.0);
+                (s.state().y[0] - (-1.0f64).exp()).abs()
+            }
+        };
+        let ratio = error(0.05, false) / error(0.025, false);
+        assert!((3.8..4.2).contains(&ratio), "{ratio}");
+        let ratio = error(0.05, true) / error(0.025, true);
+        assert!((7.0..9.0).contains(&ratio), "{ratio}");
+    }
+    #[test]
+    fn rosenbrock23_time_forcing_error_estimate_is_cubic() {
+        let estimate = |h: f64| {
+            let p = sine_problem(0.0, false);
+            let mut s = p.rosenbrock23::<LS>().unwrap();
+            *s.state_mut().t = 1.0;
+            *s.state_mut().h = h;
+            s.step().unwrap();
+            s.rk.error_norm(h, None::<&mut NoAug<_>>, |_| Ok(()))
+                .unwrap()
+                .sqrt()
+        };
+        let ratio = estimate(0.05) / estimate(0.025);
+        assert!((6.0..10.0).contains(&ratio), "{ratio}");
+    }
+    #[test]
+    fn rosenbrock23_integrated_outputs_converge_and_restart() {
+        let error = |h: f64| {
+            let p = sine_problem(-2.0, true);
+            let mut s = p.rosenbrock23::<LS>().unwrap();
+            *s.state_mut().h = h;
+            s.config_mut().minimum_timestep_growth = 1.0;
+            s.config_mut().maximum_timestep_growth = 1.0;
+            advance(&mut s, 1.0);
+            let mut restart = p.rosenbrock23_solver::<LS>(s.checkpoint()).unwrap();
+            *restart.config_mut() = s.config().clone();
+            advance(&mut s, 2.0);
+            advance(&mut restart, 2.0);
+            assert!((s.state().g[0] - restart.state().g[0]).abs() < 1e-12);
+            (s.state().g[0] - (1.0 - (4.0f64).sin() / 4.0 + 32.0 / 5.0)).abs()
+        };
+        let order = (error(0.05) / error(0.025)).log2();
+        assert!(order >= 2.0, "{order}");
+    }
 
     #[test]
     fn rodas5p_coefficients_match_julia_bit_for_bit() {
@@ -1067,14 +1193,24 @@ mod tests {
     }
     #[test]
     fn built_in_fixed_robertson_matches_julia() {
-        for (tableau, expected) in [(
-            Tableau::rodas5p(),
-            [
-                0.9996006841629056,
-                3.6450479186134964e-5,
-                0.0003628653579085962,
-            ],
-        )] {
+        for (tableau, expected) in [
+            (
+                Tableau::rodas5p(),
+                [
+                    0.9996006841629056,
+                    3.6450479186134964e-5,
+                    0.0003628653579085962,
+                ],
+            ),
+            (
+                Tableau::rosenbrock23(),
+                [
+                    0.9996006819320089,
+                    3.645047866463391e-5,
+                    0.0003628675893263426,
+                ],
+            ),
+        ] {
             let (mut p, _) = robertson_ode::<Mat>(false, 1);
             p.rtol = 10.0;
             p.atol.fill(10.0);
@@ -1096,6 +1232,100 @@ mod tests {
     }
 
     #[test]
+    fn rosenbrock23_rejected_attempt_keeps_initial_state_intact() {
+        let problem = OdeBuilder::<Mat>::new()
+            .rtol(1e-8)
+            .atol([1e-10])
+            .rhs_implicit(
+                |x, _, _, f| f[0] = -100.0 * x[0],
+                |_, _, _, v, jv| jv[0] = -100.0 * v[0],
+            )
+            .init(|_, _, y| y[0] = 1.0, 1)
+            .build()
+            .unwrap();
+        let mut solver = problem.rosenbrock23::<LS>().unwrap();
+        *solver.state_mut().h = 0.1;
+        solver.step().unwrap();
+        assert!(solver.get_statistics().number_of_error_test_failures > 0);
+        assert!(
+            solver
+                .get_statistics()
+                .number_of_linear_solver_setups_from_error_test_fail
+                > 0
+        );
+        let t = solver.state().t;
+        assert!(t > 0.0 && t < 0.1);
+        assert!((solver.state().y[0] - (-100.0 * t).exp()).abs() < 1e-5);
+        advance(&mut solver, 0.1);
+        assert!((solver.state().y[0] - (-10.0f64).exp()).abs() < 1e-5);
+    }
+    #[test]
+    fn rosenbrock23_interpolation_and_root_event() {
+        let problem = OdeBuilder::<Mat>::new()
+            .rtol(1e-8)
+            .atol([1e-10])
+            .h0(0.8)
+            .rhs_implicit(|_, _, _, f| f[0] = 1.0, |_, _, _, _, jv| jv[0] = 0.0)
+            .init(|_, _, y| y[0] = 0.0, 1)
+            .root(|x, _, _, r| r[0] = x[0] - 0.5, 1)
+            .build()
+            .unwrap();
+        let mut solver = problem.rosenbrock23::<LS>().unwrap();
+        let mut found = None;
+        for _ in 0..100 {
+            if let OdeSolverStopReason::RootFound(t, index) = solver.step().unwrap() {
+                found = Some((t, index));
+                break;
+            }
+        }
+        let (root, index) = found.expect("root must be detected");
+        assert_eq!(index, 0);
+        assert!((root - 0.5).abs() < 1e-6);
+        assert!((solver.interpolate(root).unwrap()[0] - 0.5).abs() < 1e-6);
+        assert!((solver.interpolate_dy(root).unwrap()[0] - 1.0).abs() < 1e-6);
+        solver.state_mut_back(root).unwrap();
+        assert!((solver.state().y[0] - 0.5).abs() < 1e-6);
+    }
+    #[test]
+    fn rosenbrock23_nonlinear_jacobian_refreshes_after_an_accepted_step() {
+        use std::{cell::RefCell, rc::Rc};
+
+        let jacobian_states = Rc::new(RefCell::new(Vec::<(f64, f64)>::new()));
+        let observed = jacobian_states.clone();
+        let problem = OdeBuilder::<Mat>::new()
+            .rtol(1e-7)
+            .atol([1e-9])
+            .h0(0.05)
+            .rhs_implicit(
+                |x, _, _, f| f[0] = -x[0] * x[0],
+                move |x, _, t, v, jv| {
+                    observed.borrow_mut().push((t, x[0]));
+                    jv[0] = -2.0 * x[0] * v[0];
+                },
+            )
+            .init(|_, _, y| y[0] = 2.0, 1)
+            .build()
+            .unwrap();
+        let mut solver = problem.rosenbrock23::<LS>().unwrap();
+        solver.step().unwrap();
+        let first_time = solver.state().t;
+        let first_value = solver.state().y[0];
+        assert!(first_time > 0.0 && first_value < 2.0);
+        solver.step().unwrap();
+        let second_time = solver.state().t;
+        let second_value = solver.state().y[0];
+        assert!(second_time > first_time);
+        assert!(
+            jacobian_states
+                .borrow()
+                .iter()
+                .any(|(t, y)| { *t == first_time && (*y - first_value).abs() < 1e-12 }),
+            "the nonlinear Jacobian was not evaluated at the first accepted state"
+        );
+        let exact = 2.0 / (1.0 + 2.0 * second_time);
+        assert!((second_value - exact).abs() < 1e-4);
+    }
+    #[test]
     fn built_in_fixed_nonautonomous_matches_julia_with_analytic_ft() {
         for (name, tableau, lambda, h, expected) in [
             (
@@ -1111,6 +1341,20 @@ mod tests {
                 -1000.0,
                 0.001,
                 0.009999833334166675,
+            ),
+            (
+                "rosenbrock23",
+                Tableau::rosenbrock23(),
+                0.0,
+                0.01,
+                0.09983383262061077,
+            ),
+            (
+                "rosenbrock23",
+                Tableau::rosenbrock23(),
+                -1000.0,
+                0.001,
+                0.009999834105815892,
             ),
         ] {
             let p = sine_problem(lambda, false);

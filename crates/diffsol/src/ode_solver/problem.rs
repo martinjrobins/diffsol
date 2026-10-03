@@ -956,6 +956,34 @@ where
     {
         self.rk_state_and_consistent::<LS>(&Tableau::rodas5p())
     }
+    /// Create a second-order Rosenbrock23 Rosenbrock solver.
+    pub fn rosenbrock23<LS: LinearSolver<Eqn::M>>(
+        &self,
+    ) -> Result<Rosenbrock<'_, Eqn, LS>, DiffsolError>
+    where
+        Eqn: OdeEquationsImplicit,
+    {
+        self.rosenbrock23_solver(self.rosenbrock23_state::<LS>()?)
+    }
+    /// Restart a Rosenbrock23 solver from a caller-supplied state.
+    pub fn rosenbrock23_solver<LS: LinearSolver<Eqn::M>>(
+        &self,
+        state: RkState<Eqn::V>,
+    ) -> Result<Rosenbrock<'_, Eqn, LS>, DiffsolError>
+    where
+        Eqn: OdeEquationsImplicit,
+    {
+        self.rosenbrock_solver(state, Tableau::rosenbrock23())
+    }
+    /// Create consistent initial conditions and an initial step size for Rosenbrock23.
+    pub fn rosenbrock23_state<LS: LinearSolver<Eqn::M>>(
+        &self,
+    ) -> Result<RkState<Eqn::V>, DiffsolError>
+    where
+        Eqn: OdeEquationsImplicit,
+    {
+        self.rk_state_and_consistent::<LS>(&Tableau::rosenbrock23())
+    }
 
     pub(crate) fn sdirk_solver_aug<
         LS: LinearSolver<Eqn::M>,
