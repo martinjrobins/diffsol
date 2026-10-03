@@ -356,12 +356,18 @@ impl<T: OdeEquations> OdeEquations for &'_ T {
 }
 
 pub trait OdeEquationsImplicit:
-    OdeEquations<Rhs: NonLinearOpJacobian<M = Self::M, V = Self::V, T = Self::T, C = Self::C>>
+    OdeEquations<
+    Rhs: NonLinearOpJacobian<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
+             + NonLinearOpTimePartial<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
+>
 {
 }
 
 impl<T> OdeEquationsImplicit for T where
-    T: OdeEquations<Rhs: NonLinearOpJacobian<M = T::M, V = T::V, T = T::T, C = T::C>>
+    T: OdeEquations<
+        Rhs: NonLinearOpJacobian<M = T::M, V = T::V, T = T::T, C = T::C>
+                 + NonLinearOpTimePartial<M = T::M, V = T::V, T = T::T, C = T::C>,
+    >
 {
 }
 

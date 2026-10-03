@@ -11,6 +11,36 @@ pub type TableauMat<T> = SmallMat<T, { MAX_SMALL_COLS * MAX_SMALL_COLS }>;
 /// The `b`, `c` and `d` vectors of a [`Tableau`], `s` long.
 pub type TableauVec<T> = SmallVec<T, MAX_SMALL_COLS>;
 
+/// Coefficients for transformed Rosenbrock-Wanner stages:
+/// `(M - gamma*h*J) k_i = gamma*h * (f(Y_i, t+c_i*h) + h*d_i*f_t
+/// + M*sum_{j<i}(c_ij*k_j/h))`, where `Y_i = y_0 + sum_{j<i}(a_ij*k_j)`
+/// and `y_1 = y_0 + sum_i(b_i*k_i)`. `J` is frozen at the step's initial state.
+#[derive(Clone, Copy, Debug)]
+pub struct RosenbrockTableau<T: Scalar> {
+    pub(crate) coupling: TableauMat<T>,
+    pub(crate) gamma: T,
+    pub(crate) time: TableauVec<T>,
+    pub(crate) error_order: usize,
+}
+impl<T: Scalar> RosenbrockTableau<T> {
+    /// Common diagonal factor in the linear stage system.
+    pub fn gamma(&self) -> T {
+        self.gamma
+    }
+    /// Strictly lower triangular transformed coupling matrix, in natural orientation.
+    pub fn coupling(&self) -> &TableauMat<T> {
+        &self.coupling
+    }
+    /// Weights of `h*f_t` in the stages.
+    pub fn time_weights(&self) -> &TableauVec<T> {
+        &self.time
+    }
+    /// Local order of the embedded error difference.
+    pub fn error_order(&self) -> usize {
+        self.error_order
+    }
+}
+
 /// A butcher tableau for a Runge-Kutta method.
 ///
 /// The tableau is defined by the matrices `a`, `b`, `c` and `d` and the order of the method.
@@ -37,6 +67,7 @@ pub type TableauVec<T> = SmallVec<T, MAX_SMALL_COLS>;
 pub struct Tableau<T: Scalar> {
     /// `a` transposed: column `i` is stage `i`'s coefficient run.
     a_t: TableauMat<T>,
+    rosenbrock: Option<RosenbrockTableau<T>>,
     b: TableauVec<T>,
     c: TableauVec<T>,
     d: TableauVec<T>,
@@ -46,6 +77,142 @@ pub struct Tableau<T: Scalar> {
 }
 
 impl<T: Scalar> Tableau<T> {
+    /// Construct a transformed Rosenbrock tableau. `a` and `coupling` use natural
+    /// orientation and must be strictly lower triangular. `d` is the embedded error
+    /// difference; `time` supplies partial-time weights. Solvers validate the coefficients.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_rosenbrock(
+        a: TableauMat<T>,
+        b: TableauVec<T>,
+        c: TableauVec<T>,
+        d: TableauVec<T>,
+        order: usize,
+        beta: Option<TableauMat<T>>,
+        coupling: TableauMat<T>,
+        gamma: T,
+        time: TableauVec<T>,
+        error_order: usize,
+    ) -> Self {
+        let mut ret = Self::new(a, b, c, d, order, beta);
+        ret.rosenbrock = Some(RosenbrockTableau {
+            coupling,
+            gamma,
+            time,
+            error_order,
+        });
+        ret
+    }
+    /// Rosenbrock coefficients, absent for ordinary Runge-Kutta tableaus.
+    pub fn rosenbrock(&self) -> Option<&RosenbrockTableau<T>> {
+        self.rosenbrock.as_ref()
+    }
+    /// Eight-stage fifth-order Rodas5P, with a fourth-order continuous extension.
+    /// Steinebach (2023), <https://doi.org/10.1007/s10543-023-00967-x>.
+    pub fn rodas5p() -> Self {
+        const GAMMA: f64 = 0.21193756319429014;
+
+        // Natural row/column orientation: A[i][j] and C[i][j] are used only for j<i.
+        // Source: G. Steinebach, BIT Numerical Mathematics 63, article 27 (2023),
+        // https://doi.org/10.1007/s10543-023-00967-x; coefficient transcription
+        // checked against OrdinaryDiffEqRosenbrock 2.4.0's MIT-licensed Rodas5P
+        // tableau (`src/rosenbrock_tableaus.jl`, RODAS5PA/PC/Pc/Pd/PH). See
+        // https://github.com/SciML/OrdinaryDiffEq.jl/tree/master/lib/OrdinaryDiffEqRosenbrock.
+        #[rustfmt::skip]
+        const A: [&[f64]; 5] = [
+            &[],
+            &[3.0],
+            &[2.849394379747939, 0.45842242204463923],
+            &[-6.954028509809101, 2.489845061869568, -10.358996098473584],
+            &[2.8029986275628964, 0.5072464736228206, -0.3988312541770524, -0.04721187230404641],
+        ];
+
+        #[rustfmt::skip]
+        const C: [&[f64]; 8] = [
+            &[],
+            &[-14.155112264123755],
+            &[-17.97296035885952, -2.859693295451294],
+            &[147.12150275711716, -1.41221402718213, 71.68940251302358],
+            &[165.43517024871676, -0.4592823456491126, 42.90938336958603, -5.961986721573306],
+            &[24.854864614690072, -3.0009227002832186, 47.4931110020768, 5.5814197821558125, -0.6610691825249471],
+            &[30.91273214028599, -3.1208243349937974, 77.79954646070892, 34.28646028294783, -19.097331116725623, -28.087943162872662],
+            &[37.80277123390563, -3.2571969029072276, 112.26918849496327, 66.9347231244047, -40.06618937091002, -54.66780262877968, -9.48861652309627],
+        ];
+
+        const TIMES: [f64; 8] = [
+            0.0,
+            0.6358126895828704,
+            0.4095798393397535,
+            0.9769306725060716,
+            0.4288403609558664,
+            1.0,
+            1.0,
+            1.0,
+        ];
+        const D: [f64; 8] = [
+            0.21193756319429014,
+            -0.42387512638858027,
+            -0.3384627126235924,
+            1.8046452872882734,
+            2.325825639765069,
+            0.0,
+            0.0,
+            0.0,
+        ];
+        const B: [f64; 8] = [
+            -7.502846399306121,
+            2.561846144803919,
+            -11.627539656261098,
+            -0.18268767659942256,
+            0.030198172008377946,
+            1.0,
+            1.0,
+            1.0,
+        ];
+        // H rows define the continuous extension
+        // y(theta)=(1-theta)y0 + theta[y1+(1-theta)(K1+theta(K2+theta K3))].
+        #[rustfmt::skip]
+        const H: [[f64; 8]; 3] = [
+            [25.948786856663858, -2.5579724845846235, 10.433815404888879, -2.3679251022685204, 0.524948541321073, 1.1241088310450404, 0.4272876194431874, -0.17202221070155493],
+            [-9.91568850695171, -0.9689944594115154, 3.0438037242978453, -24.495224566215796, 20.176138334709044, 15.98066361424651, -6.789040303419874, -6.710236069923372],
+            [11.419903575922262, 2.8879645146136994, 72.92137995996029, 80.12511834622643, -52.072871366152654, -59.78993625266729, -0.15582684282751913, 4.883087185713722],
+        ];
+
+        let mut beta = TableauMat::zeros(8, 4);
+        let mut a = TableauMat::zeros(8, 8);
+        let mut coupling = TableauMat::zeros(8, 8);
+        for i in 0..8 {
+            for j in 0..i {
+                a[(i, j)] = T::from_f64(if i < 5 { A[i][j] } else { B[j] }).unwrap();
+                coupling[(i, j)] = T::from_f64(C[i][j]).unwrap();
+            }
+            for (p, value) in [
+                B[i] + H[0][i],
+                -H[0][i] + H[1][i],
+                -H[1][i] + H[2][i],
+                -H[2][i],
+            ]
+            .iter()
+            .enumerate()
+            {
+                beta[(i, p)] = T::from_f64(*value).unwrap();
+            }
+        }
+        let mut error = TableauVec::zeros(8);
+        error[7] = T::one();
+        Self::new_rosenbrock(
+            a,
+            TableauVec::from_slice(&B.map(|x| T::from_f64(x).unwrap())),
+            TableauVec::from_slice(&TIMES.map(|x| T::from_f64(x).unwrap())),
+            error,
+            5,
+            Some(beta),
+            coupling,
+            T::from_f64(GAMMA).unwrap(),
+            TableauVec::from_slice(&D.map(|x| T::from_f64(x).unwrap())),
+            5,
+        )
+    }
+
     /// TR-BDF2 method
     /// from R.E. Bank, W.M. Coughran Jr, W. Fichtner, E.H. Grosse, D.J. Rose and R.K. Smith, Transient simulation of silicon devices and circuits, IEEE Trans. Comput.-Aided Design 4 (1985) 436-451.
     /// analysed in M.E. Hosea and L.F. Shampine. Analysis and implementation of TR-BDF2. Applied Numerical Mathematics, 20:21–37, 1996.
@@ -306,6 +473,7 @@ impl<T: Scalar> Tableau<T> {
         }
         Self {
             a_t: a.transposed(),
+            rosenbrock: None,
             b,
             c,
             d,

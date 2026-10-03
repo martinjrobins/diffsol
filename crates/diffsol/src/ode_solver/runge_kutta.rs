@@ -10,8 +10,8 @@ use crate::RootFinder;
 use crate::Tableau;
 use crate::{
     ode_solver_error, AugmentedOdeEquations, Convergence, DefaultDenseMatrix, DenseMatrix,
-    NonLinearOp, NonLinearSolver, OdeEquations, OdeSolverProblem, OdeSolverState, Op, Scalar,
-    Vector, VectorViewMut,
+    LinearOp, LinearSolver, NonLinearOp, NonLinearSolver, OdeEquations, OdeSolverProblem,
+    OdeSolverState, Op, Scalar, Vector, VectorViewMut,
 };
 use crate::{TableauMat, TableauVec};
 use log::info;
@@ -141,13 +141,27 @@ where
             None
         };
 
-        let diff = M::zeros(nstates, order, ctx.clone());
+        // Hermite interpolation needs two endpoint derivative columns, even for a one-stage method.
+        let diff_cols = if tableau.rosenbrock().is_some() && tableau.beta_t().is_none() {
+            order.max(2)
+        } else {
+            order
+        };
+        let diff = M::zeros(nstates, diff_cols, ctx.clone());
         let gdiff_rows = if problem.integrate_out {
             problem.eqn.out().unwrap().nout()
         } else {
             0
         };
-        let gdiff = M::zeros(gdiff_rows, order, ctx.clone());
+        let gdiff = M::zeros(
+            gdiff_rows,
+            if tableau.rosenbrock().is_some() {
+                5
+            } else {
+                order
+            },
+            ctx.clone(),
+        );
 
         let old_state = state.clone();
 
@@ -272,7 +286,7 @@ where
     }
 
     pub(crate) fn skip_first_stage(&self) -> bool {
-        self.tableau.a(0, 0) == Eqn::T::zero()
+        self.tableau.rosenbrock().is_none() && self.tableau.a(0, 0) == Eqn::T::zero()
     }
 
     pub(crate) fn check_sdirk_rk(tableau: &Tableau<Eqn::T>) -> Result<(), DiffsolError> {
@@ -465,7 +479,14 @@ where
             self.prev_error_norm,
             self.problem().ode_options.pi_control_integral,
             self.problem().ode_options.pi_control_proportional,
-            self.order() + 1,
+            // Rosenbrock embedded differences have their own local order.
+            self.tableau.rosenbrock().map_or(self.order() + 1, |row| {
+                if self.out_error.is_some() {
+                    row.error_order.min(5)
+                } else {
+                    row.error_order
+                }
+            }),
         );
 
         let mut factor = safety * raw;
@@ -620,6 +641,168 @@ where
                 hdy,
             );
         }
+    }
+
+    /// Solve one Rosenbrock stage in the preallocated state scratch and `diff` columns.
+    /// The Jacobian factorization is frozen at the attempt's initial state and shared by all stages.
+    pub(crate) fn do_stage_rosenbrock<LS: LinearSolver<Eqn::M>>(
+        &mut self,
+        i: usize,
+        h: Eqn::T,
+        op: &SdirkCallable<&Eqn>,
+        linear_solver: &mut LS,
+        ft: &Eqn::V,
+    ) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquationsImplicit,
+    {
+        let row = self.tableau.rosenbrock().unwrap();
+        let t = self.state.t + self.tableau.c()[i] * h;
+        self.old_state.y.copy_from(&self.state.y);
+        self.diff.gemv_cols(
+            0,
+            i,
+            Eqn::T::one(),
+            self.tableau.stage_coeffs(i),
+            Eqn::T::one(),
+            &mut self.old_state.y,
+        );
+        op.eqn()
+            .rhs()
+            .call_inplace(&self.old_state.y, t, &mut self.old_state.dy);
+        self.old_state.dy.axpy(h * row.time[i], ft, Eqn::T::one());
+        let mut weights = TableauVec::zeros(i);
+        for (j, w) in weights.as_mut_slice().iter_mut().enumerate() {
+            *w = row.coupling[(i, j)] / h;
+        }
+        self.diff.gemv_cols(
+            0,
+            i,
+            Eqn::T::one(),
+            weights.as_slice(),
+            Eqn::T::zero(),
+            &mut self.old_state.y,
+        );
+        if let Some(mass) = op.eqn().mass() {
+            mass.gemv_inplace(
+                &self.old_state.y,
+                self.state.t,
+                Eqn::T::one(),
+                &mut self.old_state.dy,
+            );
+        } else {
+            self.old_state
+                .dy
+                .axpy(Eqn::T::one(), &self.old_state.y, Eqn::T::one());
+        }
+        linear_solver.solve_in_place(&mut self.old_state.dy)?;
+        self.old_state.dy *= scale(row.gamma * h);
+        self.diff.column_mut(i).copy_from(&self.old_state.dy);
+        Ok(())
+    }
+
+    /// Form the accepted endpoint and its derivative before the existing RK state swap.
+    pub(crate) fn finish_step_rosenbrock(&mut self, h: Eqn::T)
+    where
+        Eqn: OdeEquationsImplicit,
+    {
+        self.old_state.y.copy_from(&self.state.y);
+        self.diff.gemv_cols(
+            0,
+            self.tableau.s(),
+            Eqn::T::one(),
+            self.tableau.b().as_slice(),
+            Eqn::T::one(),
+            &mut self.old_state.y,
+        );
+        if self.problem.eqn.mass().is_some() {
+            let weights = Self::interpolate_beta_weights_deriv(
+                Eqn::T::one(),
+                self.tableau.beta_t().unwrap(),
+                Eqn::T::one() / h,
+            );
+            self.diff.gemv_cols(
+                0,
+                weights.len(),
+                Eqn::T::one(),
+                weights.as_slice(),
+                Eqn::T::zero(),
+                &mut self.old_state.dy,
+            );
+        } else {
+            self.problem.eqn.rhs().call_inplace(
+                &self.old_state.y,
+                self.state.t + h,
+                &mut self.old_state.dy,
+            );
+        }
+    }
+    pub(crate) fn store_rosenbrock_hermite_derivatives(&mut self, h: Eqn::T) {
+        if self.tableau.beta_t().is_none() {
+            // Existing Hermite interpolation expects endpoint derivatives scaled by h.
+            self.diff
+                .column_mut(0)
+                .axpy(h, &self.state.dy, Eqn::T::zero());
+            self.diff
+                .column_mut(self.diff.ncols() - 1)
+                .axpy(h, &self.old_state.dy, Eqn::T::zero());
+        }
+    }
+
+    /// Integrate outputs along the state continuous extension with Gauss-3 and embedded
+    /// Gauss-2 quadrature (local error order five), using preallocated vector storage.
+    pub(crate) fn integrate_rosenbrock_outputs(&mut self, h: Eqn::T, scratch: &mut Eqn::V) {
+        let out = self.problem.eqn.out().unwrap();
+        for (i, node) in Self::rosenbrock_output_nodes().into_iter().enumerate() {
+            let theta = Eqn::T::from_f64(node).unwrap();
+            let weights = Self::interpolate_beta_weights(
+                theta,
+                self.tableau.beta_t().unwrap(),
+                Eqn::T::one(),
+            );
+            Self::interpolate_from_diff(&self.state.y, weights.as_slice(), &self.diff, scratch);
+            out.call_inplace(scratch, self.state.t + theta * h, &mut self.old_state.dg);
+            self.gdiff
+                .column_mut(i)
+                .axpy(h, &self.old_state.dg, Eqn::T::zero());
+        }
+        out.call_inplace(&self.old_state.y, self.state.t + h, &mut self.old_state.dg);
+    }
+    fn rosenbrock_output_nodes() -> [f64; 5] {
+        let a = (3.0_f64 / 5.0).sqrt() / 2.0;
+        let b = 1.0 / (2.0 * 3.0_f64.sqrt());
+        [0.5 - a, 0.5 - b, 0.5, 0.5 + b, 0.5 + a]
+    }
+    fn rosenbrock_output_weights(error: bool) -> TableauVec<Eqn::T> {
+        let embedded = if error { -0.5 } else { 0.0 };
+        TableauVec::from_slice(
+            &[5.0 / 18.0, embedded, 4.0 / 9.0, embedded, 5.0 / 18.0]
+                .map(|x| Eqn::T::from_f64(x).unwrap()),
+        )
+    }
+    fn rosenbrock_output_beta() -> TableauMat<Eqn::T> {
+        // Integrate the Lagrange basis at the five nodes. The resulting polynomial
+        // uses the existing beta interpolation path and matches Gauss-3 at theta=1.
+        let nodes = Self::rosenbrock_output_nodes();
+        let mut beta = TableauMat::zeros(5, 5);
+        for (i, xi) in nodes.into_iter().enumerate() {
+            let mut coefficients = [1.0, 0.0, 0.0, 0.0, 0.0];
+            let mut degree = 0;
+            for (j, xj) in nodes.into_iter().enumerate() {
+                if i == j {
+                    continue;
+                }
+                degree += 1;
+                for k in (0..=degree).rev() {
+                    let previous = if k == 0 { 0.0 } else { coefficients[k - 1] };
+                    coefficients[k] = (previous - xj * coefficients[k]) / (xi - xj);
+                }
+            }
+            for (k, coefficient) in coefficients.into_iter().enumerate() {
+                beta[(k, i)] = Eqn::T::from_f64(coefficient / (k + 1) as f64).unwrap();
+            }
+        }
+        beta
     }
 
     pub(crate) fn do_stage_sdirk<AugEqn>(
@@ -798,11 +981,16 @@ where
 
         if let Some(out_error) = self.out_error.as_mut() {
             // output errors
+            let weights = if self.tableau.rosenbrock().is_some() {
+                Self::rosenbrock_output_weights(true)
+            } else {
+                *self.tableau.d()
+            };
             self.gdiff.gemv_cols(
                 0,
-                s,
+                weights.len(),
                 Eqn::T::one(),
-                self.tableau.d().as_slice(),
+                weights.as_slice(),
                 Eqn::T::zero(),
                 out_error,
             );
@@ -909,11 +1097,16 @@ where
         // step accepted, so integrate output functions
         if self.problem.integrate_out {
             self.old_state.g.copy_from(&self.state.g);
+            let weights = if self.tableau.rosenbrock().is_some() {
+                Self::rosenbrock_output_weights(false)
+            } else {
+                *self.tableau.b()
+            };
             self.gdiff.gemv_cols(
                 0,
-                s,
+                weights.len(),
                 Eqn::T::one(),
-                self.tableau.b().as_slice(),
+                weights.as_slice(),
                 Eqn::T::one(),
                 &mut self.old_state.g,
             );
@@ -1212,7 +1405,11 @@ where
             (t - self.old_state.t) / dt
         };
         let scale_diff = Eqn::T::one();
-        if let Some(beta_t) = self.tableau.beta_t() {
+        let output_beta = self
+            .tableau
+            .rosenbrock()
+            .map(|_| Self::rosenbrock_output_beta());
+        if let Some(beta_t) = output_beta.as_ref().or_else(|| self.tableau.beta_t()) {
             let beta_f = Self::interpolate_beta_weights(theta, beta_t, scale_diff);
             Self::interpolate_from_diff(&self.old_state.g, beta_f.as_slice(), &self.gdiff, g);
         } else {
