@@ -270,3 +270,321 @@ where
         self.rk.state_mut_back(t, self.rk.problem().integrate_out)
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        ode_equations::test_models::{
+            exponential_decay::exponential_decay_problem,
+            exponential_decay_with_algebraic::{
+                exponential_decay_with_algebraic_adjoint_problem,
+                exponential_decay_with_algebraic_problem,
+            },
+            robertson_ode::robertson_ode,
+        },
+        ode_solver::tests::{
+            test_checkpointing, test_config, test_interpolate, test_interpolate_dy,
+            test_ode_solver, test_problem, test_state_mut,
+        },
+        FaerLU, FaerMat, NalgebraLU, NalgebraMat, OdeBuilder, TableauMat, TableauVec,
+    };
+    type Mat = NalgebraMat<f64>;
+    type LS = NalgebraLU<f64>;
+    fn advance<'a, E: OdeEquationsImplicit<T = f64> + 'a, S: OdeSolverMethod<'a, E>>(
+        s: &mut S,
+        t: f64,
+    ) {
+        s.set_stop_time(t).unwrap();
+        while s.step().unwrap() != OdeSolverStopReason::TstopReached {}
+    }
+    macro_rules! contract {
+        ($mat:ty, $ls:ty) => {{
+            test_state_mut(test_problem::<$mat>(false).rodas5p::<$ls>().unwrap());
+            test_interpolate(test_problem::<$mat>(false).rodas5p::<$ls>().unwrap());
+            test_interpolate(test_problem::<$mat>(true).rodas5p::<$ls>().unwrap());
+            test_interpolate_dy(test_problem::<$mat>(false).rodas5p::<$ls>().unwrap());
+            test_config(robertson_ode::<$mat>(false, 1).0.rodas5p::<$ls>().unwrap());
+            let (p, sol) = exponential_decay_problem::<$mat>(false);
+            test_checkpointing(
+                sol,
+                p.rodas5p::<$ls>().unwrap(),
+                p.rodas5p::<$ls>().unwrap(),
+            );
+            for (p, sol) in [
+                exponential_decay_problem::<$mat>(false),
+                exponential_decay_problem::<$mat>(true),
+            ] {
+                let mut s = p.rodas5p::<$ls>().unwrap();
+                test_ode_solver(&mut s, sol, None, false, false);
+                let stats = s.get_statistics();
+                assert_eq!(
+                    stats.number_of_linear_solver_setups,
+                    stats.number_of_steps + stats.number_of_error_test_failures
+                );
+                assert_eq!(stats.number_of_nonlinear_solver_iterations, 0);
+            }
+            let (p, sol) = robertson_ode::<$mat>(false, 1);
+            test_ode_solver(&mut p.rodas5p::<$ls>().unwrap(), sol, None, false, false);
+        }};
+    }
+    #[test]
+    fn nalgebra_shared_contract() {
+        contract!(Mat, LS);
+    }
+    #[test]
+    fn faer_shared_contract() {
+        contract!(FaerMat<f64>, FaerLU<f64>);
+    }
+    #[test]
+    fn constant_mass_index_one_dae() {
+        macro_rules! check {
+            ($mat:ty, $ls:ty) => {{
+                let (p, sol) = exponential_decay_with_algebraic_problem::<$mat>(false);
+                test_ode_solver(&mut p.rodas5p::<$ls>().unwrap(), sol, None, false, false);
+                let (p, sol) = exponential_decay_with_algebraic_adjoint_problem::<$mat>(true);
+                let mut s = p.rodas5p::<$ls>().unwrap();
+                // The shared state harness applies out(y); this fixture instead expects integral(out).
+                for point in sol.solution_points {
+                    while s.state().t < point.t { s.step().unwrap(); }
+                    s.interpolate_out(point.t).unwrap().assert_eq_st(&point.state, 2e-5);
+                }
+            }};
+        }
+        check!(Mat, LS);
+        check!(FaerMat<f64>, FaerLU<f64>);
+    }
+    fn sine_problem(
+        lambda: f64,
+        integrate: bool,
+    ) -> OdeSolverProblem<
+        impl OdeEquationsImplicit<
+            M = Mat,
+            V = crate::NalgebraVec<f64>,
+            T = f64,
+            C = crate::NalgebraContext,
+        >,
+    > {
+        OdeBuilder::<Mat>::new()
+            .rtol(10.0)
+            .atol([10.0])
+            .rhs_implicit(
+                move |x, _, t, f| f[0] = lambda * (x[0] - t.sin()) + t.cos(),
+                move |_, _, _, v, jv| jv[0] = lambda * v[0],
+            )
+            .init(|_, _, y| y[0] = 0.0, 1)
+            .integrate_out(integrate)
+            .out_implicit(
+                |x, _, t, g| g[0] = x[0] * x[0] + t.powi(4),
+                |_, _, _, _, _| unreachable!("quadrature does not use output Jacobians"),
+                1,
+            )
+            .build()
+            .unwrap()
+    }
+    fn fixed_error(h: f64, lambda: f64) -> f64 {
+        let p = sine_problem(lambda, false);
+        let mut s = p.rodas5p::<LS>().unwrap();
+        *s.state_mut().h = h;
+        s.config_mut().maximum_timestep_growth = 1.0;
+        s.config_mut().minimum_timestep_growth = 1.0;
+        advance(&mut s, 1.0);
+        (s.state().y[0] - 1.0f64.sin()).abs()
+    }
+    #[test]
+    fn fifth_order_and_stiff_order_reduction() {
+        let coarse = fixed_error(0.2, -2.0);
+        let fine = fixed_error(0.1, -2.0);
+        assert!(coarse > 20.0 * fine, "{coarse} {fine}");
+        assert!(fixed_error(0.2, -1000.0) > fixed_error(0.1, -1000.0));
+    }
+    #[test]
+    fn continuous_extension_midpoint_convergence() {
+        let error = |h| {
+            let p = sine_problem(0.0, false);
+            let mut s = p.rodas5p::<LS>().unwrap();
+            *s.state_mut().h = h;
+            s.step().unwrap();
+            (s.interpolate(h / 2.0).unwrap()[0] - (h / 2.0).sin()).abs()
+        };
+        assert!(error(0.4) > 12.0 * error(0.2));
+    }
+    #[test]
+    fn embedded_difference_has_local_order_five() {
+        let error = |h| {
+            let p = sine_problem(-2.0, false);
+            let mut s = p.rodas5p::<LS>().unwrap();
+            *s.state_mut().h = h;
+            s.step().unwrap();
+            s.rk.error_norm(h, None::<&mut NoAug<_>>, |_| Ok(()))
+                .unwrap()
+                .sqrt()
+        };
+        let ratio = error(0.2) / error(0.1);
+        assert!((20.0..45.0).contains(&ratio), "{ratio}");
+    }
+    #[test]
+    fn nonlinear_jacobian_refreshes_at_the_accepted_state() {
+        use std::{cell::RefCell, rc::Rc};
+        let points = Rc::new(RefCell::new(Vec::new()));
+        let observed = points.clone();
+        let p = OdeBuilder::<Mat>::new()
+            .rtol(1e-7)
+            .atol([1e-9])
+            .rhs_implicit(
+                |x, _, _, f| f[0] = -x[0] * x[0],
+                move |x, _, t, v, jv| {
+                    observed.borrow_mut().push((t, x[0]));
+                    jv[0] = -2.0 * x[0] * v[0];
+                },
+            )
+            .init(|_, _, y| y[0] = 2.0, 1)
+            .build()
+            .unwrap();
+        let mut s = p.rodas5p::<LS>().unwrap();
+        s.step().unwrap();
+        let (t, y) = (s.state().t, s.state().y[0]);
+        s.step().unwrap();
+        assert!(points
+            .borrow()
+            .iter()
+            .any(|&(at, x)| at == t && (x - y).abs() < 1e-12));
+    }
+    #[test]
+    fn rejection_preserves_the_initial_solution() {
+        let p = OdeBuilder::<Mat>::new()
+            .rtol(1e-8)
+            .atol([1e-10])
+            .rhs_implicit(
+                |x, _, _, f| f[0] = -100.0 * x[0],
+                |_, _, _, v, jv| jv[0] = -100.0 * v[0],
+            )
+            .init(|_, _, y| y[0] = 1.0, 1)
+            .build()
+            .unwrap();
+        let mut s = p.rodas5p::<LS>().unwrap();
+        *s.state_mut().h = 0.1;
+        s.step().unwrap();
+        assert!(s.get_statistics().number_of_error_test_failures > 0);
+        assert!(s.state().t < 0.1);
+        assert!((s.state().y[0] - (-100.0 * s.state().t).exp()).abs() < 2e-5);
+        advance(&mut s, 0.1);
+        assert!((s.state().y[0] - (-10.0f64).exp()).abs() < 2e-5);
+    }
+    fn euler(gamma: f64, diagonal: f64, coupling: f64) -> Tableau<f64> {
+        Tableau::new_rosenbrock(
+            TableauMat::from_slice(1, 1, &[diagonal]),
+            TableauVec::from_slice(&[1.0]),
+            TableauVec::from_slice(&[0.0]),
+            TableauVec::from_slice(&[0.0]),
+            1,
+            None,
+            TableauMat::from_slice(1, 1, &[coupling]),
+            gamma,
+            TableauVec::from_slice(&[0.0]),
+            1,
+        )
+    }
+    #[test]
+    fn custom_tableau_and_single_stage_hermite_interpolation() {
+        let (p, _) = exponential_decay_problem::<Mat>(false);
+        let mut state = p.rodas5p_state::<LS>().unwrap();
+        state.h = 0.1;
+        let mut s = p
+            .rosenbrock_solver::<LS, Mat>(state, euler(1.0, 0.0, 0.0))
+            .unwrap();
+        let y0 = s.state().y[0];
+        let dy0 = s.state().dy[0];
+        s.step().unwrap();
+        assert!((s.state().y[0] - y0 / 1.01).abs() < 1e-12);
+        assert!((s.interpolate_dy(0.0).unwrap()[0] - dy0).abs() < 1e-12);
+        assert!((s.interpolate_dy(0.1).unwrap()[0] - s.state().dy[0]).abs() < 1e-12);
+    }
+    #[test]
+    fn invalid_tableaus_are_typed_errors() {
+        let (p, _) = exponential_decay_problem::<Mat>(false);
+        for tableau in [
+            euler(0.0, 0.0, 0.0),
+            euler(-1.0, 0.0, 0.0),
+            euler(f64::NAN, 0.0, 0.0),
+            euler(1.0, 1.0, 0.0),
+            euler(1.0, 0.0, 1.0),
+            Tableau::esdirk34(),
+        ] {
+            let error = p
+                .rosenbrock_solver::<LS, Mat>(p.rodas5p_state::<LS>().unwrap(), tableau)
+                .err()
+                .unwrap();
+            assert!(matches!(
+                error,
+                DiffsolError::OdeSolverError(OdeSolverError::InvalidTableau(_))
+            ));
+        }
+        let (p, _) = exponential_decay_with_algebraic_problem::<Mat>(false);
+        assert!(p
+            .rosenbrock_solver::<LS, Mat>(p.rodas5p_state::<LS>().unwrap(), euler(1.0, 0.0, 0.0))
+            .is_err());
+    }
+    #[test]
+    fn constant_integrated_output_is_consistent_and_dense() {
+        macro_rules! check {
+            ($mat:ty, $ls:ty) => {{
+                let p = test_problem::<$mat>(true);
+                let mut s = p.rodas5p::<$ls>().unwrap();
+                *s.state_mut().h = 0.1;
+                s.step().unwrap();
+                assert!((s.state().g[0] - 0.1 * s.state().y[0]).abs() < 1e-12);
+                assert!(
+                    (s.interpolate_out(0.05).unwrap()[0] - 0.05 * s.state().y[0]).abs() < 1e-12
+                );
+            }};
+        }
+        check!(Mat, LS);
+        check!(FaerMat<f64>, FaerLU<f64>);
+    }
+    #[test]
+    fn nonlinear_integrated_output_converges_and_restarts() {
+        let error = |h| {
+            let p = sine_problem(-2.0, true);
+            let mut s = p.rodas5p::<LS>().unwrap();
+            *s.state_mut().h = h;
+            s.config_mut().minimum_timestep_growth = 1.0;
+            s.config_mut().maximum_timestep_growth = 1.0;
+            advance(&mut s, 1.0);
+
+            let state = s.checkpoint();
+            let mut restarted = p.rodas5p_solver::<LS>(state).unwrap();
+            *restarted.config_mut() = s.config().clone();
+            advance(&mut s, 2.0);
+            advance(&mut restarted, 2.0);
+            assert!((s.state().g[0] - restarted.state().g[0]).abs() < 1e-12);
+            (s.interpolate_out(s.state().t).unwrap()[0] - (1.0 - (4.0f64).sin() / 4.0 + 32.0 / 5.0))
+                .abs()
+        };
+        let coarse = error(0.2);
+        let fine = error(0.1);
+        assert!(coarse > 20.0 * fine, "{coarse} {fine}");
+    }
+    #[test]
+    fn integrated_output_has_its_own_error_control() {
+        let p = OdeBuilder::<Mat>::new()
+            .rtol(1e-6)
+            .atol([1e-8])
+            .integrate_out(true)
+            .out_rtol(1e-8)
+            .out_atol([1e-10])
+            .rhs_implicit(|_, _, _, f| f[0] = 0.0, |_, _, _, _, jv| jv[0] = 0.0)
+            .init(|_, _, y| y[0] = 1.0, 1)
+            .out_implicit(
+                |_, _, t, g| g[0] = t.exp(),
+                |_, _, _, _, _| unreachable!("quadrature does not use output Jacobians"),
+                1,
+            )
+            .build()
+            .unwrap();
+        let mut s = p.rodas5p::<LS>().unwrap();
+        *s.state_mut().h = 1.0;
+        advance(&mut s, 1.0);
+        assert!(s.get_statistics().number_of_error_test_failures > 0);
+        assert!((s.state().g[0] - (1.0f64.exp() - 1.0)).abs() < 1e-8);
+    }
+}
