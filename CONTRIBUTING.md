@@ -22,6 +22,10 @@ Thank you for your interest in contributing to diffsol! This guide will help you
   - [Opening a Pull Request](#opening-a-pull-request)
 - [Review Process](#review-process)
 - [Getting Help](#getting-help)
+- [Additional Notes](#additional-notes)
+  - [Performance Testing](#performance-testing)
+  - [Checking All Features](#checking-all-features)
+  - [LLM Usage](#llm-usage)
 
 ## Getting Started
 
@@ -425,3 +429,11 @@ cargo test --no-default-features --features nalgebra
 # Test with diffsl features
 cargo test --features diffsl-cranelift
 ```
+
+### LLM Usage
+
+Feel free to use an LLM Chatbot or Agent to help you with any of the above, but please keep all communication on issues/PRs strictly human-only. If you need to copy-paste some LLM output or code that is useful to the conversation or for reference, please do so but clearly mark it as such.
+
+If you do use an agent for implementation, you are responsible for all code that is submitted to this repository, and it is expected that you have reviewed and fully understood the submitted PR, as well as the parts of diffsol that you are modifying. If the change touches any of the numerical methods implemented in diffsol, it is expected that you have a full understanding of the numerics, math and surrounding academic literature of the methods you are implementing, and that appropriate citations are included in the code and/or documentation.
+
+If you are planning a large change please open an issue to discuss it first. Your agent can probably get something working within diffsol but won't be very good at structuring the code to fit in with the overall architecture, diffsol's roadmap and prioritising maintenance. Note that authors of significant new features would normally be expected to help with maintenance of that feature into the future, so please consider this before starting a large change.
