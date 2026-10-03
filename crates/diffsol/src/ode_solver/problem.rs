@@ -599,6 +599,40 @@ where
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
+    /// Create an initial state for the Rosenbrock 2(3) solver.
+    pub fn rosenbrock23_state(&self) -> Result<RkState<Eqn::V>, DiffsolError>
+    where
+        Eqn: OdeEquationsImplicit,
+    {
+        RkState::new(self, 2)
+    }
+
+    /// Create a Rosenbrock 2(3) solver from an existing state.
+    pub fn rosenbrock23_solver<
+        LS: LinearSolver<Eqn::M>,
+        DM: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
+    >(
+        &self,
+        state: RkState<Eqn::V>,
+    ) -> Result<crate::Rosenbrock23<'_, Eqn, LS, DM>, DiffsolError>
+    where
+        Eqn: OdeEquationsImplicit,
+    {
+        crate::Rosenbrock23::new(self, state, LS::default())
+    }
+
+    /// Create a Rosenbrock 2(3) solver for an ODE with an identity mass matrix.
+    /// The right-hand side must provide a Jacobian action.
+    pub fn rosenbrock23<LS: LinearSolver<Eqn::M>>(
+        &self,
+    ) -> Result<crate::Rosenbrock23<'_, Eqn, LS>, DiffsolError>
+    where
+        Eqn: OdeEquationsImplicit,
+    {
+        let state = self.rosenbrock23_state()?;
+        self.rosenbrock23_solver::<LS, <Eqn::V as DefaultDenseMatrix>::M>(state)
+    }
+
     /// Create a new state for the Bdf solver. This will provide a consistent initial state,
     /// so might require solving a nonlinear system if a mass matrix is present.
     pub fn bdf_state<LS: LinearSolver<Eqn::M>>(&self) -> Result<BdfState<Eqn::V>, DiffsolError>

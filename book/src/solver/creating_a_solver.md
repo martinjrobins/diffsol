@@ -4,6 +4,7 @@ Once you have defined the problem, you need to create a solver to solve the prob
 - [`diffsol::Bdf`](https://docs.rs/diffsol/latest/diffsol/ode_solver/bdf/struct.Bdf.html): A Backwards Difference Formulae solver, suitable for stiff problems and singular mass matrices.
 - [`diffsol::Sdirk`](https://docs.rs/diffsol/latest/diffsol/ode_solver/sdirk/struct.Sdirk.html) A Singly Diagonally Implicit Runge-Kutta (SDIRK or ESDIRK) solver. You can define your own butcher tableau using [`Tableau`](https://docs.rs/diffsol/latest/diffsol/ode_solver/tableau/struct.Tableau.html) or use one of the pre-defined tableaues.
 - [`diffsol::ExplicitRk`](https://docs.rs/diffsol/latest/diffsol/ode_solver/explicit_rk/struct.ExplicitRk.html): An explicit Runge-Kutta solver. You can define your own butcher tableau using [`Tableau`](https://docs.rs/diffsol/latest/diffsol/ode_solver/tableau/struct.Tableau.html) or use one of the pre-defined tableaues.
+- `diffsol::Rosenbrock23`: An adaptive Rosenbrock 2(3) solver for stiff ODEs. It requires an identity mass matrix and a right-hand-side Jacobian; integrated outputs and sensitivity analysis are not currently supported.
 
 For each solver, you will need to specify the linear solver type to use. The available linear solvers are:
 - [`diffsol::NalgebraLU`](https://docs.rs/diffsol/latest/diffsol/linear_solver/nalgebra_lu/struct.NalgebraLU.html): A LU decomposition solver using the [nalgebra](https://nalgebra.org) crate.
@@ -11,6 +12,7 @@ For each solver, you will need to specify the linear solver type to use. The ava
 - [`diffsol::FaerSparseLU`](https://docs.rs/diffsol/latest/diffsol/linear_solver/faer_sparse_lu/struct.FaerSparseLU.html): A sparse LU decomposition solver using the `faer` crate.
 
 Each solver can be created directly, but it generally easier to use the methods on the [`OdeSolverProblem`](https://docs.rs/diffsol/latest/diffsol/ode_solver/problem/struct.OdeSolverProblem.html) struct to create the solver.
+For an implicit ODE with an identity mass matrix, construct Rosenbrock23 with `problem.rosenbrock23::<NalgebraLU<f64>>()?` after building the problem. Use `solver.set_discontinuity_stop_time(t)?` before a known forcing jump; ordinary output times use `solver.set_stop_time(t)?`.
 For example:
 
 ```rust,ignore

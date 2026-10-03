@@ -438,6 +438,7 @@ pub use ode_solver::{
     method::OdeSolverStopReason,
     no_checkpointing_solver::NoCheckpointingSolver,
     problem::{InitialConditionSolverOptions, OdeSolverOptions, OdeSolverProblem},
+    rosenbrock23::Rosenbrock23,
     sdirk::Sdirk,
     sdirk_state::RkState,
     sensitivities::SensitivitiesOdeSolverMethod,
