@@ -617,6 +617,10 @@ mod tests {
         let mut solver = problem.rodas5p::<LS>().unwrap();
         advance(&mut solver, 2.0);
         let error = (solver.state().y[0] - g(2.0)).abs();
+        println!(
+            "paper,B3,{error:.17e},{}",
+            solver.get_statistics().number_of_steps
+        );
         assert!(error < 1e-7, "paper problem 2 error={error}");
     }
     #[test]
@@ -648,6 +652,7 @@ mod tests {
             advance(&mut solver, 2.0);
             let exact = 10.0 - 12.0 * (-2.0_f64).exp();
             let error = (solver.state().y[0] - exact).abs();
+            println!("paper,B5,{h},{published:.17e},{error:.17e}");
             assert!(
                 (error - published).abs() < 0.2 * published,
                 "h={h}, error={error}, published={published}"
@@ -703,6 +708,7 @@ mod tests {
             advance(&mut solver, 2.0);
             let y = solver.state().y;
             let error = (y[0] + 0.5).abs().max((y[1] - 0.25).abs());
+            println!("paper,B7,{h},{published:.17e},{error:.17e}");
             assert!(
                 (error - published).abs() < 0.2 * published,
                 "h={h}, error={error}, published={published}"
@@ -740,7 +746,7 @@ mod tests {
     fn paper_index_one_dae_problem_one() {
         let problem = OdeBuilder::<Mat>::new()
             .t0(2.0)
-            .rtol(1e-8)
+            .rtol(1e-7)
             .atol([1e-10, 1e-10])
             .rhs_implicit(
                 |x, _, t, f| {
@@ -768,6 +774,12 @@ mod tests {
         let mut solver = problem.rodas5p::<LS>().unwrap();
         advance(&mut solver, 4.0);
         let y = solver.state().y;
+        println!(
+            "paper,B2,{:.17e},{:.17e},{}",
+            (y[0] - 4.0_f64.ln()).abs(),
+            (y[1] - 4.0_f64.ln() / 4.0).abs(),
+            solver.get_statistics().number_of_steps
+        );
         assert!((y[0] - 4.0_f64.ln()).abs() < 1e-7);
         assert!((y[1] - 4.0_f64.ln() / 4.0).abs() < 1e-7);
         assert!((y[0] / y[1] - 4.0).abs() < 1e-7);
@@ -813,6 +825,7 @@ mod tests {
             let error = (y[0] - 4.0_f64.ln())
                 .abs()
                 .max((y[1] - 4.0_f64.ln() / 4.0).abs());
+            println!("paper,B4,{h},{published:.17e},{error:.17e}");
             assert!(
                 (error - published).abs() < 0.2 * published,
                 "h={h}, error={error}, published={published}"
@@ -959,5 +972,161 @@ mod tests {
         }
         assert!(stability_step(-1e8).abs() < 1e-6);
         assert!(stability_step(-1e14).abs() < 1e-10);
+    }
+
+    // Isolate the method from the existing, non-overridable blanket central f_t helper.
+    // Test-only: production continues to use NonLinearOpTimePartial unchanged.
+    fn analytic_step<
+        E: OdeEquationsImplicit<
+            T = f64,
+            M = Mat,
+            V = crate::NalgebraVec<f64>,
+            C = crate::NalgebraContext,
+        >,
+    >(
+        s: &mut Rosenbrock<'_, E, LS>,
+        h: f64,
+        ft: f64,
+    ) -> f64 {
+        let _ = s.rk.start_step().unwrap();
+        s.op.zero_phi();
+        s.op.set_h(s.rk.tableau().rosenbrock().unwrap().gamma * h);
+        s.op.set_jacobian_is_stale();
+        LinearSolver::set_linearisation(
+            &mut s.linear_solver,
+            &s.op,
+            &s.rk.state().y,
+            s.rk.state().t,
+        );
+        s.ft[0] = ft;
+        s.rk.start_step_attempt(h, None::<&mut NoAug<E>>);
+        for i in 0..s.rk.tableau().s() {
+            s.rk.do_stage_rosenbrock(i, h, &s.op, &mut s.linear_solver, &s.ft)
+                .unwrap();
+        }
+        s.rk.finish_step_rosenbrock(h);
+        let err =
+            s.rk.error_norm(h, None::<&mut NoAug<E>>, |_| Ok(()))
+                .unwrap()
+                .sqrt()
+                * (s.problem().atol[0] + s.problem().rtol * s.state().y[0].abs());
+        s.rk.store_rosenbrock_hermite_derivatives(h);
+        s.rk.step_accepted(h, h, false).unwrap();
+        err
+    }
+    // Direct implementation 2a255e1, with analytic f_t to isolate stage arithmetic.
+    // Its within-step finite difference belongs to the downstream event policy.
+
+    #[test]
+    fn rodas5p_coefficients_match_julia_bit_for_bit() {
+        let data = include_str!(
+            "../ode_equations/test_models/rosenbrock_reference/rodas5p-julia-2.7.1.txt"
+        );
+        let values: Vec<f64> = data.lines().filter_map(|l| l.parse().ok()).collect();
+        assert_eq!(values.len(), 161);
+        let t = Tableau::<f64>::rodas5p();
+        let row = t.rosenbrock().unwrap();
+        let mut observed = vec![row.gamma];
+        for i in 0..8 {
+            for j in 0..8 {
+                observed.push(t.a(i, j));
+            }
+        }
+        for i in 0..8 {
+            for j in 0..7 {
+                observed.push(row.coupling[(i, j)]);
+            }
+        }
+        for i in 0..8 {
+            assert_eq!(row.coupling[(i, 7)], 0.0);
+        }
+        observed.extend_from_slice(t.c().as_slice());
+        observed.extend_from_slice(row.time.as_slice());
+        // Compare the beta transformation exactly, without inverting rounded sums to recover H.
+        for i in 0..8 {
+            let h = [values[137 + i], values[145 + i], values[153 + i]];
+            let beta = t.beta_t().unwrap().as_col_slice(i);
+            for (actual, expected) in
+                beta.iter()
+                    .zip([t.b()[i] + h[0], -h[0] + h[1], -h[1] + h[2], -h[2]])
+            {
+                assert_eq!(actual.to_bits(), expected.to_bits());
+            }
+        }
+        for (actual, expected) in observed.iter().zip(values) {
+            assert_eq!(actual.to_bits(), expected.to_bits());
+        }
+    }
+    #[test]
+    fn rodas5p_stability_matches_julia() {
+        assert!((stability_step(-1.0) - (0.3678803089370538)).abs() < 1e-13);
+        assert!((stability_step(-10.0) - (-0.04037298377966268)).abs() < 1e-13);
+        assert!((stability_step(-1000.0) - (-0.01205291678818721)).abs() < 1e-13);
+        assert!((stability_step(-1.0e8) - (-1.2520878608405691e-7)).abs() < 1e-13);
+        assert!((stability_step(-1.0e14) - (-1.2520883384046958e-13)).abs() < 1e-13);
+    }
+    #[test]
+    fn built_in_fixed_robertson_matches_julia() {
+        for (tableau, expected) in [(
+            Tableau::rodas5p(),
+            [
+                0.9996006841629056,
+                3.6450479186134964e-5,
+                0.0003628653579085962,
+            ],
+        )] {
+            let (mut p, _) = robertson_ode::<Mat>(false, 1);
+            p.rtol = 10.0;
+            p.atol.fill(10.0);
+            let mut s = p
+                .rosenbrock_solver::<LS, Mat>(p.rodas5p_state::<LS>().unwrap(), tableau)
+                .unwrap();
+            *s.state_mut().h = 0.001;
+            s.config_mut().minimum_timestep_growth = 1.0;
+            s.config_mut().maximum_timestep_growth = 1.0;
+            advance(&mut s, 0.01);
+            for (i, e) in expected.into_iter().enumerate() {
+                assert!(
+                    (s.state().y[i] - e).abs() < 1e-12 * e.abs(),
+                    "i={i}, actual={}, expected={e}",
+                    s.state().y[i]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn built_in_fixed_nonautonomous_matches_julia_with_analytic_ft() {
+        for (name, tableau, lambda, h, expected) in [
+            (
+                "rodas5p",
+                Tableau::rodas5p(),
+                0.0,
+                0.01,
+                0.09983341664682904,
+            ),
+            (
+                "rodas5p",
+                Tableau::rodas5p(),
+                -1000.0,
+                0.001,
+                0.009999833334166675,
+            ),
+        ] {
+            let p = sine_problem(lambda, false);
+            let mut s = p
+                .rosenbrock_solver::<LS, Mat>(p.rodas5p_state::<LS>().unwrap(), tableau)
+                .unwrap();
+            for _ in 0..10 {
+                let t = s.state().t;
+                analytic_step(&mut s, h, -lambda * t.cos() - t.sin());
+            }
+            let error = (s.state().y[0] - expected).abs();
+            println!(
+                "analytic_fixed,{name},{lambda},{h},{expected:.17e},{:.17e},{error:.17e}",
+                s.state().y[0]
+            );
+            assert!(error < 1e-13, "{name}, lambda={lambda}, {error}");
+        }
     }
 }
