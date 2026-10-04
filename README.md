@@ -58,7 +58,36 @@ See the [Cargo.toml documentation](https://doc.rust-lang.org/cargo/reference/spe
 
 The [diffsol book](https://martinjrobins.github.io/diffsol/) describes how to use diffsol using examples taken from several application areas (e.g. population dynamics, electrical circuits and pharmacological modelling), as well as more detailed information on the various APIs used to specify the ODE equations. For a more complete description of the API, please see the [docs.rs API documentation](https://docs.rs/diffsol).
 
-For a quick start, see the following example of solving the Lorenz system of equations using the BDF solver and the DiffSL DSL with the LLVM JIT backend:
+For a quick start, see the following example of solving the Lorenz system of equations using
+closures and the TSIT45 solver.
+
+```rust
+use diffsol::{NalgebraMat, OdeBuilder, OdeSolverMethod};
+
+pub fn lorenz() -> Result<(), Box<dyn std::error::Error>> {
+    let problem = OdeBuilder::<NalgebraMat<f64>>::new()
+        .p([14.0, 10.0, 8.0 / 3.0])
+        .rhs(|x, p, _t, y| {
+            y[0] = p[1] * (x[1] - x[0]);
+            y[1] = x[0] * (p[0] - x[2]) - x[1];
+            y[2] = x[0] * x[1] - p[2] * x[2];
+        })
+        .init(
+            |_p, _t, y| {
+                y[0] = 1.0;
+                y[1] = 0.0;
+                y[2] = 0.0;
+            },
+            3,
+        )
+        .build()?;
+    let mut solver = problem.tsit45()?;
+    let (_ys, _ts, _stop_reason) = solver.solve(10.0)?;
+    Ok(())
+}
+```
+
+Here is the same model using the BDF solver and the DiffSL DSL with the LLVM JIT backend:
 
 ```rust
 use diffsol::{LlvmModule, NalgebraLU, NalgebraMat, OdeBuilder, OdeSolverMethod};
@@ -80,7 +109,7 @@ pub fn lorenz() -> Result<(), Box<dyn std::error::Error>> {
         ",
     )?;
     let mut solver = problem.bdf::<NalgebraLU<f64>>()?;
-    let (_ys, _ts, _stop_reason) = solver.solve(0.0)?;
+    let (_ys, _ts, _stop_reason) = solver.solve(10.0)?;
     Ok(())
 }
 ```
