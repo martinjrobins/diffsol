@@ -146,8 +146,11 @@ impl<V: Vector> StateRefMut<'_, V> {
             result = root_solver.solve_in_place(&f, &mut y_tmp, *self.t, &yerr, &mut convergence);
             match &result {
                 Ok(()) => break,
+                // NewtonDiverged is the convergence-rate test failing: like IDA on slow
+                // convergence, retry from the current iterate with a jacobian evaluated there
                 Err(DiffsolError::NonLinearSolverError(
-                    NonLinearSolverError::NewtonMaxIterations,
+                    NonLinearSolverError::NewtonMaxIterations
+                    | NonLinearSolverError::NewtonDiverged,
                 )) => (),
                 e => e.clone()?,
             }
@@ -1246,6 +1249,7 @@ mod test {
             exponential_decay::exponential_decay_with_reset_problem,
             exponential_decay::exponential_decay_with_reset_problem_sens,
             exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem_sens,
+            nonlinear_algebraic::nonlinear_algebraic_problem,
         },
         op::closure_with_sens::ClosureWithSens,
         BdfState, Context, LinearSolver, Matrix, NalgebraLU, NonLinearOp, NonLinearOpTimePartial,
@@ -1319,6 +1323,53 @@ mod test {
                     M::T::from_f64(10.).unwrap(),
                 );
             }
+        }
+    }
+
+    #[test]
+    fn test_init_from_distant_guess_nalgebra() {
+        type M = crate::NalgebraMat<f64>;
+        type V = crate::NalgebraVec<f64>;
+        type LS = crate::NalgebraLU<f64>;
+        test_consistent_initialisation_from_distant_guess::<M, crate::BdfState<V>, LS>();
+    }
+
+    #[test]
+    fn test_init_from_distant_guess_faer_sparse() {
+        type M = crate::FaerSparseMat<f64>;
+        type V = crate::FaerVec<f64>;
+        type LS = crate::FaerSparseLU<f64>;
+        test_consistent_initialisation_from_distant_guess::<M, crate::BdfState<V>, LS>();
+    }
+
+    // The initial-condition jacobian depends on the algebraic states, so a guess far from
+    // consistency only converges if the jacobian follows them.
+    fn test_consistent_initialisation_from_distant_guess<
+        M: Matrix,
+        S: OdeSolverState<M::V>,
+        LS: LinearSolver<M>,
+    >() {
+        let mut problem = nonlinear_algebraic_problem::<M>();
+        let from = |values: [f64; 2]| {
+            M::V::from_vec(
+                values.map(|v| M::T::from_f64(v).unwrap()).to_vec(),
+                problem.context().clone(),
+            )
+        };
+        let y_expect = from([2.0, 1.0]);
+        let dy_expect = from([-2.0, 0.0]);
+
+        for line_search in [false, true] {
+            problem.ic_options.use_linesearch = line_search;
+
+            let s = S::new_and_consistent::<LS, _>(&problem, 1).unwrap();
+            let tol = M::T::from_f64(10.).unwrap();
+            s.as_ref()
+                .y
+                .assert_eq_norm(&y_expect, &problem.atol, problem.rtol, tol);
+            s.as_ref()
+                .dy
+                .assert_eq_norm(&dy_expect, &problem.atol, problem.rtol, tol);
         }
     }
 
