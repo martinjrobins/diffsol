@@ -135,6 +135,41 @@ where
             config: ExplicitRkConfig::new(&problem.ode_options),
         })
     }
+    // Production and analytic stage oracles share the complete attempted-step arithmetic.
+    // An analytic time partial is supplied only by the internal test helper.
+    fn attempt(
+        &mut self,
+        h: Eqn::T,
+        status: SolverState,
+        analytic_ft: Option<&Eqn::V>,
+    ) -> Result<Eqn::T, DiffsolError> {
+        let state = self.rk.state();
+        let gamma = self.rk.tableau().rosenbrock().unwrap().gamma;
+        self.op.zero_phi();
+        self.op.set_h(gamma * h);
+        self.op.set_jacobian_is_stale();
+        LinearSolver::set_linearisation(&mut self.linear_solver, &self.op, &state.y, state.t);
+        if let Some(ft) = analytic_ft {
+            self.ft.copy_from(ft);
+        } else {
+            self.problem()
+                .eqn
+                .rhs()
+                .time_derive_inplace(&state.y, state.t, &mut self.ft);
+        }
+        self.rk.statistics_mut().record_linear_solver_setup(status);
+        self.rk.start_step_attempt(h, None::<&mut NoAug<Eqn>>);
+        for i in 0..self.rk.tableau().s() {
+            self.rk
+                .do_stage_rosenbrock(i, h, &self.op, &mut self.linear_solver, &self.ft)?;
+        }
+        self.rk.finish_step_rosenbrock(h);
+        if self.problem().integrate_out {
+            self.rk.integrate_rosenbrock_outputs(h, &mut self.scratch);
+        }
+        // Retain diffsol's shared RK error scaling at the starting state.
+        self.rk.error_norm(h, None::<&mut NoAug<Eqn>>, |_| Ok(()))
+    }
     pub fn get_statistics(&self) -> &OdeSolverStatistics {
         self.rk.get_statistics()
     }
@@ -204,36 +239,14 @@ where
             }
             .into());
         }
-        let gamma = self.rk.tableau().rosenbrock().unwrap().gamma;
         let mut attempts = 0;
         let (factor, error) = loop {
-            let state = self.rk.state();
-            self.op.zero_phi();
-            self.op.set_h(gamma * h);
-            self.op.set_jacobian_is_stale();
-            LinearSolver::set_linearisation(&mut self.linear_solver, &self.op, &state.y, state.t);
-            self.problem()
-                .eqn
-                .rhs()
-                .time_derive_inplace(&state.y, state.t, &mut self.ft);
-            self.rk
-                .statistics_mut()
-                .record_linear_solver_setup(if attempts == 0 {
-                    SolverState::StepSuccess
-                } else {
-                    SolverState::ErrorTestFail
-                });
-            self.rk.start_step_attempt(h, None::<&mut NoAug<Eqn>>);
-            for i in 0..self.rk.tableau().s() {
-                self.rk
-                    .do_stage_rosenbrock(i, h, &self.op, &mut self.linear_solver, &self.ft)?;
-            }
-            self.rk.finish_step_rosenbrock(h);
-            if self.problem().integrate_out {
-                self.rk.integrate_rosenbrock_outputs(h, &mut self.scratch);
-            }
-            // Use diffsol's shared RK error scaling at the starting state, not the endpoint.
-            let error = self.rk.error_norm(h, None::<&mut NoAug<Eqn>>, |_| Ok(()))?;
+            let status = if attempts == 0 {
+                SolverState::StepSuccess
+            } else {
+                SolverState::ErrorTestFail
+            };
+            let error = self.attempt(h, status, None)?;
             let factor = self.rk.factor(
                 error,
                 1.0,
@@ -936,27 +949,13 @@ mod tests {
         ft: f64,
     ) -> f64 {
         let _ = s.rk.start_step().unwrap();
-        s.op.zero_phi();
-        s.op.set_h(s.rk.tableau().rosenbrock().unwrap().gamma * h);
-        s.op.set_jacobian_is_stale();
-        LinearSolver::set_linearisation(
-            &mut s.linear_solver,
-            &s.op,
-            &s.rk.state().y,
-            s.rk.state().t,
-        );
-        s.ft[0] = ft;
-        s.rk.start_step_attempt(h, None::<&mut NoAug<E>>);
-        for i in 0..s.rk.tableau().s() {
-            s.rk.do_stage_rosenbrock(i, h, &s.op, &mut s.linear_solver, &s.ft)
-                .unwrap();
-        }
-        s.rk.finish_step_rosenbrock(h);
-        let err =
-            s.rk.error_norm(h, None::<&mut NoAug<E>>, |_| Ok(()))
-                .unwrap()
-                .sqrt()
-                * (s.problem().atol[0] + s.problem().rtol * s.state().y[0].abs());
+        let mut analytic_ft = s.ft.clone();
+        analytic_ft[0] = ft;
+        let err = s
+            .attempt(h, SolverState::StepSuccess, Some(&analytic_ft))
+            .unwrap()
+            .sqrt()
+            * (s.problem().atol[0] + s.problem().rtol * s.state().y[0].abs());
         s.rk.store_rosenbrock_hermite_derivatives(h);
         s.rk.step_accepted(h, h, false).unwrap();
         err
