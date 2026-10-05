@@ -52,3 +52,32 @@ pub fn nonlinear_algebraic_problem<M: Matrix + 'static>(
         .build()
         .unwrap()
 }
+
+// as above, with mass M(t) = diag(t, 0)
+//
+// u only becomes differential once t > 0, so restarting at t = 2 from u = 2 gives the
+// consistent state v = 1, du = -u / t = -1 only if the algebraic partition and the
+// mass are taken at the state's time rather than t0 = 0.
+fn nonlinear_algebraic_time_dependent_mass<M: Matrix>(
+    x: &[M::T],
+    _p: &[M::T],
+    t: M::T,
+    beta: M::T,
+    y: &mut [M::T],
+) {
+    y[0] = t * x[0] + beta * y[0];
+    y[1] *= beta;
+}
+
+pub fn nonlinear_algebraic_time_dependent_mass_problem<M: Matrix + 'static>(
+) -> OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>> {
+    OdeBuilder::<M>::new()
+        .rhs_implicit(
+            nonlinear_algebraic_rhs::<M>,
+            nonlinear_algebraic_jac_mul::<M>,
+        )
+        .mass(nonlinear_algebraic_time_dependent_mass::<M>)
+        .init(nonlinear_algebraic_init::<M>, 2)
+        .build()
+        .unwrap()
+}

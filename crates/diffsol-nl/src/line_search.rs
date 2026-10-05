@@ -81,6 +81,7 @@ impl<V: Vector> LineSearch<V> for NoLineSearch {
 /// - max_iter: maximum number of line search iterations, default 10
 /// - n_iters: number of line search iterations performed during last call
 ///
+/// If no step is accepted, `x` is left at the iterate it was given.
 pub struct BacktrackingLineSearch<V: Vector> {
     pub tau: V::T,
     pub c: V::T,
@@ -178,6 +179,10 @@ impl<V: Vector> LineSearch<V> for BacktrackingLineSearch<V> {
                 self.norm = new_norm;
                 return Ok(convergence.check_norm(new_norm));
             }
+
+            // reject the trial step
+            x.copy_from(&self.x0);
+
             if alpha < min_alpha {
                 warn!(
                     "Linesearch: Step size fell below minimum threshold. This usually indicates: \
@@ -187,9 +192,6 @@ impl<V: Vector> LineSearch<V> for BacktrackingLineSearch<V> {
             }
 
             alpha *= self.tau;
-
-            // reset x
-            x.copy_from(&self.x0);
         }
         warn!(
             "Linesearch: Failed to find acceptable step after {} iterations. \
@@ -197,5 +199,73 @@ impl<V: Vector> LineSearch<V> for BacktrackingLineSearch<V> {
             self.max_iter
         );
         Err(non_linear_solver_error!(LinesearchFailedMaxIterations))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::NonLinearSolverError;
+    use diffsol_la::{scale, NalgebraVec};
+
+    type V = NalgebraVec<f64>;
+
+    // F(x) = x, with a linear solve of the wrong sign so that every step is uphill
+    fn uphill() -> (impl Fn(&V, &mut V), impl Fn(&mut V) -> Result<(), NlError>) {
+        let fun = |x: &V, y: &mut V| y.copy_from(x);
+        let linear_solver = |x: &mut V| {
+            *x *= scale(-1.0);
+            Ok(())
+        };
+        (fun, linear_solver)
+    }
+
+    fn take_step(ls: &mut BacktrackingLineSearch<V>) -> (V, NlError) {
+        let ctx = Default::default();
+        let atol = V::from_vec(vec![1.0], ctx);
+        let mut convergence = Convergence::new(1.0, &atol);
+        let (fun, linear_solver) = uphill();
+        let mut x = V::from_vec(vec![1.0], ctx);
+        let mut delta = V::zeros(1, ctx);
+        let error_y = x.clone();
+        let err = ls
+            .take_optimal_step(
+                &mut x,
+                &mut delta,
+                &error_y,
+                &fun,
+                &linear_solver,
+                &mut convergence,
+            )
+            .err()
+            .expect("every step is uphill");
+        (x, err)
+    }
+
+    #[test]
+    fn rejected_steps_leave_the_iterate_in_place() {
+        // fails on the minimum step
+        let mut ls = BacktrackingLineSearch::<V> {
+            steptol: 0.2,
+            ..Default::default()
+        };
+        let (x, err) = take_step(&mut ls);
+        assert!(matches!(
+            err,
+            NlError::NonLinearSolverError(NonLinearSolverError::LinesearchFailedMinStep)
+        ));
+        assert_eq!(x.get_index(0), 1.0);
+
+        // fails on the iteration count
+        let mut ls = BacktrackingLineSearch::<V> {
+            max_iter: 2,
+            ..Default::default()
+        };
+        let (x, err) = take_step(&mut ls);
+        assert!(matches!(
+            err,
+            NlError::NonLinearSolverError(NonLinearSolverError::LinesearchFailedMaxIterations)
+        ));
+        assert_eq!(x.get_index(0), 1.0);
     }
 }
