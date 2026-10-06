@@ -151,6 +151,12 @@ impl<V: Vector> StateRefMut<'_, V> {
                 )) => (),
                 e => e.clone()?,
             }
+            // a jacobian re-evaluated at the iterate it was set at (yerr) repeats the failure
+            yerr -= &y_tmp;
+            let moved = yerr.norm(1) > Eqn::T::zero();
+            if !moved {
+                break;
+            }
             yerr.copy_from(&y_tmp);
         }
         if result.is_err() {
@@ -1238,7 +1244,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
 mod test {
     use super::StateCommon;
     use crate::{
-        error::{DiffsolError, OdeSolverError},
+        error::{DiffsolError, NonLinearSolverError, OdeSolverError},
         matrix::dense_nalgebra_serial::NalgebraMat,
         ode_equations::test_models::{
             exponential_decay::exponential_decay_problem,
@@ -1252,7 +1258,7 @@ mod test {
         },
         op::closure_with_sens::ClosureWithSens,
         BdfState, Context, LinearSolver, Matrix, NalgebraLU, NonLinearOp, NonLinearOpTimePartial,
-        OdeBuilder, OdeEquations, OdeSolverState, ParameterisedOp, Vector, VectorView,
+        OdeBuilder, OdeEquations, OdeSolverState, Op, ParameterisedOp, Vector, VectorView,
         VectorViewMut,
     };
     use num_traits::FromPrimitive;
@@ -1416,6 +1422,34 @@ mod test {
         s.as_ref()
             .dy
             .assert_eq_norm(&from([-1.0, 0.0]), &problem.atol, problem.rtol, tol);
+    }
+
+    // From v = 0 the Newton step overshoots to v = 2, which a single line-search iteration
+    // rejects, so the iterate never moves from where the jacobian was evaluated.
+    #[test]
+    fn test_init_does_not_retry_without_an_accepted_step() {
+        type M = crate::NalgebraMat<f64>;
+        type V = crate::NalgebraVec<f64>;
+        let problem = nonlinear_algebraic_problem::<M>();
+        let mut s = BdfState::<V>::new_without_initialise(&problem).unwrap();
+        s.as_mut().y.set_index(1, 0.0);
+        let mut line_search = crate::BacktrackingLineSearch::default();
+        line_search.max_iter = 1;
+        let mut root_solver = crate::NewtonNonlinearSolver::new(NalgebraLU::default(), line_search);
+
+        let jacobian_evals = || problem.eqn.rhs().statistics().number_of_matrix_evals;
+        let before = jacobian_evals();
+        let err = s
+            .as_mut()
+            .set_consistent(&problem, &mut root_solver)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            DiffsolError::NonLinearSolverError(
+                NonLinearSolverError::InitialConditionDidNotConverge
+            )
+        ));
+        assert_eq!(jacobian_evals() - before, 1);
     }
 
     #[test]
