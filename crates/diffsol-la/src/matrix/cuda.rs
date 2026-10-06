@@ -9,8 +9,8 @@ use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
 use crate::context::broadcast_batch;
 use crate::{
     error::LaError, linear_solver::cuda::lu::CudaLU, matrix::default_solver::DefaultSolver,
-    matrix_error, Context, CudaContext, CudaVec, CudaVecMut, CudaVecRef, IndexType, MatrixCommon,
-    ScalarCuda, Scale, Vector, VectorIndex,
+    matrix_error, Context, CudaContext, CudaIndex, CudaVec, CudaVecMut, CudaVecRef, IndexType,
+    MatrixCommon, ScalarCuda, Scale, Vector, VectorIndex,
 };
 
 use super::{
@@ -137,6 +137,46 @@ impl<T: ScalarCuda> CudaMat<T> {
             data,
             context: self.context.clone(),
         }
+    }
+    fn set_data_with_indices_from(
+        &mut self,
+        dst_indices: &CudaIndex,
+        src_indices: &CudaIndex,
+        src: &CudaSlice<T>,
+        src_stride: IndexType,
+        src_nbatch: IndexType,
+        op: &str,
+    ) {
+        assert_eq!(
+            dst_indices.len(),
+            src_indices.len(),
+            "Destination and source indices must have the same length"
+        );
+        let nbatch = self.context.nbatch();
+        self.context.assert_broadcastable_into(src_nbatch, op);
+        let f = self.context.function::<T>("mat_set_data_with_indices");
+        let n = dst_indices.len() as u32;
+        if n == 0 {
+            return;
+        }
+        let nbatch_u32 = nbatch as u32;
+        let config = self.context.launch_config_2d(n, nbatch_u32, &f);
+        let mut build = self.context.stream.launch_builder(&f);
+        let self_stride = (self.nrows * self.ncols) as i32;
+        let self_nbatch_i32 = nbatch as i32;
+        let src_stride_i32 = src_stride as i32;
+        let src_nbatch_i32 = src_nbatch as i32;
+        build
+            .arg(&mut self.data)
+            .arg(src)
+            .arg(&dst_indices.data)
+            .arg(&src_indices.data)
+            .arg(&n)
+            .arg(&self_stride)
+            .arg(&self_nbatch_i32)
+            .arg(&src_stride_i32)
+            .arg(&src_nbatch_i32);
+        unsafe { build.launch(config) }.expect("Failed to launch kernel");
     }
 }
 
@@ -693,39 +733,30 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
         src_indices: &<Self::V as Vector>::Index,
         data: &Self::V,
     ) {
-        assert_eq!(
-            dst_indices.len(),
-            src_indices.len(),
-            "Destination and source indices must have the same length"
+        self.set_data_with_indices_from(
+            dst_indices,
+            src_indices,
+            &data.data,
+            data.len(),
+            data.context.nbatch(),
+            "set_data_with_indices",
         );
-        let nbatch = self.context.nbatch();
-        let data_nbatch = data.context.nbatch();
-        self.context
-            .assert_broadcastable_into(data_nbatch, "set_data_with_indices");
-        let f = self.context.function::<T>("mat_set_data_with_indices");
-        let n = dst_indices.len() as u32;
-        if n == 0 {
-            return;
-        }
-        let nbatch_u32 = nbatch as u32;
-        let config = self.context.launch_config_2d(n, nbatch_u32, &f);
-        let mut build = self.context.stream.launch_builder(&f);
-        let self_stride = (self.nrows * self.ncols) as i32;
-        let self_nbatch_i32 = nbatch as i32;
-        let data_nstates = data.len();
-        let other_stride = data_nstates as i32;
-        let other_nbatch_i32 = data_nbatch as i32;
-        build
-            .arg(&mut self.data)
-            .arg(&data.data)
-            .arg(&dst_indices.data)
-            .arg(&src_indices.data)
-            .arg(&n)
-            .arg(&self_stride)
-            .arg(&self_nbatch_i32)
-            .arg(&other_stride)
-            .arg(&other_nbatch_i32);
-        unsafe { build.launch(config) }.expect("Failed to launch kernel");
+    }
+
+    fn copy_data_with_indices(
+        &mut self,
+        dst_indices: &<Self::V as Vector>::Index,
+        src_indices: &<Self::V as Vector>::Index,
+        other: &Self,
+    ) {
+        self.set_data_with_indices_from(
+            dst_indices,
+            src_indices,
+            &other.data,
+            other.nrows * other.ncols,
+            other.context.nbatch(),
+            "copy_data_with_indices",
+        );
     }
 
     fn add_column_to_vector(&self, j: IndexType, v: &mut Self::V) {
