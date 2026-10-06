@@ -1,6 +1,6 @@
 use crate::{
-    scale, Context, LinearOp, Matrix, MatrixSparsityRef, NonLinearOpJacobian, OdeEquationsImplicit,
-    Vector, VectorIndex,
+    scale, Context, LinearOp, Matrix, MatrixSparsity, MatrixSparsityRef, NonLinearOpJacobian,
+    OdeEquationsImplicit, Vector, VectorIndex,
 };
 use num_traits::One;
 use std::cell::RefCell;
@@ -15,10 +15,11 @@ pub struct InitOp<'a, Eqn: OdeEquationsImplicit> {
     eqn: &'a Eqn,
     pub y0: RefCell<Eqn::V>,
     pub algebraic_indices: <Eqn::V as Vector>::Index,
-    neg_mass_u: Eqn::M,
     neg_mass: Eqn::M,
+    jac: Eqn::M,
     rhs_jac: RefCell<Eqn::M>,
-    jac_sparsity: Option<<Eqn::M as Matrix>::Sparsity>,
+    jac_alg_indices: <Eqn::V as Vector>::Index,
+    rhs_jac_alg_indices: <Eqn::V as Vector>::Index,
     v_alg: RefCell<Eqn::V>,
 }
 
@@ -30,6 +31,7 @@ impl<'a, Eqn: OdeEquationsImplicit> InitOp<'a, Eqn> {
         algebraic_indices: <Eqn::V as Vector>::Index,
     ) -> Self {
         let n = eqn.rhs().nstates();
+        let ctx = eqn.context().clone();
         let mass = eqn.mass().unwrap().matrix(t0);
 
         // equations are:
@@ -37,23 +39,28 @@ impl<'a, Eqn: OdeEquationsImplicit> InitOp<'a, Eqn> {
         // g(t, u, v) = 0
         // where u are differential states, v are algebraic states.
         // choose h = -M_u du + f(u, v), where M_u are the differential states of the mass matrix
-        // want to solve for du, v; see [Self::assemble_jacobian] for the jacobian.
+        // want to solve for du, v, so jacobian is
+        // J = (-M_u, df/dv)
+        //     (0,    dg/dv)
+        // note rhs_jac = (df/du df/dv)
+        //                (dg/du dg/dv)
+        // according to the algebraic indices.
         let [(m_u, _), _, _, _] = mass.split(&algebraic_indices);
         let neg_mass_u = m_u * scale(-Eqn::T::one());
         let zero_ll = <Eqn::M as Matrix>::zeros(
             algebraic_indices.len(),
             n - algebraic_indices.len(),
-            eqn.context().clone(),
+            ctx.clone(),
         );
         let zero_ur = <Eqn::M as Matrix>::zeros(
             n - algebraic_indices.len(),
             algebraic_indices.len(),
-            eqn.context().clone(),
+            ctx.clone(),
         );
         let zero_lr = <Eqn::M as Matrix>::zeros(
             algebraic_indices.len(),
             algebraic_indices.len(),
-            eqn.context().clone(),
+            ctx.clone(),
         );
         let neg_mass = Eqn::M::combine(
             &neg_mass_u,
@@ -63,12 +70,38 @@ impl<'a, Eqn: OdeEquationsImplicit> InitOp<'a, Eqn> {
             &algebraic_indices,
         );
 
-        // only the structure is fixed: the values depend on v and are evaluated at each iterate
-        let rhs_jac =
-            Eqn::M::new_from_sparsity(n, n, eqn.rhs().jacobian_sparsity(), eqn.context().clone());
-        let jac_sparsity = Self::assemble_jacobian(eqn, &neg_mass_u, &rhs_jac, &algebraic_indices)
-            .sparsity()
-            .map(|s| s.to_owned());
+        // J's structure is fixed, so assemble it once and copy in rhs_jac's algebraic columns
+        let rhs_jac = Eqn::M::new_from_sparsity(n, n, eqn.rhs().jacobian_sparsity(), ctx.clone());
+        let [_, (dfdv, _), _, (dgdv, _)] = rhs_jac.split(&algebraic_indices);
+        let jac = Eqn::M::combine(&neg_mass_u, &dfdv, &zero_ll, &dgdv, &algebraic_indices);
+
+        let alg_cols = algebraic_indices.clone_as_vec();
+        let alg_entries: Vec<_> = match rhs_jac.sparsity() {
+            Some(sparsity) => {
+                let mut is_algebraic = vec![false; n];
+                for &j in &alg_cols {
+                    is_algebraic[j] = true;
+                }
+                sparsity
+                    .indices()
+                    .into_iter()
+                    .filter(|&(_, j)| is_algebraic[j])
+                    .collect()
+            }
+            None => alg_cols
+                .iter()
+                .flat_map(|&j| (0..n).map(move |i| (i, j)))
+                .collect(),
+        };
+        let data_indices = |m: &Eqn::M| match m.sparsity() {
+            Some(sparsity) => sparsity.to_owned().get_index(&alg_entries, ctx.clone()),
+            None => <Eqn::V as Vector>::Index::from_vec(
+                alg_entries.iter().map(|&(i, j)| j * n + i).collect(),
+                algebraic_indices.context().clone(),
+            ),
+        };
+        let jac_alg_indices = data_indices(&jac);
+        let rhs_jac_alg_indices = data_indices(&rhs_jac);
 
         let v_alg = RefCell::new(Eqn::V::zeros(n, y0.context().clone()));
         let y0 = y0.clone();
@@ -76,36 +109,14 @@ impl<'a, Eqn: OdeEquationsImplicit> InitOp<'a, Eqn> {
         Self {
             eqn,
             y0,
-            neg_mass_u,
             neg_mass,
+            jac,
             rhs_jac: RefCell::new(rhs_jac),
-            jac_sparsity,
+            jac_alg_indices,
+            rhs_jac_alg_indices,
             algebraic_indices,
             v_alg,
         }
-    }
-
-    /// The jacobian of the initial condition equations,
-    ///
-    /// J = (-M_u, df/dv)
-    ///     (0,    dg/dv)
-    ///
-    /// assembled from the blocks of the rhs jacobian (df/du df/dv; dg/du dg/dv) that the
-    /// algebraic indices select.
-    fn assemble_jacobian(
-        eqn: &Eqn,
-        neg_mass_u: &Eqn::M,
-        rhs_jac: &Eqn::M,
-        algebraic_indices: &<Eqn::V as Vector>::Index,
-    ) -> Eqn::M {
-        let n = eqn.rhs().nstates();
-        let [_, (dfdv, _), _, (dgdv, _)] = rhs_jac.split(algebraic_indices);
-        let zero_ll = <Eqn::M as Matrix>::zeros(
-            algebraic_indices.len(),
-            n - algebraic_indices.len(),
-            eqn.context().clone(),
-        );
-        Eqn::M::combine(neg_mass_u, &dfdv, &zero_ll, &dgdv, algebraic_indices)
     }
 
     pub fn scatter_soln(&self, soln: &Eqn::V, y: &mut Eqn::V, dy: &mut Eqn::V) {
@@ -176,16 +187,12 @@ impl<Eqn: OdeEquationsImplicit> NonLinearOpJacobian for InitOp<'_, Eqn> {
         y0.copy_from_indices(x, &self.algebraic_indices);
         let mut rhs_jac = self.rhs_jac.borrow_mut();
         self.eqn.rhs().jacobian_inplace(&y0, t, &mut rhs_jac);
-        y.copy_from(&Self::assemble_jacobian(
-            self.eqn,
-            &self.neg_mass_u,
-            &rhs_jac,
-            &self.algebraic_indices,
-        ));
+        y.copy_from(&self.jac);
+        y.copy_data_with_indices(&self.jac_alg_indices, &self.rhs_jac_alg_indices, &rhs_jac);
     }
 
     fn jacobian_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
-        self.jac_sparsity.clone()
+        self.jac.sparsity().map(|s| s.to_owned())
     }
 }
 
@@ -278,13 +285,13 @@ mod tests {
             .partition_indices_by_zero_diagonal();
         let initop = InitOp::new(&problem.eqn, t, &y0, algebraic_indices);
 
-        // J = (-1, df/dv)  = (-1,  0)
+        // J = (-1, df/dv)  = (-1,  1)
         //     (0,  dg/dv)    (0, -(1 + 3 v^2))
         for v in [5.0, 1.0] {
             let du_v = Vcpu::from_vec(vec![0.0, v], *problem.context());
             let jac = initop.jacobian(&du_v, t);
             assert_eq!(jac.get_index(0, 0), -1.0);
-            assert_eq!(jac.get_index(0, 1), 0.0);
+            assert_eq!(jac.get_index(0, 1), 1.0);
             assert_eq!(jac.get_index(1, 0), 0.0);
             assert_eq!(jac.get_index(1, 1), -(1.0 + 3.0 * v * v));
         }
@@ -300,10 +307,10 @@ mod tests {
         test_initop_jac_mul_matches_jacobian::<FaerSparseMat<f64>>();
     }
 
-    // The product overwrites its output with the assembled jacobian's product, also when the
-    // direction has more batch lanes than the equations, so the jacobian is shared across them.
+    // The product overwrites its output and matches the assembled jacobian at the same iterate,
+    // including when v has more batch lanes than the equations.
     fn test_initop_jac_mul_matches_jacobian<M: Matrix + 'static>() {
-        let (problem, _soln) = exponential_decay_with_algebraic_problem::<M>(false);
+        let problem = nonlinear_algebraic_problem::<M>();
         let ctx = problem.context().clone();
         let from = |values: Vec<f64>, ctx: M::C| {
             M::V::from_vec(
@@ -315,7 +322,7 @@ mod tests {
             )
         };
         let t = M::T::zero();
-        let y0 = from(vec![1.0, 2.0, 3.0], ctx.clone());
+        let y0 = from(vec![2.0, 5.0], ctx.clone());
         let (algebraic_indices, _) = problem
             .eqn()
             .mass()
@@ -324,17 +331,23 @@ mod tests {
             .partition_indices_by_zero_diagonal();
         let initop = InitOp::new(&problem.eqn, t, &y0, algebraic_indices);
 
-        let du_v = from(vec![4.0, 5.0, 3.0], ctx.clone());
-        let jac = initop.jacobian(&du_v, t);
+        // evaluate every jacobian first, so a product that ignores x would use the last iterate
+        let iterates = [5.0, 1.0].map(|v| from(vec![0.0, v], ctx.clone()));
+        let jacs = iterates
+            .iter()
+            .map(|du_v| initop.jacobian(du_v, t))
+            .collect::<Vec<_>>();
         for nbatch in [1, 2] {
             let lanes = ctx.clone_with_nbatch(nbatch).unwrap();
-            let v = from((1..=3 * nbatch).map(|i| i as f64).collect(), lanes.clone());
-            let mut jv_expect = M::V::zeros(3, lanes.clone());
-            jac.gemv(M::T::one(), &v, M::T::zero(), &mut jv_expect);
+            let v = from((1..=2 * nbatch).map(|i| i as f64).collect(), lanes.clone());
+            for (du_v, jac) in iterates.iter().zip(&jacs) {
+                let mut jv_expect = M::V::zeros(2, lanes.clone());
+                jac.gemv(M::T::one(), &v, M::T::zero(), &mut jv_expect);
 
-            let mut jv = from(vec![100.0; 3 * nbatch], lanes);
-            initop.jac_mul_inplace(&du_v, t, &v, &mut jv);
-            jv.assert_eq_st(&jv_expect, M::T::from_f64(1e-12).unwrap());
+                let mut jv = from(vec![100.0; 2 * nbatch], lanes.clone());
+                initop.jac_mul_inplace(du_v, t, &v, &mut jv);
+                jv.assert_eq_st(&jv_expect, M::T::from_f64(1e-12).unwrap());
+            }
         }
     }
 
