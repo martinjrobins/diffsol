@@ -57,6 +57,7 @@
   - [Solving Many ODEs in Parallel](./performance/parallel_ensemble.md)
     - [CPU Parallelism](./performance/parallel_ensemble_cpu.md)
     - [GPU Parallelism](./performance/parallel_ensemble_gpu.md)
+  - [Parallel-in-Time (DEER)](./performance/parallel_in_time_cpu.md)
 - [Using diffsol from other languages](./use/use_from_other_languages.md)
   - [Python](./use/python.md)
   - [C and other languages](./use/c.md)

@@ -1,0 +1,12 @@
+[package]
+name = "performance-cpu-parallel-in-time"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[dependencies]
+diffsol = { path = "../../crates/diffsol" }
+nalgebra = { workspace = true }
+plotly = { workspace = true }
+rayon = "1.10"
+rayon-scan = "0.1.1"
