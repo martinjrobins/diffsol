@@ -141,8 +141,8 @@ impl<V: Vector> StateRefMut<'_, V> {
             result = root_solver.solve_in_place(&f, &mut y_tmp, *self.t, &yerr, &mut convergence);
             match &result {
                 Ok(()) => break,
-                // recoverable: y_tmp is left at the last accepted iterate, where a fresh
-                // jacobian can give a new direction
+                // recoverable: the jacobian is fixed through a solve, so once y_tmp has moved a
+                // fresh jacobian there can give a new direction
                 Err(DiffsolError::NonLinearSolverError(
                     NonLinearSolverError::NewtonMaxIterations
                     | NonLinearSolverError::NewtonDiverged
@@ -150,12 +150,6 @@ impl<V: Vector> StateRefMut<'_, V> {
                     | NonLinearSolverError::LinesearchFailedMinStep,
                 )) => (),
                 e => e.clone()?,
-            }
-            // a jacobian re-evaluated at the iterate it was set at (yerr) repeats the failure
-            yerr -= &y_tmp;
-            let moved = yerr.norm(1) > Eqn::T::zero();
-            if !moved {
-                break;
             }
             yerr.copy_from(&y_tmp);
         }
@@ -1244,7 +1238,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
 mod test {
     use super::StateCommon;
     use crate::{
-        error::{DiffsolError, NonLinearSolverError, OdeSolverError},
+        error::{DiffsolError, OdeSolverError},
         matrix::dense_nalgebra_serial::NalgebraMat,
         ode_equations::test_models::{
             exponential_decay::exponential_decay_problem,
@@ -1254,11 +1248,12 @@ mod test {
             exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem_sens,
             nonlinear_algebraic::{
                 nonlinear_algebraic_problem, nonlinear_algebraic_time_dependent_mass_problem,
+                power_algebraic_problem,
             },
         },
         op::closure_with_sens::ClosureWithSens,
         BdfState, Context, LinearSolver, Matrix, NalgebraLU, NonLinearOp, NonLinearOpTimePartial,
-        OdeBuilder, OdeEquations, OdeSolverState, Op, ParameterisedOp, Vector, VectorView,
+        OdeBuilder, OdeEquations, OdeSolverState, ParameterisedOp, Vector, VectorView,
         VectorViewMut,
     };
     use num_traits::FromPrimitive;
@@ -1424,32 +1419,45 @@ mod test {
             .assert_eq_norm(&from([-1.0, 0.0]), &problem.atol, problem.rtol, tol);
     }
 
-    // From v = 0 the Newton step overshoots to v = 2, which a single line-search iteration
-    // rejects, so the iterate never moves from where the jacobian was evaluated.
     #[test]
-    fn test_init_does_not_retry_without_an_accepted_step() {
+    fn test_init_after_a_failed_line_search_nalgebra() {
         type M = crate::NalgebraMat<f64>;
         type V = crate::NalgebraVec<f64>;
-        let problem = nonlinear_algebraic_problem::<M>();
-        let mut s = BdfState::<V>::new_without_initialise(&problem).unwrap();
-        s.as_mut().y.set_index(1, 0.0);
-        let mut line_search = crate::BacktrackingLineSearch::default();
-        line_search.max_iter = 1;
-        let mut root_solver = crate::NewtonNonlinearSolver::new(NalgebraLU::default(), line_search);
+        type LS = crate::NalgebraLU<f64>;
+        test_consistent_initialisation_after_a_failed_line_search::<M, crate::BdfState<V>, LS>();
+    }
 
-        let jacobian_evals = || problem.eqn.rhs().statistics().number_of_matrix_evals;
-        let before = jacobian_evals();
-        let err = s
-            .as_mut()
-            .set_consistent(&problem, &mut root_solver)
-            .unwrap_err();
-        assert!(matches!(
-            err,
-            DiffsolError::NonLinearSolverError(
-                NonLinearSolverError::InitialConditionDidNotConverge
+    #[test]
+    fn test_init_after_a_failed_line_search_faer_sparse() {
+        type M = crate::FaerSparseMat<f64>;
+        type V = crate::FaerVec<f64>;
+        type LS = crate::FaerSparseLU<f64>;
+        test_consistent_initialisation_after_a_failed_line_search::<M, crate::BdfState<V>, LS>();
+    }
+
+    // The line search fails after an accepted step, so this only converges if the failure is
+    // retried with a jacobian at that step.
+    fn test_consistent_initialisation_after_a_failed_line_search<
+        M: Matrix,
+        S: OdeSolverState<M::V>,
+        LS: LinearSolver<M>,
+    >() {
+        let problem = power_algebraic_problem::<M>();
+        let from = |values: [f64; 2]| {
+            M::V::from_vec(
+                values.map(|v| M::T::from_f64(v).unwrap()).to_vec(),
+                problem.context().clone(),
             )
-        ));
-        assert_eq!(jacobian_evals() - before, 1);
+        };
+
+        let s = S::new_and_consistent::<LS, _>(&problem, 1).unwrap();
+        let tol = M::T::from_f64(10.).unwrap();
+        s.as_ref()
+            .y
+            .assert_eq_norm(&from([1.0, 1.0]), &problem.atol, problem.rtol, tol);
+        s.as_ref()
+            .dy
+            .assert_eq_norm(&from([-1.0, 0.0]), &problem.atol, problem.rtol, tol);
     }
 
     #[test]
