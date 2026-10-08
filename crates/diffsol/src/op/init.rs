@@ -1,11 +1,23 @@
 use crate::{
-    jacobian::JacobianColoring, scale, Context, LinearOp, Matrix, MatrixSparsity,
-    MatrixSparsityRef, NonLinearOpJacobian, OdeEquationsImplicit, Vector, VectorIndex,
+    jacobian::JacobianColoring, scale, Context, LinearOp, Matrix, MatrixSparsityRef,
+    NonLinearOpJacobian, OdeEquationsImplicit, Vector, VectorIndex,
 };
-use num_traits::One;
+use num_traits::{One, Zero};
 use std::cell::RefCell;
 
 use super::{NonLinearOp, Op};
+
+// how J's algebraic columns, the only ones that depend on the iterate, are refreshed
+enum AlgebraicColumns<M: Matrix> {
+    Coloring(JacobianColoring<M>),
+    // a dense jacobian has no structure to colour, so take the columns from the rhs jacobian,
+    // which keeps any colouring the rhs caches
+    Copy {
+        rhs_jac: RefCell<M>,
+        col: RefCell<M::V>,
+        cols: Vec<usize>,
+    },
+}
 
 /// NonLinearOp implementation of consistent initial conditions for an ODE system.
 ///
@@ -17,7 +29,7 @@ pub struct InitOp<'a, Eqn: OdeEquationsImplicit> {
     pub algebraic_indices: <Eqn::V as Vector>::Index,
     neg_mass: Eqn::M,
     jac: Eqn::M,
-    alg_coloring: JacobianColoring<Eqn::M>,
+    alg_columns: AlgebraicColumns<Eqn::M>,
     v_alg: RefCell<Eqn::V>,
 }
 
@@ -68,35 +80,40 @@ impl<'a, Eqn: OdeEquationsImplicit> InitOp<'a, Eqn> {
             &algebraic_indices,
         );
 
-        // only J's algebraic columns depend on the iterate, so colour just those
         let rhs_jac = Eqn::M::new_from_sparsity(n, n, eqn.rhs().jacobian_sparsity(), ctx.clone());
-        let [_, (dfdv, _), _, (dgdv, _)] = rhs_jac.split(&algebraic_indices);
-        let jac = Eqn::M::combine(&neg_mass_u, &dfdv, &zero_ll, &dgdv, &algebraic_indices);
-
         let alg_cols = algebraic_indices.clone_as_vec();
-        let alg_entries: Vec<_> = match rhs_jac.sparsity() {
-            Some(sparsity) => {
-                let mut is_algebraic = vec![false; n];
-                for &j in &alg_cols {
-                    is_algebraic[j] = true;
-                }
-                sparsity
-                    .indices()
-                    .into_iter()
-                    .filter(|&(_, j)| is_algebraic[j])
-                    .collect()
+        let alg_entries = rhs_jac.sparsity().map(|sparsity| {
+            let mut is_algebraic = vec![false; n];
+            for &j in &alg_cols {
+                is_algebraic[j] = true;
             }
-            None => alg_cols
-                .iter()
-                .flat_map(|&j| (0..n).map(move |i| (i, j)))
-                .collect(),
+            sparsity
+                .indices()
+                .into_iter()
+                .filter(|&(_, j)| is_algebraic[j])
+                .collect::<Vec<_>>()
+        });
+        let (jac, alg_columns) = match alg_entries {
+            Some(alg_entries) => {
+                let [_, (dfdv, _), _, (dgdv, _)] = rhs_jac.split(&algebraic_indices);
+                let jac = Eqn::M::combine(&neg_mass_u, &dfdv, &zero_ll, &dgdv, &algebraic_indices);
+                let jac_sparsity = jac
+                    .sparsity()
+                    .map(|s| s.to_owned())
+                    .expect("a sparse jacobian has a sparsity pattern");
+                let coloring = JacobianColoring::new(&jac_sparsity, &alg_entries, ctx.clone());
+                (jac, AlgebraicColumns::Coloring(coloring))
+            }
+            // a dense J has the structure of -M, and its algebraic columns start at zero
+            None => (
+                neg_mass.clone(),
+                AlgebraicColumns::Copy {
+                    rhs_jac: RefCell::new(rhs_jac),
+                    col: RefCell::new(Eqn::V::zeros(n, ctx)),
+                    cols: alg_cols,
+                },
+            ),
         };
-        let jac_sparsity = match jac.sparsity() {
-            Some(sparsity) => sparsity.to_owned(),
-            None => <Eqn::M as Matrix>::Sparsity::try_from_indices(n, n, Vec::new())
-                .expect("the initial-condition jacobian is not empty"),
-        };
-        let alg_coloring = JacobianColoring::new(&jac_sparsity, &alg_entries, ctx);
 
         let v_alg = RefCell::new(Eqn::V::zeros(n, y0.context().clone()));
         let y0 = y0.clone();
@@ -106,7 +123,7 @@ impl<'a, Eqn: OdeEquationsImplicit> InitOp<'a, Eqn> {
             y0,
             neg_mass,
             jac,
-            alg_coloring,
+            alg_columns,
             algebraic_indices,
             v_alg,
         }
@@ -179,8 +196,21 @@ impl<Eqn: OdeEquationsImplicit> NonLinearOpJacobian for InitOp<'_, Eqn> {
         let mut y0 = self.y0.borrow_mut();
         y0.copy_from_indices(x, &self.algebraic_indices);
         y.copy_from(&self.jac);
-        self.alg_coloring
-            .jacobian_inplace(&self.eqn.rhs(), &y0, t, y);
+        match &self.alg_columns {
+            AlgebraicColumns::Coloring(coloring) => {
+                coloring.jacobian_inplace(&self.eqn.rhs(), &y0, t, y)
+            }
+            AlgebraicColumns::Copy { rhs_jac, col, cols } => {
+                let mut rhs_jac = rhs_jac.borrow_mut();
+                let mut col = col.borrow_mut();
+                self.eqn.rhs().jacobian_inplace(&y0, t, &mut rhs_jac);
+                for &j in cols {
+                    col.fill(Eqn::T::zero());
+                    rhs_jac.add_column_to_vector(j, &mut col);
+                    y.set_column(j, &col);
+                }
+            }
+        }
     }
 
     fn jacobian_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
