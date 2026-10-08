@@ -32,8 +32,8 @@ use crate::vector::cuda_oxide::{
 use crate::{
     context::broadcast_batch, error::LaError, linear_solver::cuda_oxide::lu::OxideLU,
     matrix::default_solver::DefaultSolver, matrix_error, Context, CudaType, IndexType,
-    MatrixCommon, OxideContext, OxideIndex, OxideVec, OxideVecMut, OxideVecRef, ScalarCuda, Scale,
-    Vector, VectorIndex,
+    MatrixCommon, OxideContext, OxideVec, OxideVecMut, OxideVecRef, ScalarCuda, Scale, Vector,
+    VectorIndex,
 };
 
 use super::{
@@ -131,49 +131,6 @@ impl<T: ScalarCuda> OxideMat<T> {
         let index = self.col_major_index(i, j);
         write_at(&self.context.stream, &self.data, index, &[value])
             .expect("Failed to copy data from host to device");
-    }
-    fn set_data_with_indices_from(
-        &mut self,
-        dst_indices: &OxideIndex,
-        src_indices: &OxideIndex,
-        src: Operand<'_, T>,
-        op: &str,
-    ) {
-        assert_eq!(
-            dst_indices.len(),
-            src_indices.len(),
-            "Destination and source indices must have the same length"
-        );
-        let ctx = self.context.clone();
-        ctx.assert_broadcastable_into(src.nbatch as IndexType, op);
-        let nindices = dst_indices.len();
-        if nindices == 0 {
-            return;
-        }
-        let mut dest = self.operand_mut();
-        let nindices_u32 = nindices as u32;
-        let (nbatch_u32, dest_stride) = (dest.nbatch, dest.stride);
-        let n = nindices_u32 * nbatch_u32;
-        let cfg = OxideContext::config_1d(n);
-        let m = &ctx.module;
-        let p = m
-            .prepare_mat_set_data_with_indices::<T>(cfg)
-            .expect("prepare mat_set_data_with_indices");
-        m.mat_set_data_with_indices::<T>(
-            &ctx.stream,
-            &p,
-            &mut dest.window,
-            &src.window,
-            &dst_indices.data,
-            &src_indices.data,
-            n,
-            nindices_u32,
-            dest_stride,
-            src.stride,
-            src.nbatch,
-            nbatch_u32,
-        )
-        .expect("launch mat_set_data_with_indices");
     }
     fn diagonal(&self) -> OxideVec<T> {
         assert_eq!(
@@ -877,26 +834,42 @@ impl<T: ScalarCuda> Matrix for OxideMat<T> {
         src_indices: &<Self::V as Vector>::Index,
         data: &Self::V,
     ) {
-        self.set_data_with_indices_from(
-            dst_indices,
-            src_indices,
-            data.operand(),
-            "set_data_with_indices",
+        assert_eq!(
+            dst_indices.len(),
+            src_indices.len(),
+            "Destination and source indices must have the same length"
         );
-    }
-
-    fn copy_data_with_indices(
-        &mut self,
-        dst_indices: &<Self::V as Vector>::Index,
-        src_indices: &<Self::V as Vector>::Index,
-        other: &Self,
-    ) {
-        self.set_data_with_indices_from(
-            dst_indices,
-            src_indices,
-            other.operand(),
-            "copy_data_with_indices",
-        );
+        let ctx = self.context.clone();
+        ctx.assert_broadcastable_into(data.context.nbatch(), "set_data_with_indices");
+        let nindices = dst_indices.len();
+        if nindices == 0 {
+            return;
+        }
+        let src = data.operand();
+        let mut dest = self.operand_mut();
+        let nindices_u32 = nindices as u32;
+        let (nbatch_u32, dest_stride) = (dest.nbatch, dest.stride);
+        let n = nindices_u32 * nbatch_u32;
+        let cfg = OxideContext::config_1d(n);
+        let m = &ctx.module;
+        let p = m
+            .prepare_mat_set_data_with_indices::<T>(cfg)
+            .expect("prepare mat_set_data_with_indices");
+        m.mat_set_data_with_indices::<T>(
+            &ctx.stream,
+            &p,
+            &mut dest.window,
+            &src.window,
+            &dst_indices.data,
+            &src_indices.data,
+            n,
+            nindices_u32,
+            dest_stride,
+            src.stride,
+            src.nbatch,
+            nbatch_u32,
+        )
+        .expect("launch mat_set_data_with_indices");
     }
 
     fn add_column_to_vector(&self, j: IndexType, v: &mut Self::V) {

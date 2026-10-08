@@ -769,8 +769,8 @@ mod test {
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 28
-        number_of_jac_muls: 6
-        number_of_matrix_evals: 2
+        number_of_jac_muls: 4
+        number_of_matrix_evals: 1
         number_of_jac_adj_muls: 0
         "###);
     }
@@ -836,9 +836,9 @@ mod test {
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 413
-        number_of_jac_muls: 12
-        number_of_matrix_evals: 4
-        number_of_jac_adj_muls: 478
+        number_of_jac_muls: 6
+        number_of_matrix_evals: 1
+        number_of_jac_adj_muls: 474
         "###);
     }
 
@@ -856,9 +856,9 @@ mod test {
         test_adjoint(adjoint_solver, dgdu, 40.0);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 381
-        number_of_jac_muls: 30
-        number_of_matrix_evals: 10
-        number_of_jac_adj_muls: 117
+        number_of_jac_muls: 20
+        number_of_matrix_evals: 5
+        number_of_jac_adj_muls: 113
         "###);
     }
 
@@ -881,8 +881,8 @@ mod test {
         ");
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 1613
-        number_of_jac_muls: 36
-        number_of_matrix_evals: 12
+        number_of_jac_muls: 34
+        number_of_matrix_evals: 11
         number_of_jac_adj_muls: 0
         "###);
     }
@@ -907,8 +907,8 @@ mod test {
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 1534
-        number_of_jac_muls: 1480
-        number_of_matrix_evals: 14
+        number_of_jac_muls: 1476
+        number_of_matrix_evals: 12
         number_of_jac_adj_muls: 0
         "###);
     }
@@ -932,8 +932,8 @@ mod test {
         ");
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 2537
-        number_of_jac_muls: 39
-        number_of_matrix_evals: 13
+        number_of_jac_muls: 37
+        number_of_matrix_evals: 12
         number_of_jac_adj_muls: 0
         "###);
     }
@@ -957,8 +957,8 @@ mod test {
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 2395
-        number_of_jac_muls: 2946
-        number_of_matrix_evals: 15
+        number_of_jac_muls: 2942
+        number_of_matrix_evals: 13
         number_of_jac_adj_muls: 0
         "###);
     }

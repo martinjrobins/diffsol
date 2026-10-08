@@ -195,18 +195,6 @@ pub trait Matrix:
         data: &Self::V,
     );
 
-    /// Assign values of the matrix `other` to this matrix: the value at data index
-    /// `src_indices[k]` of `other` is written to data index `dst_indices[k]` of this matrix, and
-    /// every other value of this matrix is left unchanged.
-    ///
-    /// Data indices are as for [Self::set_data_with_indices].
-    fn copy_data_with_indices(
-        &mut self,
-        dst_indices: &<Self::V as Vector>::Index,
-        src_indices: &<Self::V as Vector>::Index,
-        other: &Self,
-    );
-
     /// Gather values from another matrix at specified indices into this matrix.
     ///
     /// For sparse matrices: the index `idx_i` in `indices` is an index into the data array for `other`,
@@ -1823,24 +1811,6 @@ pub(crate) mod tests {
     }
 
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
-    pub fn test_narrow_dest_copy_data_with_indices_m<M: Matrix>(ctx2: M::C) {
-        let wide = ctx4::<M>(&ctx2);
-        let indices = vec![(0, 0), (1, 1)];
-        let src = M::try_from_triplets(
-            2,
-            2,
-            indices.clone(),
-            (1..=8).map(|i| f::<M>(i as f64)).collect(),
-            wide,
-        )
-        .unwrap();
-        let zeros = (0..4).map(|_| f::<M>(0.0)).collect::<Vec<_>>();
-        let mut dst = M::try_from_triplets(2, 2, indices, zeros, ctx2).unwrap();
-        let data_indices = <M::V as Vector>::Index::from_vec(vec![0, 1], Default::default());
-        dst.copy_data_with_indices(&data_indices, &data_indices, &src);
-    }
-
-    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_narrow_dest_add_assign_m<M: DenseMatrix>(ctx2: M::C) {
         let wide = ctx4::<M>(&ctx2);
         let src = M::from_vec(2, 2, (0..16).map(|_| f::<M>(1.0)).collect(), wide);
@@ -2361,39 +2331,6 @@ pub(crate) mod tests {
     }
 
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
-    pub fn test_batched_copy_data_with_indices_m<M: Matrix>(ctx: M::C) {
-        assert_eq!(ctx.nbatch(), 2);
-        let full = |n: IndexType| -> Vec<(IndexType, IndexType)> {
-            (0..n).flat_map(|j| (0..n).map(move |i| (i, j))).collect()
-        };
-        let other_values = (1..=9)
-            .chain((1..=9).map(|i| 10 * i))
-            .map(|i| f::<M>(i as f64))
-            .collect();
-        let other = M::try_from_triplets(3, 3, full(3), other_values, ctx.clone()).unwrap();
-        let values = (0..8).map(|_| f::<M>(-1.0)).collect();
-        let mut mat = M::try_from_triplets(2, 2, full(2), values, ctx).unwrap();
-        let dst_indices = <M::V as Vector>::Index::from_vec(vec![0, 3], Default::default());
-        let src_indices = <M::V as Vector>::Index::from_vec(vec![8, 4], Default::default());
-        mat.copy_data_with_indices(&dst_indices, &src_indices, &other);
-        let (_, vals) = mat.triplet_iter();
-        let vals: Vec<_> = vals.collect();
-        assert_eq!(
-            vals,
-            vec![
-                f::<M>(9.0),
-                f::<M>(-1.0),
-                f::<M>(-1.0),
-                f::<M>(5.0),
-                f::<M>(90.0),
-                f::<M>(-1.0),
-                f::<M>(-1.0),
-                f::<M>(50.0),
-            ]
-        );
-    }
-
-    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_gather_m<M: Matrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
         let indices: Vec<(IndexType, IndexType)> =
@@ -2660,10 +2597,6 @@ macro_rules! generate_matrix_tests_batched {
                 $crate::matrix::tests::test_batched_set_data_with_indices_m::<$M>($ctx2);
             }
             #[test]
-            fn [<test_batched_copy_data_with_indices_ $suffix>]() {
-                $crate::matrix::tests::test_batched_copy_data_with_indices_m::<$M>($ctx2);
-            }
-            #[test]
             fn [<test_batched_gather_ $suffix>]() {
                 $crate::matrix::tests::test_batched_gather_m::<$M>($ctx2);
             }
@@ -2770,11 +2703,6 @@ macro_rules! generate_matrix_tests_batched {
             #[should_panic(expected = "incompatible nbatch")]
             fn [<test_narrow_dest_set_data_with_indices_ $suffix>]() {
                 $crate::matrix::tests::test_narrow_dest_set_data_with_indices_m::<$M>($ctx2);
-            }
-            #[test]
-            #[should_panic(expected = "incompatible nbatch")]
-            fn [<test_narrow_dest_copy_data_with_indices_ $suffix>]() {
-                $crate::matrix::tests::test_narrow_dest_copy_data_with_indices_m::<$M>($ctx2);
             }
 
             // --- Grouped broadcast tests (B -> B * P, using $ctx2 widened to 4) ---

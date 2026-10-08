@@ -307,26 +307,6 @@ impl<T: NalgebraScalar> Matrix for NalgebraMat<T> {
             }
         }
     }
-    fn copy_data_with_indices(
-        &mut self,
-        dst: &crate::vector::nalgebra_serial::NalgebraIndex,
-        src: &crate::vector::nalgebra_serial::NalgebraIndex,
-        o: &Self,
-    ) {
-        self.context
-            .assert_broadcastable_into(o.context.nbatch(), "copy_data_with_indices");
-        let nb = self.context.nbatch();
-        for (d, s) in dst.data.iter().zip(src.data.iter()) {
-            let i = d % self.nrows();
-            let j = d / self.nrows();
-            let oi = s % o.nrows();
-            let oj = s / o.nrows();
-            for b in 0..nb {
-                let c = self.col(b, j);
-                self.data[(i, c)] = o.data[(oi, o.col_bcast(b, oj, nb))]
-            }
-        }
-    }
     fn gather(&mut self, o: &Self, idx: &crate::vector::nalgebra_serial::NalgebraIndex) {
         self.context
             .assert_broadcastable_into(o.context.nbatch(), "gather");

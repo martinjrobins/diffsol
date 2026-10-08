@@ -331,24 +331,6 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
         }
     }
 
-    fn copy_data_with_indices(
-        &mut self,
-        dst_indices: &<Self::V as Vector>::Index,
-        src_indices: &<Self::V as Vector>::Index,
-        other: &Self,
-    ) {
-        self.context
-            .assert_broadcastable_into(other.context.nbatch(), "copy_data_with_indices");
-        let nb = self.data.len();
-        for (batch, matrix) in self.data.iter_mut().enumerate() {
-            let values = matrix.val_mut();
-            let other = other.batch_bcast(batch, nb).val();
-            for (dst, src) in dst_indices.data.iter().zip(&src_indices.data) {
-                values[*dst] = other[*src];
-            }
-        }
-    }
-
     fn add_column_to_vector(&self, j: IndexType, v: &mut Self::V) {
         v.context
             .assert_broadcastable_into(self.context.nbatch(), "add_column_to_vector");
