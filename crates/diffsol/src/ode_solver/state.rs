@@ -139,14 +139,15 @@ impl<V: Vector> StateRefMut<'_, V> {
         for _ in 0..ode_problem.ic_options.max_linear_solver_setups {
             root_solver.reset_jacobian(&f, &y_tmp, *self.t);
             result = root_solver.solve_in_place(&f, &mut y_tmp, *self.t, &yerr, &mut convergence);
+            // the failures below retry with a fresh jacobian at the last iterate; IDA's IDANlsIC
+            // does this only for slow convergence, restarting other failures from the initial guess
             match &result {
                 Ok(()) => break,
-                // recoverable: the jacobian is fixed through a solve, so once y_tmp has moved a
-                // fresh jacobian there can give a new direction
                 Err(DiffsolError::NonLinearSolverError(
                     NonLinearSolverError::LinesearchFailedMaxIterations,
                 )) => {
-                    // this failure restores y_tmp, so at yerr no step was accepted
+                    // the line search restores y_tmp on this failure, so if y_tmp still equals yerr
+                    // no step was accepted, and a jacobian evaluated there would fail the same way
                     yerr -= &y_tmp;
                     if yerr.norm(1) == Eqn::T::zero() {
                         break;

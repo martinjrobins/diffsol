@@ -10,8 +10,8 @@ use super::{NonLinearOp, Op};
 // how J's algebraic columns, the only ones that depend on the iterate, are refreshed
 enum AlgebraicColumns<M: Matrix> {
     Coloring(JacobianColoring<M>),
-    // a dense jacobian has no structure to colour, so take the columns from the rhs jacobian,
-    // which keeps any colouring the rhs caches
+    // a dense jacobian has no sparsity to color, so take the columns from the rhs jacobian,
+    // which keeps any coloring the rhs caches
     Copy {
         rhs_jac: RefCell<M>,
         col: RefCell<M::V>,
@@ -104,7 +104,8 @@ impl<'a, Eqn: OdeEquationsImplicit> InitOp<'a, Eqn> {
                 let coloring = JacobianColoring::new(&jac_sparsity, &alg_entries, ctx.clone());
                 (jac, AlgebraicColumns::Coloring(coloring))
             }
-            // a dense J has the structure of -M, and its algebraic columns start at zero
+            // a dense J starts as neg_mass, whose differential columns are J's (-M_u; 0) and whose
+            // algebraic columns are zero until jacobian_inplace fills them
             None => (
                 neg_mass.clone(),
                 AlgebraicColumns::Copy {
