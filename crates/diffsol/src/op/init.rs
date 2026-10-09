@@ -7,11 +7,8 @@ use std::cell::RefCell;
 
 use super::{NonLinearOp, Op};
 
-// how J's algebraic columns, the only ones that depend on the iterate, are refreshed
 enum AlgebraicColumns<M: Matrix> {
     Coloring(JacobianColoring<M>),
-    // a dense jacobian has no sparsity to color, so take the columns from the rhs jacobian,
-    // which keeps any coloring the rhs caches
     Copy {
         rhs_jac: RefCell<M>,
         col: RefCell<M::V>,
@@ -104,8 +101,6 @@ impl<'a, Eqn: OdeEquationsImplicit> InitOp<'a, Eqn> {
                 let coloring = JacobianColoring::new(&jac_sparsity, &alg_entries, ctx.clone());
                 (jac, AlgebraicColumns::Coloring(coloring))
             }
-            // a dense J starts as neg_mass, whose differential columns are J's (-M_u; 0) and whose
-            // algebraic columns are zero until jacobian_inplace fills them
             None => (
                 neg_mass.clone(),
                 AlgebraicColumns::Copy {
@@ -330,8 +325,6 @@ mod tests {
         test_initop_jac_mul_matches_jacobian::<FaerSparseMat<f64>>();
     }
 
-    // The product overwrites its output and matches the assembled jacobian at the same iterate,
-    // including when v has more batch lanes than the equations.
     fn test_initop_jac_mul_matches_jacobian<M: Matrix + 'static>() {
         let problem = nonlinear_algebraic_problem::<M>();
         let ctx = problem.context().clone();
@@ -354,7 +347,6 @@ mod tests {
             .partition_indices_by_zero_diagonal();
         let initop = InitOp::new(&problem.eqn, t, &y0, algebraic_indices);
 
-        // evaluate every jacobian first, so a product that ignores x would use the last iterate
         let iterates = [5.0, 1.0].map(|v| from(vec![0.0, v], ctx.clone()));
         let jacs = iterates
             .iter()

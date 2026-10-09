@@ -3,10 +3,6 @@ use num_traits::{FromPrimitive, One, Pow};
 
 // du/dt = -u + v - 1
 // 0 = u - v - v^3
-//
-// From u = 2 the consistent state is v = 1, du = -2. The initial guess v = 5 is where
-// dg/dv = -76 against -4 at the solution, so Newton on a jacobian frozen at the guess
-// contracts by about 0.95 a step and cannot finish in the initial-condition budget.
 fn nonlinear_algebraic_rhs<M: Matrix>(x: &[M::T], _p: &[M::T], _t: M::T, y: &mut [M::T]) {
     y[0] = -x[0] + x[1] - M::T::one();
     y[1] = x[0] - x[1] - x[1] * x[1] * x[1];
@@ -54,10 +50,6 @@ pub fn nonlinear_algebraic_problem<M: Matrix + 'static>(
 }
 
 // as above, with mass M(t) = diag(t, 0)
-//
-// u only becomes differential once t > 0, so restarting at t = 2 from u = 2 gives the
-// consistent state v = 1, du = -u / t = -1 only if the algebraic partition and the
-// mass are taken at the state's time rather than t0 = 0.
 fn nonlinear_algebraic_time_dependent_mass<M: Matrix>(
     x: &[M::T],
     _p: &[M::T],
@@ -84,9 +76,6 @@ pub fn nonlinear_algebraic_time_dependent_mass_problem<M: Matrix + 'static>(
 
 // du/dt = -u
 // 0 = u - v^10
-//
-// From u = 1 the consistent state is v = 1. dg/dv grows from -0.0076 at the guess v = 0.45 to
-// -10, so a jacobian frozen at the guess overshoots more than the line search can backtrack.
 fn power_algebraic_rhs<M: Matrix>(x: &[M::T], _p: &[M::T], _t: M::T, y: &mut [M::T]) {
     y[0] = -x[0];
     y[1] = x[0] - x[1].pow(10i32);

@@ -1340,8 +1340,6 @@ mod test {
         test_consistent_initialisation_from_distant_guess::<M, crate::BdfState<V>, LS>();
     }
 
-    // The initial-condition jacobian depends on the algebraic states, so a guess far from
-    // consistency only converges if the jacobian follows them.
     fn test_consistent_initialisation_from_distant_guess<
         M: Matrix,
         S: OdeSolverState<M::V>,
@@ -1387,7 +1385,6 @@ mod test {
         test_consistent_initialisation_away_from_t0::<M, crate::BdfState<V>, LS>();
     }
 
-    // As after a reset, the state's time is not t0, and the mass depends on it.
     fn test_consistent_initialisation_away_from_t0<
         M: Matrix,
         S: OdeSolverState<M::V>,
@@ -1433,8 +1430,6 @@ mod test {
         test_consistent_initialisation_after_a_failed_line_search::<M, crate::BdfState<V>, LS>();
     }
 
-    // The line search fails after an accepted step, so this only converges if the failure is
-    // retried with a jacobian at that step.
     fn test_consistent_initialisation_after_a_failed_line_search<
         M: Matrix,
         S: OdeSolverState<M::V>,
