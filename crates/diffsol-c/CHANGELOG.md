@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2](https://github.com/martinjrobins/diffsol/compare/diffsol-c-v0.6.1...diffsol-c-v0.6.2) - 2026-10-10
+
+### Added
+
+- *(diffsol-la)* support f32 for cuda-oxide, deprecate C cuda feature ([#387](https://github.com/martinjrobins/diffsol/pull/387))
+
 ## [0.6.1](https://github.com/martinjrobins/diffsol/compare/diffsol-c-v0.6.0...diffsol-c-v0.6.1) - 2026-09-28
 
 ### Other
