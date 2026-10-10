@@ -2395,8 +2395,8 @@ mod test {
         ");
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 183
-        number_of_jac_muls: 29
-        number_of_matrix_evals: 4
+        number_of_jac_muls: 24
+        number_of_matrix_evals: 3
         number_of_jac_adj_muls: 0
         "###);
     }

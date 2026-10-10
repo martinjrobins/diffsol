@@ -99,7 +99,7 @@ impl<V: Vector> StateRefMut<'_, V> {
             .eqn
             .mass()
             .unwrap()
-            .matrix(ode_problem.t0)
+            .matrix(*self.t)
             .partition_indices_by_zero_diagonal();
         if algebraic_indices.is_empty() {
             return Ok(());
@@ -114,12 +114,7 @@ impl<V: Vector> StateRefMut<'_, V> {
             "Setting consistent initial conditions: checking mass matrix for algebraic constraints"
         );
 
-        let f = InitOp::new(
-            &ode_problem.eqn,
-            ode_problem.t0,
-            self.y,
-            algebraic_indices.clone(),
-        );
+        let f = InitOp::new(&ode_problem.eqn, *self.t, self.y, algebraic_indices.clone());
 
         debug!(
             "Found {} algebraic variables (zero diagonal in mass matrix) out of {} total states",
@@ -147,7 +142,10 @@ impl<V: Vector> StateRefMut<'_, V> {
             match &result {
                 Ok(()) => break,
                 Err(DiffsolError::NonLinearSolverError(
-                    NonLinearSolverError::NewtonMaxIterations,
+                    NonLinearSolverError::NewtonMaxIterations
+                    | NonLinearSolverError::NewtonDiverged
+                    | NonLinearSolverError::LinesearchFailedMaxIterations
+                    | NonLinearSolverError::LinesearchFailedMinStep,
                 )) => (),
                 e => e.clone()?,
             }
@@ -188,7 +186,7 @@ impl<V: Vector> StateRefMut<'_, V> {
             .eqn
             .mass()
             .unwrap()
-            .matrix(ode_problem.t0)
+            .matrix(*self.t)
             .partition_indices_by_zero_diagonal();
         if algebraic_indices.is_empty() {
             return Ok(());
@@ -1246,6 +1244,10 @@ mod test {
             exponential_decay::exponential_decay_with_reset_problem,
             exponential_decay::exponential_decay_with_reset_problem_sens,
             exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem_sens,
+            nonlinear_algebraic::{
+                nonlinear_algebraic_problem, nonlinear_algebraic_time_dependent_mass_problem,
+                power_algebraic_problem,
+            },
         },
         op::closure_with_sens::ClosureWithSens,
         BdfState, Context, LinearSolver, Matrix, NalgebraLU, NonLinearOp, NonLinearOpTimePartial,
@@ -1320,6 +1322,135 @@ mod test {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_init_from_distant_guess_nalgebra() {
+        type M = crate::NalgebraMat<f64>;
+        type V = crate::NalgebraVec<f64>;
+        type LS = crate::NalgebraLU<f64>;
+        test_consistent_initialisation_from_distant_guess::<M, crate::BdfState<V>, LS>();
+    }
+
+    #[test]
+    fn test_init_from_distant_guess_faer_sparse() {
+        type M = crate::FaerSparseMat<f64>;
+        type V = crate::FaerVec<f64>;
+        type LS = crate::FaerSparseLU<f64>;
+        test_consistent_initialisation_from_distant_guess::<M, crate::BdfState<V>, LS>();
+    }
+
+    fn test_consistent_initialisation_from_distant_guess<
+        M: Matrix,
+        S: OdeSolverState<M::V>,
+        LS: LinearSolver<M>,
+    >() {
+        let mut problem = nonlinear_algebraic_problem::<M>();
+        let from = |values: [f64; 2]| {
+            M::V::from_vec(
+                values.map(|v| M::T::from_f64(v).unwrap()).to_vec(),
+                problem.context().clone(),
+            )
+        };
+        let y_expect = from([2.0, 1.0]);
+        let dy_expect = from([-2.0, 0.0]);
+
+        for line_search in [false, true] {
+            problem.ic_options.use_linesearch = line_search;
+
+            let s = S::new_and_consistent::<LS, _>(&problem, 1).unwrap();
+            let tol = M::T::from_f64(10.).unwrap();
+            s.as_ref()
+                .y
+                .assert_eq_norm(&y_expect, &problem.atol, problem.rtol, tol);
+            s.as_ref()
+                .dy
+                .assert_eq_norm(&dy_expect, &problem.atol, problem.rtol, tol);
+        }
+    }
+
+    #[test]
+    fn test_init_away_from_t0_nalgebra() {
+        type M = crate::NalgebraMat<f64>;
+        type V = crate::NalgebraVec<f64>;
+        type LS = crate::NalgebraLU<f64>;
+        test_consistent_initialisation_away_from_t0::<M, crate::BdfState<V>, LS>();
+    }
+
+    #[test]
+    fn test_init_away_from_t0_faer_sparse() {
+        type M = crate::FaerSparseMat<f64>;
+        type V = crate::FaerVec<f64>;
+        type LS = crate::FaerSparseLU<f64>;
+        test_consistent_initialisation_away_from_t0::<M, crate::BdfState<V>, LS>();
+    }
+
+    fn test_consistent_initialisation_away_from_t0<
+        M: Matrix,
+        S: OdeSolverState<M::V>,
+        LS: LinearSolver<M>,
+    >() {
+        let problem = nonlinear_algebraic_time_dependent_mass_problem::<M>();
+        let from = |values: [f64; 2]| {
+            M::V::from_vec(
+                values.map(|v| M::T::from_f64(v).unwrap()).to_vec(),
+                problem.context().clone(),
+            )
+        };
+
+        let mut s = S::new_without_initialise(&problem).unwrap();
+        *s.as_mut().t = M::T::from_f64(2.0).unwrap();
+        let mut root_solver = crate::NewtonNonlinearSolver::new(LS::default(), crate::NoLineSearch);
+        s.as_mut()
+            .set_consistent(&problem, &mut root_solver)
+            .unwrap();
+
+        let tol = M::T::from_f64(10.).unwrap();
+        s.as_ref()
+            .y
+            .assert_eq_norm(&from([2.0, 1.0]), &problem.atol, problem.rtol, tol);
+        s.as_ref()
+            .dy
+            .assert_eq_norm(&from([-1.0, 0.0]), &problem.atol, problem.rtol, tol);
+    }
+
+    #[test]
+    fn test_init_after_a_failed_line_search_nalgebra() {
+        type M = crate::NalgebraMat<f64>;
+        type V = crate::NalgebraVec<f64>;
+        type LS = crate::NalgebraLU<f64>;
+        test_consistent_initialisation_after_a_failed_line_search::<M, crate::BdfState<V>, LS>();
+    }
+
+    #[test]
+    fn test_init_after_a_failed_line_search_faer_sparse() {
+        type M = crate::FaerSparseMat<f64>;
+        type V = crate::FaerVec<f64>;
+        type LS = crate::FaerSparseLU<f64>;
+        test_consistent_initialisation_after_a_failed_line_search::<M, crate::BdfState<V>, LS>();
+    }
+
+    fn test_consistent_initialisation_after_a_failed_line_search<
+        M: Matrix,
+        S: OdeSolverState<M::V>,
+        LS: LinearSolver<M>,
+    >() {
+        let problem = power_algebraic_problem::<M>();
+        let from = |values: [f64; 2]| {
+            M::V::from_vec(
+                values.map(|v| M::T::from_f64(v).unwrap()).to_vec(),
+                problem.context().clone(),
+            )
+        };
+
+        let s = S::new_and_consistent::<LS, _>(&problem, 1).unwrap();
+        let tol = M::T::from_f64(10.).unwrap();
+        s.as_ref()
+            .y
+            .assert_eq_norm(&from([1.0, 1.0]), &problem.atol, problem.rtol, tol);
+        s.as_ref()
+            .dy
+            .assert_eq_norm(&from([-1.0, 0.0]), &problem.atol, problem.rtol, tol);
     }
 
     #[test]
