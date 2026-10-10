@@ -142,7 +142,7 @@ We do not expect perfect linear scaling with the number of threads, since:
 Here we see a maximum speedup of just over 5x with 25-30 threads and a total of 96 chunks. Some possible improvements that we could make to this example are:
 
 - We are not getting much advantage out of the parallel scan, since its only 96 compositions of 2x2 matrices. A more expensive composition (more states or more chunks) could help here.
-- The coarse solve is serial, this could be done on a separate thread and overlapped with the chunk solves. Could also investigate an even looser tolerance.
+- The coarse solve is serial so is limiting the speedup, could investigate an even looser tolerance, or if the solve was more expensive (see first point), could try removing this rely on more newton iterations.
 - We solve every chunk at each newton iteration, but the chunks that have already converged could be skipped in later iterations (e.g. the first chunk is always exact)
 - Each chunk solve creates a new solver, but we could reuse the solvers between iterations and reset them to the new initial condition, which would save some setup time.
 - Could reuse the first iteration's jacobians, since these only need to be approximate.
