@@ -19,7 +19,7 @@ type T = <M as MatrixCommon>::T;
 type C = <M as MatrixCommon>::C;
 // ANCHOR_END: types
 
-const BENCH_REPEATS: usize = 20;
+const BENCH_REPEATS: usize = 100;
 
 // ANCHOR: problem
 const DELTA: f64 = 0.5;
@@ -175,7 +175,7 @@ fn thread_scaling() -> (Vec<f64>, Vec<f64>, Vec<f64>) {
     let mut threads = Vec::new();
     let mut elapsed = Vec::new();
     let max_threads = rayon::current_num_threads();
-    for n in [1, 2, 4, 8, 16, 24, 32]
+    for n in [1, 2, 4, 8, 16, 24, 30]
         .into_iter()
         .filter(|&n| n <= max_threads)
     {

@@ -43,6 +43,8 @@ The parameters are the initial state, \\(\mathbf{p} = \mathbf{y}(t\_0)\\), so th
 
 ## The DEER iteration
 
+The time interval \\([0, T]\\) is split into \\(N\\) chunks, and each chunk is integrated independently, in parallel, from a guess of the state at its start time:
+
 The states at the chunk boundaries \\(\mathbf{y}\_k \approx \mathbf{y}(t\_k)\\) satisfy the nonlinear recurrence
 
 \\[
@@ -61,19 +63,25 @@ which is a linear (affine) recurrence
 \mathbf{y}\_{k+1}^{(i+1)} = J\_k \mathbf{y}\_k^{(i+1)} + \mathbf{b}\_k, \quad \mathbf{b}\_k = \boldsymbol{\phi}\_k(\mathbf{y}\_k^{(i)}) - J\_k \mathbf{y}\_k^{(i)}.
 \\]
 
-All of the \\(\boldsymbol{\phi}\_k(\mathbf{y}\_k^{(i)})\\) and \\(J\_k\\) can be computed in parallel. Each step of the recurrence is an affine map \\(\mathbf{y} \mapsto A \mathbf{y} + \mathbf{b}\\), and composing two such maps
+Each step of the recurrence is an affine map \\(\mathbf{y} \mapsto A \mathbf{y} + \mathbf{b}\\), fully described by the pair \\((A, \mathbf{b})\\). Applying step 0 and then step 1 gives
 
 \\[
-(A\_2, \mathbf{b}\_2) \bullet (A\_1, \mathbf{b}\_1) = (A\_2 A\_1, A\_2 \mathbf{b}\_1 + \mathbf{b}\_2)
+\mathbf{y}\_2 = J\_1 (J\_0 \mathbf{y}\_0 + \mathbf{b}\_0) + \mathbf{b}\_1 = (J\_1 J\_0) \mathbf{y}\_0 + (J\_1 \mathbf{b}\_0 + \mathbf{b}\_1),
 \\]
 
-is associative with identity \\((I, \mathbf{0})\\). The prefixes
+which is again an affine map. Writing this composition as an operator on pairs (read right to left, so the right-hand map is applied first),
 
 \\[
-(P\_k, \mathbf{c}\_k) = (J\_k, \mathbf{b}\_k) \bullet (J\_{k-1}, \mathbf{b}\_{k-1}) \bullet \dots \bullet (J\_0, \mathbf{b}\_0)
+(A\_2, \mathbf{b}\_2) \bullet (A\_1, \mathbf{b}\_1) = (A\_2 A\_1, A\_2 \mathbf{b}\_1 + \mathbf{b}\_2).
 \\]
 
-can therefore be computed with a parallel scan, giving the new iterate
+Like any composition of functions, this operator is associative, \\((f \bullet g) \bullet h = f \bullet (g \bullet h)\\), and it has the identity \\((I, \mathbf{0})\\), the map that leaves \\(\mathbf{y}\\) unchanged. Associativity means the steps can be grouped in any order, so different threads can combine different groups of steps at the same time. The prefix \\((P\_k, \mathbf{c}\_k)\\) is the single affine map equal to applying steps \\(0, 1, \dots, k\\) in order,
+
+\\[
+(P\_k, \mathbf{c}\_k) = (J\_k, \mathbf{b}\_k) \bullet (J\_{k-1}, \mathbf{b}\_{k-1}) \bullet \dots \bullet (J\_0, \mathbf{b}\_0),
+\\]
+
+which takes \\(\mathbf{y}\_0\\) straight to \\(\mathbf{y}\_{k+1}\\). A sequential loop would build each prefix from the previous one, but a parallel scan computes all \\(N\\) prefixes in \\(O(\log N)\\) rounds of combining (given enough threads). Each new boundary state then depends only on \\(\mathbf{y}\_0\\), so they can all be evaluated in parallel:
 
 \\[
 \mathbf{y}\_{k+1}^{(i+1)} = P\_k \mathbf{y}\_0 + \mathbf{c}\_k.
@@ -85,17 +93,13 @@ The iteration stops when
 \max\_k \left\Vert \mathbf{y}\_k^{(i+1)} - \mathbf{y}\_k^{(i)} \right\Vert\_\infty < \text{tol}.
 \\]
 
-Newton's method still converges to the solution of the nonlinear recurrence if the \\(J\_k\\) are only approximate (here computed with a loose tolerance), but the convergence rate drops from quadratic to linear.
-
 ```rust,ignore
 {{#include ../../../examples/performance-cpu-parallel-in-time/src/main.rs:deer}}
 ```
 
 ## Solving a single chunk
 
-TODO
-
-Split the time interval \\([0, T]\\) into \\(N\\) chunks with boundaries \\(t\_k = k \Delta t\\), \\(k = 0, \dots, N\\), where \\(\Delta t = T / N\\). Let \\(\boldsymbol{\phi}\_k(\mathbf{y})\\) be the flow map of chunk \\(k\\), the solution at \\(t\_{k+1}\\) of
+Let \\(\boldsymbol{\phi}\_k(\mathbf{y})\\) be the flow map of chunk \\(k\\), the solution at \\(t\_{k+1}\\) of
 
 \\[
 \dot{\mathbf{y}} = \mathbf{f}(\mathbf{y}, t), \quad \mathbf{y}(t\_k) = \mathbf{y}.
@@ -107,15 +111,15 @@ Its Jacobian \\(J\_k = \partial \boldsymbol{\phi}\_k / \partial \mathbf{y}\\) is
 \dot{S} = \frac{\partial \mathbf{f}}{\partial \mathbf{y}} S, \quad S(t\_k) = I, \quad J\_k = S(t\_{k+1}).
 \\]
 
+Newton's method still converges to the solution of the nonlinear recurrence if the \\(J\_k\\) are only approximate, so we can use a much cheaper solve with loose tolerances and forward sensitivities to compute \\(J\_k\\).
+
 ```rust,ignore
 {{#include ../../../examples/performance-cpu-parallel-in-time/src/main.rs:chunk}}
 ```
 
 ## Initial guess
 
-TODO: explain the coarse, loose-tolerance solve.
-
-The initial guess \\(\mathbf{y}\_k^{(0)}\\), \\(k = 0, \dots, N\\), is a cheap sequential solve of \\(\dot{\mathbf{y}} = \mathbf{f}(\mathbf{y}, t)\\) with loose tolerances, evaluated at the chunk boundaries \\(t\_k\\).
+The initial guess \\(\mathbf{y}\_k^{(0)}\\), \\(k = 0, \dots, N\\) also only needs to be approximate, so we use a cheap sequential solve of \\(\dot{\mathbf{y}} = \mathbf{f}(\mathbf{y}, t)\\) with loose tolerances, evaluated at the chunk boundaries \\(t\_k\\).
 
 ```rust,ignore
 {{#include ../../../examples/performance-cpu-parallel-in-time/src/main.rs:coarse}}
@@ -123,14 +127,24 @@ The initial guess \\(\mathbf{y}\_k^{(0)}\\), \\(k = 0, \dots, N\\), is a cheap s
 
 ## Convergence
 
-TODO
+With a reasonable initial guess the Newton iteration converges in a few iterations, and the final solution is accurate to the tolerance of the chunk solves.
 
 {{#include images/deer_error.html}}
 
 ## Thread Scaling
 
-TODO
+We do not expect perfect linear scaling with the number of threads, since:
+
+- the parallel scan requires \\(O(\log N)\\) rounds of combining
+- the initial coarse solve is serial
+- each solve chuck is an adaptive solve, so slower solves will hold up the faster ones
+
+Here we see a maximum speedup of just over 5x with 25-30 threads and a total of 96 chunks. Some possible improvements that we could make to this example are:
+
+- We are not getting much advantage out of the parallel scan, since its only 96 compositions of 2x2 matrices. A more expensive composition (more states or more chunks) could help here.
+- The coarse solve is serial, this could be done on a separate thread and overlapped with the chunk solves. Could also investigate an even looser tolerance.
+- We solve every chunk at each newton iteration, but the chunks that have already converged could be skipped in later iterations (e.g. the first chunk is always exact)
+- Each chunk solve creates a new solver, but we could reuse the solvers between iterations and reset them to the new initial condition, which would save some setup time.
+- Could reuse the first iteration's jacobians, since these only need to be approximate.
 
 {{#include images/deer_scaling.html}}
-
-TODO: discussion.
