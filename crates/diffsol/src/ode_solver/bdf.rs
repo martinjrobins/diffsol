@@ -1232,6 +1232,7 @@ where
         let old_num_error_test_failures = self.statistics.number_of_error_test_failures;
 
         let mut convergence_fail = false;
+        let mut nonlinear_failures = 0;
 
         if self.is_state_modified {
             // reinitalise root finder if needed
@@ -1308,13 +1309,12 @@ where
             // handle case where either nonlinear solve failed
             if solve_result.is_err() {
                 self.statistics.number_of_nonlinear_solver_fails += 1;
-                if self.statistics.number_of_nonlinear_solver_fails
-                    > self.config.maximum_newton_fails
-                {
+                nonlinear_failures += 1;
+                if nonlinear_failures > self.config.maximum_newton_fails {
                     return Err(DiffsolError::from(
                         OdeSolverError::TooManyNonlinearSolverFailures {
                             time: self.state.t.to_f64().unwrap(),
-                            num_failures: self.statistics.number_of_nonlinear_solver_fails,
+                            num_failures: nonlinear_failures,
                         },
                     ));
                 }
@@ -1582,11 +1582,13 @@ mod test {
             robertson_ode_with_sens::robertson_ode_with_sens,
         },
         ode_solver::tests::{
-            setup_test_adjoint, setup_test_adjoint_sum_squares,
+            nonlinear_failure_problem, setup_test_adjoint, setup_test_adjoint_sum_squares,
             setup_test_adjoint_sum_squares_with_single_reset_root,
             single_reset_root_discrete_times, test_adjoint, test_adjoint_sum_squares,
             test_checkpointing, test_config, test_interpolate, test_interpolate_dy,
-            test_ode_solver, test_problem, test_solve_adjoint_sum_squares_with_single_reset_root,
+            test_nonlinear_failures_are_per_step,
+            test_nonlinear_failures_stop_an_unrecoverable_step, test_ode_solver, test_problem,
+            test_solve_adjoint_sum_squares_with_single_reset_root,
             test_solve_adjoint_with_single_reset_root,
             test_solve_soln_adjoint_sum_squares_with_single_reset_root,
             test_solve_soln_adjoint_with_single_reset_root, test_state_mut,
@@ -1599,6 +1601,30 @@ mod test {
 
     type M = NalgebraMat<f64>;
     type LS = NalgebraLU<f64>;
+
+    #[test]
+    fn bdf_nonlinear_failures_are_per_step() {
+        let (mut problem, soln) = robertson_sens::<M>();
+        let limit = 3;
+        problem.ode_options.max_nonlinear_solver_failures = limit;
+        let solver = problem.bdf_sens::<LS>().unwrap();
+        test_nonlinear_failures_are_per_step(solver, soln, limit, |s| s.get_statistics());
+    }
+
+    #[test]
+    fn bdf_nonlinear_failures_stop_an_unrecoverable_step() {
+        for limit in [0, 2] {
+            let fail = std::rc::Rc::new(std::cell::Cell::new(false));
+            let problem = nonlinear_failure_problem::<M>(fail.clone(), limit);
+            let solver = problem.bdf::<LS>().unwrap();
+            // Permit initialization, then force every nonlinear solve to fail.
+            fail.set(true);
+            test_nonlinear_failures_stop_an_unrecoverable_step(solver, limit, |s| {
+                s.get_statistics()
+            });
+        }
+    }
+
     #[test]
     fn bdf_state_mut() {
         test_state_mut(test_problem::<M>(false).bdf::<LS>().unwrap());
@@ -2187,7 +2213,6 @@ mod test {
         let times = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
         let (dgdp, data) = setup_test_adjoint_sum_squares::<LS, _>(&mut problem, times.as_slice());
         let (mut problem, _soln) = robertson_ode::robertson_ode_diffsl_problem::<M, LlvmModule>();
-        problem.ode_options.max_nonlinear_solver_failures = 1000;
         problem.ode_options.max_error_test_failures = 200;
         problem.ode_options.pi_control_integral = 0.5;
         let mut s = problem.bdf::<LS>().unwrap();
@@ -2202,8 +2227,7 @@ mod test {
 
     #[test]
     fn test_bdf_nalgebra_robertson_sens() {
-        let (mut problem, soln) = robertson_sens::<M>();
-        problem.ode_options.max_nonlinear_solver_failures = 70;
+        let (problem, soln) = robertson_sens::<M>();
         let mut s = problem.bdf_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
