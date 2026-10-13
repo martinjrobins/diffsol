@@ -1616,6 +1616,14 @@ where
         self
     }
 
+    /// Set the maximum order for the BDF solver.
+    ///
+    /// The requested order is clamped to the supported range 1–5. The default is 5.
+    pub fn max_bdf_order(mut self, max_order: usize) -> Self {
+        self.ode_options.max_bdf_order = max_order.clamp(1, 5);
+        self
+    }
+
     /// Set the relative tolerance for the ODE solver. The state variables will be controlled to this relative tolerance.
     /// State error control remains enabled, and the absolute tolerance keeps its current value.
     pub fn rtol(mut self, rtol: f64) -> Self {
@@ -1785,6 +1793,7 @@ where
 
     fn build_ode_options<T: Scalar>(ode_options: OdeSolverOptions<f64>) -> OdeSolverOptions<T> {
         OdeSolverOptions {
+            max_bdf_order: ode_options.max_bdf_order,
             max_error_test_failures: ode_options.max_error_test_failures,
             max_nonlinear_solver_iterations: ode_options.max_nonlinear_solver_iterations,
             min_timestep: T::from_f64(ode_options.min_timestep).unwrap(),

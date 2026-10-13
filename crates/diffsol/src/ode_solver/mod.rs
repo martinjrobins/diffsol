@@ -965,12 +965,7 @@ pub(crate) mod tests {
             .expect("state tolerances must be set for this test");
         let rtol = *rtol;
         let atol = atol.clone();
-        dy.assert_eq_norm(
-            &fd_dy,
-            &atol,
-            rtol,
-            M::T::from_f64(1e3).unwrap(),
-        );
+        dy.assert_eq_norm(&fd_dy, &atol, rtol, M::T::from_f64(1e3).unwrap());
 
         // take a second step and check consistency again
         let t1 = s.state().t;
@@ -984,12 +979,7 @@ pub(crate) mod tests {
         let fd_dy2 =
             (y_plus - y_minus) * Scale(M::T::one() / (M::T::from_f64(2.0).unwrap() * eps2));
         let dy2 = s.interpolate_dy(tmid2).unwrap();
-        dy2.assert_eq_norm(
-            &fd_dy2,
-            &atol,
-            rtol,
-            M::T::from_f64(1e3).unwrap(),
-        );
+        dy2.assert_eq_norm(&fd_dy2, &atol, rtol, M::T::from_f64(1e3).unwrap());
     }
 
     pub fn test_config<'a, Eqn: OdeEquations + 'a, Method: OdeSolverMethod<'a, Eqn>>(
@@ -1162,19 +1152,9 @@ pub(crate) mod tests {
                 );
             }
             let soln = solver1.interpolate(point.t).unwrap();
-            soln.assert_eq_norm(
-                &point.state,
-                &atol,
-                rtol,
-                M::T::from_f64(15.0).unwrap(),
-            );
+            soln.assert_eq_norm(&point.state, &atol, rtol, M::T::from_f64(15.0).unwrap());
             let soln = solver2.interpolate(point.t).unwrap();
-            soln.assert_eq_norm(
-                &point.state,
-                &atol,
-                rtol,
-                M::T::from_f64(15.0).unwrap(),
-            );
+            soln.assert_eq_norm(&point.state, &atol, rtol, M::T::from_f64(15.0).unwrap());
         }
     }
 
@@ -1208,9 +1188,7 @@ pub(crate) mod tests {
                 .state_tolerances
                 .as_ref()
                 .expect("state tolerances must be set for this test");
-            let error_norm = error
-                .squared_norm(&error, atol, *rtol)
-                .sqrt();
+            let error_norm = error.squared_norm(&error, atol, *rtol).sqrt();
             assert!(
                 error_norm < Eqn::T::from_f64(19.0).unwrap(),
                 "error_norm: {} at t = {}",
