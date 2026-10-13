@@ -1710,6 +1710,35 @@ mod test {
     }
 
     #[test]
+    fn bdf_adaptive_order_respects_configured_maximum() {
+        let problem = OdeBuilder::<M>::new()
+            .h0(0.01)
+            .rtol(1e-4)
+            .atol([1e-6])
+            .max_bdf_order(2)
+            .rhs_implicit(
+                |y, _p, _t, dy| dy[0] = -y[0],
+                |_y, _p, _t, v, jv| jv[0] = -v[0],
+            )
+            .init(|_p, _t, y| y[0] = 1.0, 1)
+            .build()
+            .unwrap();
+        let mut solver = problem.bdf::<LS>().unwrap();
+        let mut reached_limit = false;
+
+        for _ in 0..40 {
+            solver.step().unwrap();
+            assert!(solver.order() <= 2);
+            reached_limit |= solver.order() == 2;
+        }
+
+        assert!(
+            reached_limit,
+            "adaptive BDF should reach the configured order limit"
+        );
+    }
+
+    #[test]
     fn bdf_test_interpolate() {
         test_interpolate(test_problem::<M>(false).bdf::<LS>().unwrap());
     }
