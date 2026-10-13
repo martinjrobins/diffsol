@@ -1147,7 +1147,20 @@ mod test {
         assert!((t[t.len() - 1] - 10.0).abs() < 1e-10);
         for (i, t_i) in t.iter().enumerate() {
             let y_i = y.column(i).into_owned();
-            y_i.assert_eq_norm(&expect(*t_i), &problem.atol, problem.rtol, 15.0);
+            y_i.assert_eq_norm(
+                &expect(*t_i),
+                &problem
+                    .state_tolerances
+                    .as_ref()
+                    .expect("state tolerances must be set for this test")
+                    .1,
+                problem
+                    .state_tolerances
+                    .as_ref()
+                    .expect("state tolerances must be set for this test")
+                    .0,
+                15.0,
+            );
         }
     }
 
@@ -1166,7 +1179,20 @@ mod test {
 
         let y_last = y.column(y.ncols() - 1).into_owned();
         let expected = NalgebraVec::from_vec(vec![0.6, 0.6], *problem.context());
-        y_last.assert_eq_norm(&expected, &problem.atol, problem.rtol, 15.0);
+        y_last.assert_eq_norm(
+            &expected,
+            &problem
+                .state_tolerances
+                .as_ref()
+                .expect("state tolerances must be set for this test")
+                .1,
+            problem
+                .state_tolerances
+                .as_ref()
+                .expect("state tolerances must be set for this test")
+                .0,
+            15.0,
+        );
     }
 
     #[test]
@@ -1188,7 +1214,20 @@ mod test {
         assert_eq!(stop_reason, OdeSolverStopReason::TstopReached);
         for (i, t_i) in t.iter().enumerate() {
             let y_i = y.column(i).into_owned();
-            y_i.assert_eq_norm(&expect(*t_i), &problem.atol, problem.rtol, 15.0);
+            y_i.assert_eq_norm(
+                &expect(*t_i),
+                &problem
+                    .state_tolerances
+                    .as_ref()
+                    .expect("state tolerances must be set for this test")
+                    .1,
+                problem
+                    .state_tolerances
+                    .as_ref()
+                    .expect("state tolerances must be set for this test")
+                    .0,
+                15.0,
+            );
         }
     }
 
@@ -1202,7 +1241,20 @@ mod test {
         assert_eq!(stop_reason, OdeSolverStopReason::TstopReached);
         for (i, soln_pt) in soln.solution_points.iter().enumerate() {
             let y_i = y.column(i).into_owned();
-            y_i.assert_eq_norm(&soln_pt.state, &problem.atol, problem.rtol, 15.0);
+            y_i.assert_eq_norm(
+                &soln_pt.state,
+                &problem
+                    .state_tolerances
+                    .as_ref()
+                    .expect("state tolerances must be set for this test")
+                    .1,
+                problem
+                    .state_tolerances
+                    .as_ref()
+                    .expect("state tolerances must be set for this test")
+                    .0,
+                15.0,
+            );
         }
     }
 
@@ -1225,11 +1277,37 @@ mod test {
             vec![f64::exp(-0.1 * t_eval[t_root_minus_one]); 2],
             *problem.context(),
         );
-        y_root_minus_one.assert_eq_norm(&expected_minus_one, &problem.atol, problem.rtol, 15.0);
+        y_root_minus_one.assert_eq_norm(
+            &expected_minus_one,
+            &problem
+                .state_tolerances
+                .as_ref()
+                .expect("state tolerances must be set for this test")
+                .1,
+            problem
+                .state_tolerances
+                .as_ref()
+                .expect("state tolerances must be set for this test")
+                .0,
+            15.0,
+        );
 
         let y_last = y.column(y.ncols() - 1).into_owned();
         let expected = NalgebraVec::from_vec(vec![0.6, 0.6], *problem.context());
-        y_last.assert_eq_norm(&expected, &problem.atol, problem.rtol, 15.0);
+        y_last.assert_eq_norm(
+            &expected,
+            &problem
+                .state_tolerances
+                .as_ref()
+                .expect("state tolerances must be set for this test")
+                .1,
+            problem
+                .state_tolerances
+                .as_ref()
+                .expect("state tolerances must be set for this test")
+                .0,
+            15.0,
+        );
     }
 
     #[test]
@@ -1250,7 +1328,20 @@ mod test {
         let y0 = problem.eqn.init().call(0.0);
         let integral = (1.0 - decay) / k;
         let expected = y0 * scale(integral);
-        y_last.assert_eq_norm(&expected, &problem.atol, problem.rtol, 15.0);
+        y_last.assert_eq_norm(
+            &expected,
+            &problem
+                .state_tolerances
+                .as_ref()
+                .expect("state tolerances must be set for this test")
+                .1,
+            problem
+                .state_tolerances
+                .as_ref()
+                .expect("state tolerances must be set for this test")
+                .0,
+            15.0,
+        );
     }
 
     #[test]
@@ -1263,7 +1354,20 @@ mod test {
         assert_eq!(stop_reason, OdeSolverStopReason::TstopReached);
         for (i, soln_pt) in soln.solution_points.iter().enumerate() {
             let y_i = y.column(i).into_owned();
-            y_i.assert_eq_norm(&soln_pt.state, &problem.atol, problem.rtol, 15.0);
+            y_i.assert_eq_norm(
+                &soln_pt.state,
+                &problem
+                    .state_tolerances
+                    .as_ref()
+                    .expect("state tolerances must be set for this test")
+                    .1,
+                problem
+                    .state_tolerances
+                    .as_ref()
+                    .expect("state tolerances must be set for this test")
+                    .0,
+                15.0,
+            );
         }
     }
 
@@ -1289,7 +1393,20 @@ mod test {
         assert_eq!(stop_reason, OdeSolverStopReason::TstopReached);
         for (i, soln_pt) in soln.solution_points.iter().enumerate() {
             let y_i = y.column(i).into_owned();
-            y_i.assert_eq_norm(&soln_pt.state, &problem.atol, problem.rtol, 15.0);
+            y_i.assert_eq_norm(
+                &soln_pt.state,
+                &problem
+                    .state_tolerances
+                    .as_ref()
+                    .expect("state tolerances must be set for this test")
+                    .1,
+                problem
+                    .state_tolerances
+                    .as_ref()
+                    .expect("state tolerances must be set for this test")
+                    .0,
+                15.0,
+            );
         }
         for (j, soln_pts) in soln.sens_solution_points.unwrap().iter().enumerate() {
             for (i, soln_pt) in soln_pts.iter().enumerate() {
@@ -1319,7 +1436,20 @@ mod test {
         assert_eq!(stop_reason, OdeSolverStopReason::TstopReached);
         for (i, soln_pt) in soln.solution_points.iter().enumerate() {
             let y_i = y.column(i).into_owned();
-            y_i.assert_eq_norm(&soln_pt.state, &problem.atol, problem.rtol, 15.0);
+            y_i.assert_eq_norm(
+                &soln_pt.state,
+                &problem
+                    .state_tolerances
+                    .as_ref()
+                    .expect("state tolerances must be set for this test")
+                    .1,
+                problem
+                    .state_tolerances
+                    .as_ref()
+                    .expect("state tolerances must be set for this test")
+                    .0,
+                15.0,
+            );
         }
         for (j, soln_pts) in soln.sens_solution_points.unwrap().iter().enumerate() {
             for (i, soln_pt) in soln_pts.iter().enumerate() {
@@ -1360,7 +1490,20 @@ mod test {
         assert_eq!(dense_soln.ts, t_eval);
         for (i, soln_pt) in soln.solution_points.iter().enumerate() {
             let y_i = dense_soln.ys.column(i).into_owned();
-            y_i.assert_eq_norm(&soln_pt.state, &problem.atol, problem.rtol, 15.0);
+            y_i.assert_eq_norm(
+                &soln_pt.state,
+                &problem
+                    .state_tolerances
+                    .as_ref()
+                    .expect("state tolerances must be set for this test")
+                    .1,
+                problem
+                    .state_tolerances
+                    .as_ref()
+                    .expect("state tolerances must be set for this test")
+                    .0,
+                15.0,
+            );
         }
         for (j, soln_pts) in soln.sens_solution_points.unwrap().iter().enumerate() {
             for (i, soln_pt) in soln_pts.iter().enumerate() {
@@ -1406,8 +1549,16 @@ mod test {
         let expected = NalgebraVec::from_vec(vec![decay; 2], *problem.context());
         dense_soln.ys.column(0).into_owned().assert_eq_norm(
             &expected,
-            &problem.atol,
-            problem.rtol,
+            &problem
+                .state_tolerances
+                .as_ref()
+                .expect("state tolerances must be set for this test")
+                .1,
+            problem
+                .state_tolerances
+                .as_ref()
+                .expect("state tolerances must be set for this test")
+                .0,
             15.0,
         );
 
@@ -1484,7 +1635,20 @@ mod test {
                 let t = soln.ts[i];
                 let expected = &stage_y0 * scale(f64::exp(-k * (t - stage_t0)));
                 let got = soln.ys.column(i).into_owned();
-                got.assert_eq_norm(&expected, &problem.atol, problem.rtol, 15.0);
+                got.assert_eq_norm(
+                    &expected,
+                    &problem
+                        .state_tolerances
+                        .as_ref()
+                        .expect("state tolerances must be set for this test")
+                        .1,
+                    problem
+                        .state_tolerances
+                        .as_ref()
+                        .expect("state tolerances must be set for this test")
+                        .0,
+                    15.0,
+                );
             }
         }
 
@@ -1542,7 +1706,20 @@ mod test {
             s.solve_with_checkpointing(final_time, None).unwrap();
         for (i, t_i) in t.iter().enumerate() {
             let y_i = y.column(i).into_owned();
-            y_i.assert_eq_norm(&expect(*t_i), &problem.atol, problem.rtol, 15.0);
+            y_i.assert_eq_norm(
+                &expect(*t_i),
+                &problem
+                    .state_tolerances
+                    .as_ref()
+                    .expect("state tolerances must be set for this test")
+                    .1,
+                problem
+                    .state_tolerances
+                    .as_ref()
+                    .expect("state tolerances must be set for this test")
+                    .0,
+                15.0,
+            );
         }
         let mut y = NalgebraVec::zeros(problem.eqn.rhs().nstates(), *problem.context());
         let mut replay_solver = s.clone();
@@ -1551,8 +1728,20 @@ mod test {
             checkpointer
                 .interpolate(Some(&mut replay_solver), point.t, &mut y)
                 .unwrap();
-            // cubic Hermite interpolation between steps: its error grows with the step size
-            y.assert_eq_norm(&point.state, &problem.atol, problem.rtol, 250.0);
+            y.assert_eq_norm(
+                &point.state,
+                &problem
+                    .state_tolerances
+                    .as_ref()
+                    .expect("state tolerances must be set for this test")
+                    .1,
+                problem
+                    .state_tolerances
+                    .as_ref()
+                    .expect("state tolerances must be set for this test")
+                    .0,
+                250.0,
+            );
         }
     }
 
@@ -1579,7 +1768,20 @@ mod test {
             .expect("expected checkpointed solve output to include the reset time");
         let reset_state = ys.column(reset_col).into_owned();
         let expected_reset = NalgebraVec::from_element(reset_state.len(), 0.4, *problem.context());
-        reset_state.assert_eq_norm(&expected_reset, &problem.atol, problem.rtol, 20.0);
+        reset_state.assert_eq_norm(
+            &expected_reset,
+            &problem
+                .state_tolerances
+                .as_ref()
+                .expect("state tolerances must be set for this test")
+                .1,
+            problem
+                .state_tolerances
+                .as_ref()
+                .expect("state tolerances must be set for this test")
+                .0,
+            20.0,
+        );
     }
 
     #[test]
@@ -1609,8 +1811,16 @@ mod test {
         );
         ys.column(1).into_owned().assert_eq_norm(
             &expected_post_reset,
-            &problem.atol,
-            problem.rtol,
+            &problem
+                .state_tolerances
+                .as_ref()
+                .expect("state tolerances must be set for this test")
+                .1,
+            problem
+                .state_tolerances
+                .as_ref()
+                .expect("state tolerances must be set for this test")
+                .0,
             20.0,
         );
     }

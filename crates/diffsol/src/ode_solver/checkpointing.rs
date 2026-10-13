@@ -468,7 +468,20 @@ mod tests {
             checkpointer
                 .interpolate(Some(&mut solver), point.t, &mut y)
                 .unwrap();
-            y.assert_eq_norm(&point.state, &problem.atol, problem.rtol, 10.0);
+            y.assert_eq_norm(
+                &point.state,
+                &problem
+                    .state_tolerances
+                    .as_ref()
+                    .expect("state tolerances must be set for this test")
+                    .1,
+                problem
+                    .state_tolerances
+                    .as_ref()
+                    .expect("state tolerances must be set for this test")
+                    .0,
+                10.0,
+            );
         }
     }
 

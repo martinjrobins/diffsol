@@ -6,7 +6,7 @@ use crate::{
     AugmentedOdeEquationsImplicit, Bdf, BdfState, CheckpointingPath, Context, DefaultDenseMatrix,
     DenseMatrix, ExplicitRk, LinearSolver, MatrixRef, NewtonNonlinearSolver, NoLineSearch,
     OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
-    OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverState, RkState, Scalar, Sdirk,
+    OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverState, Op, RkState, Scalar, Sdirk,
     SensEquations, Tableau, VectorRef,
 };
 
@@ -182,10 +182,12 @@ where
 {
     /// The ODE equations to be solved, which satisfy the `OdeEquations` trait.
     pub eqn: Eqn,
-    /// Relative tolerance for the solver. The state equations are solved to this and the absolute tolerance, given by the norm `sum_i(y_i / (atol_i + rtol * |y0_i|)) < 1`.
-    pub rtol: Eqn::T,
-    /// Absolute tolerance for the solver. The state equations are solved to this and the relative tolerance, given by the norm `sum_i(y_i / (atol_i + rtol * |y0_i|)) < 1`.
-    pub atol: Eqn::V,
+    /// Relative and absolute tolerances for state error control. Both are `None` when state error
+    /// control is disabled. When present, the state equations are controlled using the norm
+    /// `sum_i(y_i / (atol_i + rtol * |y0_i|)) < 1`.
+    pub state_tolerances: Option<(Eqn::T, Eqn::V)>,
+    // Nonlinear solvers still need scaling tolerances when state error control is disabled.
+    pub(crate) nonlinear_tolerances: (Eqn::T, Eqn::V),
     /// Initial time for the ODE solve.
     pub t0: Eqn::T,
     /// Initial step size for the ODE solver.
@@ -537,8 +539,7 @@ where
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         eqn: Eqn,
-        rtol: Eqn::T,
-        atol: Eqn::V,
+        state_tolerances: Option<(Eqn::T, Eqn::V)>,
         sens_rtol: Option<Eqn::T>,
         sens_atol: Option<Eqn::V>,
         out_rtol: Option<Eqn::T>,
@@ -551,10 +552,20 @@ where
         ic_options: InitialConditionSolverOptions<Eqn::T>,
         ode_options: OdeSolverOptions<Eqn::T>,
     ) -> Result<Self, DiffsolError> {
+        let nonlinear_tolerances = state_tolerances.clone().unwrap_or_else(|| {
+            (
+                Eqn::T::from_f64(1e-6).unwrap(),
+                Eqn::V::from_element(
+                    eqn.rhs().nstates(),
+                    Eqn::T::from_f64(1e-6).unwrap(),
+                    eqn.context().clone(),
+                ),
+            )
+        });
         Ok(Self {
             eqn,
-            rtol,
-            atol,
+            state_tolerances,
+            nonlinear_tolerances,
             out_atol,
             out_rtol,
             param_atol,
@@ -732,13 +743,13 @@ where
             .as_mut()
             .set_consistent_augmented(self, augmented_eqn, &mut newton_solver)?;
         let h = state.h;
-        let atol = &self.atol;
-        let rtol = self.rtol;
-        state
-            .as_mut()
-            // the heuristic works on the main state and the main tolerances, so it is the main
-            // equations that are evaluated (the augmented rhs writes one channel per batch lane)
-            .set_step_size(h, atol, rtol, &self.eqn, 1);
+        if let Some((rtol, atol)) = self.state_tolerances.as_ref() {
+            state
+                .as_mut()
+                // the heuristic works on the main state and the main tolerances, so it is the main
+                // equations that are evaluated (the augmented rhs writes one channel per batch lane)
+                .set_step_size(h, atol, *rtol, &self.eqn, 1);
+        }
 
         Ok(state)
     }
@@ -995,12 +1006,12 @@ where
             .as_mut()
             .set_consistent_augmented(self, augmented_eqn, &mut newton_solver)?;
         let h = state.h;
-        let atol = &self.atol;
-        let rtol = self.rtol;
-        state
-            .as_mut()
-            // see the comment in `bdf_state_adjoint_from_state`
-            .set_step_size(h, atol, rtol, &self.eqn, tableau.order());
+        if let Some((rtol, atol)) = self.state_tolerances.as_ref() {
+            state
+                .as_mut()
+                // see the comment in `bdf_state_adjoint_from_state`
+                .set_step_size(h, atol, *rtol, &self.eqn, tableau.order());
+        }
         Ok(state)
     }
 
@@ -1156,12 +1167,12 @@ where
         }
 
         let h = state.h;
-        let atol = &self.atol;
-        let rtol = self.rtol;
-        state
-            .as_mut()
-            // see the comment in `bdf_state_adjoint_from_state`
-            .set_step_size(h, atol, rtol, &self.eqn, tableau.order());
+        if let Some((rtol, atol)) = self.state_tolerances.as_ref() {
+            state
+                .as_mut()
+                // see the comment in `bdf_state_adjoint_from_state`
+                .set_step_size(h, atol, *rtol, &self.eqn, tableau.order());
+        }
         Ok(state)
     }
 

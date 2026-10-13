@@ -684,8 +684,7 @@ pub fn heat2d_elem_problem<M: Matrix + 'static, const MGRID: usize>(
     let eqn = Heat2dElem::<M, MGRID>::new(ctx.clone(), t0);
     let problem = OdeSolverProblem::new(
         eqn,
-        rtol,
-        atol,
+        Some((rtol, atol)),
         None,
         None,
         None,

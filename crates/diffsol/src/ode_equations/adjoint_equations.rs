@@ -613,8 +613,11 @@ where
             eqn.rhs().nstates(),
             aug_ctx.clone(),
         ));
-        let atol = Some(&problem.atol);
-        let rtol = Some(problem.rtol);
+        let (rtol, atol) = problem
+            .state_tolerances
+            .as_ref()
+            .map(|(rtol, atol)| (Some(*rtol), Some(atol)))
+            .unwrap_or((None, None));
         let out_atol = problem.param_atol.as_ref();
         let out_rtol = problem.param_rtol;
         let mass = eqn.mass().map(|_m| AdjointMass::new(eqn));
