@@ -106,6 +106,8 @@ impl<T: Scalar> Default for InitialConditionSolverOptions<T> {
 /// in explicit Runge–Kutta methods. *ACM Transactions on Mathematical Software*,
 /// 17(4), 533–554.
 pub struct OdeSolverOptions<T: Scalar> {
+    /// Maximum order used by the BDF solver (supported range: 1–5, default: 5).
+    pub max_bdf_order: usize,
     /// Maximum number of nonlinear solver iterations per solve (default: 10).
     pub max_nonlinear_solver_iterations: usize,
     /// Maximum number of consecutive step rejections per solve before aborting (default: 40).
@@ -148,6 +150,7 @@ pub struct OdeSolverOptions<T: Scalar> {
 impl<T: Scalar> Default for OdeSolverOptions<T> {
     fn default() -> Self {
         Self {
+            max_bdf_order: 5,
             max_nonlinear_solver_iterations: 10,
             max_error_test_failures: 40,
             max_nonlinear_solver_failures: 50,

@@ -1576,7 +1576,25 @@ where
         self.prev_error_norm = Some(error_norm);
 
         if self.ode_problem.state_tolerances.is_none() {
-            // Without state tolerances, keep the current step size and order.
+            // Increase order as accepted steps build the history BDF needs for higher orders.
+            // This does not require state error tolerances: no error is predicted and h stays fixed.
+            self.n_equal_steps += 1;
+            if self.n_equal_steps > self.state.order && self.state.order < self.config.maximum_order
+            {
+                self.state.order += 1;
+                self.n_equal_steps = 0;
+                self.u = Self::_compute_r(self.state.order, Eqn::T::one());
+
+                let c = self.state.h * self.alpha[self.state.order];
+                if let Some(op) = self.op.as_mut() {
+                    op.set_c(self.state.h, self.alpha[self.state.order]);
+                }
+                if let Some(s_op) = self.s_op.as_mut() {
+                    s_op.set_c(self.state.h, self.alpha[self.state.order]);
+                }
+                self._jacobian_updates(c, SolverState::StepSuccess);
+            }
+
             self.prev_error_norm = None;
             if let (Some(root_fn), Some(root_finder)) =
                 (self.ode_problem.eqn.root(), self.root_finder.as_ref())
@@ -1613,7 +1631,7 @@ where
             } else {
                 Eqn::T::INFINITY
             };
-            let error_p_norm = if order < MAX_ORDER {
+            let error_p_norm = if order < self.config.maximum_order {
                 self.predict_error_control(order + 1)
             } else {
                 Eqn::T::INFINITY
@@ -1643,7 +1661,7 @@ where
                 let new_order = match max_index {
                     0 => old_order - 1,
                     1 => old_order,
-                    2 => old_order + 1,
+                    2 => (old_order + 1).min(self.config.maximum_order),
                     _ => unreachable!(),
                 };
                 self.state.order = new_order;
@@ -2015,6 +2033,60 @@ mod test {
     #[test]
     fn bdf_config() {
         test_config(robertson_ode::<M>(false, 1).0.bdf::<LS>().unwrap());
+    }
+
+    #[test]
+    fn bdf_maximum_order_defaults_to_five_and_can_be_lowered() {
+        let default_problem = OdeBuilder::<M>::new()
+            .rhs_implicit(
+                |y, _p, _t, dy| dy[0] = -y[0],
+                |_y, _p, _t, v, jv| jv[0] = -v[0],
+            )
+            .init(|_p, _t, y| y[0] = 1.0, 1)
+            .build()
+            .unwrap();
+        let default_solver = default_problem.bdf::<LS>().unwrap();
+        assert_eq!(default_solver.config().maximum_order, 5);
+
+        let limited_problem = OdeBuilder::<M>::new()
+            .max_bdf_order(2)
+            .rhs_implicit(
+                |y, _p, _t, dy| dy[0] = -y[0],
+                |_y, _p, _t, v, jv| jv[0] = -v[0],
+            )
+            .init(|_p, _t, y| y[0] = 1.0, 1)
+            .build()
+            .unwrap();
+        let limited_solver = limited_problem.bdf::<LS>().unwrap();
+        assert_eq!(limited_solver.config().maximum_order, 2);
+    }
+
+    #[test]
+    fn bdf_without_state_tolerances_keeps_step_size_and_grows_order_to_limit() {
+        let problem = OdeBuilder::<M>::new()
+            .h0(0.05)
+            .max_bdf_order(3)
+            .disable_state_error_control()
+            .rhs_implicit(
+                |y, _p, _t, dy| dy[0] = -y[0],
+                |_y, _p, _t, v, jv| jv[0] = -v[0],
+            )
+            .init(|_p, _t, y| y[0] = 1.0, 1)
+            .build()
+            .unwrap();
+        assert!(problem.state_tolerances.is_none());
+
+        let mut solver = problem.bdf::<LS>().unwrap();
+        let initial_h = solver.state().h;
+        assert_eq!(solver.order(), 1);
+
+        for _ in 0..30 {
+            solver.step().unwrap();
+            assert_eq!(solver.state().h, initial_h);
+            assert!(solver.order() <= 3);
+        }
+
+        assert_eq!(solver.order(), 3);
     }
 
     #[test]
