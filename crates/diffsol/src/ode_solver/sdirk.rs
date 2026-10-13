@@ -193,8 +193,8 @@ where
 
         // set max iterations for nonlinear solver
         let mut convergence = Convergence::with_tolerance(
-            problem.rtol,
-            &problem.atol,
+            problem.nonlinear_tolerances.0,
+            &problem.nonlinear_tolerances.1,
             problem.ode_options.nonlinear_solver_tolerance,
         );
         convergence.set_max_iter(config.maximum_newton_iterations);
@@ -465,6 +465,15 @@ where
                     // try again....
                     continue 'step;
                 }
+            }
+            if self.problem().state_tolerances.is_none() {
+                // A converged nonlinear solve is enough to accept this step. Keep h unchanged;
+                // nonlinear solve failures above can still reduce h and retry the step.
+                self.update_op_step_size(h);
+                self.jacobian_updates(h, SolverState::StepSuccess);
+                self.jacobian_update.step();
+                self.rk.reset_prev_error();
+                return self.rk.step_accepted(h, h, true);
             }
             let error_norm = if self.problem().eqn().mass().is_some() && self.op.is_some() {
                 let linear_solver = |x: &mut Eqn::V| {
@@ -1060,12 +1069,38 @@ mod test {
         let target = 0.6_f64;
         let t_root = -((target / y0.get_index(0)).ln()) / k;
         let expected = y0.clone() * scale(f64::exp(-k * t_root));
-        y.assert_eq_norm(&expected, &problem.atol, problem.rtol, 15.0);
+        y.assert_eq_norm(
+            &expected,
+            &problem
+                .state_tolerances
+                .as_ref()
+                .expect("state tolerances must be set for this test")
+                .1,
+            problem
+                .state_tolerances
+                .as_ref()
+                .expect("state tolerances must be set for this test")
+                .0,
+            15.0,
+        );
 
         let g = s.interpolate_out(t_root).unwrap();
         let integral = (1.0 - f64::exp(-k * t_root)) / k;
         let expected_g = y0 * scale(integral);
-        g.assert_eq_norm(&expected_g, &problem.atol, problem.rtol, 15.0);
+        g.assert_eq_norm(
+            &expected_g,
+            &problem
+                .state_tolerances
+                .as_ref()
+                .expect("state tolerances must be set for this test")
+                .1,
+            problem
+                .state_tolerances
+                .as_ref()
+                .expect("state tolerances must be set for this test")
+                .0,
+            15.0,
+        );
     }
 
     #[test]
@@ -1086,7 +1121,19 @@ mod test {
                 let new_soln = ys.column(ys.ncols() - 1).into_owned();
                 let error = new_soln - &*old_soln;
                 let diff = error
-                    .squared_norm(old_soln, &problem.atol, problem.rtol)
+                    .squared_norm(
+                        old_soln,
+                        &problem
+                            .state_tolerances
+                            .as_ref()
+                            .expect("state tolerances must be set for this test")
+                            .1,
+                        problem
+                            .state_tolerances
+                            .as_ref()
+                            .expect("state tolerances must be set for this test")
+                            .0,
+                    )
                     .sqrt();
                 assert!(diff > 1.0e-6, "diff: {diff}");
             }

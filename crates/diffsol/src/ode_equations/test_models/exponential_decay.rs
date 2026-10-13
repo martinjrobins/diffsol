@@ -162,8 +162,17 @@ pub fn exponential_decay_problem_diffsl<
         .unwrap();
     let p = [k, y0];
     let mut soln = OdeSolverSolution {
-        atol: problem.atol.clone(),
-        rtol: problem.rtol,
+        atol: problem
+            .state_tolerances
+            .as_ref()
+            .unwrap()// AW maybe convert back to .expect with message
+            .1
+            .clone(),
+        rtol: problem
+            .state_tolerances
+            .as_ref()
+            .unwrap()// AW maybe convert back to .expect with message
+            .0,
         ..Default::default()
     };
     for i in 0..10 {
@@ -200,8 +209,17 @@ pub fn exponential_decay_problem<M: Matrix + 'static>(
         .unwrap();
     let p = [M::T::from_f64(k).unwrap(), M::T::from_f64(y0).unwrap()];
     let mut soln = OdeSolverSolution {
-        atol: problem.atol.clone(),
-        rtol: problem.rtol,
+        atol: problem
+            .state_tolerances
+            .as_ref()
+            .unwrap()// AW maybe convert back to .expect with message
+            .1
+            .clone(),
+        rtol: problem
+            .state_tolerances
+            .as_ref()
+            .unwrap()// AW maybe convert back to .expect with message
+            .0,
         ..Default::default()
     };
     for i in 0..10 {
@@ -237,8 +255,17 @@ pub fn exponential_decay_problem_batched<M: Matrix + 'static>(
         .build()
         .unwrap();
     let mut soln = OdeSolverSolution {
-        atol: problem.atol.clone(),
-        rtol: problem.rtol,
+        atol: problem
+            .state_tolerances
+            .as_ref()
+            .unwrap()// AW maybe convert back to .expect with message
+            .1
+            .clone(),
+        rtol: problem
+            .state_tolerances
+            .as_ref()
+            .unwrap()// AW maybe convert back to .expect with message
+            .0,
         ..Default::default()
     };
     for i in 0..10 {
@@ -278,8 +305,17 @@ pub fn exponential_decay_problem_with_mass<M: Matrix + 'static>(
         .unwrap();
     let p = [M::T::from_f64(k).unwrap(), M::T::from_f64(y0).unwrap()];
     let mut soln = OdeSolverSolution {
-        atol: problem.atol.clone(),
-        rtol: problem.rtol,
+        atol: problem
+            .state_tolerances
+            .as_ref()
+            .unwrap()// AW maybe convert back to .expect with message
+            .1
+            .clone(),
+        rtol: problem
+            .state_tolerances
+            .as_ref()
+            .unwrap()// AW maybe convert back to .expect with message
+            .0,
         ..Default::default()
     };
     for i in 0..10 {
@@ -322,8 +358,17 @@ pub fn exponential_decay_problem_with_root<M: Matrix + 'static>(
     let problem = builder.build().unwrap();
     let p = [M::T::from_f64(k).unwrap(), M::T::from_f64(y0).unwrap()];
     let mut soln = OdeSolverSolution {
-        atol: problem.atol.clone(),
-        rtol: problem.rtol,
+        atol: problem
+            .state_tolerances
+            .as_ref()
+            .unwrap()// AW maybe convert back to .expect with message
+            .1
+            .clone(),
+        rtol: problem
+            .state_tolerances
+            .as_ref()
+            .unwrap()// AW maybe convert back to .expect with message
+            .0,
         ..Default::default()
     };
     for i in 0..10 {
@@ -377,8 +422,17 @@ pub fn exponential_decay_problem_adjoint<M: Matrix>(
     let problem = builder.build().unwrap();
     let ctx = problem.eqn.context();
     let mut soln = OdeSolverSolution {
-        atol: problem.atol.clone(),
-        rtol: problem.rtol,
+        atol: problem
+            .state_tolerances
+            .as_ref()
+            .unwrap()// AW maybe convert back to .expect with message
+            .1
+            .clone(),
+        rtol: problem
+            .state_tolerances
+            .as_ref()
+            .unwrap()// AW maybe convert back to .expect with message
+            .0,
         ..Default::default()
     };
     let t0 = M::T::zero();
@@ -619,11 +673,21 @@ pub fn exponential_decay_with_single_reset_root_problem_adjoint<M: Matrix + 'sta
     let dgdr = M::T::from_f64(2.0 / k).unwrap();
 
     let mut soln = OdeSolverSolution {
-        atol: problem
-            .out_atol
-            .clone()
-            .unwrap_or_else(|| problem.atol.clone()),
-        rtol: problem.out_rtol.unwrap_or(problem.rtol),
+        atol: problem.out_atol.clone().unwrap_or_else(|| {
+            problem
+                .state_tolerances
+                .as_ref()
+                .unwrap()// AW maybe convert back to .expect with message
+                .1
+                .clone()
+        }),
+        rtol: problem.out_rtol.unwrap_or(
+            problem
+                .state_tolerances
+                .as_ref()
+                .unwrap()// AW maybe convert back to .expect with message
+                .0,
+        ),
         ..Default::default()
     };
     let g_state = M::V::from_vec(vec![g], ctx.clone());
@@ -805,8 +869,17 @@ pub fn exponential_decay_with_reset_problem<M: Matrix + 'static>() -> (
     let nstates = problem.eqn.nstates();
     let ctx = problem.context().clone();
     let mut soln = OdeSolverSolution {
-        atol: problem.atol.clone(),
-        rtol: problem.rtol,
+        atol: problem
+            .state_tolerances
+            .as_ref()
+            .unwrap()// AW maybe convert back to .expect with message
+            .1
+            .clone(),
+        rtol: problem
+            .state_tolerances
+            .as_ref()
+            .unwrap()// AW maybe convert back to .expect with message
+            .0,
         ..Default::default()
     };
     // Only point: second-root stop state after manual reset.
@@ -840,8 +913,17 @@ pub fn exponential_decay_with_two_roots_problem<M: Matrix + 'static>() -> (
     let y0: M::V = problem.eqn.init().call(M::T::zero());
     let y_root_0 = y0 * scale(M::T::from_f64(0.6).unwrap());
     let mut soln = OdeSolverSolution {
-        atol: problem.atol.clone(),
-        rtol: problem.rtol,
+        atol: problem
+            .state_tolerances
+            .as_ref()
+            .unwrap()// AW maybe convert back to .expect with message
+            .1
+            .clone(),
+        rtol: problem
+            .state_tolerances
+            .as_ref()
+            .unwrap()// AW maybe convert back to .expect with message
+            .0,
         ..Default::default()
     };
     soln.push(y_root_0, t_root_0);
@@ -1003,8 +1085,17 @@ pub fn exponential_decay_with_reset_problem_sens<M: Matrix + 'static>() -> (
     let s_y0 = M::V::from_element(2, s_y0_val, ctx.clone());
 
     let mut soln = OdeSolverSolution {
-        atol: problem.atol.clone(),
-        rtol: problem.rtol,
+        atol: problem
+            .state_tolerances
+            .as_ref()
+            .unwrap()// AW maybe convert back to .expect with message
+            .1
+            .clone(),
+        rtol: problem
+            .state_tolerances
+            .as_ref()
+            .unwrap()// AW maybe convert back to .expect with message
+            .0,
         ..Default::default()
     };
     soln.push_sens(y_stop, t_stop, &[s_k, s_y0]);
@@ -1263,8 +1354,17 @@ pub fn exponential_decay_problem_batched_adjoint<M: Matrix + 'static>(
     let t0 = M::T::zero();
     let t1 = M::T::from_f64(9.0).unwrap();
     let mut soln = OdeSolverSolution {
-        atol: problem.atol.clone(),
-        rtol: problem.rtol,
+        atol: problem
+            .state_tolerances
+            .as_ref()
+            .unwrap()// AW maybe convert back to .expect with message
+            .1
+            .clone(),
+        rtol: problem
+            .state_tolerances
+            .as_ref()
+            .unwrap()// AW maybe convert back to .expect with message
+            .0,
         ..Default::default()
     };
     for i in 0..10 {
@@ -1454,8 +1554,17 @@ pub fn exponential_decay_with_constant_reset_problem_sens<M: Matrix + 'static>()
     let nstates = problem.eqn.rhs().nstates();
     let ctx = problem.context().clone();
     let mut soln = OdeSolverSolution {
-        atol: problem.atol.clone(),
-        rtol: problem.rtol,
+        atol: problem
+            .state_tolerances
+            .as_ref()
+            .unwrap()// AW maybe convert back to .expect with message
+            .1
+            .clone(),
+        rtol: problem
+            .state_tolerances
+            .as_ref()
+            .unwrap()// AW maybe convert back to .expect with message
+            .0,
         ..Default::default()
     };
     soln.push(M::V::from_element(nstates, M::T::zero(), ctx), M::T::zero());
@@ -1521,8 +1630,17 @@ pub fn exponential_decay_problem_batched_sens_with_reset<M: Matrix + 'static>(
         .unwrap();
     let t_reset = M::T::from_f64(5.0).unwrap();
     let mut soln = OdeSolverSolution {
-        atol: problem.atol.clone(),
-        rtol: problem.rtol,
+        atol: problem
+            .state_tolerances
+            .as_ref()
+            .unwrap()// AW maybe convert back to .expect with message
+            .1
+            .clone(),
+        rtol: problem
+            .state_tolerances
+            .as_ref()
+            .unwrap()// AW maybe convert back to .expect with message
+            .0,
         ..Default::default()
     };
     for i in 0..11 {
@@ -1640,8 +1758,17 @@ pub fn exponential_decay_problem_batched_adjoint_with_reset<M: Matrix + 'static>
     let problem = builder.build().unwrap();
     // Single solution point at final time; dgdp computed via setup_test_adjoint
     let mut soln = OdeSolverSolution {
-        atol: problem.atol.clone(),
-        rtol: problem.rtol,
+        atol: problem
+            .state_tolerances
+            .as_ref()
+            .unwrap()// AW maybe convert back to .expect with message
+            .1
+            .clone(),
+        rtol: problem
+            .state_tolerances
+            .as_ref()
+            .unwrap()// AW maybe convert back to .expect with message
+            .0,
         ..Default::default()
     };
     let t_final = M::T::from_f64(10.0).unwrap();

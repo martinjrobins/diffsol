@@ -209,6 +209,12 @@ where
             for i in 1..self.rk.tableau().s() {
                 self.rk.do_stage(i, h, self.augmented_eqn.as_mut());
             }
+            if self.rk.problem().state_tolerances.is_none() {
+                // With state tolerances disabled, accept a successfully computed step at the
+                // current size without evaluating any error contributions or the controller.
+                self.rk.reset_prev_error();
+                return self.rk.step_accepted(h, h, false);
+            }
             let error_norm =
                 self.rk
                     .error_norm(h, self.augmented_eqn.as_mut(), |_err: &mut Eqn::V| Ok(()))?;
@@ -567,12 +573,38 @@ mod test {
         let target = 0.6_f64;
         let t_root = -((target / y0.get_index(0)).ln()) / k;
         let expected = y0.clone() * scale(f64::exp(-k * t_root));
-        y.assert_eq_norm(&expected, &problem.atol, problem.rtol, 15.0);
+        y.assert_eq_norm(
+            &expected,
+            &problem
+                .state_tolerances
+                .as_ref()
+                .expect("state tolerances must be set for this test")
+                .1,
+            problem
+                .state_tolerances
+                .as_ref()
+                .expect("state tolerances must be set for this test")
+                .0,
+            15.0,
+        );
 
         let g = s.interpolate_out(t_root).unwrap();
         let integral = (1.0 - f64::exp(-k * t_root)) / k;
         let expected_g = y0 * scale(integral);
-        g.assert_eq_norm(&expected_g, &problem.atol, problem.rtol, 15.0);
+        g.assert_eq_norm(
+            &expected_g,
+            &problem
+                .state_tolerances
+                .as_ref()
+                .expect("state tolerances must be set for this test")
+                .1,
+            problem
+                .state_tolerances
+                .as_ref()
+                .expect("state tolerances must be set for this test")
+                .0,
+            15.0,
+        );
     }
 
     #[test]
@@ -593,7 +625,19 @@ mod test {
                 let new_soln = ys.column(ys.ncols() - 1).into_owned();
                 let error = new_soln - &*old_soln;
                 let diff = error
-                    .squared_norm(old_soln, &problem.atol, problem.rtol)
+                    .squared_norm(
+                        old_soln,
+                        &problem
+                            .state_tolerances
+                            .as_ref()
+                            .expect("state tolerances must be set for this test")
+                            .1,
+                        problem
+                            .state_tolerances
+                            .as_ref()
+                            .expect("state tolerances must be set for this test")
+                            .0,
+                    )
                     .sqrt();
                 assert!(diff > 1.0e-6, "diff: {diff}");
             }

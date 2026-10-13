@@ -776,9 +776,14 @@ where
         augmented_eqn: Option<&mut impl AugmentedOdeEquations<Eqn>>,
         linear_solver: impl FnOnce(&mut Eqn::V) -> Result<(), DiffsolError>,
     ) -> Result<Eqn::T, DiffsolError> {
+        if self.problem.state_tolerances.is_none() {
+            return Ok(Eqn::T::zero());
+        }
         let s = self.tableau.s();
         let mut error_norm = Eqn::T::zero();
-        if let Some(error) = self.error.as_mut() {
+        if let (Some(error), Some((rtol, atol))) =
+            (self.error.as_mut(), self.problem.state_tolerances.as_ref())
+        {
             self.diff.gemv_cols(
                 0,
                 s,
@@ -790,9 +795,7 @@ where
             linear_solver(error)?;
 
             // compute error norm
-            let atol = &self.problem.atol;
-            let rtol = self.problem.rtol;
-            let err = error.squared_norm(&self.state.y, atol, rtol);
+            let err = error.squared_norm(&self.state.y, atol, *rtol);
             error_norm = error_norm.max(err);
         }
 

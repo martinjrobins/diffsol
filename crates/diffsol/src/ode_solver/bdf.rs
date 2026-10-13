@@ -291,8 +291,8 @@ where
         state.check_consistent_with_problem(problem)?;
 
         let mut convergence = Convergence::with_tolerance(
-            problem.rtol,
-            &problem.atol,
+            problem.nonlinear_tolerances.0,
+            &problem.nonlinear_tolerances.1,
             problem.ode_options.nonlinear_solver_tolerance,
         );
         convergence.set_max_iter(config.maximum_newton_iterations);
@@ -835,11 +835,11 @@ where
 
         let mut error_norm = M::T::zero();
         if self.op.is_some() {
-            let atol = &self.ode_problem.atol;
-            let rtol = self.ode_problem.rtol;
-            let err =
-                self.y_delta.squared_norm(&state.y, atol, rtol) * self.error_const2[order - 1];
-            error_norm = error_norm.max(err);
+            if let Some((rtol, atol)) = self.ode_problem.state_tolerances.as_ref() {
+                let err =
+                    self.y_delta.squared_norm(&state.y, atol, *rtol) * self.error_const2[order - 1];
+                error_norm = error_norm.max(err);
+            }
             if output_in_error_control {
                 let rtol = self.ode_problem.out_rtol.unwrap();
                 let atol = self.ode_problem.out_atol.as_ref().unwrap();
@@ -884,16 +884,16 @@ where
                 .eqn()
                 .include_out_in_error_control();
 
-        let atol = &self.ode_problem.atol;
-        let rtol = self.ode_problem.rtol;
         let mut error_norm = M::T::zero();
         if self.op.is_some() {
-            let err = state
-                .diff
-                .column(order + 1)
-                .squared_norm(&state.y, atol, rtol)
-                * self.error_const2[order];
-            error_norm = error_norm.max(err);
+            if let Some((rtol, atol)) = self.ode_problem.state_tolerances.as_ref() {
+                let err = state
+                    .diff
+                    .column(order + 1)
+                    .squared_norm(&state.y, atol, *rtol)
+                    * self.error_const2[order];
+                error_norm = error_norm.max(err);
+            }
             if output_in_error_control {
                 let rtol = self.ode_problem.out_rtol.unwrap();
                 let atol = self.ode_problem.out_atol.as_ref().unwrap();
@@ -1351,7 +1351,11 @@ where
                 continue;
             }
 
-            error_norm = self.error_control();
+            error_norm = if self.ode_problem.state_tolerances.is_some() {
+                self.error_control()
+            } else {
+                Eqn::T::zero()
+            };
 
             // need to caulate safety even if step is accepted
             let maxiter = self.convergence.max_iter() as f64;
@@ -1429,6 +1433,30 @@ where
         self.statistics.number_of_steps += 1;
         self.jacobian_update.step();
         self.prev_error_norm = Some(error_norm);
+
+        if self.ode_problem.state_tolerances.is_none() {
+            // Without state tolerances, keep the current step size and order.
+            self.prev_error_norm = None;
+            if let (Some(root_fn), Some(root_finder)) =
+                (self.ode_problem.eqn.root(), self.root_finder.as_ref())
+            {
+                let ret = root_finder.check_root(
+                    &|t: <Eqn as Op>::T, y: &mut <Eqn as Op>::V| self.interpolate_inplace(t, y),
+                    &root_fn,
+                    self.state.as_ref().y,
+                    self.state.as_ref().t,
+                );
+                if let Some((root, root_idx)) = ret {
+                    return Ok(OdeSolverStopReason::RootFound(root, root_idx));
+                }
+            }
+            if let Some(tstop) = self.tstop {
+                if let Some(reason) = self.handle_tstop(tstop).unwrap() {
+                    return Ok(reason);
+                }
+            }
+            return Ok(OdeSolverStopReason::InternalTimestep);
+        }
 
         // a change in order is only done after running at order k for k + 1 steps
         // (see page 83 of [2])
@@ -2109,8 +2137,17 @@ mod test {
         let (_problem, mut soln) = exponential_decay_with_algebraic_problem_sens::<M>();
         let (problem, _soln) =
             exponential_decay_with_algebraic_problem_diffsl::<M, diffsl::LlvmModule>(false);
-        soln.atol = problem.atol.clone();
-        soln.rtol = problem.rtol;
+        soln.atol = problem
+            .state_tolerances
+            .as_ref()
+            .expect("state tolerances must be set for this test")
+            .1
+            .clone();
+        soln.rtol = problem
+            .state_tolerances
+            .as_ref()
+            .expect("state tolerances must be set for this test")
+            .0;
         let mut s = problem.bdf_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
@@ -2725,12 +2762,38 @@ mod test {
         let target = 0.6_f64;
         let t_root = -((target / y0.get_index(0)).ln()) / k;
         let expected = y0.clone() * scale(f64::exp(-k * t_root));
-        y.assert_eq_norm(&expected, &problem.atol, problem.rtol, 15.0);
+        y.assert_eq_norm(
+            &expected,
+            &problem
+                .state_tolerances
+                .as_ref()
+                .expect("state tolerances must be set for this test")
+                .1,
+            problem
+                .state_tolerances
+                .as_ref()
+                .expect("state tolerances must be set for this test")
+                .0,
+            15.0,
+        );
 
         let g = s.interpolate_out(t_root).unwrap();
         let integral = (1.0 - f64::exp(-k * t_root)) / k;
         let expected_g = y0 * scale(integral);
-        g.assert_eq_norm(&expected_g, &problem.atol, problem.rtol, 15.0);
+        g.assert_eq_norm(
+            &expected_g,
+            &problem
+                .state_tolerances
+                .as_ref()
+                .expect("state tolerances must be set for this test")
+                .1,
+            problem
+                .state_tolerances
+                .as_ref()
+                .expect("state tolerances must be set for this test")
+                .0,
+            15.0,
+        );
     }
 
     #[test]
@@ -2752,7 +2815,19 @@ mod test {
                 let new_soln = ys.column(ys.ncols() - 1).into_owned();
                 let error = new_soln - &*old_soln;
                 let diff = error
-                    .squared_norm(old_soln, &problem.atol, problem.rtol)
+                    .squared_norm(
+                        old_soln,
+                        &problem
+                            .state_tolerances
+                            .as_ref()
+                            .expect("state tolerances must be set for this test")
+                            .1,
+                        problem
+                            .state_tolerances
+                            .as_ref()
+                            .expect("state tolerances must be set for this test")
+                            .0,
+                    )
                     .sqrt();
                 assert!(diff > 1.0e-6, "diff: {diff}");
             }

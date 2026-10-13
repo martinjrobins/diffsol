@@ -59,8 +59,17 @@ pub fn robertson_ode_diffsl_problem<
         .build_from_diffsl::<CG>(code)
         .unwrap();
     let mut soln = soln::<M::V>(problem.context().clone());
-    soln.rtol = problem.rtol;
-    soln.atol = problem.atol.clone();
+    soln.rtol = problem
+        .state_tolerances
+        .as_ref()
+        .expect("state tolerances must be set for this test")
+        .0;
+    soln.atol = problem
+        .state_tolerances
+        .as_ref()
+        .expect("state tolerances must be set for this test")
+        .1
+        .clone();
     (problem, soln)
 }
 
@@ -464,8 +473,7 @@ pub fn robertson_ode_elem_problem<M: Matrix + 'static>(
     let eqn = RobertsonOdeElem::new(p, t0);
     let problem = OdeSolverProblem::new(
         eqn,
-        rtol,
-        atol,
+        Some((rtol, atol)),
         None,
         None,
         None,
