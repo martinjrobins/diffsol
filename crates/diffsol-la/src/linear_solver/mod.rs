@@ -44,6 +44,11 @@ pub trait LinearSolver<M: Matrix>: Default {
     }
 
     fn solve_in_place(&self, b: &mut M::V) -> Result<(), LaError>;
+
+    /// Solve the transposed problem `A^T x = b` in place, reusing the factorisation of `A`.
+    ///
+    /// Returns an error if [Self::set_linearisation] has not been called previously.
+    fn solve_transpose_in_place(&self, b: &mut M::V) -> Result<(), LaError>;
 }
 
 /// The shared [LinearSolver] tests for solver `$LS` on matrix `$M`, with `$ctx2` a context of
@@ -59,6 +64,10 @@ macro_rules! generate_lu_tests {
             #[test]
             fn [<test_grouped_lu_ $suffix>]() {
                 $crate::linear_solver::tests::test_grouped_lu_solve::<$M, $LS>($ctx2);
+            }
+            #[test]
+            fn [<test_transpose_lu_ $suffix>]() {
+                $crate::linear_solver::tests::test_transpose_lu_solve::<$M, $LS>($ctx2);
             }
             #[test]
             #[should_panic(expected = "incompatible nbatch")]
@@ -78,7 +87,7 @@ pub(crate) mod tests {
 
     /// A simple diagonal [LinearOp] used for testing the linear solvers.
     pub struct DiagonalOp<M: Matrix> {
-        matrix: M,
+        pub matrix: M,
     }
 
     /// Create a 2x2 diagonal operator `A = diag(value, value)`.
@@ -161,6 +170,40 @@ pub(crate) mod tests {
             wide,
         );
         x.assert_eq_eps(&expected, 100.0);
+    }
+
+    /// Solve `A x = b` and `A^T x = b` with `A_0 = [[0, 1, 2], [3, 1, 0], [1, 0, 4]]` and
+    /// `A_1 = A_0^T`, both needing a pivot, against 4 right-hand side batches grouped as in
+    /// [test_grouped_lu_solve]. Every solution is `(1, 2, 3)`.
+    pub fn test_transpose_lu_solve<M: Matrix, LS: LinearSolver<M>>(ctx2: M::C) {
+        use num_traits::FromPrimitive;
+        let f = |x: f64| M::T::from_f64(x).unwrap();
+        let wide = ctx2.clone_with_nbatch(4).unwrap();
+        let indices = vec![(0, 1), (0, 2), (1, 0), (1, 1), (2, 0), (2, 2)];
+        let values = [1.0, 2.0, 3.0, 1.0, 1.0, 4.0, 3.0, 1.0, 1.0, 1.0, 2.0, 4.0];
+        let matrix =
+            M::try_from_triplets(3, 3, indices, values.iter().map(|&v| f(v)).collect(), ctx2)
+                .unwrap();
+        let op = DiagonalOp { matrix };
+        let mut s = LS::default();
+        s.set_sparsity(&op);
+        s.set_linearisation(&op);
+        let rhs = |a: [f64; 3], b: [f64; 3]| {
+            M::V::from_vec(
+                [a, a, b, b].iter().flatten().map(|&v| f(v)).collect(),
+                wide.clone(),
+            )
+        };
+        let expected = rhs([1.0, 2.0, 3.0], [1.0, 2.0, 3.0]);
+        let (a_x, at_x) = ([8.0, 5.0, 13.0], [9.0, 3.0, 14.0]);
+
+        let mut b = rhs(a_x, at_x);
+        s.solve_in_place(&mut b).unwrap();
+        b.assert_eq_eps(&expected, 100.0);
+
+        let mut b = rhs(at_x, a_x);
+        s.solve_transpose_in_place(&mut b).unwrap();
+        b.assert_eq_eps(&expected, 100.0);
     }
 
     /// More factorizations than right-hand side batches would leave factorizations unused, so

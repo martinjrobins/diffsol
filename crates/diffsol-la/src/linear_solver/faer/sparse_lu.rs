@@ -35,8 +35,11 @@ impl<T: FaerScalar> SparseLu<T> {
         // right-hand side broadcasts into
         let factor_scratch =
             MemBuffer::new(symbolic.factorize_numeric_lu_scratch::<T>(par, Default::default()));
-        let solve_scratch =
-            RefCell::new(MemBuffer::new(symbolic.solve_in_place_scratch::<T>(1, par)));
+        let solve_scratch = RefCell::new(MemBuffer::new(
+            symbolic
+                .solve_in_place_scratch::<T>(1, par)
+                .or(symbolic.solve_transpose_in_place_scratch::<T>(1, par)),
+        ));
         Self {
             numeric: (0..a.data.len()).map(|_| NumericLu::new()).collect(),
             a,
@@ -65,13 +68,15 @@ impl<T: FaerScalar> SparseLu<T> {
         }
     }
 
-    fn solve_block(&self, batch: usize, rhs: faer::MatMut<'_, T>, par: faer::Par) {
-        LuRef::new_unchecked(&self.symbolic, &self.numeric[batch]).solve_in_place_with_conj(
-            Conj::No,
-            rhs,
-            par,
-            MemStack::new(&mut self.solve_scratch.borrow_mut()),
-        );
+    fn solve_block(&self, batch: usize, rhs: faer::MatMut<'_, T>, par: faer::Par, transpose: bool) {
+        let lu = LuRef::new_unchecked(&self.symbolic, &self.numeric[batch]);
+        let mut scratch = self.solve_scratch.borrow_mut();
+        let stack = MemStack::new(&mut scratch);
+        if transpose {
+            lu.solve_transpose_in_place_with_conj(Conj::No, rhs, par, stack);
+        } else {
+            lu.solve_in_place_with_conj(Conj::No, rhs, par, stack);
+        }
     }
 }
 
@@ -110,6 +115,26 @@ impl<T: FaerScalar> LinearSolver<FaerSparseMat<T>> for FaerSparseLU<T> {
     }
 
     fn solve_in_place(&self, x: &mut FaerVec<T>) -> Result<(), LaError> {
+        self.solve_in_place_impl(x, false)
+    }
+
+    fn solve_transpose_in_place(&self, x: &mut FaerVec<T>) -> Result<(), LaError> {
+        self.solve_in_place_impl(x, true)
+    }
+
+    fn set_sparsity<C: LinearOp<T = T, V = FaerVec<T>, M = FaerSparseMat<T>, C = FaerContext>>(
+        &mut self,
+        op: &C,
+    ) {
+        let ncols = op.ncols();
+        let nrows = op.nrows();
+        let a = C::M::new_from_sparsity(nrows, ncols, op.sparsity(), *op.context());
+        self.lu = Some(SparseLu::new(a));
+    }
+}
+
+impl<T: FaerScalar> FaerSparseLU<T> {
+    fn solve_in_place_impl(&self, x: &mut FaerVec<T>, transpose: bool) -> Result<(), LaError> {
         let Some(lu) = self.lu.as_ref() else {
             return Err(linear_solver_error!(LuNotInitialized));
         };
@@ -122,19 +147,10 @@ impl<T: FaerScalar> LinearSolver<FaerSparseMat<T>> for FaerSparseLU<T> {
                 broadcast_batch(batch, lu.nbatch(), nb),
                 x.data.rb_mut().col_mut(batch).as_mat_mut(),
                 par,
+                transpose,
             );
         }
         Ok(())
-    }
-
-    fn set_sparsity<C: LinearOp<T = T, V = FaerVec<T>, M = FaerSparseMat<T>, C = FaerContext>>(
-        &mut self,
-        op: &C,
-    ) {
-        let ncols = op.ncols();
-        let nrows = op.nrows();
-        let a = C::M::new_from_sparsity(nrows, ncols, op.sparsity(), *op.context());
-        self.lu = Some(SparseLu::new(a));
     }
 }
 

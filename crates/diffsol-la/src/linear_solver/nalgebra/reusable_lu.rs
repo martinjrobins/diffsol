@@ -81,6 +81,50 @@ impl<T: NalgebraScalar> BatchLu<T> {
         let _ = block.solve_lower_triangular_with_diag_mut(b, T::one());
         block.solve_upper_triangular_mut(b)
     }
+
+    /// Solve `block(batch)^T * x = b` in place: `U^T z = b`, `L^T w = z`, then undo the pivots.
+    fn solve_transpose_block<C2: Dim, S2: StorageMut<T, Dyn, C2>>(
+        &self,
+        batch: usize,
+        b: &mut NaMatrix<T, Dyn, C2, S2>,
+    ) -> bool {
+        let ncols = self.logical_ncols();
+        let block = self.a.data.columns(batch * ncols, ncols);
+        if !block.tr_solve_upper_triangular_mut(b) {
+            return false;
+        }
+        // L has a unit diagonal, which nalgebra's transposed solves can't assume
+        for c in 0..b.ncols() {
+            for i in (0..ncols.saturating_sub(1)).rev() {
+                let s = block.view_range(i + 1.., i).dot(&b.view_range(i + 1.., c));
+                b[(i, c)] -= s;
+            }
+        }
+        for &(i, p) in self.piv[batch].iter().rev() {
+            b.swap_rows(i, p);
+        }
+        true
+    }
+
+    fn solve(&self, state: &mut NalgebraVec<T>, transpose: bool) -> Result<(), LaError> {
+        state
+            .context
+            .assert_broadcastable_into(self.nbatch(), "lu_solve");
+        let nb = state.context.nbatch();
+        for batch in 0..nb {
+            let lu_batch = broadcast_batch(batch, self.nbatch(), nb);
+            let mut state_batch = state.data.column_mut(batch);
+            let ok = if transpose {
+                self.solve_transpose_block(lu_batch, &mut state_batch)
+            } else {
+                self.solve_block(lu_batch, &mut state_batch)
+            };
+            if !ok {
+                return Err(linear_solver_error!(LuSolveFailed));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// The default nalgebra [LinearSolver], exported as [NalgebraLU](crate::NalgebraLU). Factorizes
@@ -106,23 +150,14 @@ impl<T: NalgebraScalar> LinearSolver<NalgebraMat<T>> for ReusableLU<T> {
         let Some(lu) = self.lu.as_ref() else {
             return Err(linear_solver_error!(LuNotInitialized));
         };
-        state
-            .context
-            .assert_broadcastable_into(lu.nbatch(), "lu_solve");
-        if state.context.nbatch() == 1 {
-            if lu.solve_block(0, &mut state.data) {
-                return Ok(());
-            }
-            return Err(linear_solver_error!(LuSolveFailed));
-        }
-        let nb = state.context.nbatch();
-        for batch in 0..nb {
-            let mut state_batch = state.data.column_mut(batch);
-            if !lu.solve_block(broadcast_batch(batch, lu.nbatch(), nb), &mut state_batch) {
-                return Err(linear_solver_error!(LuSolveFailed));
-            }
-        }
-        Ok(())
+        lu.solve(state, false)
+    }
+
+    fn solve_transpose_in_place(&self, state: &mut NalgebraVec<T>) -> Result<(), LaError> {
+        let Some(lu) = self.lu.as_ref() else {
+            return Err(linear_solver_error!(LuNotInitialized));
+        };
+        lu.solve(state, true)
     }
 
     fn set_linearisation<
