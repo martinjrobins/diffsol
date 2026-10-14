@@ -348,7 +348,7 @@ mod test {
             test_interpolate_dy, test_ode_solver, test_problem, test_state_mut,
             test_state_mut_on_problem,
         },
-        scale, ConstantOp, Context, DenseMatrix, MatrixCommon, NalgebraLU, NalgebraVec,
+        scale, ConstantOp, Context, DenseMatrix, MatrixCommon, NalgebraLU, NalgebraVec, OdeBuilder,
         OdeEquations, OdeSolverMethod, OdeSolverStopReason, Op, Vector, VectorView,
     };
 
@@ -588,6 +588,34 @@ mod test {
         let (problem, soln) = exponential_decay_problem::<M>(false);
         let mut s = problem.tsit45().unwrap();
         test_ode_solver(&mut s, soln, None, true, false);
+    }
+
+    #[test]
+    fn test_tstop_tsit45_restores_step_size_without_state_tolerances() {
+        let problem = OdeBuilder::<M>::new()
+            .h0(0.1)
+            .disable_state_error_control()
+            .rhs(|y, _p, _t, dy| dy[0] = -y[0])
+            .init(|_p, _t, y| y[0] = 1.0, 1)
+            .build()
+            .unwrap();
+        let mut solver = problem.tsit45().unwrap();
+        solver.set_stop_time(0.15).unwrap();
+
+        assert_eq!(
+            solver.step().unwrap(),
+            OdeSolverStopReason::InternalTimestep
+        );
+        assert!((solver.state().t - 0.1).abs() < 1e-12);
+        assert!((solver.state().h - 0.05).abs() < 1e-12);
+
+        assert_eq!(solver.step().unwrap(), OdeSolverStopReason::TstopReached);
+        assert!((solver.state().t - 0.15).abs() < 1e-12);
+        assert!((solver.state().h - 0.1).abs() < 1e-12);
+
+        solver.step().unwrap();
+        assert!((solver.state().t - 0.25).abs() < 1e-12);
+        assert!((solver.state().h - 0.1).abs() < 1e-12);
     }
 
     #[cfg(feature = "cuda")]
