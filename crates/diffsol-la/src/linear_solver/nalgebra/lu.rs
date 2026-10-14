@@ -34,52 +34,43 @@ where
     }
 }
 
-impl<T: NalgebraScalar> LinearSolver<NalgebraMat<T>> for LU<T> {
-    fn solve_in_place(&self, state: &mut NalgebraVec<T>) -> Result<(), LaError> {
+impl<T: NalgebraScalar> LU<T> {
+    fn solve(&self, state: &mut NalgebraVec<T>, transpose: bool) -> Result<(), LaError> {
         if self.lu.is_empty() {
             return Err(linear_solver_error!(LuNotInitialized));
         }
         state
             .context
             .assert_broadcastable_into(self.lu.len(), "lu_solve");
-        if state.context.nbatch() == 1 {
-            if self.lu[0].solve_mut(&mut state.data) {
-                return Ok(());
-            }
-            return Err(linear_solver_error!(LuSolveFailed));
-        }
         let nb = state.context.nbatch();
         for batch in 0..nb {
+            let lu = &self.lu[broadcast_batch(batch, self.lu.len(), nb)];
             let mut state_batch = state.data.column_mut(batch);
-            if !self.lu[broadcast_batch(batch, self.lu.len(), nb)].solve_mut(&mut state_batch) {
+            let ok = if transpose {
+                // P A = L U, so A^T x = b is U^T L^T P x = b
+                // ponytail: l()/u() copy the factors each call; fine for this comparison solver
+                let ok = lu.u().tr_solve_upper_triangular_mut(&mut state_batch)
+                    && lu.l().tr_solve_lower_triangular_mut(&mut state_batch);
+                lu.p().inv_permute_rows(&mut state_batch);
+                ok
+            } else {
+                lu.solve_mut(&mut state_batch)
+            };
+            if !ok {
                 return Err(linear_solver_error!(LuSolveFailed));
             }
         }
         Ok(())
     }
+}
+
+impl<T: NalgebraScalar> LinearSolver<NalgebraMat<T>> for LU<T> {
+    fn solve_in_place(&self, state: &mut NalgebraVec<T>) -> Result<(), LaError> {
+        self.solve(state, false)
+    }
 
     fn solve_transpose_in_place(&self, state: &mut NalgebraVec<T>) -> Result<(), LaError> {
-        if self.lu.is_empty() {
-            return Err(linear_solver_error!(LuNotInitialized));
-        }
-        state
-            .context
-            .assert_broadcastable_into(self.lu.len(), "lu_solve");
-        let nb = state.context.nbatch();
-        for batch in 0..nb {
-            // P A = L U, so A^T x = b is U^T L^T P x = b
-            let (p, l, u) = self.lu[broadcast_batch(batch, self.lu.len(), nb)]
-                .clone()
-                .unpack();
-            let mut state_batch = state.data.column_mut(batch);
-            if !u.tr_solve_upper_triangular_mut(&mut state_batch)
-                || !l.tr_solve_lower_triangular_mut(&mut state_batch)
-            {
-                return Err(linear_solver_error!(LuSolveFailed));
-            }
-            p.inv_permute_rows(&mut state_batch);
-        }
-        Ok(())
+        self.solve(state, true)
     }
 
     fn set_linearisation<

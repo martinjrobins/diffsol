@@ -218,7 +218,9 @@ impl<T: ScalarCuda> LinearSolver<CudaMat<T>> for CudaLU<T> {
 mod tests {
     use super::*;
     use crate::{
-        linear_solver::tests::{diagonal_op, test_grouped_lu_solve, test_narrow_state_lu_solve},
+        linear_solver::tests::{
+            diagonal_op, test_grouped_lu_solve, test_narrow_state_lu_solve, test_transpose_lu_solve,
+        },
         Vector,
     };
 
@@ -247,6 +249,11 @@ mod tests {
     #[test]
     fn test_grouped_lu() {
         test_grouped_lu_solve::<CudaMat<f64>, CudaLU<f64>>(CudaContext::default().with_nbatch(2));
+    }
+
+    #[test]
+    fn test_transpose_lu() {
+        test_transpose_lu_solve::<CudaMat<f64>, CudaLU<f64>>(CudaContext::default().with_nbatch(2));
     }
 }
 

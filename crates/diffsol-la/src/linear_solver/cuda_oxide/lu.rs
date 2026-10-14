@@ -688,4 +688,64 @@ mod tests {
     fn test_cusolver_factor_batched_solve_f32() {
         cusolver_factor_batched_solve::<f32>();
     }
+
+    /// The per-lane `getrs` path (`n` past the small-n cut, fewer lanes than the batched
+    /// solve needs) in both directions, for a tridiagonal `A` whose zero (0, 0) entry forces a
+    /// pivot. Two right-hand-side lanes broadcast over the one factorisation.
+    fn getrs_transpose<T: ScalarCuda>() {
+        let n = BATCHED_SMALL_N + 4;
+        let nlanes = 2;
+        assert!(!batched_solve(n, nlanes));
+        let a = |i: usize, j: usize| match (i, j) {
+            (0, 0) => 0.0,
+            _ if i == j => 4.0,
+            _ if j == i + 1 => 1.0,
+            _ if i == j + 1 => 2.0,
+            _ => 0.0,
+        };
+        let indices: Vec<_> = (0..n)
+            .flat_map(|i| (0..n).map(move |j| (i, j)))
+            .filter(|&(i, j)| i.abs_diff(j) <= 1)
+            .collect();
+        let values: Vec<f64> = indices.iter().map(|&(i, j)| a(i, j)).collect();
+        let matrix =
+            OxideMat::<T>::try_from_triplets(n, n, indices, fv(&values), OxideContext::default())
+                .unwrap();
+        let op = crate::linear_solver::tests::DiagonalOp { matrix };
+        let mut s = OxideLU::<T>::default();
+        s.set_sparsity(&op);
+        s.set_linearisation(&op);
+
+        let x: Vec<f64> = (1..=n).map(|i| i as f64).collect();
+        let mul = |transpose: bool| -> Vec<f64> {
+            (0..n)
+                .map(|i| {
+                    (0..n)
+                        .map(|j| if transpose { a(j, i) } else { a(i, j) } * x[j])
+                        .sum()
+                })
+                .collect()
+        };
+        let lanes = |v: &[f64]| v.repeat(nlanes);
+        let wide = OxideContext::default().with_nbatch(nlanes);
+        let expected = OxideVec::from_vec(fv(&lanes(&x)), wide.clone());
+
+        let mut b = OxideVec::from_vec(fv(&lanes(&mul(false))), wide.clone());
+        s.solve_in_place(&mut b).unwrap();
+        b.assert_eq_eps(&expected, 100.0);
+
+        let mut b = OxideVec::from_vec(fv(&lanes(&mul(true))), wide);
+        s.solve_transpose_in_place(&mut b).unwrap();
+        b.assert_eq_eps(&expected, 100.0);
+    }
+
+    #[test]
+    fn test_getrs_transpose() {
+        getrs_transpose::<f64>();
+    }
+
+    #[test]
+    fn test_getrs_transpose_f32() {
+        getrs_transpose::<f32>();
+    }
 }

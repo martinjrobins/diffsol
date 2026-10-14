@@ -47,7 +47,7 @@ pub trait LinearSolver<M: Matrix>: Default {
 
     /// Solve the transposed problem `A^T x = b` in place, reusing the factorisation of `A`.
     ///
-    /// Panics if [Self::set_linearisation] has not been called previously.
+    /// Returns an error if [Self::set_linearisation] has not been called previously.
     fn solve_transpose_in_place(&self, b: &mut M::V) -> Result<(), LaError>;
 }
 
@@ -67,7 +67,7 @@ macro_rules! generate_lu_tests {
             }
             #[test]
             fn [<test_transpose_lu_ $suffix>]() {
-                $crate::linear_solver::tests::test_transpose_lu_solve::<$M, $LS>();
+                $crate::linear_solver::tests::test_transpose_lu_solve::<$M, $LS>($ctx2);
             }
             #[test]
             #[should_panic(expected = "incompatible nbatch")]
@@ -87,7 +87,7 @@ pub(crate) mod tests {
 
     /// A simple diagonal [LinearOp] used for testing the linear solvers.
     pub struct DiagonalOp<M: Matrix> {
-        matrix: M,
+        pub matrix: M,
     }
 
     /// Create a 2x2 diagonal operator `A = diag(value, value)`.
@@ -172,38 +172,36 @@ pub(crate) mod tests {
         x.assert_eq_eps(&expected, 100.0);
     }
 
-    /// Solve `A x = b` and `A^T x = b` for a non-symmetric `A` whose (0, 0) entry forces a pivot.
-    pub fn test_transpose_lu_solve<M: Matrix, LS: LinearSolver<M>>() {
+    /// Solve `A x = b` and `A^T x = b` with `A_0 = [[0, 1, 2], [3, 1, 0], [1, 0, 4]]` and
+    /// `A_1 = A_0^T`, both needing a pivot, against 4 right-hand side batches grouped as in
+    /// [test_grouped_lu_solve]. Every solution is `(1, 2, 3)`.
+    pub fn test_transpose_lu_solve<M: Matrix, LS: LinearSolver<M>>(ctx2: M::C) {
         use num_traits::FromPrimitive;
         let f = |x: f64| M::T::from_f64(x).unwrap();
-        // A = [[0, 1, 2], [3, 1, 0], [1, 0, 4]]
-        let entries = [
-            ((0, 1), 1.0),
-            ((0, 2), 2.0),
-            ((1, 0), 3.0),
-            ((1, 1), 1.0),
-            ((2, 0), 1.0),
-            ((2, 2), 4.0),
-        ];
-        let matrix = M::try_from_triplets(
-            3,
-            3,
-            entries.iter().map(|e| e.0).collect(),
-            entries.iter().map(|e| f(e.1)).collect(),
-            Default::default(),
-        )
-        .unwrap();
+        let wide = ctx2.clone_with_nbatch(4).unwrap();
+        let indices = vec![(0, 1), (0, 2), (1, 0), (1, 1), (2, 0), (2, 2)];
+        let values = [1.0, 2.0, 3.0, 1.0, 1.0, 4.0, 3.0, 1.0, 1.0, 1.0, 2.0, 4.0];
+        let matrix =
+            M::try_from_triplets(3, 3, indices, values.iter().map(|&v| f(v)).collect(), ctx2)
+                .unwrap();
         let op = DiagonalOp { matrix };
         let mut s = LS::default();
         s.set_sparsity(&op);
         s.set_linearisation(&op);
-        let expected = M::V::from_vec(vec![f(1.0), f(2.0), f(3.0)], Default::default());
+        let rhs = |a: [f64; 3], b: [f64; 3]| {
+            M::V::from_vec(
+                [a, a, b, b].iter().flatten().map(|&v| f(v)).collect(),
+                wide.clone(),
+            )
+        };
+        let expected = rhs([1.0, 2.0, 3.0], [1.0, 2.0, 3.0]);
+        let (a_x, at_x) = ([8.0, 5.0, 13.0], [9.0, 3.0, 14.0]);
 
-        let mut b = M::V::from_vec(vec![f(8.0), f(5.0), f(13.0)], Default::default());
+        let mut b = rhs(a_x, at_x);
         s.solve_in_place(&mut b).unwrap();
         b.assert_eq_eps(&expected, 100.0);
 
-        let mut b = M::V::from_vec(vec![f(9.0), f(3.0), f(14.0)], Default::default());
+        let mut b = rhs(at_x, a_x);
         s.solve_transpose_in_place(&mut b).unwrap();
         b.assert_eq_eps(&expected, 100.0);
     }

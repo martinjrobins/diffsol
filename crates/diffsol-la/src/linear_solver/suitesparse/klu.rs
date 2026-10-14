@@ -272,7 +272,7 @@ mod tests {
         crate::linear_solver::tests::test_transpose_lu_solve::<
             FaerSparseMat<f64>,
             KLU<FaerSparseMat<f64>>,
-        >();
+        >(crate::FaerContext::with_nbatch(2));
     }
 
     #[test]
