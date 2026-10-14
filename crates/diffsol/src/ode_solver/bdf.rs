@@ -157,6 +157,7 @@ pub struct Bdf<
     statistics: OdeSolverStatistics,
     state: BdfState<Eqn::V, M>,
     tstop: Option<Eqn::T>,
+    tstop_restore_h: Option<Eqn::T>,
     root_finder: Option<RootFinder<Eqn::V>>,
     is_state_modified: bool,
     jacobian_update: JacobianUpdate<Eqn::T>,
@@ -209,6 +210,7 @@ where
             statistics: OdeSolverStatistics::default(),
             state: self.state.clone(),
             tstop: self.tstop,
+            tstop_restore_h: self.tstop_restore_h,
             root_finder: self.root_finder.clone(),
             is_state_modified: self.is_state_modified,
             jacobian_update: self.jacobian_update.clone(),
@@ -368,6 +370,7 @@ where
             },
             state,
             tstop: None,
+            tstop_restore_h: None,
             root_finder,
             is_state_modified,
             jacobian_update: JacobianUpdate::new(&problem.ode_options),
@@ -680,19 +683,24 @@ where
         tstop: Eqn::T,
     ) -> Result<Option<OdeSolverStopReason<Eqn::T>>, DiffsolError> {
         // check if the we are at tstop
-        let state = &self.state;
+        let state_t = self.state.t;
+        let state_h = self.state.h;
         let troundoff = <Eqn::T as FromPrimitive>::from_f64(100.0).unwrap()
             * Eqn::T::EPSILON
-            * (abs(state.t) + abs(state.h));
-        if abs(state.t - tstop) <= troundoff {
+            * (abs(state_t) + abs(state_h));
+        if abs(state_t - tstop) <= troundoff {
             self.tstop = None;
+            if let Some(h) = self.tstop_restore_h.take() {
+                let factor = h / self.state.h;
+                self._update_step_size(factor)?;
+            }
             return Ok(Some(OdeSolverStopReason::TstopReached));
-        } else if (state.h > M::T::zero() && tstop < state.t - troundoff)
-            || (state.h < M::T::zero() && tstop > state.t + troundoff)
+        } else if (state_h > M::T::zero() && tstop < state_t - troundoff)
+            || (state_h < M::T::zero() && tstop > state_t + troundoff)
         {
             let error = OdeSolverError::StopTimeBeforeCurrentTime {
                 stop_time: self.tstop.unwrap().to_f64().unwrap(),
-                state_time: state.t.to_f64().unwrap(),
+                state_time: state_t.to_f64().unwrap(),
             };
             self.tstop = None;
 
@@ -700,14 +708,15 @@ where
         }
 
         // check if the next step will be beyond tstop, if so adjust the step size
-        if (state.h > M::T::zero() && state.t + state.h > tstop + troundoff)
-            || (state.h < M::T::zero() && state.t + state.h < tstop - troundoff)
+        if (state_h > M::T::zero() && state_t + state_h > tstop + troundoff)
+            || (state_h < M::T::zero() && state_t + state_h < tstop - troundoff)
         {
             debug!(
                 "Adjusting step size to hit tstop at t = {}",
                 tstop.to_f64().unwrap()
             );
-            let factor = (tstop - state.t) / state.h;
+            let factor = (tstop - state_t) / state_h;
+            self.tstop_restore_h.get_or_insert(state_h);
             // update step size ignoring the possible "step size too small" error
             let _ = self._update_step_size(factor);
         }
@@ -2667,6 +2676,37 @@ mod test {
         let (problem, soln) = exponential_decay_problem::<M>(false);
         let mut s = problem.bdf::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, true, false);
+    }
+
+    #[test]
+    fn test_tstop_bdf_restores_step_size_without_state_tolerances() {
+        let problem = OdeBuilder::<M>::new()
+            .h0(0.1)
+            .disable_state_error_control()
+            .rhs_implicit(
+                |y, _p, _t, dy| dy[0] = -y[0],
+                |_y, _p, _t, v, jv| jv[0] = -v[0],
+            )
+            .init(|_p, _t, y| y[0] = 1.0, 1)
+            .build()
+            .unwrap();
+        let mut solver = problem.bdf::<LS>().unwrap();
+        solver.set_stop_time(0.15).unwrap();
+
+        assert_eq!(
+            solver.step().unwrap(),
+            OdeSolverStopReason::InternalTimestep
+        );
+        assert!((solver.state().t - 0.1).abs() < 1e-12);
+        assert!((solver.state().h - 0.05).abs() < 1e-12);
+
+        assert_eq!(solver.step().unwrap(), OdeSolverStopReason::TstopReached);
+        assert!((solver.state().t - 0.15).abs() < 1e-12);
+        assert!((solver.state().h - 0.1).abs() < 1e-12);
+
+        solver.step().unwrap();
+        assert!((solver.state().t - 0.25).abs() < 1e-12);
+        assert!((solver.state().h - 0.1).abs() < 1e-12);
     }
 
     #[cfg(feature = "cuda")]

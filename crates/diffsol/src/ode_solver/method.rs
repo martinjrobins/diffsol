@@ -167,6 +167,8 @@ where
 
     /// Set a stop time for the solver. The solver will stop when the internal time reaches this time.
     /// Once it stops, the stop time is unset. If `tstop` is at or before the current internal time, an error is returned.
+    /// If the next step would cross `tstop`, that boundary step is shortened to land on it; after
+    /// reaching the stop time, the solver resumes with the step size it had before shortening.
     fn set_stop_time(&mut self, tstop: Eqn::T) -> Result<(), DiffsolError>;
 
     /// Interpolate the solution at a given time. This time should be between the current time and the last solver time step
