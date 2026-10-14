@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0](https://github.com/martinjrobins/diffsol/compare/diffsol-la-v0.2.0...diffsol-la-v0.3.0) - 2026-10-14
+
+### Added
+
+- *(diffsol-la)* add transposed linear solve ([#406](https://github.com/martinjrobins/diffsol/pull/406))
+- *(diffsol-la)* support f32 for cuda-oxide, deprecate C cuda feature ([#387](https://github.com/martinjrobins/diffsol/pull/387))
+- *(diffsol-la)* make cuda-oxide containers generic on ScalarCuda ([#386](https://github.com/martinjrobins/diffsol/pull/386))
+- *(diffsol-la)* generic cuda-oxide kernels ([#381](https://github.com/martinjrobins/diffsol/pull/381))
+
 ## [0.2.0](https://github.com/martinjrobins/diffsol/compare/diffsol-la-v0.1.1...diffsol-la-v0.2.0) - 2026-09-21
 
 ### Added
