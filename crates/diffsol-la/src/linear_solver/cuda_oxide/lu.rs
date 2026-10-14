@@ -114,6 +114,7 @@ unsafe fn getrf<T: ScalarCuda>(
 unsafe fn getrs<T: ScalarCuda>(
     handle: cusolverDnHandle_t,
     n: c_int,
+    transpose: bool,
     nrhs: c_int,
     a: *const T,
     lda: c_int,
@@ -122,7 +123,11 @@ unsafe fn getrs<T: ScalarCuda>(
     ldb: c_int,
     info: *mut c_int,
 ) -> cusolverStatus_t {
-    let op = cublasOperation_t::CUBLAS_OP_N;
+    let op = if transpose {
+        cublasOperation_t::CUBLAS_OP_T
+    } else {
+        cublasOperation_t::CUBLAS_OP_N
+    };
     match T::as_enum() {
         CudaType::F32 => {
             cusolver::cusolverDnSgetrs(handle, op, n, nrhs, a as _, lda, piv, b as _, ldb, info)
@@ -156,6 +161,7 @@ unsafe fn getrf_batched<T: ScalarCuda>(
 unsafe fn getrs_batched<T: ScalarCuda>(
     handle: cublas::cublasHandle_t,
     n: c_int,
+    transpose: bool,
     nrhs: c_int,
     a_ptrs: u64,
     lda: c_int,
@@ -165,7 +171,11 @@ unsafe fn getrs_batched<T: ScalarCuda>(
     info: &mut c_int,
     nbatch: c_int,
 ) -> cublas::cublasStatus_t {
-    let op = cublas::cublasOperation_t::CUBLAS_OP_N;
+    let op = if transpose {
+        cublas::cublasOperation_t::CUBLAS_OP_T
+    } else {
+        cublas::cublasOperation_t::CUBLAS_OP_N
+    };
     match T::as_enum() {
         CudaType::F32 => cublas::cublasSgetrsBatched(
             handle,
@@ -374,6 +384,97 @@ impl<T: ScalarCuda> OxideLU<T> {
     }
 }
 
+impl<T: ScalarCuda> OxideLU<T> {
+    fn solve_impl(&self, x: &mut OxideVec<T>, transpose: bool) -> Result<(), LaError> {
+        let matrix = if let Some(ref matrix) = self.matrix {
+            if matrix.nrows() != matrix.ncols() {
+                Err(linear_solver_error!(LinearSolverMatrixNotSquare))?;
+            }
+            matrix
+        } else {
+            Err(linear_solver_error!(LinearSolverNotSetup))?
+        };
+        if !self.linearisation_set {
+            Err(linear_solver_error!(LinearSolverNotSetup))?;
+        }
+        let ctx = x.context.clone();
+        let nbatch = ctx.nbatch();
+        let lu_nbatch = matrix.context().nbatch();
+        ctx.assert_broadcastable_into(lu_nbatch, "lu_solve");
+        let nrows = matrix.nrows();
+        let ncols = matrix.ncols();
+        let x_nstates = x.len();
+        if x_nstates != nrows {
+            Err(linear_solver_error!(LinearSolverMatrixVectorNotCompatible))?;
+        }
+
+        let n = c_int::try_from(nrows).unwrap();
+        let lda = n;
+        let nrhs = 1;
+
+        if batched_solve(nrows, nbatch) {
+            let a_ptrs = self.solve_a_ptrs(&ctx, nrows * ncols, lu_nbatch, nbatch);
+            let piv = self.solve_pivots(&ctx, nrows, lu_nbatch, nbatch);
+            let x_ptrs = self.solve_x_ptrs(&ctx, x, x_nstates, nbatch);
+            let mut info = 0;
+            ctx.with_blas(|handle| {
+                // SAFETY: both pointer arrays hold `nbatch` lane pointers in
+                // this context, and the pivots `nbatch` blocks of `nrows`.
+                unsafe {
+                    getrs_batched::<T>(
+                        handle,
+                        n,
+                        transpose,
+                        nrhs,
+                        a_ptrs,
+                        lda,
+                        piv as *const c_int,
+                        x_ptrs,
+                        n,
+                        &mut info,
+                        c_int::try_from(nbatch).unwrap(),
+                    )
+                    .result()
+                    .expect("Failed to launch getrsBatched");
+                }
+            });
+            assert_eq!(info, 0, "getrsBatched rejected parameter {}", -info);
+            return Ok(());
+        }
+
+        self.bind_stream(&ctx);
+        let a = matrix.data.cu_deviceptr() as *const T;
+        let piv = self.pivots.as_ref().unwrap().cu_deviceptr() as *const i32;
+        let nfo = self.nfo.as_ref().expect("Info not set").borrow_mut();
+        let info = nfo.cu_deviceptr() as *mut i32;
+        let xp = x.data.cu_deviceptr() as *mut T;
+        for b in 0..nbatch {
+            // one factorization can serve several right-hand side batches
+            let lu_b = broadcast_batch(b, lu_nbatch, nbatch);
+            // SAFETY: as in `set_linearisation`; `lu_b < lu_nbatch` by
+            // `broadcast_batch` and `b < nbatch`, which is `x`'s lane count.
+            unsafe {
+                check(
+                    getrs(
+                        self.handle,
+                        n,
+                        transpose,
+                        nrhs,
+                        a.add(lu_b * nrows * ncols),
+                        lda,
+                        piv.add(lu_b * nrows),
+                        xp.add(b * x_nstates),
+                        n,
+                        info.add(lu_b),
+                    ),
+                    "getrs",
+                );
+            }
+        }
+        Ok(())
+    }
+}
+
 impl<T: ScalarCuda> LinearSolver<OxideMat<T>> for OxideLU<T> {
     fn set_sparsity<C: LinearOp<T = T, V = OxideVec<T>, M = OxideMat<T>, C = OxideContext>>(
         &mut self,
@@ -505,90 +606,11 @@ impl<T: ScalarCuda> LinearSolver<OxideMat<T>> for OxideLU<T> {
     }
 
     fn solve_in_place(&self, x: &mut OxideVec<T>) -> Result<(), LaError> {
-        let matrix = if let Some(ref matrix) = self.matrix {
-            if matrix.nrows() != matrix.ncols() {
-                Err(linear_solver_error!(LinearSolverMatrixNotSquare))?;
-            }
-            matrix
-        } else {
-            Err(linear_solver_error!(LinearSolverNotSetup))?
-        };
-        if !self.linearisation_set {
-            Err(linear_solver_error!(LinearSolverNotSetup))?;
-        }
-        let ctx = x.context.clone();
-        let nbatch = ctx.nbatch();
-        let lu_nbatch = matrix.context().nbatch();
-        ctx.assert_broadcastable_into(lu_nbatch, "lu_solve");
-        let nrows = matrix.nrows();
-        let ncols = matrix.ncols();
-        let x_nstates = x.len();
-        if x_nstates != nrows {
-            Err(linear_solver_error!(LinearSolverMatrixVectorNotCompatible))?;
-        }
+        self.solve_impl(x, false)
+    }
 
-        let n = c_int::try_from(nrows).unwrap();
-        let lda = n;
-        let nrhs = 1;
-
-        if batched_solve(nrows, nbatch) {
-            let a_ptrs = self.solve_a_ptrs(&ctx, nrows * ncols, lu_nbatch, nbatch);
-            let piv = self.solve_pivots(&ctx, nrows, lu_nbatch, nbatch);
-            let x_ptrs = self.solve_x_ptrs(&ctx, x, x_nstates, nbatch);
-            let mut info = 0;
-            ctx.with_blas(|handle| {
-                // SAFETY: both pointer arrays hold `nbatch` lane pointers in
-                // this context, and the pivots `nbatch` blocks of `nrows`.
-                unsafe {
-                    getrs_batched::<T>(
-                        handle,
-                        n,
-                        nrhs,
-                        a_ptrs,
-                        lda,
-                        piv as *const c_int,
-                        x_ptrs,
-                        n,
-                        &mut info,
-                        c_int::try_from(nbatch).unwrap(),
-                    )
-                    .result()
-                    .expect("Failed to launch getrsBatched");
-                }
-            });
-            assert_eq!(info, 0, "getrsBatched rejected parameter {}", -info);
-            return Ok(());
-        }
-
-        self.bind_stream(&ctx);
-        let a = matrix.data.cu_deviceptr() as *const T;
-        let piv = self.pivots.as_ref().unwrap().cu_deviceptr() as *const i32;
-        let nfo = self.nfo.as_ref().expect("Info not set").borrow_mut();
-        let info = nfo.cu_deviceptr() as *mut i32;
-        let xp = x.data.cu_deviceptr() as *mut T;
-        for b in 0..nbatch {
-            // one factorization can serve several right-hand side batches
-            let lu_b = broadcast_batch(b, lu_nbatch, nbatch);
-            // SAFETY: as in `set_linearisation`; `lu_b < lu_nbatch` by
-            // `broadcast_batch` and `b < nbatch`, which is `x`'s lane count.
-            unsafe {
-                check(
-                    getrs(
-                        self.handle,
-                        n,
-                        nrhs,
-                        a.add(lu_b * nrows * ncols),
-                        lda,
-                        piv.add(lu_b * nrows),
-                        xp.add(b * x_nstates),
-                        n,
-                        info.add(lu_b),
-                    ),
-                    "getrs",
-                );
-            }
-        }
-        Ok(())
+    fn solve_transpose_in_place(&self, x: &mut OxideVec<T>) -> Result<(), LaError> {
+        self.solve_impl(x, true)
     }
 }
 

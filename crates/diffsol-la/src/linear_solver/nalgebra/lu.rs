@@ -58,6 +58,30 @@ impl<T: NalgebraScalar> LinearSolver<NalgebraMat<T>> for LU<T> {
         Ok(())
     }
 
+    fn solve_transpose_in_place(&self, state: &mut NalgebraVec<T>) -> Result<(), LaError> {
+        if self.lu.is_empty() {
+            return Err(linear_solver_error!(LuNotInitialized));
+        }
+        state
+            .context
+            .assert_broadcastable_into(self.lu.len(), "lu_solve");
+        let nb = state.context.nbatch();
+        for batch in 0..nb {
+            // P A = L U, so A^T x = b is U^T L^T P x = b
+            let (p, l, u) = self.lu[broadcast_batch(batch, self.lu.len(), nb)]
+                .clone()
+                .unpack();
+            let mut state_batch = state.data.column_mut(batch);
+            if !u.tr_solve_upper_triangular_mut(&mut state_batch)
+                || !l.tr_solve_lower_triangular_mut(&mut state_batch)
+            {
+                return Err(linear_solver_error!(LuSolveFailed));
+            }
+            p.inv_permute_rows(&mut state_batch);
+        }
+        Ok(())
+    }
+
     fn set_linearisation<
         C: LinearOp<T = T, V = NalgebraVec<T>, M = NalgebraMat<T>, C = NalgebraContext>,
     >(

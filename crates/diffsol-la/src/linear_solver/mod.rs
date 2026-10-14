@@ -44,6 +44,11 @@ pub trait LinearSolver<M: Matrix>: Default {
     }
 
     fn solve_in_place(&self, b: &mut M::V) -> Result<(), LaError>;
+
+    /// Solve the transposed problem `A^T x = b` in place, reusing the factorisation of `A`.
+    ///
+    /// Panics if [Self::set_linearisation] has not been called previously.
+    fn solve_transpose_in_place(&self, b: &mut M::V) -> Result<(), LaError>;
 }
 
 /// The shared [LinearSolver] tests for solver `$LS` on matrix `$M`, with `$ctx2` a context of
@@ -59,6 +64,10 @@ macro_rules! generate_lu_tests {
             #[test]
             fn [<test_grouped_lu_ $suffix>]() {
                 $crate::linear_solver::tests::test_grouped_lu_solve::<$M, $LS>($ctx2);
+            }
+            #[test]
+            fn [<test_transpose_lu_ $suffix>]() {
+                $crate::linear_solver::tests::test_transpose_lu_solve::<$M, $LS>();
             }
             #[test]
             #[should_panic(expected = "incompatible nbatch")]
@@ -161,6 +170,42 @@ pub(crate) mod tests {
             wide,
         );
         x.assert_eq_eps(&expected, 100.0);
+    }
+
+    /// Solve `A x = b` and `A^T x = b` for a non-symmetric `A` whose (0, 0) entry forces a pivot.
+    pub fn test_transpose_lu_solve<M: Matrix, LS: LinearSolver<M>>() {
+        use num_traits::FromPrimitive;
+        let f = |x: f64| M::T::from_f64(x).unwrap();
+        // A = [[0, 1, 2], [3, 1, 0], [1, 0, 4]]
+        let entries = [
+            ((0, 1), 1.0),
+            ((0, 2), 2.0),
+            ((1, 0), 3.0),
+            ((1, 1), 1.0),
+            ((2, 0), 1.0),
+            ((2, 2), 4.0),
+        ];
+        let matrix = M::try_from_triplets(
+            3,
+            3,
+            entries.iter().map(|e| e.0).collect(),
+            entries.iter().map(|e| f(e.1)).collect(),
+            Default::default(),
+        )
+        .unwrap();
+        let op = DiagonalOp { matrix };
+        let mut s = LS::default();
+        s.set_sparsity(&op);
+        s.set_linearisation(&op);
+        let expected = M::V::from_vec(vec![f(1.0), f(2.0), f(3.0)], Default::default());
+
+        let mut b = M::V::from_vec(vec![f(8.0), f(5.0), f(13.0)], Default::default());
+        s.solve_in_place(&mut b).unwrap();
+        b.assert_eq_eps(&expected, 100.0);
+
+        let mut b = M::V::from_vec(vec![f(9.0), f(3.0), f(14.0)], Default::default());
+        s.solve_transpose_in_place(&mut b).unwrap();
+        b.assert_eq_eps(&expected, 100.0);
     }
 
     /// More factorizations than right-hand side batches would leave factorizations unused, so

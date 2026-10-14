@@ -3,7 +3,7 @@ use std::cell::RefCell;
 #[cfg(target_pointer_width = "32")]
 use suitesparse_sys::{
     klu_analyze, klu_common, klu_defaults, klu_factor, klu_free_numeric, klu_free_symbolic,
-    klu_numeric, klu_solve, klu_symbolic,
+    klu_numeric, klu_solve, klu_symbolic, klu_tsolve,
 };
 
 #[cfg(target_pointer_width = "32")]
@@ -14,7 +14,7 @@ use suitesparse_sys::{
     klu_l_analyze as klu_analyze, klu_l_common as klu_common, klu_l_defaults as klu_defaults,
     klu_l_factor as klu_factor, klu_l_free_numeric as klu_free_numeric,
     klu_l_free_symbolic as klu_free_symbolic, klu_l_numeric as klu_numeric,
-    klu_l_solve as klu_solve, klu_l_symbolic as klu_symbolic,
+    klu_l_solve as klu_solve, klu_l_symbolic as klu_symbolic, klu_l_tsolve as klu_tsolve,
 };
 
 #[cfg(target_pointer_width = "64")]
@@ -196,6 +196,32 @@ where
     }
 
     fn solve_in_place(&self, x: &mut M::V) -> Result<(), LaError> {
+        self.solve_impl(x, false)
+    }
+
+    fn solve_transpose_in_place(&self, x: &mut M::V) -> Result<(), LaError> {
+        self.solve_impl(x, true)
+    }
+
+    fn set_sparsity<C: LinearOp<T = M::T, V = M::V, M = M, C = M::C>>(&mut self, op: &C) {
+        let ncols = op.ncols();
+        let nrows = op.nrows();
+        let matrix = C::M::new_from_sparsity(nrows, ncols, op.sparsity(), op.context().clone());
+        let mut klu_common = self.klu_common.borrow_mut();
+        self.klu_symbolic = KluSymbolic::try_from_matrix(&matrix, klu_common.as_mut()).ok();
+        self.matrix = Some(matrix);
+    }
+}
+
+impl<M> KLU<M>
+where
+    M: Matrix,
+{
+    fn solve_impl(&self, x: &mut M::V, transpose: bool) -> Result<(), LaError>
+    where
+        M: MatrixKLU,
+        M::V: VectorKLU,
+    {
         if self.klu_numeric.is_empty() {
             return Err(linear_solver_error!(LuNotInitialized));
         }
@@ -205,9 +231,10 @@ where
         let x_nbatch = x.context().nbatch();
         let nlu = self.klu_numeric.len();
         x.context().assert_broadcastable_into(nlu, "klu_solve");
+        let solve = if transpose { klu_tsolve } else { klu_solve };
         for batch in 0..x_nbatch {
             unsafe {
-                klu_solve(
+                solve(
                     klu_symbolic.inner,
                     self.klu_numeric[broadcast_batch(batch, nlu, x_nbatch)].inner,
                     n,
@@ -218,15 +245,6 @@ where
             };
         }
         Ok(())
-    }
-
-    fn set_sparsity<C: LinearOp<T = M::T, V = M::V, M = M, C = M::C>>(&mut self, op: &C) {
-        let ncols = op.ncols();
-        let nrows = op.nrows();
-        let matrix = C::M::new_from_sparsity(nrows, ncols, op.sparsity(), op.context().clone());
-        let mut klu_common = self.klu_common.borrow_mut();
-        self.klu_symbolic = KluSymbolic::try_from_matrix(&matrix, klu_common.as_mut()).ok();
-        self.matrix = Some(matrix);
     }
 }
 
@@ -247,6 +265,14 @@ mod tests {
             &FaerVec::from_vec(vec![1.0, 2.0], Default::default()),
             100.0,
         );
+    }
+
+    #[test]
+    fn test_transpose_klu() {
+        crate::linear_solver::tests::test_transpose_lu_solve::<
+            FaerSparseMat<f64>,
+            KLU<FaerSparseMat<f64>>,
+        >();
     }
 
     #[test]
