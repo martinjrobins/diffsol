@@ -63,7 +63,7 @@ pub enum OdeSolverError {
     #[error("Sensitivity solve failed")]
     SensitivitySolveFailed,
     #[error(
-        "Exceeded maximum number of nonlinear solver failures ({num_failures}) at time = {time}"
+        "Too many nonlinear solver failures within one step ({num_failures}) at time = {time}"
     )]
     TooManyNonlinearSolverFailures { time: f64, num_failures: usize },
     #[error("Exceeded maximum number of error test failures ({num_failures}) at time = {time}")]
