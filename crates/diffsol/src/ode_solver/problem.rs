@@ -539,6 +539,35 @@ where
             && self.out_rtol.is_some()
             && self.out_atol.is_some()
     }
+
+    /// Set the state relative tolerance after building the problem.
+    ///
+    /// This enables state error control and keeps the current absolute tolerance. If state error
+    /// control was disabled, the absolute tolerance from the nonlinear solver scaling is used.
+    pub fn set_state_rtol(&mut self, rtol: Eqn::T) {
+        let atol = self
+            .state_tolerances
+            .as_ref()
+            .map(|(_, atol)| atol.clone())
+            .unwrap_or_else(|| self.nonlinear_tolerances.1.clone());
+        self.nonlinear_tolerances = (rtol.clone(), atol.clone());
+        self.state_tolerances = Some((rtol, atol));
+    }
+
+    /// Set the state absolute tolerance vector after building the problem.
+    ///
+    /// This enables state error control and keeps the current relative tolerance. If state error
+    /// control was disabled, the relative tolerance from the nonlinear solver scaling is used.
+    pub fn set_state_atol(&mut self, atol: Eqn::V) {
+        let rtol = self
+            .state_tolerances
+            .as_ref()
+            .map(|(rtol, _)| rtol.clone())
+            .unwrap_or_else(|| self.nonlinear_tolerances.0.clone());
+        self.nonlinear_tolerances = (rtol.clone(), atol.clone());
+        self.state_tolerances = Some((rtol, atol));
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         eqn: Eqn,
@@ -1251,9 +1280,11 @@ pub struct OdeSolverSolution<V: Vector> {
     pub solution_points: Vec<OdeSolverSolutionPoint<V>>,
     /// Optional sensitivity solution points, one vector per parameter
     pub sens_solution_points: Option<Vec<Vec<OdeSolverSolutionPoint<V>>>>,
-    /// Relative tolerance used for the solution
+    /// Relative tolerance metadata for comparing this solution with another result.
+    /// This does not set the tolerances used by an `OdeSolverProblem`.
     pub rtol: V::T,
-    /// Absolute tolerance used for the solution
+    /// Absolute tolerance metadata for comparing this solution with another result.
+    /// This does not set the tolerances used by an `OdeSolverProblem`.
     pub atol: V,
     /// Whether this is a backward-time integration (decreasing time)
     pub negative_time: bool,

@@ -201,23 +201,33 @@ mod tests {
         let times: Vec<_> = (0..=400).map(|i| i as f64 * 0.1).collect();
 
         let mut diffsl_problem = problem_diffsl(1.0);
-        let rtol = diffsl_problem.rtol;
-        let atol = diffsl_problem.atol.clone();
+        let (rtol, atol) = diffsl_problem
+            .state_tolerances
+            .as_ref()
+            .expect("state tolerances are enabled for this comparison");
+        let rtol = *rtol;
+        let atol = atol.clone();
         // Tighter integration keeps accumulated errors below the default comparison tolerance.
-        diffsl_problem.rtol = 1e-8;
-        diffsl_problem.atol.fill(1e-8);
+        diffsl_problem.set_state_rtol(1e-8);
+        let mut tight_atol = atol.clone();
+        tight_atol.fill(1e-8);
+        diffsl_problem.set_state_atol(tight_atol);
         let mut diffsl_solver = diffsl_problem.bdf::<LS>().unwrap();
         let (diffsl_solution, _) = diffsl_solver.solve_dense(&times).unwrap();
 
         let mut closures_problem = problem_rust_closures(1.0);
-        closures_problem.rtol = 1e-8;
-        closures_problem.atol.fill(1e-8);
+        closures_problem.set_state_rtol(1e-8);
+        let mut tight_atol = atol.clone();
+        tight_atol.fill(1e-8);
+        closures_problem.set_state_atol(tight_atol);
         let mut closures_solver = closures_problem.bdf::<LS>().unwrap();
         let (closures_solution, _) = closures_solver.solve_dense(&times).unwrap();
 
         let mut explicit_problem = problem_rust_closures_explicit(1.0);
-        explicit_problem.rtol = 1e-8;
-        explicit_problem.atol.fill(1e-8);
+        explicit_problem.set_state_rtol(1e-8);
+        let mut tight_atol = atol.clone();
+        tight_atol.fill(1e-8);
+        explicit_problem.set_state_atol(tight_atol);
         let mut explicit_solver = explicit_problem.tsit45().unwrap();
         let (explicit_solution, _) = explicit_solver.solve_dense(&times).unwrap();
 
