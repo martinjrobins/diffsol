@@ -29,11 +29,8 @@ use super::pi_controller::pi_controller_raw;
 use super::sensitivities::SensitivitiesOdeSolverMethod;
 use super::step_ad::{StepJvp, StepVjp};
 use super::OdeSolverStatistics;
-use crate::{
-    LinearOp, LinearOpTranspose, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens,
-    NonLinearOpSensAdjoint, Scale, VectorViewMut,
-};
-use diffsol_la::linear_solver::{richardson, RichardsonOptions};
+use crate::{Scale, VectorViewMut};
+use diffsol_la::linear_solver::RichardsonOptions;
 use std::ops::MulAssign;
 
 /// Length of a per-order BDF coefficient list — `gamma`, `alpha`, `error_const2`, the
@@ -1586,16 +1583,12 @@ where
 }
 
 /// The step that [StepJvp::step_jvp] and [StepVjp::step_vjp] differentiate, with the
-/// coefficients it fixes.
+/// coefficient it fixes.
 struct BdfAdStep<T> {
     record: BdfStepRecord<T>,
     /// `c = h * alpha[order]` of the accepted attempt
     c: T,
 }
-
-/// `out = A v` for the Newton matrix `A = M - c J` at `(y, t)`, or `out = Aᵀ v`.
-type BdfAdApply<Eqn> =
-    fn(&Eqn, &<Eqn as Op>::V, <Eqn as Op>::T, <Eqn as Op>::T, &<Eqn as Op>::V, &mut <Eqn as Op>::V);
 
 impl<'a, M, Eqn, LS, AugmentedEqn> Bdf<'a, Eqn, LS, M, AugmentedEqn>
 where
@@ -1638,6 +1631,21 @@ where
         })
     }
 
+    /// Run `f` with the operator set up for the step being differentiated, i.e. with the `c` of
+    /// its accepted attempt rather than the `c` of the next step, and restore it afterwards.
+    fn ad_with_step_op<R>(
+        &mut self,
+        step: &BdfAdStep<Eqn::T>,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        let op = self.op.as_ref().unwrap();
+        op.set_c(step.record.h, self.alpha[step.record.order]);
+        let result = f(self);
+        let op = self.op.as_ref().unwrap();
+        op.set_c(self.state.h, self.alpha[self.state.order]);
+        result
+    }
+
     /// Rescale the first `order + 1` columns of `diff` from step size `from` to `to`, as
     /// `_update_step_size` does, or apply the transpose of that rescale.
     fn ad_rescale(diff: &mut M, order: usize, from: Eqn::T, to: Eqn::T, transpose: bool) {
@@ -1653,90 +1661,60 @@ where
         }
     }
 
-    fn ad_apply(eqn: &Eqn, y: &Eqn::V, t: Eqn::T, c: Eqn::T, v: &Eqn::V, out: &mut Eqn::V) {
-        // out = M v - c J v
-        eqn.rhs().jac_mul_inplace(y, t, v, out);
-        match eqn.mass() {
-            Some(mass) => mass.gemv_inplace(v, t, -c, out),
-            None => out.axpy(Eqn::T::one(), v, -c),
-        }
-    }
-
-    fn ad_apply_transpose(eqn: &Eqn, y: &Eqn::V, t: Eqn::T, c: Eqn::T, v: &Eqn::V, out: &mut Eqn::V)
-    where
-        Eqn: OdeEquationsImplicitAdjoint,
-    {
-        // out = Mᵀ v - c Jᵀ v, where jac_transpose_mul gives -Jᵀ v
-        eqn.rhs().jac_transpose_mul_inplace(y, t, v, out);
-        match eqn.mass() {
-            Some(mass) => mass.gemv_transpose_inplace(v, t, c, out),
-            None => out.axpy(Eqn::T::one(), v, c),
-        }
-    }
-
-    /// Solve `A x = b`, or `Aᵀ x = b`, for the step's Newton matrix `A = M - c J` at the end of
-    /// the step, by Richardson iteration preconditioned with the current factorisation. `x`
-    /// holds the initial guess. If that does not converge, the factorisation is refreshed at the
-    /// end of the step and the solve retried once.
-    fn ad_linear_solve(
+    /// Run a solve with the operator's Jacobian at the end of the step (`b` in `x`, solution
+    /// out), preconditioned by the current Newton matrix. If that is too poor a preconditioner
+    /// for the solve to converge, refresh it at the end of the step and retry once.
+    fn ad_solve(
         &mut self,
         step: &BdfAdStep<Eqn::T>,
-        apply: BdfAdApply<Eqn>,
-        transpose: bool,
-        b: &Eqn::V,
         x: &mut Eqn::V,
+        solve: impl Fn(
+            &NewtonNonlinearSolver<Eqn::M, LS, NoLineSearch>,
+            &BdfCallable<&'a Eqn>,
+            &Eqn::V,
+            Eqn::T,
+            &mut Eqn::V,
+            &RichardsonOptions<Eqn::T>,
+        ) -> Result<(), DiffsolError>,
     ) -> Result<(), DiffsolError> {
         let opts = RichardsonOptions {
             rtol: self.config.ad_linear_solve_rtol,
             max_iter: self.config.ad_linear_solve_max_iter,
             max_rate: Eqn::T::from_f64(0.9).unwrap(),
         };
-        let x0 = x.clone();
-        let mut tmp = x.clone();
+        let b = x.clone();
         if !self.nonlinear_solver.is_jacobian_set() {
             self.ad_refresh_jacobian(step);
         }
         let mut refreshed = false;
         loop {
-            let result = {
-                let (eqn, y, t, c) = (&self.ode_problem.eqn, &self.state.y, self.state.t, step.c);
-                let ls = self.nonlinear_solver.linear_solver();
-                richardson(
-                    |v: &Eqn::V, out: &mut Eqn::V| apply(eqn, y, t, c, v, out),
-                    |r: &mut Eqn::V| {
-                        if transpose {
-                            ls.solve_transpose_in_place(r)
-                        } else {
-                            ls.solve_in_place(r)
-                        }
-                    },
-                    b,
-                    x,
-                    &mut tmp,
-                    &opts,
-                )
-            };
+            let op = self.op.as_ref().unwrap();
+            let result = solve(
+                &self.nonlinear_solver,
+                op,
+                &self.state.y,
+                self.state.t,
+                x,
+                &opts,
+            );
             match result {
-                Ok(_) => return Ok(()),
+                Ok(()) => return Ok(()),
                 Err(_) if !refreshed => {
                     self.ad_refresh_jacobian(step);
-                    x.copy_from(&x0);
+                    x.copy_from(&b);
                     refreshed = true;
                 }
-                Err(e) => return Err(e.into()),
+                Err(e) => return Err(e),
             }
         }
     }
 
-    /// Refresh the Newton matrix at the end of the step, with the step's `c`. The op's stored
-    /// `c` is restored afterwards, so only the factorisation changes.
+    /// Refresh the Newton matrix at the end of the step. The op must hold the step's `c`.
     fn ad_refresh_jacobian(&mut self, step: &BdfAdStep<Eqn::T>) {
-        let op = self.op.as_mut().unwrap();
-        op.set_c(step.record.h, self.alpha[step.record.order]);
+        let op = self.op.as_ref().unwrap();
         op.set_jacobian_is_stale();
         self.nonlinear_solver
             .reset_jacobian(op, &self.state.y, self.state.t);
-        op.set_c(self.state.h, self.alpha[self.state.order]);
         self.jacobian_update.update_rhs_jacobian(step.c);
         self.convergence.reset_eta();
         self.ad_jacobian_refreshes += 1;
@@ -1771,6 +1749,26 @@ where
     /// `dy` are all set, and the step data (`t`, `h`, `order`) match the solver's state.
     fn step_jvp(&mut self, tangent: &mut Self::State, p_dot: &Eqn::V) -> Result<(), DiffsolError> {
         let step = self.ad_step()?;
+        self.ad_with_step_op(&step, |s| s.ad_jvp(&step, tangent, p_dot))
+    }
+}
+
+impl<'a, M, Eqn, LS, AugmentedEqn> Bdf<'a, Eqn, LS, M, AugmentedEqn>
+where
+    Eqn: OdeEquationsImplicitSens + 'a,
+    AugmentedEqn: AugmentedOdeEquations<Eqn> + OdeEquationsImplicit,
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
+    Eqn::V: DefaultDenseMatrix,
+    LS: LinearSolver<Eqn::M>,
+    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
+{
+    fn ad_jvp(
+        &mut self,
+        step: &BdfAdStep<Eqn::T>,
+        tangent: &mut BdfState<Eqn::V, M>,
+        p_dot: &Eqn::V,
+    ) -> Result<(), DiffsolError> {
         let BdfStepRecord {
             h_ref,
             h,
@@ -1778,48 +1776,39 @@ where
             from_init,
         } = step.record;
         let one = Eqn::T::one();
-        let zero = Eqn::T::zero();
-        let (t_new, y_new) = (self.state.t, &self.state.y);
 
-        // the history the step started from
+        // the history the step started from, rescaled for the accepted attempt
         if from_init {
-            let ncols = tangent.diff.ncols();
-            tangent.diff = M::zeros(tangent.diff.nrows(), ncols, tangent.diff.context().clone());
+            let (nrows, ncols) = (tangent.diff.nrows(), tangent.diff.ncols());
+            tangent.diff = M::zeros(nrows, ncols, tangent.diff.context().clone());
             tangent.diff.column_mut(0).copy_from(&tangent.y);
-            tangent.diff.column_mut(1).axpy(h_ref, &tangent.dy, zero);
+            tangent
+                .diff
+                .column_mut(1)
+                .axpy(h_ref, &tangent.dy, Eqn::T::zero());
         }
         Self::ad_rescale(&mut tangent.diff, order, h_ref, h, false);
 
-        // predictor and psi tangents
+        // the corrector equation's tangent: (M - c J) y_dot = b
         let mut y_pred = tangent.y.clone();
-        let ones = [one; COEFFS_LEN];
-        tangent
-            .diff
-            .gemv_cols(0, order + 1, one, &ones, zero, &mut y_pred);
-        let mut psi = tangent.y.clone();
-        tangent.diff.gemv_cols(
-            1,
-            order + 1,
-            self.alpha[order],
-            &self.gamma.as_slice()[1..],
-            zero,
-            &mut psi,
-        );
-
-        // b = -(M (psi - y_pred) - c f_p p_dot)
-        let eqn = &self.ode_problem.eqn;
-        psi.axpy(-one, &y_pred, one);
-        let mut b = y_pred.clone();
-        eqn.rhs().sens_mul_inplace(y_new, t_new, p_dot, &mut b);
-        match eqn.mass() {
-            Some(mass) => mass.gemv_inplace(&psi, t_new, -step.c, &mut b),
-            None => b.axpy(one, &psi, -step.c),
-        }
-        b.mul_assign(Scale(-one));
-
-        // corrector tangent, then d = y - y_pred
+        Self::_predict_using_diff(&mut y_pred, &tangent.diff, order);
         let mut y_dot = y_pred.clone();
-        self.ad_linear_solve(&step, Self::ad_apply, false, &b, &mut y_dot)?;
+        self.op.as_ref().unwrap().tangent_rhs(
+            &self.state.y,
+            self.state.t,
+            &tangent.diff,
+            &self.gamma.as_slice()[1..],
+            self.alpha.as_slice(),
+            order,
+            &y_pred,
+            p_dot,
+            &mut y_dot,
+        );
+        self.ad_solve(step, &mut y_dot, |nl, op, y, t, x, opts| {
+            nl.solve_jacobian_in_place(op, y, t, x, opts)
+        })?;
+
+        // update of the history with d = y - y_pred
         y_dot.axpy(-one, &y_pred, one);
         tangent.diff.update_backward_diff(order, &y_dot);
 
@@ -1870,6 +1859,26 @@ where
         p_bar: &mut Eqn::V,
     ) -> Result<(), DiffsolError> {
         let step = self.ad_step()?;
+        self.ad_with_step_op(&step, |s| s.ad_vjp(&step, cotangent, p_bar))
+    }
+}
+
+impl<'a, M, Eqn, LS, AugmentedEqn> Bdf<'a, Eqn, LS, M, AugmentedEqn>
+where
+    Eqn: OdeEquationsImplicitAdjoint + 'a,
+    AugmentedEqn: AugmentedOdeEquations<Eqn> + OdeEquationsImplicit,
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
+    Eqn::V: DefaultDenseMatrix,
+    LS: LinearSolver<Eqn::M>,
+    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
+{
+    fn ad_vjp(
+        &mut self,
+        step: &BdfAdStep<Eqn::T>,
+        c: &mut BdfState<Eqn::V, M>,
+        p_bar: &mut Eqn::V,
+    ) -> Result<(), DiffsolError> {
         let BdfStepRecord {
             h_ref,
             h,
@@ -1881,57 +1890,43 @@ where
 
         // the Newton matrix is only a preconditioner, so refresh it on the forward pass's
         // schedule rather than every step
-        if let Some(op) = self.op.as_ref() {
-            op.set_c(h, self.alpha[order]);
-        }
         self._jacobian_updates(step.c, SolverState::StepSuccess);
         self.jacobian_update.step();
-        if let Some(op) = self.op.as_ref() {
-            op.set_c(self.state.h, self.alpha[self.state.order]);
-        }
 
         // fold in the readouts: y = diff[:, 0] at the end, and dy = diff[:, 1] / h before the
         // rescale at the end of the step
-        let c = cotangent;
         c.diff.column_mut(0).axpy(one, &c.y, one);
         Self::ad_rescale(&mut c.diff, self.state.order, h, self.state.h, true);
         c.diff.column_mut(1).axpy(one / h, &c.dy, one);
         c.y.fill(zero);
         c.dy.fill(zero);
 
-        // update of the history
+        // update of the history, then the corrector: (M - c J)ᵀ w = d_bar
         let mut d_bar = c.y.clone();
         c.diff.update_backward_diff_transpose(order, &mut d_bar);
-
-        // corrector: solve Aᵀ w = d_bar
         let mut w = d_bar.clone();
-        self.ad_linear_solve(&step, Self::ad_apply_transpose, true, &d_bar, &mut w)?;
+        self.ad_solve(step, &mut w, |nl, op, y, t, x, opts| {
+            nl.solve_jacobian_transpose_in_place(op, y, t, x, opts)
+        })?;
 
-        // predictor and psi: C_j += Mᵀ w - d_bar for j <= order, C_j -= alpha gamma_j Mᵀ w for
-        // 1 <= j <= order
-        let eqn = &self.ode_problem.eqn;
-        let (t_new, y_new) = (self.state.t, &self.state.y);
-        let mut mt_w = w.clone();
-        if let Some(mass) = eqn.mass() {
-            mass.call_transpose_inplace(&w, t_new, &mut mt_w);
-        }
-        let mut pred_bar = mt_w.clone();
-        pred_bar.axpy(-one, &d_bar, one);
+        // the operator's inputs: the history (through psi), the prediction and the parameters;
+        // the prediction also enters through d = y - y_pred
+        let mut y_pred_bar = d_bar;
+        y_pred_bar.mul_assign(Scale(-one));
+        self.op.as_ref().unwrap().adjoint_inputs(
+            &self.state.y,
+            self.state.t,
+            &w,
+            &self.gamma.as_slice()[1..],
+            self.alpha.as_slice(),
+            order,
+            &mut c.diff,
+            &mut y_pred_bar,
+            p_bar,
+        );
         for j in 0..=order {
-            c.diff.column_mut(j).axpy(one, &pred_bar, one);
+            c.diff.column_mut(j).axpy(one, &y_pred_bar, one);
         }
-        let alpha = self.alpha[order];
-        for j in 1..=order {
-            c.diff
-                .column_mut(j)
-                .axpy(-alpha * self.gamma[j], &mt_w, one);
-        }
-
-        // parameters: p_bar += c f_pᵀ w, where sens_transpose_mul gives -f_pᵀ w
-        let mut fp_w = p_bar.clone();
-        eqn.rhs()
-            .sens_transpose_mul_inplace(y_new, t_new, &w, &mut fp_w);
-        p_bar.axpy(-step.c, &fp_w, one);
 
         // the rescale before the accepted attempt, then the initialisation of the history
         Self::ad_rescale(&mut c.diff, order, h_ref, h, true);

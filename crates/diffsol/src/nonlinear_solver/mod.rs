@@ -1,7 +1,9 @@
 use crate::{
     error::DiffsolError, Matrix, NonLinearOp as TimeAwareNonLinearOp,
+    NonLinearOpAdjoint as TimeAwareNonLinearOpAdjoint,
     NonLinearOpJacobian as TimeAwareNonLinearOpJacobian,
 };
+use diffsol_la::linear_solver::RichardsonOptions;
 use diffsol_nl::NonLinearSolver as NlNonLinearSolver;
 use num_traits::Zero;
 
@@ -80,6 +82,12 @@ impl<C: TimeAwareNonLinearOpJacobian> diffsol_nl::NonLinearOpJacobian for NonLin
     }
 }
 
+impl<C: TimeAwareNonLinearOpAdjoint> diffsol_nl::NonLinearOpAdjoint for NonLinearisedRef<'_, C> {
+    fn jac_transpose_mul_inplace(&self, x: &Self::V, v: &Self::V, y: &mut Self::V) {
+        self.op.jac_transpose_mul_inplace(x, self.t, v, y);
+    }
+}
+
 /// A solver for the (time-aware) nonlinear problem `F(x, t) = 0` for fixed `t`.
 pub trait NonLinearSolver<M: Matrix>: Default {
     /// Set the problem to be solved, any previous problem is discarded.
@@ -128,6 +136,31 @@ pub trait NonLinearSolver<M: Matrix>: Default {
     /// Solve the linearised problem `J * x = b`, where `J` was calculated using [Self::reset_jacobian].
     /// The input `b` is provided in `x`, and the solution is returned in `x`.
     fn solve_linearised_in_place(&self, x: &mut M::V) -> Result<(), DiffsolError>;
+
+    /// Solve `J(x_lin, t) * x = b` with the operator's own Jacobian, preconditioned by the one set
+    /// by [Self::reset_jacobian]. See [`diffsol_nl::NonLinearSolver::solve_jacobian_in_place`].
+    fn solve_jacobian_in_place<
+        C: TimeAwareNonLinearOpJacobian<V = M::V, T = M::T, M = M, C = M::C>,
+    >(
+        &self,
+        op: &C,
+        x_lin: &M::V,
+        t: M::T,
+        x: &mut M::V,
+        opts: &RichardsonOptions<M::T>,
+    ) -> Result<(), DiffsolError>;
+
+    /// As [Self::solve_jacobian_in_place], for the transposed problem `J(x_lin, t)^T * x = b`.
+    fn solve_jacobian_transpose_in_place<
+        C: TimeAwareNonLinearOpAdjoint<V = M::V, T = M::T, M = M, C = M::C>,
+    >(
+        &self,
+        op: &C,
+        x_lin: &M::V,
+        t: M::T,
+        x: &mut M::V,
+        opts: &RichardsonOptions<M::T>,
+    ) -> Result<(), DiffsolError>;
 }
 
 /// Any [`diffsol_nl::NonLinearSolver`] implementation automatically implements the
@@ -177,6 +210,46 @@ impl<M: Matrix, S: NlNonLinearSolver<M>> NonLinearSolver<M> for S {
 
     fn solve_linearised_in_place(&self, x: &mut M::V) -> Result<(), DiffsolError> {
         NlNonLinearSolver::solve_linearised_in_place(self, x).map_err(Into::into)
+    }
+
+    fn solve_jacobian_in_place<
+        C: TimeAwareNonLinearOpJacobian<V = M::V, T = M::T, M = M, C = M::C>,
+    >(
+        &self,
+        op: &C,
+        x_lin: &M::V,
+        t: M::T,
+        x: &mut M::V,
+        opts: &RichardsonOptions<M::T>,
+    ) -> Result<(), DiffsolError> {
+        NlNonLinearSolver::solve_jacobian_in_place(
+            self,
+            &NonLinearisedRef::at(op, t),
+            x_lin,
+            x,
+            opts,
+        )
+        .map_err(Into::into)
+    }
+
+    fn solve_jacobian_transpose_in_place<
+        C: TimeAwareNonLinearOpAdjoint<V = M::V, T = M::T, M = M, C = M::C>,
+    >(
+        &self,
+        op: &C,
+        x_lin: &M::V,
+        t: M::T,
+        x: &mut M::V,
+        opts: &RichardsonOptions<M::T>,
+    ) -> Result<(), DiffsolError> {
+        NlNonLinearSolver::solve_jacobian_transpose_in_place(
+            self,
+            &NonLinearisedRef::at(op, t),
+            x_lin,
+            x,
+            opts,
+        )
+        .map_err(Into::into)
     }
 }
 

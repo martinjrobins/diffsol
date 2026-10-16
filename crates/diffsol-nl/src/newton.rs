@@ -1,11 +1,16 @@
-use diffsol_la::{Context, IndexType, LinearOp as LaLinearOp, LinearSolver, Matrix, Vector};
+use diffsol_la::{
+    linear_solver::{richardson, RichardsonOptions},
+    Context, IndexType, LinearOp as LaLinearOp, LinearSolver, Matrix, Scale, Vector,
+};
+use num_traits::{One, Zero};
+use std::ops::MulAssign;
 
 use crate::{
     convergence::{Convergence, ConvergenceStatus},
     error::{NlError, NonLinearSolverError},
     line_search::LineSearch,
     non_linear_solver_error,
-    nonlinear_op::{NonLinearOp, NonLinearOpJacobian},
+    nonlinear_op::{NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian},
     nonlinear_solver::NonLinearSolver,
 };
 
@@ -147,6 +152,62 @@ impl<M: Matrix, Ls: LinearSolver<M>, Lsearch: LineSearch<M::V>> NonLinearSolver<
 
     fn solve_linearised_in_place(&self, x: &mut M::V) -> Result<(), NlError> {
         self.linear_solver.solve_in_place(x).map_err(Into::into)
+    }
+
+    fn solve_jacobian_in_place<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M, C = M::C>>(
+        &self,
+        op: &C,
+        x_lin: &M::V,
+        x: &mut M::V,
+        opts: &RichardsonOptions<M::T>,
+    ) -> Result<(), NlError> {
+        if !self.is_jacobian_set {
+            return Err(non_linear_solver_error!(JacobianNotReset));
+        }
+        let b = x.clone();
+        let mut tmp = x.clone();
+        x.fill(M::T::zero());
+        richardson(
+            |v: &M::V, y: &mut M::V| op.jac_mul_inplace(x_lin, v, y),
+            |r: &mut M::V| self.linear_solver.solve_in_place(r),
+            &b,
+            x,
+            &mut tmp,
+            opts,
+        )?;
+        Ok(())
+    }
+
+    fn solve_jacobian_transpose_in_place<
+        C: NonLinearOpAdjoint<V = M::V, T = M::T, M = M, C = M::C>,
+    >(
+        &self,
+        op: &C,
+        x_lin: &M::V,
+        x: &mut M::V,
+        opts: &RichardsonOptions<M::T>,
+    ) -> Result<(), NlError> {
+        if !self.is_jacobian_set {
+            return Err(non_linear_solver_error!(JacobianNotReset));
+        }
+        // the op gives -J^T v, so solve (-J^T) x = -b
+        let mut b = x.clone();
+        b.mul_assign(Scale(-M::T::one()));
+        let mut tmp = x.clone();
+        x.fill(M::T::zero());
+        richardson(
+            |v: &M::V, y: &mut M::V| op.jac_transpose_mul_inplace(x_lin, v, y),
+            |r: &mut M::V| {
+                self.linear_solver.solve_transpose_in_place(r)?;
+                r.mul_assign(Scale(-M::T::one()));
+                Ok(())
+            },
+            &b,
+            x,
+            &mut tmp,
+            opts,
+        )?;
+        Ok(())
     }
 
     fn solve_in_place<C: NonLinearOp<V = M::V, T = M::T, M = M>>(
