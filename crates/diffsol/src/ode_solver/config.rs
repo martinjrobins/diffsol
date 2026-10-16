@@ -28,6 +28,11 @@ pub struct BdfConfig<T> {
     pub maximum_timestep_shrink: T,
     pub minimum_timestep_shrink: T,
     pub maximum_newton_iterations: usize,
+    /// Relative tolerance of the linear solves in [crate::StepJvp] and [crate::StepVjp].
+    pub ad_linear_solve_rtol: T,
+    /// Maximum iterations of the linear solves in [crate::StepJvp] and [crate::StepVjp]
+    /// before the Newton matrix is refreshed.
+    pub ad_linear_solve_max_iter: usize,
 }
 
 impl<T: Scalar> OdeSolverConfig<T> for BdfConfig<T> {
@@ -69,6 +74,11 @@ impl<T: Scalar> BdfConfig<T> {
                 .min_timestep_shrink
                 .unwrap_or_else(|| T::from_f64(0.5).unwrap()),
             maximum_newton_iterations: ode_options.max_nonlinear_solver_iterations,
+            // 1e-10, or as close as single precision gets
+            ad_linear_solve_rtol: T::from_f64(1e-10)
+                .unwrap()
+                .max(T::from_f64(100.0).unwrap() * T::EPSILON),
+            ad_linear_solve_max_iter: 10,
         }
     }
 }

@@ -62,6 +62,10 @@ pub enum OdeSolverError {
     StateNotSet,
     #[error("Sensitivity solve failed")]
     SensitivitySolveFailed,
+    #[error("No step has been taken to differentiate")]
+    NoStepToDifferentiate,
+    #[error("Step derivatives need the main equations to be integrated")]
+    StepDifferentiationNotSupported,
     #[error(
         "Exceeded maximum number of nonlinear solver failures ({num_failures}) at time = {time}"
     )]

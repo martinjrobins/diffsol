@@ -443,6 +443,7 @@ pub use ode_solver::{
     sensitivities::SensitivitiesOdeSolverMethod,
     solution::Solution,
     state::OdeSolverState,
+    step_ad::{StepJvp, StepVjp},
     tableau::Tableau,
     tableau::{TableauMat, TableauVec},
 };

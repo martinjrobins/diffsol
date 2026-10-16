@@ -19,7 +19,7 @@ use crate::{
 };
 
 use super::adjoint::AdjointOdeSolverMethod;
-use super::bdf_state::MAX_ORDER;
+use super::bdf_state::{BdfStepRecord, MAX_ORDER};
 use crate::small::{SmallMat, SmallVec};
 
 use super::config::BdfConfig;
@@ -27,7 +27,14 @@ use super::jacobian_update::SolverState;
 use super::method::{check_interpolate_shape, check_interpolate_time, AugmentedOdeSolverMethod};
 use super::pi_controller::pi_controller_raw;
 use super::sensitivities::SensitivitiesOdeSolverMethod;
+use super::step_ad::{StepJvp, StepVjp};
 use super::OdeSolverStatistics;
+use crate::{
+    LinearOp, LinearOpTranspose, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens,
+    NonLinearOpSensAdjoint, Scale, VectorViewMut,
+};
+use diffsol_la::linear_solver::{richardson, RichardsonOptions};
+use std::ops::MulAssign;
 
 /// Length of a per-order BDF coefficient list — `gamma`, `alpha`, `error_const2`, the
 /// interpolation weights.
@@ -164,6 +171,7 @@ pub struct Bdf<
     jacobian_update: JacobianUpdate<Eqn::T>,
     config: BdfConfig<Eqn::T>,
     prev_error_norm: Option<Eqn::T>,
+    ad_jacobian_refreshes: usize,
 }
 
 impl<M, Eqn, LS, AugmentedEqn> Clone for Bdf<'_, Eqn, LS, M, AugmentedEqn>
@@ -217,6 +225,7 @@ where
             jacobian_update: self.jacobian_update.clone(),
             config: self.config.clone(),
             prev_error_norm: self.prev_error_norm,
+            ad_jacobian_refreshes: 0,
         }
     }
 }
@@ -378,6 +387,7 @@ where
             jacobian_update: JacobianUpdate::new(&problem.ode_options),
             config,
             prev_error_norm: None,
+            ad_jacobian_refreshes: 0,
         })
     }
 
@@ -1275,6 +1285,10 @@ where
 
         self._predict_forward();
 
+        // what the step starts from, recorded so that `step_jvp`/`step_vjp` can replay it
+        let from_init = self.state.h_init.is_some();
+        let h_ref = self.state.h_init.unwrap_or(self.state.h_end);
+
         // loop until step is accepted
         loop {
             let order = self.state.order;
@@ -1423,6 +1437,7 @@ where
         }
 
         // take the accepted step
+        let (step_h, step_order) = (self.state.h, self.state.order);
         self.update_differences_and_integrate_out();
 
         {
@@ -1522,6 +1537,15 @@ where
             }
         }
 
+        self.state.last_step = Some(BdfStepRecord {
+            h_ref,
+            h: step_h,
+            order: step_order,
+            from_init,
+        });
+        self.state.h_init = None;
+        self.state.h_end = self.state.h;
+
         // check for root within accepted step
         if let (Some(root_fn), Some(root_finder)) =
             (self.ode_problem.eqn.root(), self.root_finder.as_ref())
@@ -1542,6 +1566,8 @@ where
             if let Some(reason) = self.handle_tstop(tstop).unwrap() {
                 return Ok(reason);
             }
+            // the step may have been shortened to hit tstop next time
+            self.state.h_end = self.state.h;
         }
 
         // just a normal step, no roots or tstop reached
@@ -1555,6 +1581,375 @@ where
             self.tstop = None;
             return Err(DiffsolError::from(error));
         }
+        Ok(())
+    }
+}
+
+/// The step that [StepJvp::step_jvp] and [StepVjp::step_vjp] differentiate, with the
+/// coefficients it fixes.
+struct BdfAdStep<T> {
+    record: BdfStepRecord<T>,
+    /// `c = h * alpha[order]` of the accepted attempt
+    c: T,
+}
+
+/// `out = A v` for the Newton matrix `A = M - c J` at `(y, t)`, or `out = Aᵀ v`.
+type BdfAdApply<Eqn> =
+    fn(&Eqn, &<Eqn as Op>::V, <Eqn as Op>::T, <Eqn as Op>::T, &<Eqn as Op>::V, &mut <Eqn as Op>::V);
+
+impl<'a, M, Eqn, LS, AugmentedEqn> Bdf<'a, Eqn, LS, M, AugmentedEqn>
+where
+    Eqn: OdeEquationsImplicit,
+    AugmentedEqn: AugmentedOdeEquations<Eqn> + OdeEquationsImplicit,
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
+    Eqn::V: DefaultDenseMatrix,
+    LS: LinearSolver<Eqn::M>,
+    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
+{
+    /// The number of times [StepJvp::step_jvp] or [StepVjp::step_vjp] refreshed the Newton
+    /// matrix because the existing factorisation was too poor a preconditioner.
+    pub fn number_of_ad_jacobian_refreshes(&self) -> usize {
+        self.ad_jacobian_refreshes
+    }
+
+    fn ad_step(&self) -> Result<BdfAdStep<Eqn::T>, DiffsolError> {
+        if self.op.is_none() {
+            return Err(ode_solver_error!(StepDifferentiationNotSupported));
+        }
+        let record = self
+            .state
+            .last_step
+            .ok_or(ode_solver_error!(NoStepToDifferentiate))?;
+        debug_assert!(
+            {
+                let tol = Eqn::T::from_f64(1e3).unwrap() * Eqn::T::EPSILON;
+                let d0 = self.state.diff.column(0).into_owned().clone_as_vec();
+                let y = self.state.y.clone_as_vec();
+                y.iter()
+                    .zip(&d0)
+                    .all(|(&a, &b)| (a - b).abs() <= tol * (Eqn::T::one() + a.abs()))
+            },
+            "BDF state y must equal diff[:, 0]"
+        );
+        Ok(BdfAdStep {
+            c: record.h * self.alpha[record.order],
+            record,
+        })
+    }
+
+    /// Rescale the first `order + 1` columns of `diff` from step size `from` to `to`, as
+    /// `_update_step_size` does, or apply the transpose of that rescale.
+    fn ad_rescale(diff: &mut M, order: usize, from: Eqn::T, to: Eqn::T, transpose: bool) {
+        if from == to {
+            return;
+        }
+        let ru =
+            Self::_compute_r(order, to / from).mat_mul(&Self::_compute_r(order, Eqn::T::one()));
+        if transpose {
+            diff.mul_cols_by_transpose(order + 1, ru.as_slice());
+        } else {
+            diff.mul_cols_by(order + 1, ru.as_slice());
+        }
+    }
+
+    fn ad_apply(eqn: &Eqn, y: &Eqn::V, t: Eqn::T, c: Eqn::T, v: &Eqn::V, out: &mut Eqn::V) {
+        // out = M v - c J v
+        eqn.rhs().jac_mul_inplace(y, t, v, out);
+        match eqn.mass() {
+            Some(mass) => mass.gemv_inplace(v, t, -c, out),
+            None => out.axpy(Eqn::T::one(), v, -c),
+        }
+    }
+
+    fn ad_apply_transpose(eqn: &Eqn, y: &Eqn::V, t: Eqn::T, c: Eqn::T, v: &Eqn::V, out: &mut Eqn::V)
+    where
+        Eqn: OdeEquationsImplicitAdjoint,
+    {
+        // out = Mᵀ v - c Jᵀ v, where jac_transpose_mul gives -Jᵀ v
+        eqn.rhs().jac_transpose_mul_inplace(y, t, v, out);
+        match eqn.mass() {
+            Some(mass) => mass.gemv_transpose_inplace(v, t, c, out),
+            None => out.axpy(Eqn::T::one(), v, c),
+        }
+    }
+
+    /// Solve `A x = b`, or `Aᵀ x = b`, for the step's Newton matrix `A = M - c J` at the end of
+    /// the step, by Richardson iteration preconditioned with the current factorisation. `x`
+    /// holds the initial guess. If that does not converge, the factorisation is refreshed at the
+    /// end of the step and the solve retried once.
+    fn ad_linear_solve(
+        &mut self,
+        step: &BdfAdStep<Eqn::T>,
+        apply: BdfAdApply<Eqn>,
+        transpose: bool,
+        b: &Eqn::V,
+        x: &mut Eqn::V,
+    ) -> Result<(), DiffsolError> {
+        let opts = RichardsonOptions {
+            rtol: self.config.ad_linear_solve_rtol,
+            max_iter: self.config.ad_linear_solve_max_iter,
+            max_rate: Eqn::T::from_f64(0.9).unwrap(),
+        };
+        let x0 = x.clone();
+        let mut tmp = x.clone();
+        if !self.nonlinear_solver.is_jacobian_set() {
+            self.ad_refresh_jacobian(step);
+        }
+        let mut refreshed = false;
+        loop {
+            let result = {
+                let (eqn, y, t, c) = (&self.ode_problem.eqn, &self.state.y, self.state.t, step.c);
+                let ls = self.nonlinear_solver.linear_solver();
+                richardson(
+                    |v: &Eqn::V, out: &mut Eqn::V| apply(eqn, y, t, c, v, out),
+                    |r: &mut Eqn::V| {
+                        if transpose {
+                            ls.solve_transpose_in_place(r)
+                        } else {
+                            ls.solve_in_place(r)
+                        }
+                    },
+                    b,
+                    x,
+                    &mut tmp,
+                    &opts,
+                )
+            };
+            match result {
+                Ok(_) => return Ok(()),
+                Err(_) if !refreshed => {
+                    self.ad_refresh_jacobian(step);
+                    x.copy_from(&x0);
+                    refreshed = true;
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+    }
+
+    /// Refresh the Newton matrix at the end of the step, with the step's `c`. The op's stored
+    /// `c` is restored afterwards, so only the factorisation changes.
+    fn ad_refresh_jacobian(&mut self, step: &BdfAdStep<Eqn::T>) {
+        let op = self.op.as_mut().unwrap();
+        op.set_c(step.record.h, self.alpha[step.record.order]);
+        op.set_jacobian_is_stale();
+        self.nonlinear_solver
+            .reset_jacobian(op, &self.state.y, self.state.t);
+        op.set_c(self.state.h, self.alpha[self.state.order]);
+        self.jacobian_update.update_rhs_jacobian(step.c);
+        self.convergence.reset_eta();
+        self.ad_jacobian_refreshes += 1;
+    }
+
+    /// Copy the step data of the state at the end of the step into `tangent`.
+    fn ad_mark_end_of_step(&self, tangent: &mut BdfState<Eqn::V, M>) {
+        tangent.t = self.state.t;
+        tangent.h = self.state.h;
+        tangent.order = self.state.order;
+        tangent.last_step = self.state.last_step;
+        tangent.h_init = None;
+        tangent.h_end = self.state.h_end;
+        tangent.diff_initialised = true;
+    }
+}
+
+impl<'a, M, Eqn, LS, AugmentedEqn> StepJvp<'a, Eqn> for Bdf<'a, Eqn, LS, M, AugmentedEqn>
+where
+    Eqn: OdeEquationsImplicitSens + 'a,
+    AugmentedEqn: AugmentedOdeEquations<Eqn> + OdeEquationsImplicit,
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
+    Eqn::V: DefaultDenseMatrix,
+    LS: LinearSolver<Eqn::M>,
+    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
+{
+    /// The tangent is a [BdfState]. If the step started from a first-order initialisation of
+    /// the history (the first step, or the first after the state was modified), only
+    /// `tangent.y` and `tangent.dy` are read, and the history tangent is built from them as the
+    /// solver built its own. Otherwise only `tangent.diff` is read. On return `diff`, `y` and
+    /// `dy` are all set, and the step data (`t`, `h`, `order`) match the solver's state.
+    fn step_jvp(&mut self, tangent: &mut Self::State, p_dot: &Eqn::V) -> Result<(), DiffsolError> {
+        let step = self.ad_step()?;
+        let BdfStepRecord {
+            h_ref,
+            h,
+            order,
+            from_init,
+        } = step.record;
+        let one = Eqn::T::one();
+        let zero = Eqn::T::zero();
+        let (t_new, y_new) = (self.state.t, &self.state.y);
+
+        // the history the step started from
+        if from_init {
+            let ncols = tangent.diff.ncols();
+            tangent.diff = M::zeros(tangent.diff.nrows(), ncols, tangent.diff.context().clone());
+            tangent.diff.column_mut(0).copy_from(&tangent.y);
+            tangent.diff.column_mut(1).axpy(h_ref, &tangent.dy, zero);
+        }
+        Self::ad_rescale(&mut tangent.diff, order, h_ref, h, false);
+
+        // predictor and psi tangents
+        let mut y_pred = tangent.y.clone();
+        let ones = [one; COEFFS_LEN];
+        tangent
+            .diff
+            .gemv_cols(0, order + 1, one, &ones, zero, &mut y_pred);
+        let mut psi = tangent.y.clone();
+        tangent.diff.gemv_cols(
+            1,
+            order + 1,
+            self.alpha[order],
+            &self.gamma.as_slice()[1..],
+            zero,
+            &mut psi,
+        );
+
+        // b = -(M (psi - y_pred) - c f_p p_dot)
+        let eqn = &self.ode_problem.eqn;
+        psi.axpy(-one, &y_pred, one);
+        let mut b = y_pred.clone();
+        eqn.rhs().sens_mul_inplace(y_new, t_new, p_dot, &mut b);
+        match eqn.mass() {
+            Some(mass) => mass.gemv_inplace(&psi, t_new, -step.c, &mut b),
+            None => b.axpy(one, &psi, -step.c),
+        }
+        b.mul_assign(Scale(-one));
+
+        // corrector tangent, then d = y - y_pred
+        let mut y_dot = y_pred.clone();
+        self.ad_linear_solve(&step, Self::ad_apply, false, &b, &mut y_dot)?;
+        y_dot.axpy(-one, &y_pred, one);
+        tangent.diff.update_backward_diff(order, &y_dot);
+
+        // readouts, then the rescale at the end of the step
+        tangent.y.copy_from_view(&tangent.diff.column(0));
+        tangent.dy.copy_from_view(&tangent.diff.column(1));
+        tangent.dy.mul_assign(Scale(one / h));
+        Self::ad_rescale(&mut tangent.diff, self.state.order, h, self.state.h, false);
+        self.ad_mark_end_of_step(tangent);
+        Ok(())
+    }
+}
+
+impl<'a, M, Eqn, LS, AugmentedEqn> StepVjp<'a, Eqn> for Bdf<'a, Eqn, LS, M, AugmentedEqn>
+where
+    Eqn: OdeEquationsImplicitAdjoint + 'a,
+    AugmentedEqn: AugmentedOdeEquations<Eqn> + OdeEquationsImplicit,
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
+    Eqn::V: DefaultDenseMatrix,
+    LS: LinearSolver<Eqn::M>,
+    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
+{
+    /// Like [OdeSolverMethod::set_state], but without refactorising the Newton matrix, which
+    /// [StepVjp::step_vjp] only uses as a preconditioner.
+    fn set_replay_state(&mut self, state: Self::State) {
+        let old_order = self.state.order;
+        self.state = state;
+        if let Some(op) = self.op.as_mut() {
+            op.set_c(self.state.h, self.alpha[self.state.order]);
+        }
+        if let Some(s_op) = self.s_op.as_mut() {
+            s_op.set_c(self.state.h, self.alpha[self.state.order]);
+        }
+        if self.state.order != old_order {
+            self.u = Self::_compute_r(self.state.order, Eqn::T::one());
+        }
+        self.is_state_modified = false;
+    }
+
+    /// The cotangent is a [BdfState] whose `diff`, `y` and `dy` are all read, as cotangents of
+    /// the history and of its `y` and `dy` readouts. On return, if the step started from a
+    /// first-order initialisation of the history, the cotangent is carried by `y` and `dy`
+    /// alone (`diff` is zero); otherwise by `diff` alone (`y` and `dy` are zero).
+    fn step_vjp(
+        &mut self,
+        cotangent: &mut Self::State,
+        p_bar: &mut Eqn::V,
+    ) -> Result<(), DiffsolError> {
+        let step = self.ad_step()?;
+        let BdfStepRecord {
+            h_ref,
+            h,
+            order,
+            from_init,
+        } = step.record;
+        let one = Eqn::T::one();
+        let zero = Eqn::T::zero();
+
+        // the Newton matrix is only a preconditioner, so refresh it on the forward pass's
+        // schedule rather than every step
+        if let Some(op) = self.op.as_ref() {
+            op.set_c(h, self.alpha[order]);
+        }
+        self._jacobian_updates(step.c, SolverState::StepSuccess);
+        self.jacobian_update.step();
+        if let Some(op) = self.op.as_ref() {
+            op.set_c(self.state.h, self.alpha[self.state.order]);
+        }
+
+        // fold in the readouts: y = diff[:, 0] at the end, and dy = diff[:, 1] / h before the
+        // rescale at the end of the step
+        let c = cotangent;
+        c.diff.column_mut(0).axpy(one, &c.y, one);
+        Self::ad_rescale(&mut c.diff, self.state.order, h, self.state.h, true);
+        c.diff.column_mut(1).axpy(one / h, &c.dy, one);
+        c.y.fill(zero);
+        c.dy.fill(zero);
+
+        // update of the history
+        let mut d_bar = c.y.clone();
+        c.diff.update_backward_diff_transpose(order, &mut d_bar);
+
+        // corrector: solve Aᵀ w = d_bar
+        let mut w = d_bar.clone();
+        self.ad_linear_solve(&step, Self::ad_apply_transpose, true, &d_bar, &mut w)?;
+
+        // predictor and psi: C_j += Mᵀ w - d_bar for j <= order, C_j -= alpha gamma_j Mᵀ w for
+        // 1 <= j <= order
+        let eqn = &self.ode_problem.eqn;
+        let (t_new, y_new) = (self.state.t, &self.state.y);
+        let mut mt_w = w.clone();
+        if let Some(mass) = eqn.mass() {
+            mass.call_transpose_inplace(&w, t_new, &mut mt_w);
+        }
+        let mut pred_bar = mt_w.clone();
+        pred_bar.axpy(-one, &d_bar, one);
+        for j in 0..=order {
+            c.diff.column_mut(j).axpy(one, &pred_bar, one);
+        }
+        let alpha = self.alpha[order];
+        for j in 1..=order {
+            c.diff
+                .column_mut(j)
+                .axpy(-alpha * self.gamma[j], &mt_w, one);
+        }
+
+        // parameters: p_bar += c f_pᵀ w, where sens_transpose_mul gives -f_pᵀ w
+        let mut fp_w = p_bar.clone();
+        eqn.rhs()
+            .sens_transpose_mul_inplace(y_new, t_new, &w, &mut fp_w);
+        p_bar.axpy(-step.c, &fp_w, one);
+
+        // the rescale before the accepted attempt, then the initialisation of the history
+        Self::ad_rescale(&mut c.diff, order, h_ref, h, true);
+        if from_init {
+            c.y.copy_from_view(&c.diff.column(0));
+            c.dy.copy_from_view(&c.diff.column(1));
+            c.dy.mul_assign(Scale(h_ref));
+            c.diff = M::zeros(c.diff.nrows(), c.diff.ncols(), c.diff.context().clone());
+        }
+
+        // the cotangent now sits at the start of the step
+        c.t = self.state.t - h;
+        c.h = h_ref;
+        c.order = order;
+        c.last_step = None;
+        c.h_init = from_init.then_some(h_ref);
+        c.h_end = h_ref;
+        c.diff_initialised = !from_init;
         Ok(())
     }
 }
@@ -1615,6 +2010,36 @@ mod test {
 
     type M = NalgebraMat<f64>;
     type LS = NalgebraLU<f64>;
+
+    /// Rescaling by `a` then by `b` is rescaling by `a * b`: each `R(f) U` resamples the same
+    /// interpolating polynomial. The step derivatives rely on this to replay all the rescales of
+    /// a step's attempts as one.
+    #[test]
+    fn bdf_rescales_compose() {
+        type B<'a> = super::Bdf<'a, crate::ode_solver::tests::TestEqn<M>, LS>;
+        for order in 1..=5 {
+            let ru = |f: f64| B::_compute_r(order, f).mat_mul(&B::_compute_r(order, 1.0));
+            for (a, b) in [(0.5, 0.3), (2.0, 0.7), (1.3, 1.9)] {
+                let lhs = ru(a).mat_mul(&ru(b));
+                let rhs = ru(a * b);
+                for (x, y) in lhs.as_slice().iter().zip(rhs.as_slice()) {
+                    assert!(
+                        (x - y).abs() < 1e-12 * (1.0 + y.abs()),
+                        "order {order}: {x} != {y}"
+                    );
+                }
+            }
+            // U is its own inverse, so a factor of one changes nothing
+            for (i, x) in ru(1.0).as_slice().iter().enumerate() {
+                let expected = if i % (order + 2) == 0 { 1.0 } else { 0.0 };
+                assert!(
+                    (x - expected).abs() < 1e-12,
+                    "order {order}: RU(1) is not I"
+                );
+            }
+        }
+    }
+
     #[test]
     fn bdf_state_mut() {
         test_state_mut(test_problem::<M>(false).bdf::<LS>().unwrap());
