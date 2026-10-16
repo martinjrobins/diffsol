@@ -276,6 +276,14 @@ mod tests {
     }
 
     #[test]
+    fn test_richardson_klu() {
+        crate::linear_solver::richardson::tests::test_richardson::<
+            FaerSparseMat<f64>,
+            KLU<FaerSparseMat<f64>>,
+        >();
+    }
+
+    #[test]
     fn test_grouped_klu() {
         crate::linear_solver::tests::test_grouped_lu_solve::<
             FaerSparseMat<f64>,
