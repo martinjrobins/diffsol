@@ -521,17 +521,57 @@ mod tests {
                     assert_close_vec(&y_fallback, &y_default, 1e-6, "y");
                 }
 
-                /// `step_jvp` and `step_vjp` need a step to differentiate.
+                fn assert_no_step(solver: &mut Bdf<'_, AdTestEqn<M>, LS>, what: &str) {
+                    let mut t = solver.state_clone().zeros_like();
+                    let p = V::zeros(3, Default::default());
+                    assert!(solver.step_jvp(&mut t, &p).is_err(), "jvp after {what}");
+                    let mut p_bar = V::zeros(3, Default::default());
+                    assert!(
+                        solver.step_vjp(&mut t, &mut p_bar).is_err(),
+                        "vjp after {what}"
+                    );
+                }
+
+                /// `step_jvp` and `step_vjp` need a step to differentiate, ending at the
+                /// solver's current state: none has been taken yet, or the state has since been
+                /// modified or moved back within the step.
                 #[test]
                 fn no_step() {
                     let problem = problem(P, false);
                     let mut solver = problem.bdf::<LS>().unwrap();
-                    let mut t = solver.state_clone().zeros_like();
-                    assert!(solver
-                        .step_jvp(&mut t, &V::zeros(3, Default::default()))
-                        .is_err());
-                    let mut p_bar = V::zeros(3, Default::default());
-                    assert!(solver.step_vjp(&mut t, &mut p_bar).is_err());
+                    assert_no_step(&mut solver, "no step");
+
+                    solver.step().unwrap();
+                    solver.state_mut();
+                    assert_no_step(&mut solver, "state_mut");
+
+                    solver.step().unwrap();
+                    let t = solver.state().t - 0.5 * solver.state_clone().last_step.unwrap().h;
+                    solver.state_mut_back(t).unwrap();
+                    assert_no_step(&mut solver, "state_mut_back");
+                }
+
+                /// The AD evaluates the step's Jacobian at `y` but propagates the history
+                /// `diff`, so after every step `y` must be its readout `diff[:, 0]`.
+                fn y_is_history_readout(dae: bool) {
+                    for state in trajectory(&problem(P, dae)).iter().skip(1) {
+                        assert_close_vec(
+                            &state.y.clone_as_vec(),
+                            &state.diff.column(0).into_owned().clone_as_vec(),
+                            1e-12,
+                            "y",
+                        );
+                    }
+                }
+
+                #[test]
+                fn y_is_history_readout_ode() {
+                    y_is_history_readout(false);
+                }
+
+                #[test]
+                fn y_is_history_readout_dae() {
+                    y_is_history_readout(true);
                 }
             }
         };

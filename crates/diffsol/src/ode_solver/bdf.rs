@@ -1219,6 +1219,8 @@ where
             Self::interpolate_from_diff(t, &state.sdiff, current_t, current_h, order, &mut state.s);
         }
         state.t = t;
+        // the state is no longer the end of the recorded step
+        state.last_step = None;
         self.is_state_modified = true;
         Ok(())
     }
@@ -1607,17 +1609,6 @@ where
             .state
             .last_step
             .ok_or(ode_solver_error!(NoStepToDifferentiate))?;
-        debug_assert!(
-            {
-                let tol = Eqn::T::from_f64(1e3).unwrap() * Eqn::T::EPSILON;
-                let d0 = self.state.diff.column(0).into_owned().clone_as_vec();
-                let y = self.state.y.clone_as_vec();
-                y.iter()
-                    .zip(&d0)
-                    .all(|(&a, &b)| (a - b).abs() <= tol * (Eqn::T::one() + a.abs()))
-            },
-            "BDF state y must equal diff[:, 0]"
-        );
         Ok(record)
     }
 

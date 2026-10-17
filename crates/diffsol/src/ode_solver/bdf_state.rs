@@ -280,6 +280,8 @@ where
         self.sdiff_initialised = false;
         self.gdiff_initialised = false;
         self.sgdiff_initialised = false;
+        // a modified state is no longer the end of the recorded step
+        self.last_step = None;
         StateRefMut {
             y: &mut self.y,
             dy: &mut self.dy,
