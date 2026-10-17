@@ -204,7 +204,8 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
     }
     /// The history input `psi - y0` of the operator, from the differences `diff` and the
     /// prediction `y0`, written into `out`. This is linear in `(diff, y0)`, so it also maps their
-    /// tangents. See [Self::set_psi] for `gamma`.
+    /// tangents. `gamma` must be `gamma[1..]`, offset to line up with the `1..order + 1` column
+    /// range psi sums over.
     pub fn psi_neg_y0_into<M: DenseMatrix<V = Eqn::V, T = Eqn::T>>(
         diff: &M,
         gamma: &[Eqn::T],
