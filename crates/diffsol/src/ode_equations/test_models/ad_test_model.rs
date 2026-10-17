@@ -12,106 +12,81 @@
 //! ```
 //! Both forms conserve `y0 + y1 + y2 = p2`.
 //!
-//! Every operator works lane by lane on batched vectors, with a single-lane state broadcast over
-//! the lanes of its argument, as the forward sensitivity equations call them.
+//! Every operator works lane by lane on batched vectors through [Vector::for_each_batch], with a
+//! single-lane state broadcast over the lanes of its argument, as the forward sensitivity
+//! equations call them.
 
-use num_traits::{FromPrimitive, One, Zero};
+use num_traits::{FromPrimitive, Zero};
 
 use crate::{
     op::{unit::UnitCallable, ParameterisedOp},
     ConstantOp, ConstantOpSens, ConstantOpSensAdjoint, LinearOp, LinearOpTranspose, Matrix,
     NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint,
-    OdeEquations, OdeEquationsRef, OdeSolverProblem, Op, Vector,
+    OdeEquations, OdeEquationsRef, OdeSolverProblem, Op, Scalar, Vector,
 };
 
 const N: usize = 3;
 const NP: usize = 3;
 
-/// `out = f(x lane, v lane)` for every lane of `v`, where `x` has either one lane or as many as
-/// `v`, `v` lanes have `n_in` entries and `out` lanes have `n_out`.
-fn map_lanes<V: Vector>(
-    x: &V,
-    v: &V,
-    out: &mut V,
-    n_in: usize,
-    f: impl Fn(&[V::T], &[V::T]) -> Vec<V::T>,
-) {
-    let xs = x.clone_as_vec();
-    let vs = v.clone_as_vec();
-    let nlanes = vs.len() / n_in;
-    let x_lanes = xs.len() / N;
-    let mut data = Vec::new();
-    for l in 0..nlanes {
-        let xl = if x_lanes == 1 { 0 } else { l };
-        data.extend(f(&xs[xl * N..(xl + 1) * N], &vs[l * n_in..(l + 1) * n_in]));
+/// `a v`, or `a^T v`, for a 3x3 `a`.
+fn mat_vec<T: Scalar>(a: &[[T; 3]; 3], v: &[T], transpose: bool) -> [T; 3] {
+    let mut out = [T::zero(); 3];
+    for (i, out_i) in out.iter_mut().enumerate() {
+        for (j, &v_j) in v.iter().enumerate().take(3) {
+            *out_i += if transpose { a[j][i] } else { a[i][j] } * v_j;
+        }
     }
-    out.copy_from(&V::from_vec(data, out.context().clone()));
+    out
 }
 
-fn mat_vec<T: Copy + Zero + std::ops::Mul<Output = T> + std::ops::Add<Output = T>>(
-    a: &[[T; 3]; 3],
-    v: &[T],
-    transpose: bool,
-) -> Vec<T> {
-    (0..3)
-        .map(|i| {
-            (0..3).fold(T::zero(), |acc, j| {
-                acc + if transpose { a[j][i] } else { a[i][j] } * v[j]
-            })
-        })
-        .collect()
+fn rhs<T: Scalar>(p: [T; 3], dae: bool, y: &[T]) -> [T; 3] {
+    let last = if dae {
+        y[0] + y[1] + y[2] - p[2]
+    } else {
+        y[1] * y[1]
+    };
+    [
+        -p[0] * y[0] + p[1] * y[1] * y[2],
+        p[0] * y[0] - p[1] * y[1] * y[2] - y[1] * y[1],
+        last,
+    ]
+}
+
+/// `df/dy`
+fn jac<T: Scalar>(p: [T; 3], dae: bool, y: &[T]) -> [[T; 3]; 3] {
+    let (zero, one) = (T::zero(), T::one());
+    let two = one + one;
+    let last = if dae {
+        [one, one, one]
+    } else {
+        [zero, two * y[1], zero]
+    };
+    [
+        [-p[0], p[1] * y[2], p[1] * y[1]],
+        [p[0], -p[1] * y[2] - two * y[1], -p[1] * y[1]],
+        last,
+    ]
+}
+
+/// `df/dp`
+fn jac_p<T: Scalar>(dae: bool, y: &[T]) -> [[T; 3]; 3] {
+    let zero = T::zero();
+    let last = if dae { -T::one() } else { zero };
+    [
+        [-y[0], y[1] * y[2], zero],
+        [y[0], -y[1] * y[2], zero],
+        [zero, zero, last],
+    ]
 }
 
 pub struct AdTestRhs<M: Matrix> {
-    p: Vec<M::T>,
+    p: [M::T; 3],
     dae: bool,
     ctx: M::C,
 }
 
-impl<M: Matrix> AdTestRhs<M> {
-    fn f(&self, y: &[M::T]) -> Vec<M::T> {
-        let p = &self.p;
-        let last = if self.dae {
-            y[0] + y[1] + y[2] - p[2]
-        } else {
-            y[1] * y[1]
-        };
-        vec![
-            -p[0] * y[0] + p[1] * y[1] * y[2],
-            p[0] * y[0] - p[1] * y[1] * y[2] - y[1] * y[1],
-            last,
-        ]
-    }
-
-    fn jac(&self, y: &[M::T]) -> [[M::T; 3]; 3] {
-        let p = &self.p;
-        let (zero, one) = (M::T::zero(), M::T::one());
-        let two = one + one;
-        let last = if self.dae {
-            [one, one, one]
-        } else {
-            [zero, two * y[1], zero]
-        };
-        [
-            [-p[0], p[1] * y[2], p[1] * y[1]],
-            [p[0], -p[1] * y[2] - two * y[1], -p[1] * y[1]],
-            last,
-        ]
-    }
-
-    fn jac_p(&self, y: &[M::T]) -> [[M::T; 3]; 3] {
-        let zero = M::T::zero();
-        let last = if self.dae { -M::T::one() } else { zero };
-        [
-            [-y[0], y[1] * y[2], zero],
-            [y[0], -y[1] * y[2], zero],
-            [zero, zero, last],
-        ]
-    }
-}
-
 pub struct AdTestInit<M: Matrix> {
-    p: Vec<M::T>,
+    p: [M::T; 3],
     ctx: M::C,
 }
 
@@ -147,70 +122,86 @@ impl_op!(AdTestMass, N);
 
 impl<M: Matrix> NonLinearOp for AdTestRhs<M> {
     fn call_inplace(&self, x: &M::V, _t: M::T, y: &mut M::V) {
-        map_lanes(x, x, y, N, |x, _| self.f(x));
+        let (p, dae) = (self.p, self.dae);
+        y.for_each_batch([x], move |y, [x], _| y.copy_from_slice(&rhs(p, dae, x)));
     }
 }
 
 impl<M: Matrix> NonLinearOpJacobian for AdTestRhs<M> {
     fn jac_mul_inplace(&self, x: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
-        map_lanes(x, v, y, N, |x, v| mat_vec(&self.jac(x), v, false));
+        let (p, dae) = (self.p, self.dae);
+        y.for_each_batch([x, v], move |y, [x, v], _| {
+            y.copy_from_slice(&mat_vec(&jac(p, dae, x), v, false))
+        });
     }
 }
 
 impl<M: Matrix> NonLinearOpAdjoint for AdTestRhs<M> {
     fn jac_transpose_mul_inplace(&self, x: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
-        map_lanes(x, v, y, N, |x, v| {
-            mat_vec(&self.jac(x), v, true)
-                .into_iter()
-                .map(|e| -e)
-                .collect()
+        let (p, dae) = (self.p, self.dae);
+        y.for_each_batch([x, v], move |y, [x, v], _| {
+            let jt_v = mat_vec(&jac(p, dae, x), v, true);
+            for (y, jt_v) in y.iter_mut().zip(jt_v) {
+                *y = -jt_v;
+            }
         });
     }
 }
 
 impl<M: Matrix> NonLinearOpSens for AdTestRhs<M> {
     fn sens_mul_inplace(&self, x: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
-        map_lanes(x, v, y, NP, |x, v| mat_vec(&self.jac_p(x), v, false));
+        let dae = self.dae;
+        y.for_each_batch([x, v], move |y, [x, v], _| {
+            y.copy_from_slice(&mat_vec(&jac_p(dae, x), v, false))
+        });
     }
 }
 
 impl<M: Matrix> NonLinearOpSensAdjoint for AdTestRhs<M> {
     fn sens_transpose_mul_inplace(&self, x: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
-        map_lanes(x, v, y, N, |x, v| {
-            mat_vec(&self.jac_p(x), v, true)
-                .into_iter()
-                .map(|e| -e)
-                .collect()
+        let dae = self.dae;
+        y.for_each_batch([x, v], move |y, [x, v], _| {
+            let jpt_v = mat_vec(&jac_p(dae, x), v, true);
+            for (y, jpt_v) in y.iter_mut().zip(jpt_v) {
+                *y = -jpt_v;
+            }
         });
     }
 }
 
 impl<M: Matrix> ConstantOp for AdTestInit<M> {
     fn call_inplace(&self, _t: M::T, y: &mut M::V) {
-        let nlanes = y.clone_as_vec().len() / N;
-        let lane = [self.p[2], M::T::zero(), M::T::zero()];
-        let data = (0..nlanes).flat_map(|_| lane).collect();
-        y.copy_from(&M::V::from_vec(data, y.context().clone()));
+        let p2 = self.p[2];
+        y.for_each_batch([], move |y, [], _| {
+            y.copy_from_slice(&[p2, M::T::zero(), M::T::zero()])
+        });
     }
 }
 
 impl<M: Matrix> ConstantOpSens for AdTestInit<M> {
     fn sens_mul_inplace(&self, _t: M::T, v: &M::V, y: &mut M::V) {
-        map_lanes(v, v, y, NP, |_, v| vec![v[2], M::T::zero(), M::T::zero()]);
+        y.for_each_batch([v], |y, [v], _| {
+            y.copy_from_slice(&[v[2], M::T::zero(), M::T::zero()])
+        });
     }
 }
 
 impl<M: Matrix> ConstantOpSensAdjoint for AdTestInit<M> {
     fn sens_transpose_mul_inplace(&self, _t: M::T, v: &M::V, y: &mut M::V) {
-        map_lanes(v, v, y, N, |_, v| vec![M::T::zero(), M::T::zero(), -v[0]]);
+        y.for_each_batch([v], |y, [v], _| {
+            y.copy_from_slice(&[M::T::zero(), M::T::zero(), -v[0]])
+        });
     }
 }
 
 impl<M: Matrix> AdTestMass<M> {
+    /// `y = diag(1, 1, 0) x + beta y`, which is its own transpose
     fn gemv(x: &M::V, beta: M::T, y: &mut M::V) {
-        let mut mx = y.clone();
-        map_lanes(x, x, &mut mx, N, |x, _| vec![x[0], x[1], M::T::zero()]);
-        y.axpy(M::T::one(), &mx, beta);
+        y.for_each_batch([x], move |y, [x], _| {
+            y[0] = x[0] + beta * y[0];
+            y[1] = x[1] + beta * y[1];
+            y[2] *= beta;
+        });
     }
 }
 
@@ -272,11 +263,13 @@ impl<M: Matrix> OdeEquations for AdTestEqn<M> {
         &self.init
     }
     fn set_params(&mut self, p: &M::V) {
-        self.rhs.p = p.clone_as_vec();
-        self.init.p = p.clone_as_vec();
+        let p = p.clone_as_vec();
+        self.rhs.p = [p[0], p[1], p[2]];
+        self.init.p = self.rhs.p;
     }
     fn get_params(&self, p: &mut M::V) {
-        p.copy_from(&M::V::from_vec(self.rhs.p.clone(), p.context().clone()));
+        let params = self.rhs.p;
+        p.for_each_batch([], move |p, [], _| p.copy_from_slice(&params));
     }
 }
 
@@ -290,10 +283,10 @@ pub fn ad_test_problem<M: Matrix>(
 ) -> OdeSolverProblem<AdTestEqn<M>> {
     let ctx = M::C::default();
     let f = |x: f64| M::T::from_f64(x).unwrap();
-    let p: Vec<M::T> = p.iter().map(|&x| f(x)).collect();
+    let p = p.map(f);
     let eqn = AdTestEqn {
         rhs: AdTestRhs {
-            p: p.clone(),
+            p,
             dae,
             ctx: ctx.clone(),
         },
