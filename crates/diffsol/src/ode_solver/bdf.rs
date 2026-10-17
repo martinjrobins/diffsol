@@ -1582,14 +1582,6 @@ where
     }
 }
 
-/// The step that [StepJvp::step_jvp] and [StepVjp::step_vjp] differentiate, with the
-/// coefficient it fixes.
-struct BdfAdStep<T> {
-    record: BdfStepRecord<T>,
-    /// `c = h * alpha[order]` of the accepted attempt
-    c: T,
-}
-
 impl<'a, M, Eqn, LS, AugmentedEqn> Bdf<'a, Eqn, LS, M, AugmentedEqn>
 where
     Eqn: OdeEquationsImplicit,
@@ -1606,7 +1598,8 @@ where
         self.ad_jacobian_refreshes
     }
 
-    fn ad_step(&self) -> Result<BdfAdStep<Eqn::T>, DiffsolError> {
+    /// The record of the step that [StepJvp::step_jvp] and [StepVjp::step_vjp] differentiate.
+    fn ad_step(&self) -> Result<BdfStepRecord<Eqn::T>, DiffsolError> {
         if self.op.is_none() {
             return Err(ode_solver_error!(StepDifferentiationNotSupported));
         }
@@ -1625,21 +1618,18 @@ where
             },
             "BDF state y must equal diff[:, 0]"
         );
-        Ok(BdfAdStep {
-            c: record.h * self.alpha[record.order],
-            record,
-        })
+        Ok(record)
     }
 
     /// Run `f` with the operator set up for the step being differentiated, i.e. with the `c` of
     /// its accepted attempt rather than the `c` of the next step, and restore it afterwards.
     fn ad_with_step_op<R>(
         &mut self,
-        step: &BdfAdStep<Eqn::T>,
+        step: BdfStepRecord<Eqn::T>,
         f: impl FnOnce(&mut Self) -> R,
     ) -> R {
-        let alpha = self.alpha[step.record.order];
-        self.op.as_mut().unwrap().set_c(step.record.h, alpha);
+        let alpha = self.alpha[step.order];
+        self.op.as_mut().unwrap().set_c(step.h, alpha);
         let result = f(self);
         let (h, alpha) = (self.state.h, self.alpha[self.state.order]);
         self.op.as_mut().unwrap().set_c(h, alpha);
@@ -1666,7 +1656,6 @@ where
     /// for the solve to converge, refresh it at the end of the step and retry once.
     fn ad_solve(
         &mut self,
-        step: &BdfAdStep<Eqn::T>,
         x: &mut Eqn::V,
         solve: impl Fn(
             &NewtonNonlinearSolver<Eqn::M, LS, NoLineSearch>,
@@ -1684,7 +1673,7 @@ where
         };
         let b = x.clone();
         if !self.nonlinear_solver.is_jacobian_set() {
-            self.ad_refresh_jacobian(step);
+            self.ad_refresh_jacobian();
         }
         let mut refreshed = false;
         loop {
@@ -1700,7 +1689,7 @@ where
             match result {
                 Ok(()) => return Ok(()),
                 Err(_) if !refreshed => {
-                    self.ad_refresh_jacobian(step);
+                    self.ad_refresh_jacobian();
                     x.copy_from(&b);
                     refreshed = true;
                 }
@@ -1710,12 +1699,12 @@ where
     }
 
     /// Refresh the Newton matrix at the end of the step. The op must hold the step's `c`.
-    fn ad_refresh_jacobian(&mut self, step: &BdfAdStep<Eqn::T>) {
+    fn ad_refresh_jacobian(&mut self) {
         let op = self.op.as_ref().unwrap();
         op.set_jacobian_is_stale();
         self.nonlinear_solver
             .reset_jacobian(op, &self.state.y, self.state.t);
-        self.jacobian_update.update_rhs_jacobian(step.c);
+        self.jacobian_update.update_rhs_jacobian(op.c);
         self.convergence.reset_eta();
         self.ad_jacobian_refreshes += 1;
     }
@@ -1749,7 +1738,7 @@ where
     /// `dy` are all set, and the step data (`t`, `h`, `order`) match the solver's state.
     fn step_jvp(&mut self, tangent: &mut Self::State, p_dot: &Eqn::V) -> Result<(), DiffsolError> {
         let step = self.ad_step()?;
-        self.ad_with_step_op(&step, |s| s.ad_jvp(&step, tangent, p_dot))
+        self.ad_with_step_op(step, |s| s.ad_jvp(step, tangent, p_dot))
     }
 }
 
@@ -1765,7 +1754,7 @@ where
 {
     fn ad_jvp(
         &mut self,
-        step: &BdfAdStep<Eqn::T>,
+        step: BdfStepRecord<Eqn::T>,
         tangent: &mut BdfState<Eqn::V, M>,
         p_dot: &Eqn::V,
     ) -> Result<(), DiffsolError> {
@@ -1774,7 +1763,7 @@ where
             h,
             order,
             from_init,
-        } = step.record;
+        } = step;
         let one = Eqn::T::one();
 
         // the history the step started from, rescaled for the accepted attempt
@@ -1804,7 +1793,7 @@ where
             p_dot,
             &mut y_dot,
         );
-        self.ad_solve(step, &mut y_dot, |nl, op, y, t, x, opts| {
+        self.ad_solve(&mut y_dot, |nl, op, y, t, x, opts| {
             nl.solve_jacobian_in_place(op, y, t, x, opts)
         })?;
 
@@ -1859,7 +1848,7 @@ where
         p_bar: &mut Eqn::V,
     ) -> Result<(), DiffsolError> {
         let step = self.ad_step()?;
-        self.ad_with_step_op(&step, |s| s.ad_vjp(&step, cotangent, p_bar))
+        self.ad_with_step_op(step, |s| s.ad_vjp(step, cotangent, p_bar))
     }
 }
 
@@ -1875,7 +1864,7 @@ where
 {
     fn ad_vjp(
         &mut self,
-        step: &BdfAdStep<Eqn::T>,
+        step: BdfStepRecord<Eqn::T>,
         c: &mut BdfState<Eqn::V, M>,
         p_bar: &mut Eqn::V,
     ) -> Result<(), DiffsolError> {
@@ -1884,13 +1873,14 @@ where
             h,
             order,
             from_init,
-        } = step.record;
+        } = step;
         let one = Eqn::T::one();
         let zero = Eqn::T::zero();
 
         // the Newton matrix is only a preconditioner, so refresh it on the forward pass's
         // schedule rather than every step
-        self._jacobian_updates(step.c, SolverState::StepSuccess);
+        let c_step = self.op.as_ref().unwrap().c;
+        self._jacobian_updates(c_step, SolverState::StepSuccess);
         self.jacobian_update.step();
 
         // fold in the readouts: y = diff[:, 0] at the end, and dy = diff[:, 1] / h before the
@@ -1905,7 +1895,7 @@ where
         let mut d_bar = c.y.clone();
         c.diff.update_backward_diff_transpose(order, &mut d_bar);
         let mut w = d_bar.clone();
-        self.ad_solve(step, &mut w, |nl, op, y, t, x, opts| {
+        self.ad_solve(&mut w, |nl, op, y, t, x, opts| {
             nl.solve_jacobian_transpose_in_place(op, y, t, x, opts)
         })?;
 

@@ -16,7 +16,8 @@ use std::{
 pub struct BdfCallable<Eqn: OdeEquationsImplicit> {
     pub(crate) eqn: Eqn,
     psi_neg_y0: Eqn::V,
-    c: Eqn::T,
+    /// The coefficient `c = h * alpha` of `f` in the BDF equation.
+    pub(crate) c: Eqn::T,
     tmp: RefCell<Eqn::V>,
     rhs_jac: RefCell<Eqn::M>,
     mass_jac: RefCell<Eqn::M>,
@@ -164,11 +165,6 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
             tmp,
             sparsity,
         }
-    }
-
-    #[cfg(test)]
-    fn set_c_direct(&mut self, c: Eqn::T) {
-        self.c = c;
     }
 
     #[cfg(test)]
@@ -525,7 +521,7 @@ mod tests {
         let ctx = problem.context();
         let c = 0.1;
         let phi_neg_y0 = Vcpu::from_vec(vec![1.1, 1.2], *ctx);
-        bdf_callable.set_c_direct(c);
+        bdf_callable.c = c;
         bdf_callable.set_psi_neg_y0_direct(phi_neg_y0);
         // check that the bdf function is correct
         let y = Vcpu::from_vec(vec![1.0, 1.0], *ctx);
