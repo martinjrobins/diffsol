@@ -1911,11 +1911,6 @@ where
         c.diff.update_backward_diff_transpose(order, &mut d_bar);
         // start from, and measure errors relative to, d_bar: for small c, w is close to M^-T d_bar
         // TODO: this solve takes ~2 more iterations than the JVP's (e.g. 2.7 vs 1.1 on average).
-        // The preconditioner is no staler (both contract by ~3e-3 per iteration); the guess is
-        // only first-order accurate (error ~ c|J|), where the JVP's predictor is accurate to the
-        // local error. The previous step's w is no better. Options: extrapolate w from its last
-        // few backward steps, as the BDF predictor does for lambda, or start from
-        // d_bar + c J^T d_bar.
         let mut w = d_bar.clone();
         self.ad_solve(true, &mut w, |nl, op, y, t, x, convergence| {
             nl.solve_jacobian_transpose_in_place(op, y, t, &d_bar, x, &d_bar, convergence)
