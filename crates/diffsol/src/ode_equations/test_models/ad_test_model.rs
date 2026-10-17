@@ -21,12 +21,20 @@ use num_traits::{FromPrimitive, One, Zero};
 use crate::{
     op::{unit::UnitCallable, ParameterisedOp},
     ConstantOp, ConstantOpSens, ConstantOpSensAdjoint, LinearOp, LinearOpTranspose, Matrix,
-    NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint,
-    OdeEquations, OdeEquationsRef, OdeSolverProblem, Op, Vector,
+    MatrixSparsity, NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens,
+    NonLinearOpSensAdjoint, OdeEquations, OdeEquationsRef, OdeSolverProblem, Op, Vector,
 };
 
 const N: usize = 3;
 const NP: usize = 3;
+
+/// Every 3x3 matrix of the model (the Jacobian, the mass matrix, and the parameter derivatives
+/// of the right-hand side and the initial condition, since `NP == N`) is given a full pattern, so
+/// that it can be assembled into sparse as well as dense matrices.
+fn full_sparsity<M: Matrix>() -> Option<M::Sparsity> {
+    let indices = (0..N).flat_map(|i| (0..N).map(move |j| (i, j))).collect();
+    Some(M::Sparsity::try_from_indices(N, N, indices).unwrap())
+}
 
 pub struct AdTestRhs<M: Matrix> {
     p: [M::T; 3],
@@ -86,6 +94,9 @@ impl<M: Matrix> NonLinearOp for AdTestRhs<M> {
 
 /// `y = J v`
 impl<M: Matrix> NonLinearOpJacobian for AdTestRhs<M> {
+    fn jacobian_sparsity(&self) -> Option<M::Sparsity> {
+        full_sparsity::<M>()
+    }
     fn jac_mul_inplace(&self, x: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
         let (p, dae) = (self.p, self.dae);
         y.for_each_batch([x, v], move |y, [x, v], _| {
@@ -122,6 +133,9 @@ impl<M: Matrix> NonLinearOpAdjoint for AdTestRhs<M> {
 
 /// `y = f_p v`
 impl<M: Matrix> NonLinearOpSens for AdTestRhs<M> {
+    fn sens_sparsity(&self) -> Option<M::Sparsity> {
+        full_sparsity::<M>()
+    }
     fn sens_mul_inplace(&self, x: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
         let dae = self.dae;
         y.for_each_batch([x, v], move |y, [x, v], _| {
@@ -156,6 +170,9 @@ impl<M: Matrix> ConstantOp for AdTestInit<M> {
 }
 
 impl<M: Matrix> ConstantOpSens for AdTestInit<M> {
+    fn sens_sparsity(&self) -> Option<M::Sparsity> {
+        full_sparsity::<M>()
+    }
     fn sens_mul_inplace(&self, _t: M::T, v: &M::V, y: &mut M::V) {
         y.for_each_batch([v], |y, [v], _| {
             y[0] = v[2];
@@ -187,6 +204,9 @@ impl<M: Matrix> AdTestMass<M> {
 }
 
 impl<M: Matrix> LinearOp for AdTestMass<M> {
+    fn sparsity(&self) -> Option<M::Sparsity> {
+        full_sparsity::<M>()
+    }
     fn gemv_inplace(&self, x: &M::V, _t: M::T, beta: M::T, y: &mut M::V) {
         Self::gemv(x, beta, y);
     }
