@@ -1,66 +1,56 @@
-//! Forward- and reverse-mode derivatives of a single accepted solver step.
+//! Reverse-mode derivatives of single accepted solver steps.
 //!
 //! These differentiate what the solver actually computed ("discretise-then-optimise"), in
 //! contrast to the continuous adjoint equations of [crate::AdjointOdeSolverMethod]. Error
 //! control is not differentiated: the step size, the order and the accept/reject decisions of
 //! each step are treated as fixed, and only the accepted attempt contributes.
 //!
-//! Tangents and cotangents have the same type as the solver state, `Self::State`. What they
-//! hold, and which of their fields are read, depends on the solver; see its implementation.
-//! Allocate them with [crate::OdeSolverState::zeros_like].
+//! Cotangents have the same type as the solver state, `Self::State`. What they hold, and which
+//! of their fields are read, depends on the solver; see its implementation. Allocate them with
+//! [crate::OdeSolverState::zeros_like].
 //!
-//! A tangent or cotangent can carry several directions at once in its batch lanes: allocate it
-//! with [crate::OdeSolverState::zeros_like_with_directions], which gives it `n` lanes for each
-//! lane of the state, with lane `b * n + k` holding direction `k` of batch `b`. The parameter
-//! tangent `p_dot` of [StepJvp::step_jvp] broadcasts into the tangent's lanes (it has 1 lane,
-//! one per state lane, or one per tangent lane), while the parameter cotangent `p_bar` of
-//! [StepVjp::step_vjp] has one lane per cotangent lane. Every direction shares the step's
-//! linear solves, which iterate until the worst of them has converged.
+//! A cotangent can carry several directions at once in its batch lanes: allocate it with
+//! [crate::OdeSolverState::zeros_like_with_directions], which gives it `n` lanes for each lane of
+//! the state, with lane `b * n + k` holding direction `k` of batch `b`. The parameter cotangent
+//! `p_bar` then has one lane per cotangent lane. Every direction shares the step's linear
+//! solves, which iterate until the worst of them has converged.
 //!
-//! A forward-mode pass interleaves [StepJvp::step_jvp] with [crate::OdeSolverMethod::step]:
-//! ```ignore
-//! solver.step()?;
-//! solver.step_jvp(&mut tangent, &p_dot)?;
-//! ```
 //! A reverse-mode pass saves a [crate::OdeSolverMethod::state_clone] after every step, then
-//! pulls a cotangent back through them in reverse:
+//! pulls a cotangent back through the steps that ended at them, in reverse:
 //! ```ignore
-//! while let Some(end) = checkpoints.pop() {
-//!     solver.set_replay_state(end);
-//!     solver.step_vjp(&mut cotangent, &mut p_bar)?;
+//! for end in checkpoints.iter().rev() {
+//!     solver.step_vjp(end, &mut cotangent, &mut p_bar)?;
 //! }
 //! ```
+//!
+//! For the forward mode, use the forward sensitivities of
+//! [crate::SensitivitiesOdeSolverMethod]. With [crate::Bdf], they differentiate the same steps
+//! the same way, solved to the same `derivative_solve_tolerance` (see [crate::BdfConfig]), so the
+//! two agree as closely as that tolerance. Leave the sensitivities out of error control (the
+//! default, see [crate::OdeBuilder::sens_rtol]) for the steps to be those of a run without them.
 
-use crate::{
-    error::DiffsolError, OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeSolverMethod,
-};
-
-/// Forward-mode derivative (Jacobian-vector product) of the last accepted step.
-pub trait StepJvp<'a, Eqn: OdeEquationsImplicitSens + 'a>: OdeSolverMethod<'a, Eqn> {
-    /// Push `tangent`, a tangent state at the start of the last accepted step, through that
-    /// step, together with the parameter tangent `p_dot` (of length `nparams`). The step is the
-    /// one that ended at [OdeSolverMethod::state]. On return, `tangent` is the tangent state at
-    /// its end. Fails with `StepDifferentiationBatchMismatch` if the lanes of `tangent` and
-    /// `p_dot` do not fit the state's (see the [module docs](self)).
-    fn step_jvp(&mut self, tangent: &mut Self::State, p_dot: &Eqn::V) -> Result<(), DiffsolError>;
-}
+use crate::{error::DiffsolError, OdeEquationsImplicitAdjoint, OdeSolverMethod};
 
 /// Reverse-mode derivative (vector-Jacobian product) of a checkpointed step.
 pub trait StepVjp<'a, Eqn: OdeEquationsImplicitAdjoint + 'a>: OdeSolverMethod<'a, Eqn> {
-    /// Load `state`, a checkpointed end-of-step state, for a following
-    /// [StepVjp::step_vjp]. Unlike [OdeSolverMethod::set_state] this need not refresh the
-    /// Jacobian, since the solves in [StepVjp::step_vjp] detect a stale one themselves.
-    fn set_replay_state(&mut self, state: Self::State) {
-        self.set_state(state)
-    }
-
-    /// Pull `cotangent`, a cotangent state at [OdeSolverMethod::state], back through the step
-    /// that ended there. On return it is the cotangent state at the start of that step, and the
-    /// parameter cotangent has been added to `p_bar` (of length `nparams`). Fails with
-    /// `StepDifferentiationBatchMismatch` if the lanes of `cotangent` and `p_bar` do not fit the
-    /// state's (see the [module docs](self)).
+    /// Pull `cotangent`, a cotangent state at `end`, back through the step that ended there.
+    /// `end` is a state the solver had straight after a step, as saved by
+    /// [OdeSolverMethod::state_clone]; the solver's own state is not used or changed. On return
+    /// `cotangent` is the cotangent state at the start of that step, and the parameter cotangent
+    /// has been added to `p_bar` (of length `nparams`).
+    ///
+    /// Fails with `NoStepToDifferentiate` if `end` is not the end of a step (it is the initial
+    /// state, or was modified after the step), and with `StepDifferentiationBatchMismatch` if the
+    /// lanes of `cotangent` and `p_bar` do not fit those of `end` (see the
+    /// [module docs](self)). On any other error, `cotangent` and `p_bar` are left partly
+    /// transformed and must not be reused.
+    ///
+    /// Its linear solves use the solver's own Newton matrix as a preconditioner. If that is too
+    /// poor for them to converge, it is refreshed, which a later [OdeSolverMethod::step] then
+    /// starts from.
     fn step_vjp(
         &mut self,
+        end: &Self::State,
         cotangent: &mut Self::State,
         p_bar: &mut Eqn::V,
     ) -> Result<(), DiffsolError>;
@@ -68,15 +58,21 @@ pub trait StepVjp<'a, Eqn: OdeEquationsImplicitAdjoint + 'a>: OdeSolverMethod<'a
 
 #[cfg(test)]
 mod tests {
-    //! The step derivatives tested through the public API only: tangents and cotangents are
-    //! seeded and read through the state's `y` and `dy`, so the tests apply to any solver that
-    //! implements [super::StepJvp] and [super::StepVjp]. They are written once in
-    //! `step_ad_tests!` and run for each solver and linear solver.
+    //! The step derivatives tested through the public API only: cotangents are seeded and read
+    //! through the state's `y` and `dy`, so the tests apply to any solver that implements
+    //! [super::StepVjp]. They are written once in `step_ad_tests!` and run for each solver and
+    //! linear solver. The reference derivatives are finite differences of single steps and, for
+    //! whole trajectories, the solver's own forward sensitivities.
 
     use crate::Vector;
 
     pub(super) const P: [f64; 3] = [1.5, 3.0, 1.0];
     pub(super) const T_FINAL: f64 = 5.0;
+    /// A derivative solve tolerance tight enough for the derivatives to agree to rounding.
+    pub(super) const DERIVATIVE_TOL: f64 = 1e-10;
+    /// An iteration limit on the derivative solves low enough that some of them need a fresh
+    /// preconditioner, but not so low that they then fail.
+    pub(super) const MAX_ITER_FORCING_REFRESHES: usize = 2;
 
     /// A pseudo-random vector of the model's size.
     pub(super) fn rand<V: Vector<T = f64>>(seed: f64) -> V {
@@ -102,7 +98,7 @@ mod tests {
         assert!((a - b).abs() <= rtol * scale, "{what}: {a} != {b}");
     }
 
-    /// Pseudo-random `(y, dy)` tangent components. For the DAE they satisfy the linearised
+    /// Pseudo-random `(y, dy)` perturbation directions. For the DAE they satisfy the linearised
     /// constraint `y0 + y1 + y2 = p2` with `p_dot`, so that a perturbed state stays consistent:
     /// an inconsistent one makes a step jump, whatever its size.
     pub(super) fn tangent_y_dy<V: Vector<T = f64>>(seed: f64, dae: bool, p_dot: &V) -> (V, V) {
@@ -116,26 +112,31 @@ mod tests {
 
     /// The tests for one solver and linear solver: on matrix type `$M`, with linear solver `$LS`,
     /// for the solver built by the problem methods `$new`, `$from_state` (from a state of type
-    /// `$State`) and, with forward sensitivities, `$new_sens`.
+    /// `$State`, with a config of type `$Config`) and, with forward sensitivities, `$new_sens`.
     macro_rules! step_ad_tests {
         (
             $mod_name:ident,
             M = $M:ty,
             LS = $LS:ty,
             State = $State:ty,
+            Config = $Config:ty,
             new = $new:ident,
             from_state = $from_state:ident,
             new_sens = $new_sens:ident $(,)?
         ) => {
             mod $mod_name {
-                use super::{assert_close, dot, rand, tangent_y_dy, P, T_FINAL};
+                use super::{
+                    assert_close, dot, rand, tangent_y_dy, DERIVATIVE_TOL,
+                    MAX_ITER_FORCING_REFRESHES, P, T_FINAL,
+                };
                 use crate::error::{DiffsolError, OdeSolverError};
                 use crate::ode_equations::test_models::ad_test_model::{
                     ad_test_problem, AdTestEqn,
                 };
+                use crate::ode_solver::OdeSolverStatistics;
                 use crate::{
                     scale, Context, MatrixCommon, OdeEquations, OdeSolverMethod, OdeSolverProblem,
-                    OdeSolverState, OdeSolverStopReason, StepJvp, StepVjp, Vector, VectorView,
+                    OdeSolverState, OdeSolverStopReason, StepVjp, Vector, VectorView,
                 };
 
                 type M = $M;
@@ -144,23 +145,35 @@ mod tests {
 
                 type E = AdTestEqn<M>;
 
+                /// A solver with its derivative solves converged to `DERIVATIVE_TOL`.
                 fn new_solver(
                     p: &Problem,
-                ) -> impl OdeSolverMethod<'_, E, State = $State> + StepJvp<'_, E> + StepVjp<'_, E>
+                ) -> impl OdeSolverMethod<'_, E, State = $State, Config = $Config> + StepVjp<'_, E>
                 {
-                    p.$new::<$LS>().unwrap()
+                    let mut solver = p.$new::<$LS>().unwrap();
+                    solver.config_mut().derivative_solve_tolerance = DERIVATIVE_TOL;
+                    solver
                 }
 
+                /// As [new_solver], started from `state`.
                 fn solver_from_state(
                     p: &Problem,
                     state: $State,
-                ) -> impl OdeSolverMethod<'_, E, State = $State> + StepJvp<'_, E> + StepVjp<'_, E>
-                {
-                    p.$from_state::<$LS>(state).unwrap()
+                ) -> impl OdeSolverMethod<'_, E, State = $State> + StepVjp<'_, E> {
+                    let mut solver = p.$from_state::<$LS>(state).unwrap();
+                    solver.config_mut().derivative_solve_tolerance = DERIVATIVE_TOL;
+                    solver
                 }
 
-                fn new_sens_solver(p: &Problem) -> impl OdeSolverMethod<'_, E> + StepJvp<'_, E> {
-                    p.$new_sens::<$LS>().unwrap()
+                /// A solver with forward sensitivities, its derivative solves converged to
+                /// `DERIVATIVE_TOL`.
+                fn new_sens_solver(
+                    p: &Problem,
+                ) -> impl OdeSolverMethod<'_, E, State = $State, Config = $Config> + StepVjp<'_, E>
+                {
+                    let mut solver = p.$new_sens::<$LS>().unwrap();
+                    solver.config_mut().derivative_solve_tolerance = DERIVATIVE_TOL;
+                    solver
                 }
 
                 fn zeros() -> V {
@@ -226,8 +239,7 @@ mod tests {
                     problem: &Problem,
                     start: $State,
                     tstop: f64,
-                ) -> impl OdeSolverMethod<'_, E, State = $State> + StepJvp<'_, E> + StepVjp<'_, E>
-                {
+                ) -> impl OdeSolverMethod<'_, E, State = $State> + StepVjp<'_, E> {
                     let mut solver = solver_from_state(problem, start);
                     solver.set_stop_time(tstop).unwrap();
                     solver.step().unwrap();
@@ -236,9 +248,8 @@ mod tests {
 
                 /// One step, from the state after `after` steps with its history rebuilt from
                 /// `(y, dy)` (as after `state_mut`), and with a stop time at `tstop_fraction` of
-                /// the step if given. The step is checked two ways: against central
-                /// finite differences of `step()` in `(y, dy, p)`, and with a dot test of
-                /// `step_jvp` against `step_vjp`.
+                /// the step if given. `step_vjp` of the step is checked against central finite
+                /// differences of `step()` in `(y, dy, p)`, in a pseudo-random direction.
                 fn rebuilt_step(dae: bool, after: usize, tstop_fraction: Option<f64>, seed: f64) {
                     let problem0 = problem(dae);
                     let mut solver = new_solver(&problem0);
@@ -263,14 +274,6 @@ mod tests {
                         .map(|f| t0 + f * start.as_ref().h)
                         .unwrap_or(T_FINAL);
 
-                    let p0 = params(&problem0);
-                    let p_dot: V = rand(0.31 * seed);
-                    let (y_dot, dy_dot) = tangent_y_dy(seed, dae, &p_dot);
-                    // finite differences, on steps that must take the same step size. The Newton
-                    // error in dy = (history) / h grows as h shrinks, so eps is not too small
-                    let eps = 1e-4;
-                    let fd = |a: V, b: &V| (a - b) * scale(0.5 / eps);
-
                     let mut solver = step_from(&problem0, start.clone(), tstop);
                     let t_end = solver.state().t;
                     if tstop_fraction.is_some() {
@@ -279,9 +282,14 @@ mod tests {
                             "the stop time did not shorten the step"
                         );
                     }
-                    let mut tangent = with_y_dy(&start.zeros_like(), &y_dot, &dy_dot);
-                    solver.step_jvp(&mut tangent, &p_dot).unwrap();
 
+                    // finite differences, on steps that must take the same step size. The Newton
+                    // error in dy = (history) / h grows as h shrinks, so eps is not too small
+                    let p0 = params(&problem0);
+                    let p_dot: V = rand(0.31 * seed);
+                    let (y_dot, dy_dot) = tangent_y_dy(seed, dae, &p_dot);
+                    let eps = 1e-4;
+                    let fd = |a: V, b: &V| (a - b) * scale(0.5 / eps);
                     // a perturbed restart: parameters p + e p_dot, y + e y_dot and dy + e dy_dot
                     let perturbed = |e: f64| {
                         let problem = problem_at(&axpy(&p0, e, &p_dot), dae);
@@ -292,20 +300,19 @@ mod tests {
                         y_dy(&solver.state_clone())
                     };
                     let ((y_p, dy_p), (y_m, dy_m)) = (perturbed(eps), perturbed(-eps));
-                    let (y_jvp, dy_jvp) = y_dy(&tangent);
-                    y_jvp.assert_eq_norm(&fd(y_p, &y_m), &tol(1e-5), 1e-5, 1.0);
-                    dy_jvp.assert_eq_norm(&fd(dy_p, &dy_m), &tol(1e-5), 1e-5, 1.0);
+                    let (y_fd, dy_fd) = (fd(y_p, &y_m), fd(dy_p, &dy_m));
 
-                    // dot test: <c_end, jvp(t)> = <vjp(c_end), t> + <p_bar, p_dot>
+                    // <c_end, fd(t)> = <vjp(c_end), t> + <p_bar, p_dot>
                     let (c_y, c_dy): (V, V) = (rand(2.9 * seed), rand(3.7 * seed));
-                    let mut cot = with_y_dy(&solver.state_clone().zeros_like(), &c_y, &c_dy);
+                    let end = solver.state_clone();
+                    let mut cot = with_y_dy(&end.zeros_like(), &c_y, &c_dy);
                     let mut p_bar = zeros();
-                    solver.step_vjp(&mut cot, &mut p_bar).unwrap();
-                    let lhs = dot(&c_y, &y_jvp) + dot(&c_dy, &dy_jvp);
-                    let rhs = dot(cot.as_ref().y, &y_dot)
+                    solver.step_vjp(&end, &mut cot, &mut p_bar).unwrap();
+                    let forward = dot(&c_y, &y_fd) + dot(&c_dy, &dy_fd);
+                    let backward = dot(cot.as_ref().y, &y_dot)
                         + dot(cot.as_ref().dy, &dy_dot)
                         + dot(&p_bar, &p_dot);
-                    assert_close(lhs, rhs, 1e-7, "dot test");
+                    assert_close(forward, backward, 1e-5, "finite differences");
                 }
 
                 fn rebuilt_steps(dae: bool) {
@@ -327,113 +334,133 @@ mod tests {
                     rebuilt_steps(true);
                 }
 
-                /// The tangent pushed forward through the trajectory against the cotangent pulled
-                /// back through the checkpoints, for trajectories ending at many steps along the
-                /// way, so that the comparison includes steps whose step size changes at their end.
-                fn trajectory_test(dae: bool) {
-                    let problem = problem(dae);
-                    let mut solver = new_solver(&problem);
-                    solver.set_stop_time(T_FINAL).unwrap();
-                    let p_dot: V = rand(0.4);
-                    let (y_dot, dy_dot) = tangent_y_dy(0.9, dae, &p_dot);
-                    let mut tangent =
-                        with_y_dy(&solver.state_clone().zeros_like(), &y_dot, &dy_dot);
-                    // the checkpoint and the tangent's (y, dy) after each step
-                    let mut steps = Vec::new();
+                /// Step `solver` until it reaches its stop time with `step`, and return the state
+                /// after each step.
+                fn solve_to_stop<'a, S: OdeSolverMethod<'a, E, State = $State>>(
+                    solver: &mut S,
+                ) -> Vec<$State> {
+                    let mut checkpoints = Vec::new();
                     loop {
                         let reason = solver.step().unwrap();
-                        solver.step_jvp(&mut tangent, &p_dot).unwrap();
-                        steps.push((solver.state_clone(), y_dy(&tangent)));
+                        checkpoints.push(solver.state_clone());
                         if let OdeSolverStopReason::TstopReached = reason {
                             break;
                         }
                     }
+                    checkpoints
+                }
 
+                /// A cotangent pulled back from the end of `checkpoints[..end]` to `start`, a
+                /// trajectory of a solver with forward sensitivities, against those
+                /// sensitivities: for each parameter `k`, the derivative of `<c, (y, dy)>` at the
+                /// end, `<c, (s_k, ds_k)>`, is the cotangent's at the start against
+                /// `(s_k, ds_k)` there, plus `p_bar[k]`.
+                fn assert_vjp_matches_sensitivities<'a, S>(
+                    solver: &mut S,
+                    start: &$State,
+                    checkpoints: &[$State],
+                    end: usize,
+                ) where
+                    S: StepVjp<'a, E, State = $State>,
+                {
                     let (c_y, c_dy): (V, V) = (rand(1.3), rand(2.1));
-                    let ends = (1..steps.len()).step_by(3).chain([steps.len()]);
-                    for end in ends {
-                        let (y_end, dy_end) = &steps[end - 1].1;
-                        let mut cot = with_y_dy(&steps[end - 1].0.zeros_like(), &c_y, &c_dy);
-                        let mut p_bar = zeros();
-                        for (checkpoint, _) in steps[..end].iter().rev() {
-                            solver.set_replay_state(checkpoint.clone());
-                            solver.step_vjp(&mut cot, &mut p_bar).unwrap();
-                        }
-                        let forward = dot(&c_y, y_end) + dot(&c_dy, dy_end);
-                        let backward = dot(cot.as_ref().y, &y_dot)
-                            + dot(cot.as_ref().dy, &dy_dot)
-                            + dot(&p_bar, &p_dot);
+                    let last = &checkpoints[end - 1];
+                    let mut cot = with_y_dy(&last.zeros_like(), &c_y, &c_dy);
+                    let mut p_bar = zeros();
+                    for checkpoint in checkpoints[..end].iter().rev() {
+                        solver.step_vjp(checkpoint, &mut cot, &mut p_bar).unwrap();
+                    }
+                    let (s_end, ds_end) = (last.as_ref().s, last.as_ref().ds);
+                    let (s0, ds0) = (start.as_ref().s, start.as_ref().ds);
+                    for k in 0..3 {
+                        let forward = dot(&c_y, &lane(s_end, k)) + dot(&c_dy, &lane(ds_end, k));
+                        let backward = dot(cot.as_ref().y, &lane(s0, k))
+                            + dot(cot.as_ref().dy, &lane(ds0, k))
+                            + p_bar.get_index(k);
                         assert_close(
                             forward,
                             backward,
                             1e-7,
-                            &format!("trajectory to step {end}"),
+                            &format!("parameter {k}, trajectory to step {end}"),
                         );
                     }
                 }
 
-                #[test]
-                fn trajectory_ode() {
-                    trajectory_test(false);
-                }
-
-                #[test]
-                fn trajectory_dae() {
-                    trajectory_test(true);
-                }
-
-                /// One tangent carrying the directions p_dot = e_i in its lanes, started from the
-                /// solver's own initial sensitivities, follows the solver's forward sensitivities
-                /// step by step.
-                fn forward_sensitivities(dae: bool) {
+                /// The cotangent pulled back through the checkpoints of a solver with forward
+                /// sensitivities matches them, for trajectories ending at many steps along the
+                /// way, so that the comparison includes steps whose step size changes at their end.
+                fn sensitivities(dae: bool) {
                     let problem = problem(dae);
                     let mut solver = new_sens_solver(&problem);
                     solver.set_stop_time(T_FINAL).unwrap();
-                    let state0 = solver.state_clone();
-                    let (s, ds) = (state0.as_ref().s, state0.as_ref().ds);
-                    let mut tangent =
-                        with_y_dy(&state0.zeros_like_with_directions(3).unwrap(), s, ds);
-                    let mut p_dot = V::zeros(3, s.context().clone());
-                    p_dot
-                        .for_each_elem([], |p, [], lane, i| *p = if lane == i { 1.0 } else { 0.0 });
-                    loop {
-                        let reason = solver.step().unwrap();
-                        solver.step_jvp(&mut tangent, &p_dot).unwrap();
-                        let s = solver.state().s;
-                        tangent.as_ref().y.assert_eq_norm(s, &tol(1e-6), 1e-6, 1.0);
-                        if let OdeSolverStopReason::TstopReached = reason {
-                            break;
-                        }
+                    let start = solver.state_clone();
+                    let checkpoints = solve_to_stop(&mut solver);
+                    let n = checkpoints.len();
+                    for end in (1..n).step_by(3).chain([n]) {
+                        assert_vjp_matches_sensitivities(&mut solver, &start, &checkpoints, end);
                     }
                 }
 
                 #[test]
-                fn forward_sensitivities_ode() {
-                    forward_sensitivities(false);
+                fn sensitivities_ode() {
+                    sensitivities(false);
                 }
 
                 #[test]
-                fn forward_sensitivities_dae() {
-                    forward_sensitivities(true);
+                fn sensitivities_dae() {
+                    sensitivities(true);
                 }
 
-                /// A tangent and a cotangent carrying three directions in their lanes, pushed
-                /// forward and pulled back through a trajectory, against each direction on its own.
+                /// A `set_stop_time` between steps rescales the solver's history after the
+                /// checkpoint of the step before was taken: the next step's replay starts from the
+                /// history as that checkpoint has it. Before the first step, the stop time
+                /// shortens the first step, from the initial history.
+                #[test]
+                fn set_stop_time_between_steps() {
+                    for steps_before in [0, 10] {
+                        let problem = problem(false);
+                        let mut solver = new_sens_solver(&problem);
+                        let start = solver.state_clone();
+                        let mut checkpoints = Vec::new();
+                        for _ in 0..steps_before {
+                            solver.step().unwrap();
+                            checkpoints.push(solver.state_clone());
+                        }
+                        let (t, h) = (solver.state().t, solver.state().h);
+                        solver.set_stop_time(t + 0.3 * h).unwrap();
+                        assert!(
+                            solver.state().h != h,
+                            "the stop time did not rescale the state"
+                        );
+                        checkpoints.extend(solve_to_stop(&mut solver));
+                        let n = checkpoints.len();
+                        assert_vjp_matches_sensitivities(&mut solver, &start, &checkpoints, n);
+                    }
+                }
+
+                /// A cotangent carrying three directions in its lanes, pulled back through a
+                /// trajectory, against each direction on its own.
                 fn batched_directions(dae: bool) {
                     let problem = problem(dae);
                     let mut solver = new_solver(&problem);
                     solver.set_stop_time(T_FINAL).unwrap();
-                    let start = solver.state_clone();
-                    let mut tangent = start.zeros_like_with_directions(3).unwrap();
-                    let ctx3 = tangent.as_ref().y.context().clone();
-                    let (y_dot, dy_dot) = (rand_lanes(&ctx3, 0.7), rand_lanes(&ctx3, 1.1));
-                    let p_dot = rand_lanes(&ctx3, 1.9);
-                    tangent = with_y_dy(&tangent, &y_dot, &dy_dot);
-                    let mut tangents: Vec<_> = (0..3)
-                        .map(|k| {
-                            with_y_dy(&start.zeros_like(), &lane(&y_dot, k), &lane(&dy_dot, k))
-                        })
+                    let checkpoints = solve_to_stop(&mut solver);
+                    let end = checkpoints.last().unwrap();
+                    let mut cot = end.zeros_like_with_directions(3).unwrap();
+                    let ctx3 = cot.as_ref().y.context().clone();
+                    let (c_y, c_dy) = (rand_lanes(&ctx3, 2.3), rand_lanes(&ctx3, 2.9));
+                    cot = with_y_dy(&cot, &c_y, &c_dy);
+                    let mut p_bar = V::zeros(3, ctx3.clone());
+                    let mut cots: Vec<_> = (0..3)
+                        .map(|k| with_y_dy(&end.zeros_like(), &lane(&c_y, k), &lane(&c_dy, k)))
                         .collect();
+                    let mut p_bars: Vec<_> = (0..3).map(|_| zeros()).collect();
+                    for checkpoint in checkpoints.iter().rev() {
+                        solver.step_vjp(checkpoint, &mut cot, &mut p_bar).unwrap();
+                        for (c, p) in cots.iter_mut().zip(&mut p_bars) {
+                            solver.step_vjp(checkpoint, c, p).unwrap();
+                        }
+                    }
                     // a batched solve iterates until its worst lane converges, so each lane
                     // agrees with its own run to within the solves' tolerance
                     let assert_lanes = |batched: &V, single: &[V]| {
@@ -441,38 +468,6 @@ mod tests {
                             lane(batched, k).assert_eq_norm(single, &tol(1e-6), 1e-6, 1.0);
                         }
                     };
-                    let mut checkpoints = Vec::new();
-                    loop {
-                        let reason = solver.step().unwrap();
-                        solver.step_jvp(&mut tangent, &p_dot).unwrap();
-                        for (k, t) in tangents.iter_mut().enumerate() {
-                            solver.step_jvp(t, &lane(&p_dot, k)).unwrap();
-                        }
-                        let (y, dy): (Vec<_>, Vec<_>) = tangents.iter().map(y_dy).unzip();
-                        assert_lanes(tangent.as_ref().y, &y);
-                        assert_lanes(tangent.as_ref().dy, &dy);
-                        checkpoints.push(solver.state_clone());
-                        if let OdeSolverStopReason::TstopReached = reason {
-                            break;
-                        }
-                    }
-
-                    let end = checkpoints.last().unwrap();
-                    let (c_y, c_dy) = (rand_lanes(&ctx3, 2.3), rand_lanes(&ctx3, 2.9));
-                    let mut cot =
-                        with_y_dy(&end.zeros_like_with_directions(3).unwrap(), &c_y, &c_dy);
-                    let mut p_bar = V::zeros(3, ctx3.clone());
-                    let mut cots: Vec<_> = (0..3)
-                        .map(|k| with_y_dy(&end.zeros_like(), &lane(&c_y, k), &lane(&c_dy, k)))
-                        .collect();
-                    let mut p_bars: Vec<_> = (0..3).map(|_| zeros()).collect();
-                    for checkpoint in checkpoints.iter().rev() {
-                        solver.set_replay_state(checkpoint.clone());
-                        solver.step_vjp(&mut cot, &mut p_bar).unwrap();
-                        for (c, p) in cots.iter_mut().zip(&mut p_bars) {
-                            solver.step_vjp(c, p).unwrap();
-                        }
-                    }
                     let (y, dy): (Vec<_>, Vec<_>) = cots.iter().map(y_dy).unzip();
                     assert_lanes(cot.as_ref().y, &y);
                     assert_lanes(cot.as_ref().dy, &dy);
@@ -489,84 +484,155 @@ mod tests {
                     batched_directions(true);
                 }
 
-                /// A parameter tangent whose lanes do not broadcast into the tangent's, or a
-                /// parameter cotangent with fewer lanes than the cotangent, is an error.
+                /// A parameter cotangent with fewer lanes than the cotangent is an error.
                 #[test]
                 fn batch_mismatch() {
                     let problem = problem(false);
                     let mut solver = new_solver(&problem);
                     solver.step().unwrap();
-                    let state = solver.state_clone();
-                    let ctx = state.as_ref().y.context().clone();
+                    let end = solver.state_clone();
+                    let ctx = end.as_ref().y.context().clone();
                     let with_lanes = |n: usize| V::zeros(3, ctx.clone_with_nbatch(n).unwrap());
-                    let is_mismatch = |r: Result<(), DiffsolError>| {
+                    let mut cot = end.zeros_like_with_directions(3).unwrap();
+                    let r = solver.step_vjp(&end, &mut cot.clone(), &mut with_lanes(1));
+                    assert!(
                         matches!(
                             r,
                             Err(DiffsolError::OdeSolverError(
                                 OdeSolverError::StepDifferentiationBatchMismatch { .. }
                             ))
-                        )
-                    };
-
-                    let mut tangent = state.zeros_like_with_directions(3).unwrap();
-                    let r = solver.step_jvp(&mut tangent.clone(), &with_lanes(2));
-                    assert!(is_mismatch(r), "2-lane p_dot, 3-lane tangent");
-                    let r = solver.step_vjp(&mut tangent.clone(), &mut with_lanes(1));
-                    assert!(is_mismatch(r), "1-lane p_bar, 3-lane cotangent");
-                    // a single parameter tangent for every direction broadcasts
-                    solver.step_jvp(&mut tangent, &with_lanes(1)).unwrap();
+                        ),
+                        "1-lane p_bar, 3-lane cotangent"
+                    );
+                    solver.step_vjp(&end, &mut cot, &mut with_lanes(3)).unwrap();
                 }
 
-                /// A `set_stop_time` after a step rescales the state for the next step, but not
-                /// the step just taken, so its derivative is unchanged.
-                #[test]
-                fn set_stop_time_after_step() {
-                    let problem = problem(false);
-                    let mut solver = new_solver(&problem);
-                    let p_dot: V = rand(0.8);
-                    let (y_dot, dy_dot) = tangent_y_dy(0.6, false, &p_dot);
-                    let mut tangent =
-                        with_y_dy(&solver.state_clone().zeros_like(), &y_dot, &dy_dot);
-                    for _ in 0..9 {
-                        solver.step().unwrap();
-                        solver.step_jvp(&mut tangent, &p_dot).unwrap();
-                    }
-                    solver.step().unwrap();
-                    let mut stopped = solver.clone();
-                    let (t, h) = (solver.state().t, solver.state().h);
-                    stopped.set_stop_time(t + 0.3 * h).unwrap();
-                    assert!(
-                        stopped.state().h != h,
-                        "the stop time did not rescale the state"
-                    );
+                /// `with_derivatives` is `plain` with `refreshes` derivative refreshes added.
+                fn assert_only_derivative_refreshes_added(
+                    with_derivatives: &OdeSolverStatistics,
+                    plain: &OdeSolverStatistics,
+                    refreshes: impl Fn(usize) -> bool,
+                ) {
+                    let mut with_derivatives = with_derivatives.clone();
+                    let n = with_derivatives.number_of_derivative_jacobian_refreshes;
+                    assert!(refreshes(n), "unexpected number of refreshes: {n}");
+                    with_derivatives.number_of_derivative_jacobian_refreshes = 0;
+                    assert_eq!(format!("{with_derivatives:?}"), format!("{plain:?}"));
+                }
 
-                    let mut tangent_stopped = tangent.clone();
-                    solver.step_jvp(&mut tangent, &p_dot).unwrap();
-                    stopped.step_jvp(&mut tangent_stopped, &p_dot).unwrap();
-                    let ((y, dy), (y_s, dy_s)) = (y_dy(&tangent), y_dy(&tangent_stopped));
-                    y_s.assert_eq_norm(&y, &tol(1e-8), 1e-8, 1.0);
-                    dy_s.assert_eq_norm(&dy, &tol(1e-8), 1e-8, 1.0);
+                /// Pulling a cotangent back through the checkpoints leaves the solver's statistics
+                /// alone, apart from the derivatives' own refreshes.
+                #[test]
+                fn step_vjp_leaves_the_statistics_unchanged() {
+                    let problem = problem(true);
+                    let mut solver = new_solver(&problem);
+                    solver.config_mut().derivative_solve_max_iter = 1;
+                    solver.set_stop_time(T_FINAL).unwrap();
+                    let checkpoints = solve_to_stop(&mut solver);
+                    let plain = solver.get_statistics().clone();
+                    let end = checkpoints.last().unwrap();
+                    let mut cot = with_y_dy(&end.zeros_like(), &rand(1.3), &rand(2.1));
+                    let mut p_bar = zeros();
+                    for checkpoint in checkpoints.iter().rev() {
+                        let _ = solver.step_vjp(checkpoint, &mut cot, &mut p_bar);
+                    }
+                    assert_only_derivative_refreshes_added(solver.get_statistics(), &plain, |n| {
+                        n > 0
+                    });
+                }
+
+                /// A sensitivity solve that the Newton matrix is too poor a preconditioner for
+                /// (forced with a tiny iteration limit, at a tolerance a fresh matrix meets within
+                /// it) refreshes it and retries, rather than rejecting the step, and still reaches
+                /// the same sensitivities.
+                #[test]
+                fn sensitivity_solve_refreshes() {
+                    for dae in [false, true] {
+                        let problem = problem(dae);
+                        let tol_meeting_the_limit = 1e-6;
+                        let mut plain = new_sens_solver(&problem);
+                        plain.config_mut().derivative_solve_tolerance = tol_meeting_the_limit;
+                        plain.set_stop_time(T_FINAL).unwrap();
+                        solve_to_stop(&mut plain);
+                        let mut solver = new_sens_solver(&problem);
+                        solver.config_mut().derivative_solve_tolerance = tol_meeting_the_limit;
+                        solver.config_mut().derivative_solve_max_iter = MAX_ITER_FORCING_REFRESHES;
+                        solver.set_stop_time(T_FINAL).unwrap();
+                        solve_to_stop(&mut solver);
+                        let stats = solver.get_statistics();
+                        assert!(stats.number_of_derivative_jacobian_refreshes > 0);
+                        assert_eq!(
+                            stats.number_of_nonlinear_solver_fails, 0,
+                            "a step was rejected"
+                        );
+                        solver
+                            .state()
+                            .s
+                            .assert_eq_norm(plain.state().s, &tol(1e-6), 1e-6, 1.0);
+                    }
+                }
+
+                /// With the sensitivities left out of error control, a solver with them takes
+                /// exactly the steps of one without, whatever the derivative tolerance, as long
+                /// as their solves need no fresh preconditioner.
+                #[test]
+                fn sensitivities_take_the_same_steps() {
+                    for dae in [false, true] {
+                        let problem = problem(dae);
+                        let mut plain = new_solver(&problem);
+                        plain.set_stop_time(T_FINAL).unwrap();
+                        let plain_steps = solve_to_stop(&mut plain);
+                        let mut solver = new_sens_solver(&problem);
+                        solver.set_stop_time(T_FINAL).unwrap();
+                        let steps = solve_to_stop(&mut solver);
+                        let stats = solver.get_statistics();
+                        assert_eq!(stats.number_of_derivative_jacobian_refreshes, 0);
+                        assert_eq!(steps.len(), plain_steps.len());
+                        for (s, p) in steps.iter().zip(&plain_steps) {
+                            assert_eq!(s.as_ref().t, p.as_ref().t);
+                        }
+                        solver.state().y.assert_eq_st(plain.state().y, 0.0);
+                    }
+                }
+
+                /// A `step` after a `step_vjp` takes the step it would have taken anyway: the
+                /// derivative leaves nothing behind that changes the forward solve.
+                #[test]
+                fn step_after_step_vjp() {
+                    for dae in [false, true] {
+                        let problem = problem(dae);
+                        let mut plain = new_solver(&problem);
+                        let mut solver = new_solver(&problem);
+                        let mut p_bar = zeros();
+                        for _ in 0..20 {
+                            plain.step().unwrap();
+                            solver.step().unwrap();
+                            let end = solver.state_clone();
+                            let mut cot = with_y_dy(&end.zeros_like(), &rand(1.3), &rand(2.1));
+                            solver.step_vjp(&end, &mut cot, &mut p_bar).unwrap();
+                        }
+                        solver
+                            .state()
+                            .y
+                            .assert_eq_norm(plain.state().y, &tol(1e-8), 1e-8, 1.0);
+                    }
                 }
 
                 fn assert_no_step<'a, S>(solver: &mut S, what: &str)
                 where
-                    S: StepJvp<'a, AdTestEqn<M>> + StepVjp<'a, AdTestEqn<M>>,
+                    S: StepVjp<'a, AdTestEqn<M>>,
                 {
-                    let mut t = solver.state_clone().zeros_like();
-                    assert!(
-                        solver.step_jvp(&mut t, &zeros()).is_err(),
-                        "jvp after {what}"
-                    );
+                    let end = solver.state_clone();
+                    let mut t = end.zeros_like();
                     let mut p_bar = zeros();
                     assert!(
-                        solver.step_vjp(&mut t, &mut p_bar).is_err(),
+                        solver.step_vjp(&end, &mut t, &mut p_bar).is_err(),
                         "vjp after {what}"
                     );
                 }
 
-                /// `step_jvp` and `step_vjp` need a step to differentiate, ending at the
-                /// solver's current state: none has been taken yet, or the state has since been
-                /// modified or moved back within the step.
+                /// `step_vjp` needs a state at the end of a step: not one before any step was
+                /// taken, nor one modified or moved back within the step since.
                 #[test]
                 fn no_step() {
                     let problem = problem(false);
@@ -592,6 +658,7 @@ mod tests {
         M = crate::NalgebraMat<f64>,
         LS = crate::NalgebraLU<f64>,
         State = crate::BdfState<crate::NalgebraVec<f64>>,
+        Config = crate::BdfConfig<f64>,
         new = bdf,
         from_state = bdf_solver,
         new_sens = bdf_sens,
@@ -601,6 +668,7 @@ mod tests {
         M = crate::FaerSparseMat<f64>,
         LS = crate::FaerSparseLU<f64>,
         State = crate::BdfState<crate::FaerVec<f64>>,
+        Config = crate::BdfConfig<f64>,
         new = bdf,
         from_state = bdf_solver,
         new_sens = bdf_sens,

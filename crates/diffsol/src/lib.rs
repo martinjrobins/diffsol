@@ -133,6 +133,12 @@
 //! using the [OdeBuilder::sens_atol] and [OdeBuilder::sens_rtol] methods. Use
 //! [OdeBuilder::param_scales] to set an absolute tolerance scale for each parameter.
 //!
+//! The [Bdf] sensitivities are the derivative of the steps the solver takes
+//! ("discretise-then-optimise"), solved to [BdfConfig]'s `derivative_solve_tolerance`: make it
+//! small for gradients that agree with finite differences of the solver. Left out of error
+//! control, the sensitivities do not change the steps. For the reverse mode of the same
+//! derivative, see [StepVjp].
+//!
 //! The easiest way to obtain the sensitivity solution is to use the
 //! [SensitivitiesOdeSolverMethod::solve_dense_sensitivities] method, which will solve the forward
 //! problem and the sensitivity equations simultaneously and return the result. If you are manually
@@ -443,7 +449,7 @@ pub use ode_solver::{
     sensitivities::SensitivitiesOdeSolverMethod,
     solution::Solution,
     state::OdeSolverState,
-    step_ad::{StepJvp, StepVjp},
+    step_ad::StepVjp,
     tableau::Tableau,
     tableau::{TableauMat, TableauVec},
 };

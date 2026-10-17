@@ -275,8 +275,7 @@ impl<M: Matrix> OdeEquations for AdTestEqn<M> {
 }
 
 /// The model with parameters `p`, as an ODE or (`dae`) a DAE, at tolerances `rtol` (relative
-/// and absolute), with a tight Newton tolerance so that finite differences of solver steps are
-/// not swamped by Newton error.
+/// and absolute), with the default solver options.
 pub fn ad_test_problem<M: Matrix>(
     p: [f64; 3],
     dae: bool,
@@ -299,10 +298,6 @@ pub fn ad_test_problem<M: Matrix>(
         ctx: ctx.clone(),
     };
     let atol = M::V::from_element(N, f(rtol), ctx);
-    let ode_options = crate::OdeSolverOptions {
-        nonlinear_solver_tolerance: f(1e-6),
-        ..Default::default()
-    };
     OdeSolverProblem::new(
         eqn,
         f(rtol),
@@ -317,7 +312,7 @@ pub fn ad_test_problem<M: Matrix>(
         f(1e-3),
         false,
         Default::default(),
-        ode_options,
+        Default::default(),
     )
     .unwrap()
 }

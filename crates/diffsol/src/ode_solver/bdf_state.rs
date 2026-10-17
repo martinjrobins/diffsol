@@ -7,7 +7,7 @@ use num_traits::Zero;
 
 use super::state::StateCommon;
 
-/// What a [crate::Bdf] step needs to replay itself for [crate::StepJvp] and [crate::StepVjp]:
+/// What a [crate::Bdf] step needs to replay itself for [crate::StepVjp]:
 /// the scalars that, with the end-of-step state, fix the step as a linear map.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct BdfStepRecord<T> {

@@ -28,13 +28,16 @@ pub struct BdfConfig<T> {
     pub maximum_timestep_shrink: T,
     pub minimum_timestep_shrink: T,
     pub maximum_newton_iterations: usize,
-    /// Tolerance of the linear solves in [crate::StepJvp] and [crate::StepVjp], as
-    /// `nonlinear_solver_tolerance` is for the Newton solves: in the problem's weighted norm,
-    /// relative to its `rtol` and `atol`.
-    pub ad_linear_solve_tolerance: T,
-    /// Maximum iterations of the linear solves in [crate::StepJvp] and [crate::StepVjp]
-    /// before the Newton matrix is refreshed.
-    pub ad_linear_solve_max_iter: usize,
+    /// Tolerance of the derivative solves, as `nonlinear_solver_tolerance` is for the Newton
+    /// solves: in the problem's weighted norm, relative to its `rtol` and `atol`. The derivative
+    /// solves are those of the forward sensitivities (when solved alongside the main equations)
+    /// and of [crate::StepVjp]. Both differentiate the steps the solver takes, exactly up to this
+    /// tolerance, so make it small (e.g. `1e-10`) for derivatives that agree with finite
+    /// differences of the solver. It defaults to `nonlinear_solver_tolerance`.
+    pub derivative_solve_tolerance: T,
+    /// Maximum iterations of a derivative solve before the Newton matrix is refreshed and the
+    /// solve retried once. A forward sensitivity solve that fails again rejects the step.
+    pub derivative_solve_max_iter: usize,
 }
 
 impl<T: Scalar> OdeSolverConfig<T> for BdfConfig<T> {
@@ -76,8 +79,8 @@ impl<T: Scalar> BdfConfig<T> {
                 .min_timestep_shrink
                 .unwrap_or_else(|| T::from_f64(0.5).unwrap()),
             maximum_newton_iterations: ode_options.max_nonlinear_solver_iterations,
-            ad_linear_solve_tolerance: ode_options.nonlinear_solver_tolerance,
-            ad_linear_solve_max_iter: ode_options.max_nonlinear_solver_iterations,
+            derivative_solve_tolerance: ode_options.nonlinear_solver_tolerance,
+            derivative_solve_max_iter: ode_options.max_nonlinear_solver_iterations,
         }
     }
 }

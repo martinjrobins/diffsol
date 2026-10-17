@@ -150,6 +150,9 @@ where
     /// Get a mutable reference to the current configuration of the solver
     fn config_mut(&mut self) -> &mut Self::Config;
 
+    /// Get the statistics of the solver so far
+    fn get_statistics(&self) -> &crate::ode_solver::OdeSolverStatistics;
+
     /// Returns the current jacobian matrix of the solver, if it has one
     /// Note that this will force a full recalculation of the Jacobian.
     fn jacobian(&self) -> Option<Ref<'_, Eqn::M>>;
