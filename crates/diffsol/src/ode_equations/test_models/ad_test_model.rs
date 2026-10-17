@@ -16,68 +16,17 @@
 //! single-lane state broadcast over the lanes of its argument, as the forward sensitivity
 //! equations call them.
 
-use num_traits::{FromPrimitive, Zero};
+use num_traits::{FromPrimitive, One, Zero};
 
 use crate::{
     op::{unit::UnitCallable, ParameterisedOp},
     ConstantOp, ConstantOpSens, ConstantOpSensAdjoint, LinearOp, LinearOpTranspose, Matrix,
     NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint,
-    OdeEquations, OdeEquationsRef, OdeSolverProblem, Op, Scalar, Vector,
+    OdeEquations, OdeEquationsRef, OdeSolverProblem, Op, Vector,
 };
 
 const N: usize = 3;
 const NP: usize = 3;
-
-/// `a v`, or `a^T v`, for a 3x3 `a`.
-fn mat_vec<T: Scalar>(a: &[[T; 3]; 3], v: &[T], transpose: bool) -> [T; 3] {
-    let mut out = [T::zero(); 3];
-    for (i, out_i) in out.iter_mut().enumerate() {
-        for (j, &v_j) in v.iter().enumerate().take(3) {
-            *out_i += if transpose { a[j][i] } else { a[i][j] } * v_j;
-        }
-    }
-    out
-}
-
-fn rhs<T: Scalar>(p: [T; 3], dae: bool, y: &[T]) -> [T; 3] {
-    let last = if dae {
-        y[0] + y[1] + y[2] - p[2]
-    } else {
-        y[1] * y[1]
-    };
-    [
-        -p[0] * y[0] + p[1] * y[1] * y[2],
-        p[0] * y[0] - p[1] * y[1] * y[2] - y[1] * y[1],
-        last,
-    ]
-}
-
-/// `df/dy`
-fn jac<T: Scalar>(p: [T; 3], dae: bool, y: &[T]) -> [[T; 3]; 3] {
-    let (zero, one) = (T::zero(), T::one());
-    let two = one + one;
-    let last = if dae {
-        [one, one, one]
-    } else {
-        [zero, two * y[1], zero]
-    };
-    [
-        [-p[0], p[1] * y[2], p[1] * y[1]],
-        [p[0], -p[1] * y[2] - two * y[1], -p[1] * y[1]],
-        last,
-    ]
-}
-
-/// `df/dp`
-fn jac_p<T: Scalar>(dae: bool, y: &[T]) -> [[T; 3]; 3] {
-    let zero = T::zero();
-    let last = if dae { -T::one() } else { zero };
-    [
-        [-y[0], y[1] * y[2], zero],
-        [y[0], -y[1] * y[2], zero],
-        [zero, zero, last],
-    ]
-}
 
 pub struct AdTestRhs<M: Matrix> {
     p: [M::T; 3],
@@ -123,48 +72,74 @@ impl_op!(AdTestMass, N);
 impl<M: Matrix> NonLinearOp for AdTestRhs<M> {
     fn call_inplace(&self, x: &M::V, _t: M::T, y: &mut M::V) {
         let (p, dae) = (self.p, self.dae);
-        y.for_each_batch([x], move |y, [x], _| y.copy_from_slice(&rhs(p, dae, x)));
+        y.for_each_batch([x], move |y, [x], _| {
+            y[0] = -p[0] * x[0] + p[1] * x[1] * x[2];
+            y[1] = p[0] * x[0] - p[1] * x[1] * x[2] - x[1] * x[1];
+            y[2] = if dae {
+                x[0] + x[1] + x[2] - p[2]
+            } else {
+                x[1] * x[1]
+            };
+        });
     }
 }
 
+/// `y = J v`
 impl<M: Matrix> NonLinearOpJacobian for AdTestRhs<M> {
     fn jac_mul_inplace(&self, x: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
         let (p, dae) = (self.p, self.dae);
         y.for_each_batch([x, v], move |y, [x, v], _| {
-            y.copy_from_slice(&mat_vec(&jac(p, dae, x), v, false))
+            let two = M::T::one() + M::T::one();
+            y[0] = -p[0] * v[0] + p[1] * x[2] * v[1] + p[1] * x[1] * v[2];
+            y[1] = p[0] * v[0] - (p[1] * x[2] + two * x[1]) * v[1] - p[1] * x[1] * v[2];
+            y[2] = if dae {
+                v[0] + v[1] + v[2]
+            } else {
+                two * x[1] * v[1]
+            };
         });
     }
 }
 
+/// `y = -J^T v`
 impl<M: Matrix> NonLinearOpAdjoint for AdTestRhs<M> {
     fn jac_transpose_mul_inplace(&self, x: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
         let (p, dae) = (self.p, self.dae);
         y.for_each_batch([x, v], move |y, [x, v], _| {
-            let jt_v = mat_vec(&jac(p, dae, x), v, true);
-            for (y, jt_v) in y.iter_mut().zip(jt_v) {
-                *y = -jt_v;
-            }
+            let two = M::T::one() + M::T::one();
+            // the last row of J is (1, 1, 1) for the DAE and (0, 2 x1, 0) for the ODE
+            let (l0, l1, l2) = if dae {
+                (v[2], v[2], v[2])
+            } else {
+                (M::T::zero(), two * x[1] * v[2], M::T::zero())
+            };
+            y[0] = p[0] * v[0] - p[0] * v[1] - l0;
+            y[1] = -p[1] * x[2] * v[0] + (p[1] * x[2] + two * x[1]) * v[1] - l1;
+            y[2] = -p[1] * x[1] * v[0] + p[1] * x[1] * v[1] - l2;
         });
     }
 }
 
+/// `y = f_p v`
 impl<M: Matrix> NonLinearOpSens for AdTestRhs<M> {
     fn sens_mul_inplace(&self, x: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
         let dae = self.dae;
         y.for_each_batch([x, v], move |y, [x, v], _| {
-            y.copy_from_slice(&mat_vec(&jac_p(dae, x), v, false))
+            y[0] = -x[0] * v[0] + x[1] * x[2] * v[1];
+            y[1] = x[0] * v[0] - x[1] * x[2] * v[1];
+            y[2] = if dae { -v[2] } else { M::T::zero() };
         });
     }
 }
 
+/// `y = -f_p^T v`
 impl<M: Matrix> NonLinearOpSensAdjoint for AdTestRhs<M> {
     fn sens_transpose_mul_inplace(&self, x: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
         let dae = self.dae;
         y.for_each_batch([x, v], move |y, [x, v], _| {
-            let jpt_v = mat_vec(&jac_p(dae, x), v, true);
-            for (y, jpt_v) in y.iter_mut().zip(jpt_v) {
-                *y = -jpt_v;
-            }
+            y[0] = x[0] * v[0] - x[0] * v[1];
+            y[1] = -x[1] * x[2] * v[0] + x[1] * x[2] * v[1];
+            y[2] = if dae { v[2] } else { M::T::zero() };
         });
     }
 }
@@ -173,7 +148,9 @@ impl<M: Matrix> ConstantOp for AdTestInit<M> {
     fn call_inplace(&self, _t: M::T, y: &mut M::V) {
         let p2 = self.p[2];
         y.for_each_batch([], move |y, [], _| {
-            y.copy_from_slice(&[p2, M::T::zero(), M::T::zero()])
+            y[0] = p2;
+            y[1] = M::T::zero();
+            y[2] = M::T::zero();
         });
     }
 }
@@ -181,7 +158,9 @@ impl<M: Matrix> ConstantOp for AdTestInit<M> {
 impl<M: Matrix> ConstantOpSens for AdTestInit<M> {
     fn sens_mul_inplace(&self, _t: M::T, v: &M::V, y: &mut M::V) {
         y.for_each_batch([v], |y, [v], _| {
-            y.copy_from_slice(&[v[2], M::T::zero(), M::T::zero()])
+            y[0] = v[2];
+            y[1] = M::T::zero();
+            y[2] = M::T::zero();
         });
     }
 }
@@ -189,7 +168,9 @@ impl<M: Matrix> ConstantOpSens for AdTestInit<M> {
 impl<M: Matrix> ConstantOpSensAdjoint for AdTestInit<M> {
     fn sens_transpose_mul_inplace(&self, _t: M::T, v: &M::V, y: &mut M::V) {
         y.for_each_batch([v], |y, [v], _| {
-            y.copy_from_slice(&[M::T::zero(), M::T::zero(), -v[0]])
+            y[0] = M::T::zero();
+            y[1] = M::T::zero();
+            y[2] = -v[0];
         });
     }
 }
