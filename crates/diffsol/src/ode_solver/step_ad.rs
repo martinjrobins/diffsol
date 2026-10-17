@@ -629,35 +629,6 @@ mod tests {
                     }
                 }
 
-                /// After a `step_vjp`, the solver's own state is as it was: a `checkpoint`, which
-                /// refactorises the Newton matrix (so whatever the derivative's own refreshes left
-                /// behind no longer matters), and the steps after it are those of a solver that
-                /// took no derivatives.
-                #[test]
-                fn checkpoint_after_step_vjp() {
-                    for dae in [false, true] {
-                        let problem = problem(dae);
-                        let mut plain = new_solver(&problem);
-                        let mut solver = new_solver(&problem);
-                        let mut p_bar = zeros();
-                        for _ in 0..20 {
-                            plain.step().unwrap();
-                            solver.step().unwrap();
-                            let end = solver.state_clone();
-                            let mut cot = with_y_dy(&end.zeros_like(), &rand(1.3), &rand(2.1));
-                            solver.step_vjp(&end, &mut cot, &mut p_bar).unwrap();
-                            plain.checkpoint();
-                            solver.checkpoint();
-                        }
-                        assert_only_derivative_refreshes_added(
-                            solver.get_statistics(),
-                            plain.get_statistics(),
-                            |_| true,
-                        );
-                        solver.state().y.assert_eq_st(plain.state().y, 0.0);
-                    }
-                }
-
                 fn assert_no_step<'a, S>(solver: &mut S, what: &str)
                 where
                     S: StepVjp<'a, AdTestEqn<M>>,

@@ -1759,27 +1759,25 @@ where
             .last_step
             .ok_or(ode_solver_error!(NoStepToDifferentiate))?;
         let nparams = self.ode_problem.eqn.rhs().nparams();
-        let shape = |m: &M| format!("{} x {}", m.nrows(), m.ncols());
+        // sizes as (rows, columns of a matrix), formatted only on a mismatch
+        let shape = |m: &M| (m.nrows(), Some(m.ncols()));
+        let vector = |v: &Eqn::V| (v.len(), None);
         for (what, found, expected) in [
-            ("y", cotangent.y.len().to_string(), end.y.len().to_string()),
-            (
-                "dy",
-                cotangent.dy.len().to_string(),
-                end.y.len().to_string(),
-            ),
+            ("y", vector(&cotangent.y), vector(&end.y)),
+            ("dy", vector(&cotangent.dy), vector(&end.dy)),
             ("diff", shape(&cotangent.diff), shape(&end.diff)),
-            (
-                "the parameter cotangent",
-                p_bar.len().to_string(),
-                nparams.to_string(),
-            ),
+            ("the parameter cotangent", vector(p_bar), (nparams, None)),
         ] {
             if found != expected {
+                let size = |(rows, cols): (usize, Option<usize>)| match cols {
+                    Some(cols) => format!("{rows} x {cols}"),
+                    None => rows.to_string(),
+                };
                 return Err(DiffsolError::from(
                     OdeSolverError::StepDifferentiationSizeMismatch {
                         what,
-                        found,
-                        expected,
+                        found: size(found),
+                        expected: size(expected),
                     },
                 ));
             }
