@@ -12,10 +12,10 @@ use num_traits::{abs, FromPrimitive, One, Signed, ToPrimitive, Zero};
 use crate::ode_solver_error;
 use crate::{
     matrix::MatrixRef, nonlinear_solver::root::RootFinder, op::bdf::BdfCallable,
-    AugmentedOdeEquations, BdfState, DenseMatrix, JacobianUpdate, NonLinearOp, NonLinearSolver,
-    OdeEquationsImplicit, OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeSolverMethod,
-    OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, Scalar, SensEquations, Vector,
-    VectorRef, VectorView,
+    AugmentedOdeEquations, BdfState, Context, DenseMatrix, JacobianUpdate, NonLinearOp,
+    NonLinearSolver, OdeEquationsImplicit, OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens,
+    OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, Scalar,
+    SensEquations, Vector, VectorRef, VectorView,
 };
 
 use super::adjoint::AdjointOdeSolverMethod;
@@ -1739,6 +1739,53 @@ where
         self.ad_jacobian_refreshes += 1;
     }
 
+    /// Check that a tangent or cotangent's lanes are a whole number of directions for each lane of
+    /// the state, and that the parameter tangent or cotangent `p` fits them: as an input
+    /// (`p_is_output == false`) it broadcasts into the tangent's lanes, as an output it has
+    /// exactly as many.
+    fn ad_check_lanes(
+        &self,
+        tangent: &BdfState<Eqn::V, M>,
+        p: &Eqn::V,
+        p_is_output: bool,
+    ) -> Result<(), DiffsolError> {
+        let state_lanes = self.state.y.context().nbatch();
+        let lanes = tangent.y.context().nbatch();
+        let mismatch = |what, found, expected: String| {
+            Err(DiffsolError::from(
+                OdeSolverError::StepDifferentiationBatchMismatch {
+                    what,
+                    found,
+                    expected,
+                    state_lanes,
+                },
+            ))
+        };
+        if !lanes.is_multiple_of(state_lanes) {
+            return mismatch("y", lanes, format!("a multiple of {state_lanes}"));
+        }
+        for (what, found) in [
+            ("dy", tangent.dy.context().nbatch()),
+            ("diff", tangent.diff.context().nbatch()),
+        ] {
+            if found != lanes {
+                return mismatch(what, found, lanes.to_string());
+            }
+        }
+        let p_lanes = p.context().nbatch();
+        if p_is_output && p_lanes != lanes {
+            return mismatch("the parameter cotangent", p_lanes, lanes.to_string());
+        }
+        if !p_is_output && !lanes.is_multiple_of(p_lanes) {
+            return mismatch(
+                "the parameter tangent",
+                p_lanes,
+                format!("a divisor of {lanes}"),
+            );
+        }
+        Ok(())
+    }
+
     /// Copy the step data of the state at the end of the step into `tangent`.
     fn ad_mark_end_of_step(&self, tangent: &mut BdfState<Eqn::V, M>) {
         tangent.t = self.state.t;
@@ -1767,6 +1814,7 @@ where
     /// `dy` are all set, and the step data (`t`, `h`, `order`) match the solver's state.
     fn step_jvp(&mut self, tangent: &mut Self::State, p_dot: &Eqn::V) -> Result<(), DiffsolError> {
         let step = self.ad_step()?;
+        self.ad_check_lanes(tangent, p_dot, false)?;
         self.ad_with_step_op(step, |s| s.ad_jvp(step, tangent, p_dot))
     }
 }
@@ -1881,6 +1929,7 @@ where
         p_bar: &mut Eqn::V,
     ) -> Result<(), DiffsolError> {
         let step = self.ad_step()?;
+        self.ad_check_lanes(cotangent, p_bar, true)?;
         self.ad_with_step_op(step, |s| s.ad_vjp(step, cotangent, p_bar))
     }
 }

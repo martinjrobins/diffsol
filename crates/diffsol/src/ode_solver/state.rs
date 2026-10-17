@@ -872,12 +872,23 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
     /// Used to allocate tangent and cotangent states for [crate::StepJvp] and
     /// [crate::StepVjp].
     fn zeros_like(&self) -> Self {
+        self.zeros_like_with_directions(1)
+            .expect("a state's own lane count is a valid context")
+    }
+
+    /// Like [Self::zeros_like], but with `ndirections` lanes for every lane of this state: a
+    /// tangent or cotangent carrying that many directions through [crate::StepJvp] or
+    /// [crate::StepVjp] at once. Lane `b * ndirections + k` holds direction `k` of batch `b`.
+    fn zeros_like_with_directions(&self, ndirections: usize) -> Result<Self, DiffsolError> {
         let mut z = self.clone();
         let zm = z.as_mut();
         for v in [zm.y, zm.dy, zm.g, zm.dg, zm.s, zm.ds, zm.sg, zm.dsg] {
-            v.fill(V::T::zero());
+            let ctx = v
+                .context()
+                .clone_with_nbatch(v.context().nbatch() * ndirections)?;
+            *v = V::zeros(v.len(), ctx);
         }
-        z
+        Ok(z)
     }
 
     /// Set the ODE problem for the state, allocating any necessary data structures.

@@ -228,19 +228,23 @@ where
         }
     }
 
-    fn zeros_like(&self) -> Self {
-        let zeros = |m: &M| M::zeros(m.nrows(), m.ncols(), m.context().clone());
+    fn zeros_like_with_directions(&self, ndirections: usize) -> Result<Self, DiffsolError> {
         let mut z = self.clone();
-        z.diff = zeros(&self.diff);
-        z.sdiff = zeros(&self.sdiff);
-        z.gdiff = zeros(&self.gdiff);
-        z.sgdiff = zeros(&self.sgdiff);
         for v in [
             &mut z.y, &mut z.dy, &mut z.g, &mut z.dg, &mut z.s, &mut z.ds, &mut z.sg, &mut z.dsg,
         ] {
-            v.fill(V::T::zero());
+            let ctx = v
+                .context()
+                .clone_with_nbatch(v.context().nbatch() * ndirections)?;
+            *v = V::zeros(v.len(), ctx);
         }
-        z
+        for m in [&mut z.diff, &mut z.sdiff, &mut z.gdiff, &mut z.sgdiff] {
+            let ctx = m
+                .context()
+                .clone_with_nbatch(m.context().nbatch() * ndirections)?;
+            *m = M::zeros(m.nrows(), m.ncols(), ctx);
+        }
+        Ok(z)
     }
 
     fn into_common(self) -> StateCommon<V> {

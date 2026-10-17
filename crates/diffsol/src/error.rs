@@ -67,6 +67,15 @@ pub enum OdeSolverError {
     #[error("Step derivatives need the main equations to be integrated")]
     StepDifferentiationNotSupported,
     #[error(
+        "Step derivative lanes mismatch: {what} has {found} lanes, expected {expected} (the solver state has {state_lanes})"
+    )]
+    StepDifferentiationBatchMismatch {
+        what: &'static str,
+        found: usize,
+        expected: String,
+        state_lanes: usize,
+    },
+    #[error(
         "Exceeded maximum number of nonlinear solver failures ({num_failures}) at time = {time}"
     )]
     TooManyNonlinearSolverFailures { time: f64, num_failures: usize },
