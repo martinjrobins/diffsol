@@ -308,7 +308,7 @@ where
 
         let op = if integrate_main_eqn {
             // setup linear solver for first step
-            let bdf_callable = BdfCallable::new(&problem.eqn, problem.context().clone());
+            let mut bdf_callable = BdfCallable::new(&problem.eqn, problem.context().clone());
             bdf_callable.set_c(state.h, alpha[state.order]);
             nonlinear_solver.set_problem(&bdf_callable);
             nonlinear_solver.reset_jacobian(&bdf_callable, &state.y, state.t);
@@ -423,11 +423,11 @@ where
         let nstates = problem.eqn.rhs().nstates();
         let aug_ctx = augmented_eqn.aug_context().clone();
         ret.s_op = if integrate_main_eqn {
-            let bdf_callable = BdfCallable::new_no_jacobian(augmented_eqn, aug_ctx.clone());
+            let mut bdf_callable = BdfCallable::new_no_jacobian(augmented_eqn, aug_ctx.clone());
             bdf_callable.set_c(ret.state.h, ret.alpha[ret.state.order]);
             Some(bdf_callable)
         } else {
-            let bdf_callable = BdfCallable::new(augmented_eqn, aug_ctx.clone());
+            let mut bdf_callable = BdfCallable::new(augmented_eqn, aug_ctx.clone());
             bdf_callable.set_c(ret.state.h, ret.alpha[ret.state.order]);
             ret.nonlinear_solver.set_problem(&bdf_callable);
             ret.nonlinear_solver
@@ -1638,11 +1638,11 @@ where
         step: &BdfAdStep<Eqn::T>,
         f: impl FnOnce(&mut Self) -> R,
     ) -> R {
-        let op = self.op.as_ref().unwrap();
-        op.set_c(step.record.h, self.alpha[step.record.order]);
+        let alpha = self.alpha[step.record.order];
+        self.op.as_mut().unwrap().set_c(step.record.h, alpha);
         let result = f(self);
-        let op = self.op.as_ref().unwrap();
-        op.set_c(self.state.h, self.alpha[self.state.order]);
+        let (h, alpha) = (self.state.h, self.alpha[self.state.order]);
+        self.op.as_mut().unwrap().set_c(h, alpha);
         result
     }
 
