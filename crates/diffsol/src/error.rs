@@ -75,6 +75,12 @@ pub enum OdeSolverError {
         expected: String,
         state_lanes: usize,
     },
+    #[error("Step derivative size mismatch: {what} has {found}, expected {expected}")]
+    StepDifferentiationSizeMismatch {
+        what: &'static str,
+        found: String,
+        expected: String,
+    },
     #[error(
         "Exceeded maximum number of nonlinear solver failures ({num_failures}) at time = {time}"
     )]

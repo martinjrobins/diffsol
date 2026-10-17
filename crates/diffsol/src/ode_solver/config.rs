@@ -29,14 +29,18 @@ pub struct BdfConfig<T> {
     pub minimum_timestep_shrink: T,
     pub maximum_newton_iterations: usize,
     /// Tolerance of the derivative solves, as `nonlinear_solver_tolerance` is for the Newton
-    /// solves: in the problem's weighted norm, relative to its `rtol` and `atol`. The derivative
-    /// solves are those of the forward sensitivities (when solved alongside the main equations)
-    /// and of [crate::StepVjp]. Both differentiate the steps the solver takes, exactly up to this
-    /// tolerance, so make it small (e.g. `1e-10`) for derivatives that agree with finite
-    /// differences of the solver. It defaults to `nonlinear_solver_tolerance`.
+    /// solves: in the problem's weighted norm, so as a fraction of the error tolerance set by its
+    /// `rtol` and `atol`. The derivative solves are those of the forward sensitivities (when
+    /// solved alongside the main equations) and of [crate::StepVjp]. Both differentiate the steps
+    /// the solver takes, exactly up to this tolerance, so make it small for derivatives that agree
+    /// with finite differences of the solver: `1e-6`, say, a millionth of the error tolerance.
+    /// Much smaller values ask for more than the rounding error of the solves allows, so they
+    /// are met only with a fresh Newton matrix, and force refreshes. It defaults to
+    /// `nonlinear_solver_tolerance`.
     pub derivative_solve_tolerance: T,
     /// Maximum iterations of a derivative solve before the Newton matrix is refreshed and the
-    /// solve retried once. A forward sensitivity solve that fails again rejects the step.
+    /// solve retried once. A forward sensitivity solve that fails again rejects the step, which
+    /// is retried with a smaller step size.
     pub derivative_solve_max_iter: usize,
 }
 

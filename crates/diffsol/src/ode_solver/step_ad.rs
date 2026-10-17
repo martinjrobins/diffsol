@@ -27,7 +27,8 @@
 //! [crate::SensitivitiesOdeSolverMethod]. With [crate::Bdf], they differentiate the same steps
 //! the same way, solved to the same `derivative_solve_tolerance` (see [crate::BdfConfig]), so the
 //! two agree as closely as that tolerance. Leave the sensitivities out of error control (the
-//! default, see [crate::OdeBuilder::sens_rtol]) for the steps to be those of a run without them.
+//! default, see [crate::OdeBuilder::sens_rtol]) for the steps to be those of a run without them,
+//! as long as no sensitivity solve needs a fresh Newton matrix.
 
 use crate::{error::DiffsolError, OdeEquationsImplicitAdjoint, OdeSolverMethod};
 
@@ -40,9 +41,10 @@ pub trait StepVjp<'a, Eqn: OdeEquationsImplicitAdjoint + 'a>: OdeSolverMethod<'a
     /// has been added to `p_bar` (of length `nparams`).
     ///
     /// Fails with `NoStepToDifferentiate` if `end` is not the end of a step (it is the initial
-    /// state, or was modified after the step), and with `StepDifferentiationBatchMismatch` if the
-    /// lanes of `cotangent` and `p_bar` do not fit those of `end` (see the
-    /// [module docs](self)). On any other error, `cotangent` and `p_bar` are left partly
+    /// state, or was modified after the step), with `StepDifferentiationSizeMismatch` if
+    /// `cotangent` does not have the sizes of `end` or `p_bar` does not have `nparams` elements,
+    /// and with `StepDifferentiationBatchMismatch` if the lanes of `cotangent` and `p_bar` do not
+    /// fit those of `end` (see the [module docs](self)). On any other error, `cotangent` and `p_bar` are left partly
     /// transformed and must not be reused.
     ///
     /// Its linear solves use the solver's own Newton matrix as a preconditioner. If that is too
@@ -68,8 +70,9 @@ mod tests {
 
     pub(super) const P: [f64; 3] = [1.5, 3.0, 1.0];
     pub(super) const T_FINAL: f64 = 5.0;
-    /// A derivative solve tolerance tight enough for the derivatives to agree to rounding.
-    pub(super) const DERIVATIVE_TOL: f64 = 1e-10;
+    /// A derivative solve tolerance, a millionth of the error tolerance, tight enough for the
+    /// derivatives to agree to the tests' tolerances.
+    pub(super) const DERIVATIVE_TOL: f64 = 1e-6;
     /// An iteration limit on the derivative solves low enough that some of them need a fresh
     /// preconditioner, but not so low that they then fail.
     pub(super) const MAX_ITER_FORCING_REFRESHES: usize = 2;
@@ -484,9 +487,10 @@ mod tests {
                     batched_directions(true);
                 }
 
-                /// A parameter cotangent with fewer lanes than the cotangent is an error.
+                /// A parameter cotangent with fewer lanes than the cotangent, or with the wrong
+                /// number of elements, is an error.
                 #[test]
-                fn batch_mismatch() {
+                fn input_mismatch() {
                     let problem = problem(false);
                     let mut solver = new_solver(&problem);
                     solver.step().unwrap();
@@ -503,6 +507,16 @@ mod tests {
                             ))
                         ),
                         "1-lane p_bar, 3-lane cotangent"
+                    );
+                    let r = solver.step_vjp(&end, &mut end.zeros_like(), &mut V::zeros(2, ctx));
+                    assert!(
+                        matches!(
+                            r,
+                            Err(DiffsolError::OdeSolverError(
+                                OdeSolverError::StepDifferentiationSizeMismatch { .. }
+                            ))
+                        ),
+                        "p_bar of 2 elements, 3 parameters"
                     );
                     solver.step_vjp(&end, &mut cot, &mut with_lanes(3)).unwrap();
                 }
@@ -542,20 +556,17 @@ mod tests {
                 }
 
                 /// A sensitivity solve that the Newton matrix is too poor a preconditioner for
-                /// (forced with a tiny iteration limit, at a tolerance a fresh matrix meets within
-                /// it) refreshes it and retries, rather than rejecting the step, and still reaches
-                /// the same sensitivities.
+                /// (forced with a tiny iteration limit, which a fresh matrix still meets at
+                /// `DERIVATIVE_TOL`) refreshes it and retries, rather than rejecting the step, and
+                /// still reaches the same sensitivities.
                 #[test]
                 fn sensitivity_solve_refreshes() {
                     for dae in [false, true] {
                         let problem = problem(dae);
-                        let tol_meeting_the_limit = 1e-6;
                         let mut plain = new_sens_solver(&problem);
-                        plain.config_mut().derivative_solve_tolerance = tol_meeting_the_limit;
                         plain.set_stop_time(T_FINAL).unwrap();
                         solve_to_stop(&mut plain);
                         let mut solver = new_sens_solver(&problem);
-                        solver.config_mut().derivative_solve_tolerance = tol_meeting_the_limit;
                         solver.config_mut().derivative_solve_max_iter = MAX_ITER_FORCING_REFRESHES;
                         solver.set_stop_time(T_FINAL).unwrap();
                         solve_to_stop(&mut solver);
@@ -615,6 +626,35 @@ mod tests {
                             .state()
                             .y
                             .assert_eq_norm(plain.state().y, &tol(1e-8), 1e-8, 1.0);
+                    }
+                }
+
+                /// After a `step_vjp`, the solver's own state is as it was: a `checkpoint`, which
+                /// refactorises the Newton matrix (so whatever the derivative's own refreshes left
+                /// behind no longer matters), and the steps after it are those of a solver that
+                /// took no derivatives.
+                #[test]
+                fn checkpoint_after_step_vjp() {
+                    for dae in [false, true] {
+                        let problem = problem(dae);
+                        let mut plain = new_solver(&problem);
+                        let mut solver = new_solver(&problem);
+                        let mut p_bar = zeros();
+                        for _ in 0..20 {
+                            plain.step().unwrap();
+                            solver.step().unwrap();
+                            let end = solver.state_clone();
+                            let mut cot = with_y_dy(&end.zeros_like(), &rand(1.3), &rand(2.1));
+                            solver.step_vjp(&end, &mut cot, &mut p_bar).unwrap();
+                            plain.checkpoint();
+                            solver.checkpoint();
+                        }
+                        assert_only_derivative_refreshes_added(
+                            solver.get_statistics(),
+                            plain.get_statistics(),
+                            |_| true,
+                        );
+                        solver.state().y.assert_eq_st(plain.state().y, 0.0);
                     }
                 }
 

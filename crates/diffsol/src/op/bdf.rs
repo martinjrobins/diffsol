@@ -1,8 +1,7 @@
 use crate::{
     matrix::DenseMatrix, LinearOp, LinearOpTranspose, Matrix, MatrixSparsity, NonLinearOp,
-    NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint,
-    OdeEquationsImplicit, OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, Op, Scale, Vector,
-    VectorViewMut,
+    NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSensAdjoint, OdeEquationsImplicit,
+    OdeEquationsImplicitAdjoint, Op, Scale, Vector, VectorViewMut,
 };
 use log::debug;
 use num_traits::{One, ToPrimitive, Zero};
@@ -206,7 +205,7 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
     /// prediction `y0`, written into `out`. This is linear in `(diff, y0)`, so it also maps their
     /// tangents. `gamma` must be `gamma[1..]`, offset to line up with the `1..order + 1` column
     /// range psi sums over.
-    pub fn psi_neg_y0_into<M: DenseMatrix<V = Eqn::V, T = Eqn::T>>(
+    fn psi_neg_y0_into<M: DenseMatrix<V = Eqn::V, T = Eqn::T>>(
         diff: &M,
         gamma: &[Eqn::T],
         alpha: &[Eqn::T],
@@ -331,14 +330,6 @@ impl<Eqn: OdeEquationsImplicitAdjoint> NonLinearOpAdjoint for BdfCallable<Eqn> {
     }
 }
 
-/// `dF/dp v = -c f_p v`, taking the mass matrix to be independent of the parameters.
-impl<Eqn: OdeEquationsImplicitSens> NonLinearOpSens for BdfCallable<Eqn> {
-    fn sens_mul_inplace(&self, x: &Eqn::V, t: Eqn::T, v: &Eqn::V, y: &mut Eqn::V) {
-        self.eqn.rhs().sens_mul_inplace(x, t, v, y);
-        y.mul_assign(Scale(-self.c));
-    }
-}
-
 /// `-(dF/dp)^T v = c f_p^T v`, taking the mass matrix to be independent of the parameters.
 impl<Eqn: OdeEquationsImplicitAdjoint> NonLinearOpSensAdjoint for BdfCallable<Eqn> {
     fn sens_transpose_mul_inplace(&self, x: &Eqn::V, t: Eqn::T, v: &Eqn::V, y: &mut Eqn::V) {
@@ -348,39 +339,13 @@ impl<Eqn: OdeEquationsImplicitAdjoint> NonLinearOpSensAdjoint for BdfCallable<Eq
     }
 }
 
-impl<Eqn: OdeEquationsImplicitSens> BdfCallable<Eqn> {
-    /// The right-hand side `b` of the tangent of `F(y) = 0` at its solution `y = x`,
-    /// `(M - c f'(x)) y_dot = b`, given the tangents of the history `diff_dot`, of the
-    /// prediction `y0_dot` and of the parameters `p_dot`:
-    /// `b = -(dF/d(psi - y0) (psi_dot - y0_dot) + dF/dp p_dot)`, with `dF/d(psi - y0) = M`.
-    #[allow(clippy::too_many_arguments)]
-    pub fn tangent_rhs<M: DenseMatrix<V = Eqn::V, T = Eqn::T>>(
-        &self,
-        x: &Eqn::V,
-        t: Eqn::T,
-        diff_dot: &M,
-        gamma: &[Eqn::T],
-        alpha: &[Eqn::T],
-        order: usize,
-        y0_dot: &Eqn::V,
-        p_dot: &Eqn::V,
-        b: &mut Eqn::V,
-    ) {
-        let mut psi_dot = y0_dot.clone();
-        Self::psi_neg_y0_into(diff_dot, gamma, alpha, order, y0_dot, &mut psi_dot);
-        self.sens_mul_inplace(x, t, p_dot, b);
-        match self.eqn.mass() {
-            Some(mass) => mass.gemv_inplace(&psi_dot, t, Eqn::T::one(), b),
-            None => b.axpy(Eqn::T::one(), &psi_dot, Eqn::T::one()),
-        }
-        b.mul_assign(Scale(-Eqn::T::one()));
-    }
-}
-
 impl<Eqn: OdeEquationsImplicitAdjoint> BdfCallable<Eqn> {
-    /// The transpose of [Self::tangent_rhs]: given the cotangent `w` of `b` (so
-    /// `(M - c f'(x))^T w` is the cotangent of `y`), add the cotangents of the history columns
-    /// `1..=order` to `diff_bar`, of the prediction to `y0_bar` and of the parameters to `p_bar`.
+    /// The cotangents of the inputs of `F(y) = 0` at its solution `y = x`: the history `diff`
+    /// (through `psi - y0`), the prediction `y0` and the parameters. The tangent of the solution
+    /// solves `(M - c f'(x)) y_dot = b`, with `b = -(M (psi_dot - y0_dot) + dF/dp p_dot)` and
+    /// `dF/dp = -c f_p`. Given the cotangent `w` of `b` (so `(M - c f'(x))^T w` is the cotangent
+    /// of `y`), add the cotangents of the history columns `1..=order` to `diff_bar`, of the
+    /// prediction to `y0_bar` and of the parameters to `p_bar`.
     #[allow(clippy::too_many_arguments)]
     pub fn adjoint_inputs<M: DenseMatrix<V = Eqn::V, T = Eqn::T>>(
         &self,
@@ -449,10 +414,12 @@ mod tests {
     /// each other, with and without a mass matrix, on a model whose Jacobian is not symmetric.
     #[test]
     fn test_bdf_callable_derivatives() {
-        use crate::ode_equations::test_models::ad_test_model::ad_test_problem;
+        use crate::ode_equations::test_models::ad_test_model::{ad_test_problem, AdTestEqn};
         use crate::{
-            NonLinearOpAdjoint, NonLinearOpSens, NonLinearOpSensAdjoint, OdeEquations, Op,
+            LinearOp, NonLinearOpAdjoint, NonLinearOpSens, NonLinearOpSensAdjoint, OdeEquations,
+            Op, Scale,
         };
+        use std::ops::MulAssign;
         for dae in [false, true] {
             let problem = ad_test_problem::<Mcpu>([1.5, 3.0, 1.0], dae, 1e-8);
             let mut op = BdfCallable::new(&problem.eqn, *problem.context());
@@ -477,24 +444,37 @@ mod tests {
                 );
             }
 
-            // <w, F_p p_dot> = -<-F_p^T w, p_dot>
+            // <w, F_p p_dot> = -<-F_p^T w, p_dot>, with F_p = -c f_p
             let mut fp = Vcpu::zeros(n, ctx);
-            op.sens_mul_inplace(&x, t, &p_dot, &mut fp);
+            problem.eqn.rhs().sens_mul_inplace(&x, t, &p_dot, &mut fp);
+            fp.mul_assign(Scale(-op.c));
             let mut fpt = Vcpu::zeros(np, ctx);
             op.sens_transpose_mul_inplace(&x, t, &w, &mut fpt);
             assert!((dot(&w, &fp) + dot(&fpt, &p_dot)).abs() < 1e-12);
 
-            // tangent_rhs against adjoint_inputs: <w, b> = <diff_bar, diff_dot> + <y0_bar, y0_dot>
-            // + <p_bar, p_dot>
+            // adjoint_inputs against the tangent right-hand side it transposes,
+            // b = -(M (psi_dot - y0_dot) + F_p p_dot):
+            // <w, b> = <diff_bar, diff_dot> + <y0_bar, y0_dot> + <p_bar, p_dot>
             let (gamma, alpha) = ([1.0, 1.5, 1.8], [0.0, 0.8, 0.9, 1.0]);
             let order = 2;
             let ncols = 6;
             let diff_dot = Mcpu::from_vec(n, ncols, rand(n * ncols, 0.4), ctx);
             let y0_dot = Vcpu::from_vec(rand(n, 3.1), ctx);
-            let mut b = Vcpu::zeros(n, ctx);
-            op.tangent_rhs(
-                &x, t, &diff_dot, &gamma, &alpha, order, &y0_dot, &p_dot, &mut b,
+            let mut psi_dot = Vcpu::zeros(n, ctx);
+            BdfCallable::<&AdTestEqn<Mcpu>>::psi_neg_y0_into(
+                &diff_dot,
+                &gamma,
+                &alpha,
+                order,
+                &y0_dot,
+                &mut psi_dot,
             );
+            let mut b = fp.clone();
+            match problem.eqn.mass() {
+                Some(mass) => mass.gemv_inplace(&psi_dot, t, 1.0, &mut b),
+                None => b.axpy(1.0, &psi_dot, 1.0),
+            }
+            b.mul_assign(Scale(-1.0));
             let mut diff_bar = Mcpu::zeros(n, ncols, ctx);
             let mut y0_bar = Vcpu::zeros(n, ctx);
             let mut p_bar = Vcpu::zeros(np, ctx);

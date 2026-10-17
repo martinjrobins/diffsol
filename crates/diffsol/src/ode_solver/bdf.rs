@@ -1316,11 +1316,6 @@ where
             "Taking BDF step at time {} with step size {} and order {}",
             self.state.t, self.state.h, self.state.order
         );
-        // the op's c is h alpha[order] of the step about to be taken, which every forward path
-        // keeps, but [StepVjp::step_vjp] leaves it at the c of the step it differentiated
-        if let Some(op) = self.op.as_mut() {
-            op.set_c(self.state.h, self.alpha[self.state.order]);
-        }
         let mut safety: Eqn::T;
         let mut error_norm: Eqn::T;
         let problem = self.ode_problem;
@@ -1402,6 +1397,11 @@ where
                 && self.sensitivity_solve(self.t_predict).is_err()
             {
                 solve_result = Err(ode_solver_error!(SensitivitySolveFailed));
+                // with the main equations, the sensitivity solve has already refreshed the Newton
+                // matrix at this c and retried, so another refresh would not help: cut the step
+                if self.op.is_some() {
+                    convergence_fail = true;
+                }
             }
 
             // handle case where either nonlinear solve failed
@@ -1743,8 +1743,9 @@ where
 
     /// Check the inputs of [StepVjp::step_vjp], and return the record of the step that ended at
     /// `end`: the solver integrates the main equations, `end` is the end of a step, the
-    /// cotangent's lanes are a whole number of directions for each lane of `end`, and the
-    /// parameter cotangent `p_bar` has exactly as many.
+    /// cotangent has the sizes of `end` and `p_bar` has `nparams` elements, the cotangent's
+    /// lanes are a whole number of directions for each lane of `end`, and `p_bar` has exactly
+    /// as many.
     fn vjp_check_inputs(
         &self,
         end: &BdfState<Eqn::V, M>,
@@ -1757,6 +1758,32 @@ where
         let step = end
             .last_step
             .ok_or(ode_solver_error!(NoStepToDifferentiate))?;
+        let nparams = self.ode_problem.eqn.rhs().nparams();
+        let shape = |m: &M| format!("{} x {}", m.nrows(), m.ncols());
+        for (what, found, expected) in [
+            ("y", cotangent.y.len().to_string(), end.y.len().to_string()),
+            (
+                "dy",
+                cotangent.dy.len().to_string(),
+                end.y.len().to_string(),
+            ),
+            ("diff", shape(&cotangent.diff), shape(&end.diff)),
+            (
+                "the parameter cotangent",
+                p_bar.len().to_string(),
+                nparams.to_string(),
+            ),
+        ] {
+            if found != expected {
+                return Err(DiffsolError::from(
+                    OdeSolverError::StepDifferentiationSizeMismatch {
+                        what,
+                        found,
+                        expected,
+                    },
+                ));
+            }
+        }
         let state_lanes = end.y.context().nbatch();
         let lanes = cotangent.y.context().nbatch();
         let mismatch = |what, found, expected: String| {
@@ -1801,7 +1828,7 @@ where
             from_init,
             h_end,
         } = step;
-        // differentiate with the step's own c, which the next forward step replaces again
+        // differentiate with the step's own c, which step_vjp restores afterwards
         let alpha = self.alpha[order];
         self.op.as_mut().unwrap().set_c(h, alpha);
         let one = Eqn::T::one();
@@ -1885,7 +1912,12 @@ where
         p_bar: &mut Eqn::V,
     ) -> Result<(), DiffsolError> {
         let step = self.vjp_check_inputs(end, cotangent, p_bar)?;
-        self.ad_vjp(step, end, cotangent, p_bar)
+        let result = self.ad_vjp(step, end, cotangent, p_bar);
+        // the derivative used the replayed step's c: put back the one of the solver's own state,
+        // which the forward solve and its Jacobian schedule expect
+        let alpha = self.alpha[self.state.order];
+        self.op.as_mut().unwrap().set_c(self.state.h, alpha);
+        result
     }
 }
 
