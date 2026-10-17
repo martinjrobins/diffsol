@@ -2314,16 +2314,16 @@ mod test {
         let mut s = problem.bdf_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 14
-        number_of_steps: 56
-        number_of_error_test_failures: 1
-        number_of_nonlinear_solver_iterations: 118
+        number_of_linear_solver_setups: 12
+        number_of_steps: 54
+        number_of_error_test_failures: 0
+        number_of_nonlinear_solver_iterations: 111
         number_of_nonlinear_solver_fails: 0
         number_of_linear_solver_setups_from_checkpoint: 1
         number_of_linear_solver_setups_from_first_convergence_fail: 0
         number_of_linear_solver_setups_from_second_convergence_fail: 0
-        number_of_linear_solver_setups_from_error_test_fail: 1
-        number_of_linear_solver_setups_from_step_success: 12
+        number_of_linear_solver_setups_from_error_test_fail: 0
+        number_of_linear_solver_setups_from_step_success: 11
         "###);
     }
 
