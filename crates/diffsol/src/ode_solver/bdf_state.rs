@@ -18,6 +18,9 @@ pub(crate) struct BdfStepRecord<T> {
     pub(crate) h: T,
     /// Order of the accepted attempt.
     pub(crate) order: usize,
+    /// Step size the step ended with, after any rescale at its end, which the next step's
+    /// history starts from. Unlike the state's `h`, a later `set_stop_time` does not change it.
+    pub(crate) h_end: T,
     /// Whether the step started from a first-order initialisation of `diff` from `(y, dy)`.
     pub(crate) from_init: bool,
 }
@@ -56,9 +59,6 @@ where
     pub(crate) last_step: Option<BdfStepRecord<V::T>>,
     /// The step size `diff` was last initialised to first order with, until a step runs from it.
     pub(crate) h_init: Option<V::T>,
-    /// The step size when [crate::OdeSolverMethod::step] last returned. Unlike `h`, a later
-    /// `set_stop_time` rescale does not change it.
-    pub(crate) h_end: V::T,
 }
 
 /// Highest BDF order.
@@ -94,7 +94,6 @@ where
             sgdiff_initialised: false,
             last_step: None,
             h_init: None,
-            h_end: V::T::zero(),
         }
     }
 
@@ -226,7 +225,6 @@ where
             sgdiff_initialised: false,
             last_step: None,
             h_init: None,
-            h_end: h,
         }
     }
 

@@ -149,7 +149,8 @@ pub struct Bdf<
     y_delta: Eqn::V,
     g_delta: Eqn::V,
     y_predict: Eqn::V,
-    /// The corrected solution `y_{n+1}` of the latest successful corrector solve.
+    /// The corrector's iterate, which is the corrected solution `y_{n+1}` once the solve
+    /// succeeds.
     y_new: Eqn::V,
     t_predict: Eqn::T,
     s_predict: Eqn::V,
@@ -492,6 +493,14 @@ where
         self.convergence.reset_eta();
         self.ad_jvp_convergence.reset_eta();
         self.ad_vjp_convergence.reset_eta();
+    }
+
+    /// Record the step size the step ended with, once any rescale at its end is done.
+    fn record_h_end(&mut self) {
+        let h = self.state.h;
+        if let Some(record) = self.state.last_step.as_mut() {
+            record.h_end = h;
+        }
     }
 
     fn _jacobian_updates(&mut self, c: Eqn::T, state: SolverState) {
@@ -847,6 +856,10 @@ where
         );
     }
 
+    /// The squared weighted norm of the local error estimate of the step just solved, combining
+    /// eqs. 3, 4 and 6 of [1]: the error is `C_k h^{k+1} y^{(k+1)}`, and the correction
+    /// `d = y_{n+1} - y_pred = D^{k+1} y_{n+1}` approximates `h^{k+1} y^{(k+1)}`, so the error is
+    /// `C_k d`, with `error_const2[k] = C_k^2`.
     fn error_control(&self) -> Eqn::T {
         let state = &self.state;
         let order = state.order;
@@ -1301,21 +1314,17 @@ where
 
         self._predict_forward();
 
-        // what the step starts from, recorded so that `step_jvp`/`step_vjp` can replay it
-        let from_init = self.state.h_init.is_some();
-        let h_ref = self.state.h_init.unwrap_or(self.state.h_end);
-
         // loop until step is accepted
         loop {
             let order = self.state.order;
-            self.y_delta.copy_from(&self.y_predict);
+            self.y_new.copy_from(&self.y_predict);
 
             // solve BDF equation using y0 as starting point
             let mut solve_result = Ok(());
             if let Some(op) = self.op.as_ref() {
                 solve_result = self.nonlinear_solver.solve_in_place(
                     op,
-                    &mut self.y_delta,
+                    &mut self.y_new,
                     self.t_predict,
                     &self.y_predict,
                     &mut self.convergence,
@@ -1324,12 +1333,13 @@ where
                 self.statistics.number_of_nonlinear_solver_iterations += self.convergence.niter();
 
                 if solve_result.is_ok() {
-                    // test error is within tolerance
-                    // combine eq 3, 4 and 6 from [1] to obtain error
-                    // Note that error = C_k * h^{k+1} y^{k+1}
-                    // and d = D^{k+1} y_{n+1} \approx h^{k+1} y^{k+1}
-                    self.y_new.copy_from(&self.y_delta);
-                    self.y_delta -= &self.y_predict;
+                    // the correction d = y_{n+1} - y_pred, used for the error estimate and to
+                    // update the differences
+                    Eqn::V::for_each_elem_mut(
+                        [&mut self.y_delta],
+                        [&self.y_new, &self.y_predict],
+                        |[d], [y_new, y_predict], _lane, i| *d = y_new[i] - y_predict[i],
+                    );
 
                     // deal with output equations
                     if integrate_out {
@@ -1452,8 +1462,24 @@ where
             }
         }
 
+        // record the accepted attempt and the history it started from, so that
+        // `step_jvp`/`step_vjp` can replay it: h_init and the previous record still describe that
+        // history. Without either (a state built some other way) assume no rescale.
+        let h_ref = match (self.state.h_init, self.state.last_step) {
+            (Some(h_init), _) => h_init,
+            (None, Some(previous)) => previous.h_end,
+            (None, None) => self.state.h,
+        };
+        self.state.last_step = Some(BdfStepRecord {
+            h_ref,
+            h: self.state.h,
+            order: self.state.order,
+            from_init: self.state.h_init.is_some(),
+            h_end: self.state.h,
+        });
+        self.state.h_init = None;
+
         // take the accepted step
-        let (step_h, step_order) = (self.state.h, self.state.order);
         self.update_differences_and_integrate_out();
 
         {
@@ -1553,14 +1579,7 @@ where
             }
         }
 
-        self.state.last_step = Some(BdfStepRecord {
-            h_ref,
-            h: step_h,
-            order: step_order,
-            from_init,
-        });
-        self.state.h_init = None;
-        self.state.h_end = self.state.h;
+        self.record_h_end();
 
         // check for root within accepted step
         if let (Some(root_fn), Some(root_finder)) =
@@ -1583,7 +1602,7 @@ where
                 return Ok(reason);
             }
             // the step may have been shortened to hit tstop next time
-            self.state.h_end = self.state.h;
+            self.record_h_end();
         }
 
         // just a normal step, no roots or tstop reached
@@ -1728,7 +1747,6 @@ where
         tangent.order = self.state.order;
         tangent.last_step = self.state.last_step;
         tangent.h_init = None;
-        tangent.h_end = self.state.h_end;
         tangent.diff_initialised = true;
     }
 }
@@ -1775,6 +1793,7 @@ where
             h,
             order,
             from_init,
+            h_end,
         } = step;
         let one = Eqn::T::one();
 
@@ -1820,7 +1839,7 @@ where
         tangent.y.copy_from_view(&tangent.diff.column(0));
         tangent.dy.copy_from_view(&tangent.diff.column(1));
         tangent.dy.mul_assign(Scale(one / h));
-        Self::ad_rescale(&mut tangent.diff, self.state.order, h, self.state.h, false);
+        Self::ad_rescale(&mut tangent.diff, self.state.order, h, h_end, false);
         self.ad_mark_end_of_step(tangent);
         Ok(())
     }
@@ -1888,6 +1907,7 @@ where
             h,
             order,
             from_init,
+            h_end,
         } = step;
         let one = Eqn::T::one();
         let zero = Eqn::T::zero();
@@ -1901,7 +1921,7 @@ where
         // fold in the readouts: y = diff[:, 0] at the end, and dy = diff[:, 1] / h before the
         // rescale at the end of the step
         c.diff.column_mut(0).axpy(one, &c.y, one);
-        Self::ad_rescale(&mut c.diff, self.state.order, h, self.state.h, true);
+        Self::ad_rescale(&mut c.diff, self.state.order, h, h_end, true);
         c.diff.column_mut(1).axpy(one / h, &c.dy, one);
         c.y.fill(zero);
         c.dy.fill(zero);
@@ -1950,7 +1970,6 @@ where
         c.order = order;
         c.last_step = None;
         c.h_init = from_init.then_some(h_ref);
-        c.h_end = h_ref;
         c.diff_initialised = !from_init;
         Ok(())
     }

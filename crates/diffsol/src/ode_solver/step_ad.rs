@@ -385,7 +385,44 @@ mod tests {
                     solver.step().unwrap();
                     let record = solver.state_clone().last_step.unwrap();
                     assert!(!record.from_init);
-                    assert_eq!(record.h_ref, end.h_end);
+                    assert_eq!(record.h_ref, end.last_step.unwrap().h_end);
+                }
+
+                /// A `set_stop_time` after a step rescales the state's history and step size for
+                /// the next step, but not the step just taken, so its derivative is unchanged.
+                #[test]
+                fn set_stop_time_after_step() {
+                    let problem = problem(P, false);
+                    let mut solver = problem.bdf::<LS>().unwrap();
+                    for _ in 0..10 {
+                        solver.step().unwrap();
+                    }
+                    let mut stopped = solver.clone();
+                    let (t, h) = (solver.state().t, solver.state().h);
+                    stopped.set_stop_time(t + 0.3 * h).unwrap();
+                    assert!(
+                        stopped.state().h != h,
+                        "the stop time did not rescale the state"
+                    );
+
+                    let mut tangent = solver.state_clone().zeros_like();
+                    randomise(&mut tangent, 0.6);
+                    let p_dot = vec(&rand(3, 0.8));
+                    let mut tangent_stopped = tangent.clone();
+                    solver.step_jvp(&mut tangent, &p_dot).unwrap();
+                    stopped.step_jvp(&mut tangent_stopped, &p_dot).unwrap();
+                    assert_close_vec(
+                        &cols(&tangent_stopped.diff),
+                        &cols(&tangent.diff),
+                        1e-8,
+                        "diff",
+                    );
+                    assert_close_vec(
+                        &tangent_stopped.y.clone_as_vec(),
+                        &tangent.y.clone_as_vec(),
+                        1e-8,
+                        "y",
+                    );
                 }
 
                 #[test]
