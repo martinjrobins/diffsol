@@ -16,12 +16,9 @@ pub mod cuda;
 #[cfg(feature = "cuda-oxide")]
 pub mod cuda_oxide;
 
-pub mod richardson;
-
 pub use faer::lu::LU as FaerLU;
 pub use nalgebra::lu::LU as NalgebraNativeLU;
 pub use nalgebra::reusable_lu::ReusableLU as NalgebraLU;
-pub use richardson::{richardson, RichardsonOptions};
 
 /// A solver for the linear problem `Ax = b`, where `A` is a [LinearOp].
 pub trait LinearSolver<M: Matrix>: Default {
@@ -71,10 +68,6 @@ macro_rules! generate_lu_tests {
             #[test]
             fn [<test_transpose_lu_ $suffix>]() {
                 $crate::linear_solver::tests::test_transpose_lu_solve::<$M, $LS>($ctx2);
-            }
-            #[test]
-            fn [<test_richardson_ $suffix>]() {
-                $crate::linear_solver::richardson::tests::test_richardson::<$M, $LS>();
             }
             #[test]
             #[should_panic(expected = "incompatible nbatch")]

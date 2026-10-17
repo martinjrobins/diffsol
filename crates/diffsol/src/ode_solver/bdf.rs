@@ -30,7 +30,6 @@ use super::sensitivities::SensitivitiesOdeSolverMethod;
 use super::step_ad::{StepJvp, StepVjp};
 use super::OdeSolverStatistics;
 use crate::{Scale, VectorViewMut};
-use diffsol_la::linear_solver::RichardsonOptions;
 use std::ops::MulAssign;
 
 /// Length of a per-order BDF coefficient list — `gamma`, `alpha`, `error_const2`, the
@@ -139,6 +138,11 @@ pub struct Bdf<
 {
     nonlinear_solver: NewtonNonlinearSolver<Eqn::M, LS, NoLineSearch>,
     convergence: Convergence<'a, Eqn::V>,
+    /// Convergence of the linear solves of [StepJvp::step_jvp], kept apart from the Newton
+    /// solves so that each keeps its own convergence-rate estimate.
+    ad_jvp_convergence: Convergence<'a, Eqn::V>,
+    /// As `ad_jvp_convergence`, for [StepVjp::step_vjp].
+    ad_vjp_convergence: Convergence<'a, Eqn::V>,
     ode_problem: &'a OdeSolverProblem<Eqn>,
     op: Option<BdfCallable<&'a Eqn>>,
     n_equal_steps: usize,
@@ -196,6 +200,8 @@ where
         let mut convergence = self.convergence.clone();
         convergence.reset_eta();
         Self {
+            ad_jvp_convergence: convergence.clone(),
+            ad_vjp_convergence: convergence.clone(),
             nonlinear_solver,
             ode_problem: problem,
             convergence,
@@ -305,6 +311,8 @@ where
             problem.ode_options.nonlinear_solver_tolerance,
         );
         convergence.set_max_iter(config.maximum_newton_iterations);
+        let ad_jvp_convergence = convergence.clone();
+        let ad_vjp_convergence = convergence.clone();
 
         let op = if integrate_main_eqn {
             // setup linear solver for first step
@@ -351,6 +359,8 @@ where
 
         Ok(Self {
             convergence,
+            ad_jvp_convergence,
+            ad_vjp_convergence,
             s_op: None,
             op,
             ode_problem: problem,
@@ -477,6 +487,13 @@ where
         r
     }
 
+    /// The Newton matrix has changed, so forget the convergence rates measured with the old one.
+    fn reset_etas(&mut self) {
+        self.convergence.reset_eta();
+        self.ad_jvp_convergence.reset_eta();
+        self.ad_vjp_convergence.reset_eta();
+    }
+
     fn _jacobian_updates(&mut self, c: Eqn::T, state: SolverState) {
         let did_update = if self.jacobian_update.check_rhs_jacobian_update(c, &state) {
             let did_reset = if let Some(op) = self.op.as_mut() {
@@ -494,7 +511,7 @@ where
             };
             self.jacobian_update.update_rhs_jacobian(c);
             self.jacobian_update.update_jacobian(c);
-            self.convergence.reset_eta();
+            self.reset_etas();
             did_reset
         } else if self.jacobian_update.check_jacobian_update(c, &state) {
             let did_reset = if let Some(op) = self.op.as_mut() {
@@ -509,7 +526,7 @@ where
                 false
             };
             self.jacobian_update.update_jacobian(c);
-            self.convergence.reset_eta();
+            self.reset_etas();
             did_reset
         } else {
             false
@@ -1642,11 +1659,13 @@ where
         }
     }
 
-    /// Run a solve with the operator's Jacobian at the end of the step (`b` in `x`, solution
-    /// out), preconditioned by the current Newton matrix. If that is too poor a preconditioner
-    /// for the solve to converge, refresh it at the end of the step and retry once.
+    /// Run a solve with the operator's Jacobian at the end of the step, using the current
+    /// Newton matrix as a preconditioner, with `x` holding the initial guess and returning the
+    /// solution. If that is too poor a preconditioner for the solve to converge, refresh it at
+    /// the end of the step and retry once. `vjp` picks the convergence state to use.
     fn ad_solve(
         &mut self,
+        vjp: bool,
         x: &mut Eqn::V,
         solve: impl Fn(
             &NewtonNonlinearSolver<Eqn::M, LS, NoLineSearch>,
@@ -1654,20 +1673,22 @@ where
             &Eqn::V,
             Eqn::T,
             &mut Eqn::V,
-            &RichardsonOptions<Eqn::T>,
+            &mut Convergence<'a, Eqn::V>,
         ) -> Result<(), DiffsolError>,
     ) -> Result<(), DiffsolError> {
-        let opts = RichardsonOptions {
-            rtol: self.config.ad_linear_solve_rtol,
-            max_iter: self.config.ad_linear_solve_max_iter,
-            max_rate: Eqn::T::from_f64(0.9).unwrap(),
-        };
-        let b = x.clone();
+        let x0 = x.clone();
         if !self.nonlinear_solver.is_jacobian_set() {
             self.ad_refresh_jacobian();
         }
         let mut refreshed = false;
         loop {
+            let convergence = if vjp {
+                &mut self.ad_vjp_convergence
+            } else {
+                &mut self.ad_jvp_convergence
+            };
+            convergence.set_tolerance(self.config.ad_linear_solve_tolerance);
+            convergence.set_max_iter(self.config.ad_linear_solve_max_iter);
             let op = self.op.as_ref().unwrap();
             let result = solve(
                 &self.nonlinear_solver,
@@ -1675,13 +1696,13 @@ where
                 &self.state.y,
                 self.state.t,
                 x,
-                &opts,
+                convergence,
             );
             match result {
                 Ok(()) => return Ok(()),
                 Err(_) if !refreshed => {
                     self.ad_refresh_jacobian();
-                    x.copy_from(&b);
+                    x.copy_from(&x0);
                     refreshed = true;
                 }
                 Err(e) => return Err(e),
@@ -1696,7 +1717,7 @@ where
         self.nonlinear_solver
             .reset_jacobian(op, &self.state.y, self.state.t);
         self.jacobian_update.update_rhs_jacobian(op.c);
-        self.convergence.reset_eta();
+        self.reset_etas();
         self.ad_jacobian_refreshes += 1;
     }
 
@@ -1772,7 +1793,7 @@ where
         // the corrector equation's tangent: (M - c J) y_dot = b
         let mut y_pred = tangent.y.clone();
         Self::_predict_using_diff(&mut y_pred, &tangent.diff, order);
-        let mut y_dot = y_pred.clone();
+        let mut b = y_pred.clone();
         self.op.as_ref().unwrap().tangent_rhs(
             &self.state.y,
             self.state.t,
@@ -1782,10 +1803,13 @@ where
             order,
             &y_pred,
             p_dot,
-            &mut y_dot,
+            &mut b,
         );
-        self.ad_solve(&mut y_dot, |nl, op, y, t, x, opts| {
-            nl.solve_jacobian_in_place(op, y, t, x, opts)
+        // start from, and measure errors relative to, the predictor's tangent, as the
+        // sensitivity solve does with its prediction
+        let mut y_dot = y_pred.clone();
+        self.ad_solve(false, &mut y_dot, |nl, op, y, t, x, convergence| {
+            nl.solve_jacobian_in_place(op, y, t, &b, x, &y_pred, convergence)
         })?;
 
         // update of the history with d = y - y_pred
@@ -1885,9 +1909,10 @@ where
         // update of the history, then the corrector: (M - c J)ᵀ w = d_bar
         let mut d_bar = c.y.clone();
         c.diff.update_backward_diff_transpose(order, &mut d_bar);
+        // start from, and measure errors relative to, d_bar: for small c, w is close to M^-T d_bar
         let mut w = d_bar.clone();
-        self.ad_solve(&mut w, |nl, op, y, t, x, opts| {
-            nl.solve_jacobian_transpose_in_place(op, y, t, x, opts)
+        self.ad_solve(true, &mut w, |nl, op, y, t, x, convergence| {
+            nl.solve_jacobian_transpose_in_place(op, y, t, &d_bar, x, &d_bar, convergence)
         })?;
 
         // the operator's inputs: the history (through psi), the prediction and the parameters;

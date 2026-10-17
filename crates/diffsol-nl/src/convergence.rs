@@ -40,6 +40,12 @@ impl<'a, V: Vector> Convergence<'a, V> {
     pub fn set_max_iter(&mut self, value: IndexType) {
         self.max_iter = value;
     }
+    pub fn tolerance(&self) -> V::T {
+        self.tol
+    }
+    pub fn set_tolerance(&mut self, value: V::T) {
+        self.tol = value;
+    }
     pub fn niter(&self) -> IndexType {
         self.niter
     }

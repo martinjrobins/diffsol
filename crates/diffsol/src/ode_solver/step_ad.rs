@@ -175,7 +175,7 @@ mod tests {
                     let mut solver = problem.bdf::<LS>().unwrap();
                     // solve tightly, so the test checks that the two products are transposes
                     // rather than how accurate the iterative solves are
-                    solver.config_mut().ad_linear_solve_rtol = 1e-14;
+                    solver.config_mut().ad_linear_solve_tolerance = 1e-6;
                     solver.config_mut().ad_linear_solve_max_iter = 50;
                     solver.set_stop_time(T_FINAL).unwrap();
                     let (mut max_order, mut rescaled, mut nsteps) = (0, false, 0);
@@ -489,7 +489,7 @@ mod tests {
                     forward_sensitivities(true);
                 }
 
-                /// With too few Richardson iterations to converge on a stale Newton matrix, the
+                /// With too few iterations to converge on a stale Newton matrix, the
                 /// solves refresh it, and the result is unchanged.
                 #[test]
                 fn refresh_fallback() {
@@ -497,7 +497,6 @@ mod tests {
                     let run = |max_iter: usize| {
                         let mut solver = problem.bdf::<LS>().unwrap();
                         solver.config_mut().ad_linear_solve_max_iter = max_iter;
-                        solver.config_mut().ad_linear_solve_rtol = 1e-14;
                         let mut tangent = solver.state_clone().zeros_like();
                         randomise(&mut tangent, 0.5);
                         let p_dot = vec(&rand(3, 0.2));

@@ -28,8 +28,10 @@ pub struct BdfConfig<T> {
     pub maximum_timestep_shrink: T,
     pub minimum_timestep_shrink: T,
     pub maximum_newton_iterations: usize,
-    /// Relative tolerance of the linear solves in [crate::StepJvp] and [crate::StepVjp].
-    pub ad_linear_solve_rtol: T,
+    /// Tolerance of the linear solves in [crate::StepJvp] and [crate::StepVjp], as
+    /// `nonlinear_solver_tolerance` is for the Newton solves: in the problem's weighted norm,
+    /// relative to its `rtol` and `atol`.
+    pub ad_linear_solve_tolerance: T,
     /// Maximum iterations of the linear solves in [crate::StepJvp] and [crate::StepVjp]
     /// before the Newton matrix is refreshed.
     pub ad_linear_solve_max_iter: usize,
@@ -74,11 +76,8 @@ impl<T: Scalar> BdfConfig<T> {
                 .min_timestep_shrink
                 .unwrap_or_else(|| T::from_f64(0.5).unwrap()),
             maximum_newton_iterations: ode_options.max_nonlinear_solver_iterations,
-            // 1e-10, or as close as single precision gets
-            ad_linear_solve_rtol: T::from_f64(1e-10)
-                .unwrap()
-                .max(T::from_f64(100.0).unwrap() * T::EPSILON),
-            ad_linear_solve_max_iter: 10,
+            ad_linear_solve_tolerance: ode_options.nonlinear_solver_tolerance,
+            ad_linear_solve_max_iter: ode_options.max_nonlinear_solver_iterations,
         }
     }
 }

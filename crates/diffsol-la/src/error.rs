@@ -36,8 +36,6 @@ pub enum LinearSolverError {
     KluFailedToAnalyze,
     #[error("KLU failed to factorize")]
     KluFailedToFactorize,
-    #[error("Richardson iteration did not converge")]
-    RichardsonNotConverged,
     #[error("Error: {0}")]
     Other(String),
 }

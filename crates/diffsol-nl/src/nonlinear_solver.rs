@@ -1,4 +1,4 @@
-use diffsol_la::{linear_solver::RichardsonOptions, Matrix};
+use diffsol_la::Matrix;
 
 use crate::{
     convergence::Convergence,
@@ -60,30 +60,38 @@ pub trait NonLinearSolver<M: Matrix>: Default {
     /// The input `b` is provided in `x`, and the solution is returned in `x`.
     fn solve_linearised_in_place(&self, x: &mut M::V) -> Result<(), NlError>;
 
-    /// Solve `J(x_lin) * x = b` with the operator's own Jacobian at `x_lin`, applied matrix-free
-    /// and preconditioned by the Jacobian set by [Self::reset_jacobian], which may be stale.
-    /// The input `b` is provided in `x`, and the solution is returned in `x`.
+    /// Solve `J(x_lin) * x = b` with the operator's own Jacobian at `x_lin`, applied matrix-free.
     ///
-    /// Fails with [diffsol_la::error::LinearSolverError::RichardsonNotConverged] if the stored
-    /// Jacobian is too far from `J(x_lin)` to converge within `opts`; the caller can then call
-    /// [Self::reset_jacobian] and retry.
+    /// This is [Self::solve_in_place] for the linear problem `F(x) = J(x_lin) x - b`: the
+    /// Jacobian set by [Self::reset_jacobian], which may be stale, is the Newton matrix, so each
+    /// iteration is a step of preconditioned Richardson iteration. `x` holds the initial guess
+    /// and returns the solution; `error_y` and `convergence` control the iteration as for
+    /// [Self::solve_in_place]. If the stored Jacobian is too far from `J(x_lin)` the iteration
+    /// fails to converge, and the caller can [Self::reset_jacobian] and retry.
+    #[allow(clippy::too_many_arguments)]
     fn solve_jacobian_in_place<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M, C = M::C>>(
         &self,
         op: &C,
         x_lin: &M::V,
+        b: &M::V,
         x: &mut M::V,
-        opts: &RichardsonOptions<M::T>,
+        error_y: &M::V,
+        convergence: &mut Convergence<'_, M::V>,
     ) -> Result<(), NlError>;
 
-    /// As [Self::solve_jacobian_in_place], for the transposed problem `J(x_lin)^T * x = b`.
+    /// As [Self::solve_jacobian_in_place], for the transposed problem `J(x_lin)^T * x = b`,
+    /// preconditioned by the transpose of the stored Jacobian.
+    #[allow(clippy::too_many_arguments)]
     fn solve_jacobian_transpose_in_place<
         C: NonLinearOpAdjoint<V = M::V, T = M::T, M = M, C = M::C>,
     >(
         &self,
         op: &C,
         x_lin: &M::V,
+        b: &M::V,
         x: &mut M::V,
-        opts: &RichardsonOptions<M::T>,
+        error_y: &M::V,
+        convergence: &mut Convergence<'_, M::V>,
     ) -> Result<(), NlError>;
 }
 
@@ -221,26 +229,44 @@ pub mod tests {
         type V = <M as MatrixCommon>::V;
         let op = LinearOp2::<M>::new(0.0);
         let x_lin = V::zeros(2, Default::default());
-        let opts = diffsol_la::linear_solver::RichardsonOptions::default();
+        let atol = V::from_vec(vec![1e-10, 1e-10], Default::default());
+        let mut convergence = Convergence::new(1e-10, &atol);
+        convergence.set_max_iter(20);
         // A (1, 2) = (5, 3) and A^T (1, 2) = (1, 5)
         let expected = V::from_vec(vec![1.0, 2.0], Default::default());
         for (eps, converges) in [(0.0, true), (0.05, true), (1.5, false)] {
             let mut s = NewtonNonlinearSolver::new(NalgebraLU::default(), NoLineSearch);
             s.set_problem(&op);
             s.reset_jacobian(&LinearOp2::<M>::new(eps), &x_lin);
-
-            let mut x = V::from_vec(vec![5.0, 3.0], Default::default());
-            let result = s.solve_jacobian_in_place(&op, &x_lin, &mut x, &opts);
-            assert_eq!(result.is_ok(), converges, "eps = {eps}");
-            if converges {
-                x.assert_eq_st(&expected, 1e-8);
-            }
-
-            let mut x = V::from_vec(vec![1.0, 5.0], Default::default());
-            let result = s.solve_jacobian_transpose_in_place(&op, &x_lin, &mut x, &opts);
-            assert_eq!(result.is_ok(), converges, "transpose, eps = {eps}");
-            if converges {
-                x.assert_eq_st(&expected, 1e-8);
+            for transpose in [false, true] {
+                let b = if transpose {
+                    vec![1.0, 5.0]
+                } else {
+                    vec![5.0, 3.0]
+                };
+                let b = V::from_vec(b, Default::default());
+                let mut x = V::zeros(2, Default::default());
+                convergence.reset_eta();
+                let result = if transpose {
+                    s.solve_jacobian_transpose_in_place(
+                        &op,
+                        &x_lin,
+                        &b,
+                        &mut x,
+                        &expected,
+                        &mut convergence,
+                    )
+                } else {
+                    s.solve_jacobian_in_place(&op, &x_lin, &b, &mut x, &expected, &mut convergence)
+                };
+                assert_eq!(
+                    result.is_ok(),
+                    converges,
+                    "eps = {eps}, transpose = {transpose}"
+                );
+                if converges {
+                    x.assert_eq_st(&expected, 1e-8);
+                }
             }
         }
     }

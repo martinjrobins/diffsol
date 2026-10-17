@@ -3,7 +3,6 @@ use crate::{
     NonLinearOpAdjoint as TimeAwareNonLinearOpAdjoint,
     NonLinearOpJacobian as TimeAwareNonLinearOpJacobian,
 };
-use diffsol_la::linear_solver::RichardsonOptions;
 use diffsol_nl::NonLinearSolver as NlNonLinearSolver;
 use num_traits::Zero;
 
@@ -137,8 +136,10 @@ pub trait NonLinearSolver<M: Matrix>: Default {
     /// The input `b` is provided in `x`, and the solution is returned in `x`.
     fn solve_linearised_in_place(&self, x: &mut M::V) -> Result<(), DiffsolError>;
 
-    /// Solve `J(x_lin, t) * x = b` with the operator's own Jacobian, preconditioned by the one set
-    /// by [Self::reset_jacobian]. See [`diffsol_nl::NonLinearSolver::solve_jacobian_in_place`].
+    /// Solve `J(x_lin, t) * x = b` with the operator's own Jacobian, using the one set by
+    /// [Self::reset_jacobian] as the Newton matrix. `x` holds the initial guess. See
+    /// [`diffsol_nl::NonLinearSolver::solve_jacobian_in_place`].
+    #[allow(clippy::too_many_arguments)]
     fn solve_jacobian_in_place<
         C: TimeAwareNonLinearOpJacobian<V = M::V, T = M::T, M = M, C = M::C>,
     >(
@@ -146,11 +147,14 @@ pub trait NonLinearSolver<M: Matrix>: Default {
         op: &C,
         x_lin: &M::V,
         t: M::T,
+        b: &M::V,
         x: &mut M::V,
-        opts: &RichardsonOptions<M::T>,
+        error_y: &M::V,
+        convergence: &mut Convergence<'_, M::V>,
     ) -> Result<(), DiffsolError>;
 
     /// As [Self::solve_jacobian_in_place], for the transposed problem `J(x_lin, t)^T * x = b`.
+    #[allow(clippy::too_many_arguments)]
     fn solve_jacobian_transpose_in_place<
         C: TimeAwareNonLinearOpAdjoint<V = M::V, T = M::T, M = M, C = M::C>,
     >(
@@ -158,8 +162,10 @@ pub trait NonLinearSolver<M: Matrix>: Default {
         op: &C,
         x_lin: &M::V,
         t: M::T,
+        b: &M::V,
         x: &mut M::V,
-        opts: &RichardsonOptions<M::T>,
+        error_y: &M::V,
+        convergence: &mut Convergence<'_, M::V>,
     ) -> Result<(), DiffsolError>;
 }
 
@@ -212,6 +218,7 @@ impl<M: Matrix, S: NlNonLinearSolver<M>> NonLinearSolver<M> for S {
         NlNonLinearSolver::solve_linearised_in_place(self, x).map_err(Into::into)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn solve_jacobian_in_place<
         C: TimeAwareNonLinearOpJacobian<V = M::V, T = M::T, M = M, C = M::C>,
     >(
@@ -219,19 +226,24 @@ impl<M: Matrix, S: NlNonLinearSolver<M>> NonLinearSolver<M> for S {
         op: &C,
         x_lin: &M::V,
         t: M::T,
+        b: &M::V,
         x: &mut M::V,
-        opts: &RichardsonOptions<M::T>,
+        error_y: &M::V,
+        convergence: &mut Convergence<'_, M::V>,
     ) -> Result<(), DiffsolError> {
         NlNonLinearSolver::solve_jacobian_in_place(
             self,
             &NonLinearisedRef::at(op, t),
             x_lin,
+            b,
             x,
-            opts,
+            error_y,
+            convergence,
         )
         .map_err(Into::into)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn solve_jacobian_transpose_in_place<
         C: TimeAwareNonLinearOpAdjoint<V = M::V, T = M::T, M = M, C = M::C>,
     >(
@@ -239,15 +251,19 @@ impl<M: Matrix, S: NlNonLinearSolver<M>> NonLinearSolver<M> for S {
         op: &C,
         x_lin: &M::V,
         t: M::T,
+        b: &M::V,
         x: &mut M::V,
-        opts: &RichardsonOptions<M::T>,
+        error_y: &M::V,
+        convergence: &mut Convergence<'_, M::V>,
     ) -> Result<(), DiffsolError> {
         NlNonLinearSolver::solve_jacobian_transpose_in_place(
             self,
             &NonLinearisedRef::at(op, t),
             x_lin,
+            b,
             x,
-            opts,
+            error_y,
+            convergence,
         )
         .map_err(Into::into)
     }
