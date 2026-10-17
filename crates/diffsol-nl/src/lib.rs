@@ -33,8 +33,8 @@ pub mod line_search;
 /// [newton_iteration] function.
 pub mod newton;
 
-/// The [NonLinearOp] and [NonLinearOpJacobian] traits describing a time-unaware
-/// non-linear operator `F(x)` and its Jacobian `J(x)`.
+/// The [NonLinearOp], [NonLinearOpJacobian] and [NonLinearOpAdjoint] traits describing a
+/// time-unaware non-linear operator `F(x)`, its Jacobian `J(x)` and its transpose.
 pub mod nonlinear_op;
 
 /// Non-linear solver traits.
@@ -46,5 +46,5 @@ pub use convergence::{Convergence, ConvergenceStatus};
 pub use error::{NlError, NonLinearSolverError};
 pub use line_search::{BacktrackingLineSearch, LineSearch, NoLineSearch};
 pub use newton::{newton_iteration, NewtonNonlinearSolver};
-pub use nonlinear_op::{NonLinearOp, NonLinearOpJacobian};
+pub use nonlinear_op::{NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian};
 pub use nonlinear_solver::{NonLinearSolveSolution, NonLinearSolver};

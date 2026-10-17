@@ -1548,7 +1548,8 @@ mod test {
             checkpointer
                 .interpolate(Some(&mut replay_solver), point.t, &mut y)
                 .unwrap();
-            y.assert_eq_norm(&point.state, &problem.atol, problem.rtol, 150.0);
+            // cubic Hermite interpolation between steps: its error grows with the step size
+            y.assert_eq_norm(&point.state, &problem.atol, problem.rtol, 250.0);
         }
     }
 

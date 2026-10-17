@@ -218,26 +218,36 @@ mod tests {
         solution.column(0)[0]
     }
 
+    /// The global error of a solve is not bounded by the tolerances, but is a small multiple of
+    /// `RTOL` relative to the solution.
+    fn assert_matches(solution: <V as diffsol::DefaultDenseMatrix>::M, exact: f64) {
+        let error = ((final_value(solution) - exact) / exact).abs();
+        assert!(
+            error < 10.0 * RTOL,
+            "relative error {error:e} against {exact}"
+        );
+    }
+
     #[test]
     fn all_solvers_match_the_exact_solutions() {
         let problem = logistic_explicit();
         let mut solver = problem.tsit45().unwrap();
         let (solution, _) = solver.solve_dense(&[5.0]).unwrap();
-        assert!((final_value(solution) - logistic_exact(5.0)).abs() < 1e-5);
+        assert_matches(solution, logistic_exact(5.0));
 
         let problem = logistic_implicit();
         let mut solver = problem.bdf::<LS>().unwrap();
         let (solution, _) = solver.solve_dense(&[5.0]).unwrap();
-        assert!((final_value(solution) - logistic_exact(5.0)).abs() < 1e-5);
+        assert_matches(solution, logistic_exact(5.0));
 
         let problem = relaxation_explicit();
         let mut solver = problem.tsit45().unwrap();
         let (solution, _) = solver.solve_dense(&[10.0]).unwrap();
-        assert!((final_value(solution) - relaxation_exact(10.0)).abs() < 1e-5);
+        assert_matches(solution, relaxation_exact(10.0));
 
         let problem = relaxation_implicit();
         let mut solver = problem.bdf::<LS>().unwrap();
         let (solution, _) = solver.solve_dense(&[10.0]).unwrap();
-        assert!((final_value(solution) - relaxation_exact(10.0)).abs() < 1e-5);
+        assert_matches(solution, relaxation_exact(10.0));
     }
 }

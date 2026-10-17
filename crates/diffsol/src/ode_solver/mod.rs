@@ -17,6 +17,7 @@ pub mod sdirk_state;
 pub mod sensitivities;
 pub mod solution;
 pub mod state;
+pub mod step_ad;
 pub mod tableau;
 
 use serde::Serialize;

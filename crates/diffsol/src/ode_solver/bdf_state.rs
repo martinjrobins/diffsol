@@ -7,7 +7,29 @@ use num_traits::Zero;
 
 use super::state::StateCommon;
 
+/// What a [crate::Bdf] step needs to replay itself for [crate::StepJvp] and [crate::StepVjp]:
+/// the scalars that, with the end-of-step state, fix the step as a linear map.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct BdfStepRecord<T> {
+    /// Step size of the history the step started from: `h_init` after a first-order
+    /// initialisation, otherwise the step size the previous step ended with.
+    pub(crate) h_ref: T,
+    /// Step size of the accepted attempt.
+    pub(crate) h: T,
+    /// Order of the accepted attempt.
+    pub(crate) order: usize,
+    /// Step size the step ended with, after any rescale at its end, which the next step's
+    /// history starts from. Unlike the state's `h`, a later `set_stop_time` does not change it.
+    pub(crate) h_end: T,
+    /// Whether the step started from a first-order initialisation of `diff` from `(y, dy)`.
+    pub(crate) from_init: bool,
+}
+
 /// State container for the BDF integrator. For the common state API use `as_ref` and `as_mut` methods.
+///
+/// The history `diff` is the integrator's real state; after a step `y` and `dy` are readouts of
+/// it: `y = diff[:, 0]`, and `dy` is `diff[:, 1] / h` of the accepted attempt, taken before any
+/// step-size rescale at the end of the step.
 #[derive(Clone)]
 pub struct BdfState<V, M = <V as DefaultDenseMatrix>::M>
 where
@@ -33,6 +55,10 @@ where
     pub(crate) sdiff_initialised: bool,
     pub(crate) gdiff_initialised: bool,
     pub(crate) sgdiff_initialised: bool,
+    /// The last step taken to reach this state, if any.
+    pub(crate) last_step: Option<BdfStepRecord<V::T>>,
+    /// The step size `diff` was last initialised to first order with, until a step runs from it.
+    pub(crate) h_init: Option<V::T>,
 }
 
 /// Highest BDF order.
@@ -66,11 +92,14 @@ where
             sdiff_initialised: false,
             gdiff_initialised: false,
             sgdiff_initialised: false,
+            last_step: None,
+            h_init: None,
         }
     }
 
     pub fn initialise_diff_to_first_order(&mut self) {
         self.order = 1usize;
+        self.h_init = Some(self.h);
         self.diff.column_mut(0).copy_from(&self.y);
         self.diff.column_mut(1).axpy(self.h, &self.dy, M::T::zero());
         self.diff_initialised = true;
@@ -194,7 +223,28 @@ where
             sdiff_initialised: false,
             gdiff_initialised: false,
             sgdiff_initialised: false,
+            last_step: None,
+            h_init: None,
         }
+    }
+
+    fn zeros_like_with_directions(&self, ndirections: usize) -> Result<Self, DiffsolError> {
+        let mut z = self.clone();
+        for v in [
+            &mut z.y, &mut z.dy, &mut z.g, &mut z.dg, &mut z.s, &mut z.ds, &mut z.sg, &mut z.dsg,
+        ] {
+            let ctx = v
+                .context()
+                .clone_with_nbatch(v.context().nbatch() * ndirections)?;
+            *v = V::zeros(v.len(), ctx);
+        }
+        for m in [&mut z.diff, &mut z.sdiff, &mut z.gdiff, &mut z.sgdiff] {
+            let ctx = m
+                .context()
+                .clone_with_nbatch(m.context().nbatch() * ndirections)?;
+            *m = M::zeros(m.nrows(), m.ncols(), ctx);
+        }
+        Ok(z)
     }
 
     fn into_common(self) -> StateCommon<V> {
@@ -232,6 +282,8 @@ where
         self.sdiff_initialised = false;
         self.gdiff_initialised = false;
         self.sgdiff_initialised = false;
+        // a modified state is no longer the end of the recorded step
+        self.last_step = None;
         StateRefMut {
             y: &mut self.y,
             dy: &mut self.dy,

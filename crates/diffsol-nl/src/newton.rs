@@ -1,11 +1,12 @@
 use diffsol_la::{Context, IndexType, LinearOp as LaLinearOp, LinearSolver, Matrix, Vector};
+use num_traits::One;
 
 use crate::{
     convergence::{Convergence, ConvergenceStatus},
     error::{NlError, NonLinearSolverError},
-    line_search::LineSearch,
+    line_search::{LineSearch, NoLineSearch},
     non_linear_solver_error,
-    nonlinear_op::{NonLinearOp, NonLinearOpJacobian},
+    nonlinear_op::{NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian},
     nonlinear_solver::NonLinearSolver,
 };
 
@@ -147,6 +148,72 @@ impl<M: Matrix, Ls: LinearSolver<M>, Lsearch: LineSearch<M::V>> NonLinearSolver<
 
     fn solve_linearised_in_place(&self, x: &mut M::V) -> Result<(), NlError> {
         self.linear_solver.solve_in_place(x).map_err(Into::into)
+    }
+
+    fn solve_jacobian_in_place<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M, C = M::C>>(
+        &self,
+        op: &C,
+        x_lin: &M::V,
+        b: &M::V,
+        x: &mut M::V,
+        error_y: &M::V,
+        convergence: &mut Convergence<M::V>,
+    ) -> Result<(), NlError> {
+        if !self.is_jacobian_set {
+            return Err(non_linear_solver_error!(JacobianNotReset));
+        }
+        let mut tmp = x.clone();
+        // F(x) = J x - b
+        let fun = |x: &M::V, y: &mut M::V| {
+            op.jac_mul_inplace(x_lin, x, y);
+            y.axpy(-M::T::one(), b, M::T::one());
+        };
+        let linear_solver = |x: &mut M::V| self.linear_solver.solve_in_place(x).map_err(Into::into);
+        newton_iteration(
+            x,
+            &mut tmp,
+            error_y,
+            fun,
+            linear_solver,
+            convergence,
+            &mut NoLineSearch,
+        )
+    }
+
+    fn solve_jacobian_transpose_in_place<
+        C: NonLinearOpAdjoint<V = M::V, T = M::T, M = M, C = M::C>,
+    >(
+        &self,
+        op: &C,
+        x_lin: &M::V,
+        b: &M::V,
+        x: &mut M::V,
+        error_y: &M::V,
+        convergence: &mut Convergence<M::V>,
+    ) -> Result<(), NlError> {
+        if !self.is_jacobian_set {
+            return Err(non_linear_solver_error!(JacobianNotReset));
+        }
+        let mut tmp = x.clone();
+        // F(x) = J^T x - b, where the op gives -J^T x
+        let fun = |x: &M::V, y: &mut M::V| {
+            op.jac_transpose_mul_inplace(x_lin, x, y);
+            y.axpy(-M::T::one(), b, -M::T::one());
+        };
+        let linear_solver = |x: &mut M::V| {
+            self.linear_solver
+                .solve_transpose_in_place(x)
+                .map_err(Into::into)
+        };
+        newton_iteration(
+            x,
+            &mut tmp,
+            error_y,
+            fun,
+            linear_solver,
+            convergence,
+            &mut NoLineSearch,
+        )
     }
 
     fn solve_in_place<C: NonLinearOp<V = M::V, T = M::T, M = M>>(

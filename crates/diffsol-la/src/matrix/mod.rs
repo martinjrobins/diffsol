@@ -6,6 +6,7 @@ use crate::scalar::Scale;
 use crate::{Context, IndexType, Scalar, Vector, VectorIndex};
 
 use extract_block::combine;
+use num_traits::{One, Zero};
 use sparsity::{Dense, MatrixSparsity, MatrixSparsityRef};
 
 #[cfg(feature = "cuda")]
@@ -330,6 +331,57 @@ pub trait DenseMatrix:
     /// where each addition uses the just-updated value of column `i+1` (a
     /// right-to-left cumulative scan).
     fn update_backward_diff(&mut self, order: IndexType, d: &Self::V);
+
+    /// Transpose of [Self::update_backward_diff] with respect to `(self, d)`.
+    ///
+    /// Given cotangents `C` of the updated columns `0..=order+2`, overwrite them with the
+    /// cotangents of the columns before the update, and write the cotangent of `d` into `d_bar`.
+    /// Equivalent to:
+    /// ```text
+    /// d_bar = C[:, 0] + C[:, 1] + ... + C[:, order+2]
+    /// for i in 1..=order { C[:, i] += C[:, i-1] }   // left-to-right cumulative scan
+    /// C[:, order+1] = -C[:, order+2]
+    /// C[:, order+2] = 0
+    /// ```
+    ///
+    /// The default implementation is one [Self::gemv_cols] and one [Self::mul_cols_by], so it
+    /// needs no backend-specific code. Panics if `order + 3` exceeds [`MAX_SMALL_COLS`].
+    fn update_backward_diff_transpose(&mut self, order: IndexType, d_bar: &mut Self::V) {
+        let n = order + 3;
+        assert!(n <= MAX_SMALL_COLS, "order out of bounds");
+        let ones = [Self::T::one(); MAX_SMALL_COLS];
+        self.gemv_cols(0, n, Self::T::one(), &ones, Self::T::zero(), d_bar);
+
+        // the remaining updates are C <- C * t, with t column-major and n x n
+        let mut t = [Self::T::zero(); MAX_SMALL_COLS * MAX_SMALL_COLS];
+        for j in 0..=order {
+            for i in 0..=j {
+                t[j * n + i] = Self::T::one();
+            }
+        }
+        t[(order + 1) * n + order + 2] = -Self::T::one();
+        self.mul_cols_by(n, &t[..n * n]);
+    }
+
+    /// Right-multiply a range of columns by the transpose of a small matrix, in place:
+    ///
+    /// ```text
+    /// self[:, 0..ncols] = self[:, 0..ncols] * rhsᵀ
+    /// ```
+    ///
+    /// `rhs` is laid out as in [Self::mul_cols_by]. The default implementation transposes it on
+    /// the host and calls [Self::mul_cols_by]. Panics if `ncols` exceeds [`MAX_SMALL_COLS`].
+    fn mul_cols_by_transpose(&mut self, ncols: IndexType, rhs: &[Self::T]) {
+        assert!(ncols <= MAX_SMALL_COLS, "ncols out of bounds");
+        assert_eq!(rhs.len(), ncols * ncols, "rhs must be ncols x ncols");
+        let mut rhs_t = [Self::T::zero(); MAX_SMALL_COLS * MAX_SMALL_COLS];
+        for j in 0..ncols {
+            for i in 0..ncols {
+                rhs_t[j * ncols + i] = rhs[i * ncols + j];
+            }
+        }
+        self.mul_cols_by(ncols, &rhs_t[..ncols * ncols]);
+    }
 
     /// Right-multiply a range of columns by a small matrix, in place:
     ///
@@ -703,6 +755,89 @@ pub(crate) mod tests {
         assert_eq!(a.get_index(1, 1), f::<M>(1020.0));
         assert_eq!(a.get_index(0, 0), f::<M>(103.0));
         assert_eq!(a.get_index(1, 0), f::<M>(1030.0));
+    }
+
+    /// Deterministic, irregular values so that a dot test can't pass by symmetry.
+    fn pseudo_random<M: Matrix>(n: usize, seed: f64) -> Vec<M::T> {
+        (0..n)
+            .map(|i| f::<M>(((i as f64 + 1.0) * seed).sin()))
+            .collect()
+    }
+
+    fn dot<T: Copy + Zero + Mul<Output = T> + Add<Output = T>>(a: &[T], b: &[T]) -> T {
+        a.iter().zip(b).fold(T::zero(), |acc, (&x, &y)| acc + x * y)
+    }
+
+    fn assert_close<M: Matrix>(a: M::T, b: M::T) {
+        use num_traits::Signed;
+        let scale = if a.abs() > b.abs() { a.abs() } else { b.abs() };
+        let tol = f::<M>(1e-4) * (M::T::one() + scale);
+        assert!((a - b).abs() <= tol, "{a} != {b}");
+    }
+
+    /// Dot test of [`DenseMatrix::update_backward_diff_transpose`] against
+    /// [`DenseMatrix::update_backward_diff`]: `<C, U(D, d)> = <C_D, D> + <d_bar, d>`, with
+    /// `(C_D, d_bar) = Uᵀ(C)`, for every order the BDF solver uses. Also checks the transpose
+    /// leaves the columns above `order + 2` alone.
+    pub fn test_update_backward_diff_transpose<M: DenseMatrix>() {
+        let nrows = 3;
+        let ncols = MAX_SMALL_COLS;
+        for order in 1..=5 {
+            let d_vals = pseudo_random::<M>(nrows, 0.7);
+            let d = M::V::from_vec(d_vals.clone(), Default::default());
+            let d_mat_vals = pseudo_random::<M>(nrows * ncols, 1.3);
+            let c_vals = pseudo_random::<M>(nrows * ncols, 2.9);
+
+            let mut u = M::from_vec(nrows, ncols, d_mat_vals.clone(), Default::default());
+            u.update_backward_diff(order, &d);
+            let lhs = dot(&c_vals, &batch_as_vec(&u, 0));
+
+            let mut c = M::from_vec(nrows, ncols, c_vals.clone(), Default::default());
+            let mut d_bar = M::V::zeros(nrows, Default::default());
+            c.update_backward_diff_transpose(order, &mut d_bar);
+            let c_after = batch_as_vec(&c, 0);
+            let rhs = dot(&c_after, &d_mat_vals) + dot(&d_bar.clone_as_vec(), &d_vals);
+            assert_close::<M>(lhs, rhs);
+
+            let first_untouched = (order + 3) * nrows;
+            assert_eq!(&c_after[first_untouched..], &c_vals[first_untouched..]);
+        }
+    }
+
+    /// [`DenseMatrix::mul_cols_by_transpose`] matches [`DenseMatrix::mul_cols_by`] with an
+    /// explicitly transposed `rhs`, and passes the dot test `<C, D R> = <C Rᵀ, D>`.
+    pub fn test_mul_cols_by_transpose<M: DenseMatrix>() {
+        let nrows = 3;
+        let ncols = 5;
+        let ntot = 7;
+        let r = pseudo_random::<M>(ncols * ncols, 0.37);
+        let mut r_t = r.clone();
+        for j in 0..ncols {
+            for i in 0..ncols {
+                r_t[j * ncols + i] = r[i * ncols + j];
+            }
+        }
+        let d_vals = pseudo_random::<M>(nrows * ntot, 1.1);
+        let c_vals = pseudo_random::<M>(nrows * ntot, 2.3);
+
+        let mut a = M::from_vec(nrows, ntot, d_vals.clone(), Default::default());
+        let mut b = M::from_vec(nrows, ntot, d_vals.clone(), Default::default());
+        a.mul_cols_by_transpose(ncols, &r);
+        b.mul_cols_by(ncols, &r_t);
+        assert_eq!(batch_as_vec(&a, 0), batch_as_vec(&b, 0));
+
+        let mut dr = M::from_vec(nrows, ntot, d_vals.clone(), Default::default());
+        dr.mul_cols_by(ncols, &r);
+        let mut cr = M::from_vec(nrows, ntot, c_vals.clone(), Default::default());
+        cr.mul_cols_by_transpose(ncols, &r);
+        // only the leading ncols columns are transformed; the dot test holds there and the
+        // trailing columns pass through unchanged on both sides
+        let lead = nrows * ncols;
+        assert_close::<M>(
+            dot(&c_vals[..lead], &batch_as_vec(&dr, 0)[..lead]),
+            dot(&batch_as_vec(&cr, 0)[..lead], &d_vals[..lead]),
+        );
+        assert_eq!(&batch_as_vec(&cr, 0)[lead..], &c_vals[lead..]);
     }
 
     pub fn test_gemv_cols<M: DenseMatrix>() {
@@ -2753,6 +2888,14 @@ macro_rules! generate_dense_matrix_tests_nonbatched {
             #[test]
             fn [<test_update_backward_diff_ $suffix>]() {
                 $crate::matrix::tests::test_update_backward_diff::<$M>();
+            }
+            #[test]
+            fn [<test_update_backward_diff_transpose_ $suffix>]() {
+                $crate::matrix::tests::test_update_backward_diff_transpose::<$M>();
+            }
+            #[test]
+            fn [<test_mul_cols_by_transpose_ $suffix>]() {
+                $crate::matrix::tests::test_mul_cols_by_transpose::<$M>();
             }
             #[test]
             fn [<test_gemv_cols_ $suffix>]() {
