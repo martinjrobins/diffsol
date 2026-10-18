@@ -503,6 +503,35 @@ pub trait Vector:
         Self::reduce_elem_host(dest, args, init, map, combine);
     }
 
+    /// The dot product with `other`, summed over every element of every batch lane. `other`
+    /// broadcasts into this vector's lanes, as in [`Self::reduce_elem`].
+    fn dot(&self, other: &Self) -> Self::T {
+        let mut lanes = Self::zeros(1, self.context().clone());
+        Self::reduce_elem(
+            &mut lanes,
+            [self, other],
+            Self::T::zero(),
+            |[a, b], _lane, i| a[i] * b[i],
+            |a, b| a + b,
+        );
+        lanes
+            .clone_as_vec()
+            .into_iter()
+            .fold(Self::T::zero(), |acc, x| acc + x)
+    }
+
+    /// A deterministic pseudo-random vector of length `nstates` with the lanes of `ctx`, for
+    /// tests: element `i` of lane `b` is `sin((b * nstates + i + 1) * seed)`. The values are
+    /// irregular, so a dot test can't pass by symmetry, and different seeds give different
+    /// vectors.
+    fn rand(nstates: usize, seed: f64, ctx: Self::C) -> Self {
+        let n = nstates * ctx.nbatch();
+        let values = (0..n)
+            .map(|k| num_traits::FromPrimitive::from_f64(((k + 1) as f64 * seed).sin()).unwrap())
+            .collect();
+        Self::from_vec(values, ctx)
+    }
+
     /// Copy all values from `other` into this vector.
     fn copy_from(&mut self, other: &Self);
 
@@ -715,6 +744,14 @@ macro_rules! generate_vector_tests_nonbatched {
                 $crate::vector::tests::test_reduce_unbatched::<$V>();
             }
             #[test]
+            fn [<test_dot_ $suffix>]() {
+                $crate::vector::tests::test_dot::<$V>();
+            }
+            #[test]
+            fn [<test_rand_ $suffix>]() {
+                $crate::vector::tests::test_rand::<$V>();
+            }
+            #[test]
             fn [<test_set_index_ $suffix>]() {
                 $crate::vector::tests::test_set_index::<$V>();
             }
@@ -855,6 +892,14 @@ macro_rules! generate_vector_tests_batched {
             #[test]
             fn [<test_batched_from_element_ $suffix>]() {
                 $crate::vector::tests::test_batched_from_element::<$V>($ctx3);
+            }
+            #[test]
+            fn [<test_batched_dot_ $suffix>]() {
+                $crate::vector::tests::test_batched_dot::<$V>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_rand_ $suffix>]() {
+                $crate::vector::tests::test_batched_rand::<$V>($ctx2);
             }
             #[test]
             fn [<test_batched_axpy_ $suffix>]() {
@@ -1393,6 +1438,28 @@ pub(crate) mod tests {
         assert_eq!(y.clone_as_vec(), fv::<V>(&[8.0, 10.0, 12.0]));
     }
 
+    pub fn test_dot<V: Vector>() {
+        let a = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0]), Default::default());
+        let b = V::from_vec(fv::<V>(&[4.0, -5.0, 6.0]), Default::default());
+        assert_eq!(a.dot(&b), f::<V>(12.0));
+        assert_eq!(
+            V::zeros(0, Default::default()).dot(&V::zeros(0, Default::default())),
+            f::<V>(0.0)
+        );
+    }
+
+    pub fn test_rand<V: Vector>() {
+        let v = V::rand(3, 0.5, Default::default());
+        assert_eq!(
+            v.clone_as_vec(),
+            fv::<V>(&[0.5f64.sin(), 1.0f64.sin(), 1.5f64.sin()])
+        );
+        assert_ne!(
+            v.clone_as_vec(),
+            V::rand(3, 0.7, Default::default()).clone_as_vec()
+        );
+    }
+
     pub fn test_copy_from_indices<V: Vector>() {
         let mut v1 = V::zeros(5, Default::default());
         let v2 = V::from_vec(fv::<V>(&[10.0, 20.0, 30.0, 40.0, 50.0]), Default::default());
@@ -1685,6 +1752,27 @@ pub(crate) mod tests {
         assert_eq!(v.len(), 3);
         assert_eq!(v.total_len(), 6);
         assert_eq!(v.clone_as_vec(), fv::<V>(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]));
+    }
+
+    /// Over every lane, with a single-lane `other` broadcast into them.
+    pub fn test_batched_dot<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let a = V::from_vec(fv::<V>(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]), ctx.clone());
+        let b = V::from_vec(fv::<V>(&[1.0, 0.0, -1.0, 2.0, 1.0, 0.5]), ctx);
+        assert_eq!(a.dot(&b), f::<V>(1.0 - 3.0 + 8.0 + 5.0 + 3.0));
+        let c = V::from_vec(fv::<V>(&[1.0, 1.0, 1.0]), Default::default());
+        assert_eq!(a.dot(&c), f::<V>(21.0));
+    }
+
+    /// Each lane continues the sequence of the one before.
+    pub fn test_batched_rand<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let v = V::rand(3, 0.5, ctx);
+        assert_eq!(v.len(), 3);
+        assert_eq!(
+            v.clone_as_vec(),
+            V::rand(6, 0.5, Default::default()).clone_as_vec()
+        );
     }
 
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]

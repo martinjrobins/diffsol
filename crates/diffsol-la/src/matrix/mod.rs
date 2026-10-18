@@ -757,15 +757,38 @@ pub(crate) mod tests {
         assert_eq!(a.get_index(1, 0), f::<M>(1030.0));
     }
 
-    /// Deterministic, irregular values so that a dot test can't pass by symmetry.
-    fn pseudo_random<M: Matrix>(n: usize, seed: f64) -> Vec<M::T> {
-        (0..n)
-            .map(|i| f::<M>(((i as f64 + 1.0) * seed).sin()))
-            .collect()
+    /// A pseudo-random `nrows x ncols` matrix, each column from [`Vector::rand`] with its own
+    /// seed.
+    fn rand_mat<M: DenseMatrix>(nrows: usize, ncols: usize, seed: f64) -> M {
+        let mut m = M::zeros(nrows, ncols, Default::default());
+        for j in 0..ncols {
+            let col = M::V::rand(nrows, seed * (j + 1) as f64, Default::default());
+            m.column_mut(j).copy_from(&col);
+        }
+        m
     }
 
-    fn dot<T: Copy + Zero + Mul<Output = T> + Add<Output = T>>(a: &[T], b: &[T]) -> T {
-        a.iter().zip(b).fold(T::zero(), |acc, (&x, &y)| acc + x * y)
+    /// `<a, b>` over the entries of columns `cols`, in every batch.
+    fn mat_dot<M: DenseMatrix>(a: &M, b: &M, cols: std::ops::Range<usize>) -> M::T {
+        cols.fold(M::T::zero(), |acc, j| {
+            acc + a.column(j).into_owned().dot(&b.column(j).into_owned())
+        })
+    }
+
+    /// `a` and `b` agree exactly in columns `cols`, in every batch.
+    fn assert_cols_eq<M: DenseMatrix>(a: &M, b: &M, cols: std::ops::Range<usize>) {
+        assert_eq!(a.nrows(), b.nrows());
+        for j in cols {
+            a.column(j)
+                .into_owned()
+                .assert_eq_st(&b.column(j).into_owned(), M::T::zero());
+        }
+    }
+
+    /// `a` and `b` agree exactly, in every batch.
+    fn assert_mat_eq<M: DenseMatrix>(a: &M, b: &M) {
+        assert_eq!(a.ncols(), b.ncols());
+        assert_cols_eq(a, b, 0..a.ncols());
     }
 
     fn assert_close<M: Matrix>(a: M::T, b: M::T) {
@@ -783,24 +806,21 @@ pub(crate) mod tests {
         let nrows = 3;
         let ncols = MAX_SMALL_COLS;
         for order in 1..=5 {
-            let d_vals = pseudo_random::<M>(nrows, 0.7);
-            let d = M::V::from_vec(d_vals.clone(), Default::default());
-            let d_mat_vals = pseudo_random::<M>(nrows * ncols, 1.3);
-            let c_vals = pseudo_random::<M>(nrows * ncols, 2.9);
+            let d = M::V::rand(nrows, 0.7, Default::default());
+            let d_mat = rand_mat::<M>(nrows, ncols, 1.3);
+            let c0 = rand_mat::<M>(nrows, ncols, 2.9);
 
-            let mut u = M::from_vec(nrows, ncols, d_mat_vals.clone(), Default::default());
+            let mut u = d_mat.clone();
             u.update_backward_diff(order, &d);
-            let lhs = dot(&c_vals, &batch_as_vec(&u, 0));
+            let lhs = mat_dot(&c0, &u, 0..ncols);
 
-            let mut c = M::from_vec(nrows, ncols, c_vals.clone(), Default::default());
+            let mut c = c0.clone();
             let mut d_bar = M::V::zeros(nrows, Default::default());
             c.update_backward_diff_transpose(order, &mut d_bar);
-            let c_after = batch_as_vec(&c, 0);
-            let rhs = dot(&c_after, &d_mat_vals) + dot(&d_bar.clone_as_vec(), &d_vals);
+            let rhs = mat_dot(&c, &d_mat, 0..ncols) + d_bar.dot(&d);
             assert_close::<M>(lhs, rhs);
 
-            let first_untouched = (order + 3) * nrows;
-            assert_eq!(&c_after[first_untouched..], &c_vals[first_untouched..]);
+            assert_cols_eq(&c, &c0, order + 3..ncols);
         }
     }
 
@@ -810,34 +830,30 @@ pub(crate) mod tests {
         let nrows = 3;
         let ncols = 5;
         let ntot = 7;
-        let r = pseudo_random::<M>(ncols * ncols, 0.37);
+        let r = M::V::rand(ncols * ncols, 0.37, Default::default()).clone_as_vec();
         let mut r_t = r.clone();
         for j in 0..ncols {
             for i in 0..ncols {
                 r_t[j * ncols + i] = r[i * ncols + j];
             }
         }
-        let d_vals = pseudo_random::<M>(nrows * ntot, 1.1);
-        let c_vals = pseudo_random::<M>(nrows * ntot, 2.3);
+        let d = rand_mat::<M>(nrows, ntot, 1.1);
+        let c = rand_mat::<M>(nrows, ntot, 2.3);
 
-        let mut a = M::from_vec(nrows, ntot, d_vals.clone(), Default::default());
-        let mut b = M::from_vec(nrows, ntot, d_vals.clone(), Default::default());
+        let mut a = d.clone();
+        let mut b = d.clone();
         a.mul_cols_by_transpose(ncols, &r);
         b.mul_cols_by(ncols, &r_t);
-        assert_eq!(batch_as_vec(&a, 0), batch_as_vec(&b, 0));
+        assert_mat_eq(&a, &b);
 
-        let mut dr = M::from_vec(nrows, ntot, d_vals.clone(), Default::default());
+        let mut dr = d.clone();
         dr.mul_cols_by(ncols, &r);
-        let mut cr = M::from_vec(nrows, ntot, c_vals.clone(), Default::default());
+        let mut cr = c.clone();
         cr.mul_cols_by_transpose(ncols, &r);
         // only the leading ncols columns are transformed; the dot test holds there and the
         // trailing columns pass through unchanged on both sides
-        let lead = nrows * ncols;
-        assert_close::<M>(
-            dot(&c_vals[..lead], &batch_as_vec(&dr, 0)[..lead]),
-            dot(&batch_as_vec(&cr, 0)[..lead], &d_vals[..lead]),
-        );
-        assert_eq!(&batch_as_vec(&cr, 0)[lead..], &c_vals[lead..]);
+        assert_close::<M>(mat_dot(&c, &dr, 0..ncols), mat_dot(&cr, &d, 0..ncols));
+        assert_cols_eq(&cr, &c, ncols..ntot);
     }
 
     pub fn test_gemv_cols<M: DenseMatrix>() {
@@ -899,17 +915,6 @@ pub(crate) mod tests {
         m.column(j).into_owned().clone_as_vec()[b * m.nrows() + i]
     }
 
-    /// Every entry of batch `b`, column-major.
-    fn batch_as_vec<M: DenseMatrix>(m: &M, b: usize) -> Vec<M::T> {
-        let mut out = Vec::with_capacity(m.nrows() * m.ncols());
-        for j in 0..m.ncols() {
-            for i in 0..m.nrows() {
-                out.push(mat_at(m, b, i, j));
-            }
-        }
-        out
-    }
-
     pub fn test_mul_cols_by<M: DenseMatrix>() {
         // 2x4, columns [1,10], [2,20], [3,30], [4,40]
         let mk = || {
@@ -922,24 +927,25 @@ pub(crate) mod tests {
                 Default::default(),
             )
         };
-        let untouched = batch_as_vec(&mk(), 0);
+        let untouched = mk();
 
         // identity must leave the matrix exactly as it was: the sharpest check that the
         // in-place update never reads a value it has already overwritten
         let mut a = mk();
         a.mul_cols_by(2, &[f::<M>(1.0), f::<M>(0.0), f::<M>(0.0), f::<M>(1.0)]);
-        assert_eq!(batch_as_vec(&a, 0), untouched);
+        assert_mat_eq(&a, &untouched);
 
         // an empty range is a no-op
         let mut a = mk();
         a.mul_cols_by(0, &[]);
-        assert_eq!(batch_as_vec(&a, 0), untouched);
+        assert_mat_eq(&a, &untouched);
 
         // a single column is just scaled, and the rest are left alone
         let mut a = mk();
         a.mul_cols_by(1, &[f::<M>(3.0)]);
-        assert_eq!(
-            batch_as_vec(&a, 0),
+        let expected = M::from_vec(
+            2,
+            4,
             vec![
                 f::<M>(3.0),
                 f::<M>(30.0),
@@ -948,9 +954,11 @@ pub(crate) mod tests {
                 f::<M>(3.0),
                 f::<M>(30.0),
                 f::<M>(4.0),
-                f::<M>(40.0)
-            ]
+                f::<M>(40.0),
+            ],
+            Default::default(),
         );
+        assert_mat_eq(&a, &expected);
 
         // rhs = [[1, 2], [3, 4]] column-major, applied to the first two columns only:
         //   new[:, 0] = 1 * [1,10] + 3 * [2,20] = [7, 70]
@@ -959,8 +967,9 @@ pub(crate) mod tests {
         // above the updated range and reads it back in `update_backward_diff`
         let mut a = mk();
         a.mul_cols_by(2, &[f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0)]);
-        assert_eq!(
-            batch_as_vec(&a, 0),
+        let expected = M::from_vec(
+            2,
+            4,
             vec![
                 f::<M>(7.0),
                 f::<M>(70.0),
@@ -969,9 +978,11 @@ pub(crate) mod tests {
                 f::<M>(3.0),
                 f::<M>(30.0),
                 f::<M>(4.0),
-                f::<M>(40.0)
-            ]
+                f::<M>(40.0),
+            ],
+            Default::default(),
         );
+        assert_mat_eq(&a, &expected);
 
         // the full width the solvers use (MAX_ORDER + 1), via an identity
         let ncols = 6;
@@ -983,13 +994,13 @@ pub(crate) mod tests {
                 .collect(),
             Default::default(),
         );
-        let wide_before = batch_as_vec(&wide, 0);
+        let wide_before = wide.clone();
         let mut id = vec![f::<M>(0.0); ncols * ncols];
         for j in 0..ncols {
             id[j * ncols + j] = f::<M>(1.0);
         }
         wide.mul_cols_by(ncols, &id);
-        assert_eq!(batch_as_vec(&wide, 0), wide_before);
+        assert_mat_eq(&wide, &wide_before);
 
         // more rows than fit one staging tile, so the row-blocked loop runs several times
         let nrows = 700;
@@ -1000,12 +1011,19 @@ pub(crate) mod tests {
             Default::default(),
         );
         tall.mul_cols_by(2, &[f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0)]);
-        let got = batch_as_vec(&tall, 0);
-        for i in 0..nrows {
-            let (c0, c1) = (f::<M>(i as f64), f::<M>((nrows + i) as f64));
-            assert_eq!(got[i], c0 + f::<M>(3.0) * c1);
-            assert_eq!(got[nrows + i], f::<M>(2.0) * c0 + f::<M>(4.0) * c1);
-        }
+        // the original columns are 0..nrows and nrows..2 nrows
+        let c0 = |i: usize| f::<M>(i as f64);
+        let c1 = |i: usize| f::<M>((nrows + i) as f64);
+        let expected = M::from_vec(
+            nrows,
+            2,
+            (0..nrows)
+                .map(|i| c0(i) + f::<M>(3.0) * c1(i))
+                .chain((0..nrows).map(|i| f::<M>(2.0) * c0(i) + f::<M>(4.0) * c1(i)))
+                .collect(),
+            Default::default(),
+        );
+        assert_mat_eq(&tall, &expected);
     }
 
     /// Same product as [`test_mul_cols_by`] on 2 independent batches: `rhs` is shared by every
@@ -1020,19 +1038,21 @@ pub(crate) mod tests {
             (1..=4)
                 .flat_map(|j| [f::<M>(j as f64), f::<M>(10.0 * j as f64)])
                 .collect(),
-            ctx,
+            ctx.clone(),
         );
         a.mul_cols_by(2, &[f::<M>(1.0), f::<M>(3.0), f::<M>(2.0), f::<M>(4.0)]);
         // batch0: [1,10] + 3*[2,20] = [7,70];   2*[1,10] + 4*[2,20] = [10,100]
-        assert_eq!(
-            batch_as_vec(&a, 0),
-            vec![f::<M>(7.0), f::<M>(70.0), f::<M>(10.0), f::<M>(100.0)]
-        );
         // batch1: [3,30] + 3*[4,40] = [15,150]; 2*[3,30] + 4*[4,40] = [22,220]
-        assert_eq!(
-            batch_as_vec(&a, 1),
-            vec![f::<M>(15.0), f::<M>(150.0), f::<M>(22.0), f::<M>(220.0)]
+        let expected = M::from_vec(
+            2,
+            2,
+            [7.0, 70.0, 10.0, 100.0, 15.0, 150.0, 22.0, 220.0]
+                .into_iter()
+                .map(f::<M>)
+                .collect(),
+            ctx,
         );
+        assert_mat_eq(&a, &expected);
     }
 
     /// The widest column range `gemv_cols` accepts, which is also the size of the by-value

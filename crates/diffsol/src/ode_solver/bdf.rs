@@ -138,11 +138,8 @@ pub struct Bdf<
 {
     nonlinear_solver: NewtonNonlinearSolver<Eqn::M, LS, NoLineSearch>,
     convergence: Convergence<'a, Eqn::V>,
-    /// Convergence of the sensitivity solves alongside the main equations, and of the linear
-    /// solves of [StepVjp::step_vjp]: derivative solves, to `derivative_solve_tolerance`, kept
-    /// apart from the Newton solves so that each keeps its own convergence-rate estimate and
-    /// leaves the Newton solves (and so the steps) alone.
-    sens_convergence: Convergence<'a, Eqn::V>,
+    /// Convergence of the sensitivity/vjp solves alongside the main equations
+    s_convergence: Convergence<'a, Eqn::V>,
     vjp_convergence: Convergence<'a, Eqn::V>,
     ode_problem: &'a OdeSolverProblem<Eqn>,
     op: Option<BdfCallable<&'a Eqn>>,
@@ -201,7 +198,7 @@ where
         let mut convergence = self.convergence.clone();
         convergence.reset_eta();
         Self {
-            sens_convergence: convergence.clone(),
+            s_convergence: convergence.clone(),
             vjp_convergence: convergence.clone(),
             nonlinear_solver,
             ode_problem: problem,
@@ -311,7 +308,7 @@ where
             problem.ode_options.nonlinear_solver_tolerance,
         );
         convergence.set_max_iter(config.maximum_newton_iterations);
-        let sens_convergence = convergence.clone();
+        let s_convergence = convergence.clone();
         let vjp_convergence = convergence.clone();
 
         let op = if integrate_main_eqn {
@@ -359,7 +356,7 @@ where
 
         Ok(Self {
             convergence,
-            sens_convergence,
+            s_convergence,
             vjp_convergence,
             s_op: None,
             op,
@@ -485,7 +482,7 @@ where
     /// The Newton matrix has changed, so forget the convergence rates measured with the old one.
     fn reset_etas(&mut self) {
         self.convergence.reset_eta();
-        self.sens_convergence.reset_eta();
+        self.s_convergence.reset_eta();
         self.vjp_convergence.reset_eta();
     }
 
@@ -591,7 +588,7 @@ where
 
         self.state.h = new_h;
         self.convergence.reset_eta_timestep_change();
-        self.sens_convergence.reset_eta_timestep_change();
+        self.s_convergence.reset_eta_timestep_change();
 
         // if step size too small, then fail
         if self.state.h.abs() < self.config.minimum_timestep {
@@ -1015,9 +1012,9 @@ where
         // it is the step's own solve
         let derivative = self.op.is_some();
         if derivative {
-            self.sens_convergence
+            self.s_convergence
                 .set_tolerance(self.config.derivative_solve_tolerance);
-            self.sens_convergence
+            self.s_convergence
                 .set_max_iter(self.config.derivative_solve_max_iter);
         }
         let mut result = self.sensitivity_corrector_solve(t_new);
@@ -1044,7 +1041,7 @@ where
         s_new.copy_from(&self.s_predict);
         trace!("Solving sensitivity equations");
         let convergence = if self.op.is_some() {
-            &mut self.sens_convergence
+            &mut self.s_convergence
         } else {
             &mut self.convergence
         };
@@ -3369,6 +3366,83 @@ mod test {
             data,
             times.as_slice(),
         );
+    }
+
+    /// The BDF solver with forward sensitivities on the step-AD test model, its derivative
+    /// solves converged to `1e-6` (`max_iter` limits them, if given), stepped to `t = 5`. Returns
+    /// the solver, and the time after each step.
+    fn sens_run_on_ad_test_model(
+        problem: &crate::OdeSolverProblem<
+            crate::ode_equations::test_models::ad_test_model::AdTestEqn<M>,
+        >,
+        max_iter: Option<usize>,
+    ) -> (
+        impl OdeSolverMethod<'_, crate::ode_equations::test_models::ad_test_model::AdTestEqn<M>>,
+        Vec<f64>,
+    ) {
+        let mut solver = problem.bdf_sens::<LS>().unwrap();
+        solver.config_mut().derivative_solve_tolerance = 1e-6;
+        if let Some(max_iter) = max_iter {
+            solver.config_mut().derivative_solve_max_iter = max_iter;
+        }
+        solver.set_stop_time(5.0).unwrap();
+        let mut times = Vec::new();
+        while !matches!(solver.step().unwrap(), OdeSolverStopReason::TstopReached) {
+            times.push(solver.state().t);
+        }
+        times.push(solver.state().t);
+        (solver, times)
+    }
+
+    /// A sensitivity solve that the Newton matrix is too poor a preconditioner for (forced with
+    /// a tiny iteration limit, which a fresh matrix still meets) refreshes it and retries,
+    /// rather than rejecting the step, and still reaches the same sensitivities.
+    #[test]
+    fn bdf_sens_solve_refreshes() {
+        use crate::ode_equations::test_models::ad_test_model::ad_test_problem;
+        for dae in [false, true] {
+            let problem = ad_test_problem::<M>([1.5, 3.0, 1.0], dae, 1e-8);
+            let (plain, _) = sens_run_on_ad_test_model(&problem, None);
+            let (solver, _) = sens_run_on_ad_test_model(&problem, Some(2));
+            let stats = solver.get_statistics();
+            assert!(stats.number_of_derivative_jacobian_refreshes > 0);
+            assert_eq!(
+                stats.number_of_nonlinear_solver_fails, 0,
+                "a step was rejected"
+            );
+            let tol = <M as MatrixCommon>::V::from_element(3, 1e-6, Default::default());
+            solver
+                .state()
+                .s
+                .assert_eq_norm(plain.state().s, &tol, 1e-6, 1.0);
+        }
+    }
+
+    /// With the sensitivities left out of error control, a solver with them takes exactly the
+    /// steps of one without, as long as their solves need no fresh preconditioner: they keep
+    /// their own convergence state, so they leave the Newton solves alone.
+    #[test]
+    fn bdf_sens_takes_the_same_steps() {
+        use crate::ode_equations::test_models::ad_test_model::ad_test_problem;
+        for dae in [false, true] {
+            let problem = ad_test_problem::<M>([1.5, 3.0, 1.0], dae, 1e-8);
+            let mut plain = problem.bdf::<LS>().unwrap();
+            plain.set_stop_time(5.0).unwrap();
+            let mut plain_times = Vec::new();
+            while !matches!(plain.step().unwrap(), OdeSolverStopReason::TstopReached) {
+                plain_times.push(plain.state().t);
+            }
+            plain_times.push(plain.state().t);
+            let (solver, times) = sens_run_on_ad_test_model(&problem, None);
+            assert_eq!(
+                solver
+                    .get_statistics()
+                    .number_of_derivative_jacobian_refreshes,
+                0
+            );
+            assert_eq!(times, plain_times);
+            solver.state().y.assert_eq_st(plain.state().y, 0.0);
+        }
     }
 
     #[test]

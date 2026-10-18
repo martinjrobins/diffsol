@@ -395,18 +395,10 @@ mod tests {
     type Mcpu = NalgebraMat<f64>;
     type Vcpu = NalgebraVec<f64>;
 
-    fn rand(n: usize, seed: f64) -> Vec<f64> {
-        (0..n).map(|i| ((i as f64 + 1.0) * seed).sin()).collect()
-    }
-
-    fn dot(a: &Vcpu, b: &Vcpu) -> f64 {
-        let (a, b) = (a.clone_as_vec(), b.clone_as_vec());
-        a.iter().zip(&b).map(|(x, y)| x * y).sum()
-    }
-
+    /// The dot product of two matrices, as vectors of their entries.
     fn dot_cols(a: &Mcpu, b: &Mcpu) -> f64 {
         (0..a.ncols())
-            .map(|j| dot(&a.column(j).into_owned(), &b.column(j).into_owned()))
+            .map(|j| a.column(j).into_owned().dot(&b.column(j).into_owned()))
             .sum()
     }
 
@@ -428,8 +420,8 @@ mod tests {
             let (n, np) = (problem.eqn.rhs().nstates(), problem.eqn.rhs().nparams());
             let x = Vcpu::from_vec(vec![0.6, 0.3, 0.1], ctx);
             let t = 0.0;
-            let w = Vcpu::from_vec(rand(n, 1.7), ctx);
-            let p_dot = Vcpu::from_vec(rand(np, 2.3), ctx);
+            let w = Vcpu::rand(n, 1.7, ctx);
+            let p_dot = Vcpu::rand(np, 2.3, ctx);
 
             // -J^T w against the dense Jacobian
             let jac = op.jacobian(&x, t);
@@ -450,7 +442,7 @@ mod tests {
             fp.mul_assign(Scale(-op.c));
             let mut fpt = Vcpu::zeros(np, ctx);
             op.sens_transpose_mul_inplace(&x, t, &w, &mut fpt);
-            assert!((dot(&w, &fp) + dot(&fpt, &p_dot)).abs() < 1e-12);
+            assert!((w.dot(&fp) + fpt.dot(&p_dot)).abs() < 1e-12);
 
             // adjoint_inputs against the tangent right-hand side it transposes,
             // b = -(M (psi_dot - y0_dot) + F_p p_dot):
@@ -458,8 +450,13 @@ mod tests {
             let (gamma, alpha) = ([1.0, 1.5, 1.8], [0.0, 0.8, 0.9, 1.0]);
             let order = 2;
             let ncols = 6;
-            let diff_dot = Mcpu::from_vec(n, ncols, rand(n * ncols, 0.4), ctx);
-            let y0_dot = Vcpu::from_vec(rand(n, 3.1), ctx);
+            let diff_dot = Mcpu::from_vec(
+                n,
+                ncols,
+                Vcpu::rand(n * ncols, 0.4, ctx).clone_as_vec(),
+                ctx,
+            );
+            let y0_dot = Vcpu::rand(n, 3.1, ctx);
             let mut psi_dot = Vcpu::zeros(n, ctx);
             BdfCallable::<&AdTestEqn<Mcpu>>::psi_neg_y0_into(
                 &diff_dot,
@@ -489,8 +486,8 @@ mod tests {
                 &mut y0_bar,
                 &mut p_bar,
             );
-            let lhs = dot(&w, &b);
-            let rhs = dot_cols(&diff_bar, &diff_dot) + dot(&y0_bar, &y0_dot) + dot(&p_bar, &p_dot);
+            let lhs = w.dot(&b);
+            let rhs = dot_cols(&diff_bar, &diff_dot) + y0_bar.dot(&y0_dot) + p_bar.dot(&p_dot);
             assert!((lhs - rhs).abs() < 1e-12, "dae = {dae}: {lhs} != {rhs}");
         }
     }
