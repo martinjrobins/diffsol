@@ -1,14 +1,18 @@
 use crate::{
-    matrix::DenseMatrix, LinearOp, LinearOpTranspose, Matrix, MatrixSparsity, NonLinearOp,
+    matrix::DenseMatrix, Context, LinearOp, LinearOpTranspose, Matrix, MatrixSparsity, NonLinearOp,
     NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSensAdjoint, OdeEquationsImplicit,
-    OdeEquationsImplicitAdjoint, Op, Scale, Vector, VectorViewMut,
+    OdeEquationsImplicitAdjoint, Op, Scale, Vector,
 };
 use log::debug;
 use num_traits::{One, ToPrimitive, Zero};
 use std::{
     cell::{Ref, RefCell},
+    collections::HashMap,
     ops::{Deref, MulAssign, SubAssign},
 };
+
+/// Work vectors keyed by the lane count of the vectors they are for.
+type ByLanes<T> = RefCell<HashMap<usize, T>>;
 
 /// A NonLinearOp implementation of the BDF implicit equation system.
 /// i.e. F(y) = M (y' + psi) - c * f(y) = 0
@@ -18,6 +22,9 @@ pub struct BdfCallable<Eqn: OdeEquationsImplicit> {
     /// The coefficient `c = h * alpha` of `f` in the BDF equation.
     pub(crate) c: Eqn::T,
     tmp: RefCell<Eqn::V>,
+    /// Work vectors for [Self::adjoint_inputs], one `(M^T w, f_p^T w)` pair per lane count of
+    /// the cotangents it has been given, allocated on first use.
+    adjoint_tmps: ByLanes<(Eqn::V, Eqn::V)>,
     rhs_jac: RefCell<Eqn::M>,
     mass_jac: RefCell<Eqn::M>,
     jacobian_is_stale: RefCell<bool>,
@@ -31,6 +38,7 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
             psi_neg_y0: self.psi_neg_y0.clone(),
             c: self.c,
             tmp: RefCell::new(self.tmp.borrow().clone()),
+            adjoint_tmps: RefCell::new(HashMap::new()),
             rhs_jac: RefCell::new(self.rhs_jac.borrow().clone()),
             mass_jac: RefCell::new(self.mass_jac.borrow().clone()),
             jacobian_is_stale: RefCell::new(*self.jacobian_is_stale.borrow()),
@@ -76,6 +84,7 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
             mass_jac,
             jacobian_is_stale,
             tmp,
+            adjoint_tmps: RefCell::new(HashMap::new()),
             sparsity,
         }
     }
@@ -162,6 +171,7 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
             mass_jac,
             jacobian_is_stale,
             tmp,
+            adjoint_tmps: RefCell::new(HashMap::new()),
             sparsity,
         }
     }
@@ -360,24 +370,30 @@ impl<Eqn: OdeEquationsImplicitAdjoint> BdfCallable<Eqn> {
         p_bar: &mut Eqn::V,
     ) {
         let one = Eqn::T::one();
-        // cotangent of psi - y0 is -M^T w
-        let mut psi_bar = w.clone();
-        if let Some(mass) = self.eqn.mass() {
-            mass.call_transpose_inplace(w, t, &mut psi_bar);
-        }
-        psi_bar.mul_assign(Scale(-one));
-        // psi - y0 = alpha[order] sum_{j=1}^{order} gamma_j diff_j - y0
-        for j in 1..=order {
-            diff_bar
-                .column_mut(j)
-                .axpy(alpha[order] * gamma[j - 1], &psi_bar, one);
-        }
-        y0_bar.axpy(-one, &psi_bar, one);
+        let mut tmps = self.adjoint_tmps.borrow_mut();
+        let (mt_w, fp_w) = tmps.entry(w.context().nbatch()).or_insert_with(|| {
+            (
+                Eqn::V::zeros(w.len(), w.context().clone()),
+                Eqn::V::zeros(p_bar.len(), p_bar.context().clone()),
+            )
+        });
+
+        // cotangent of psi - y0 is -M^T w, which is -w without a mass matrix
+        let mt_w: &Eqn::V = match self.eqn.mass() {
+            Some(mass) => {
+                mass.call_transpose_inplace(w, t, mt_w);
+                mt_w
+            }
+            None => w,
+        };
+        // psi - y0 = alpha[order] sum_{j=1}^{order} gamma_j diff_j - y0, the gemv_cols of
+        // set_psi, whose transpose adds -alpha[order] gamma_j M^T w to each diff_j
+        diff_bar.ger_cols(1, order + 1, -alpha[order], gamma, mt_w);
+        y0_bar.axpy(one, mt_w, one);
 
         // cotangent of p is -(dF/dp)^T w
-        let mut fp_w = p_bar.clone();
-        self.sens_transpose_mul_inplace(x, t, w, &mut fp_w);
-        p_bar.axpy(one, &fp_w, one);
+        self.sens_transpose_mul_inplace(x, t, w, fp_w);
+        p_bar.axpy(one, fp_w, one);
     }
 }
 

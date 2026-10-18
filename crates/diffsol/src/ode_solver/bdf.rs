@@ -141,6 +141,9 @@ pub struct Bdf<
     /// Convergence of the sensitivity/vjp solves alongside the main equations
     s_convergence: Convergence<'a, Eqn::V>,
     vjp_convergence: Convergence<'a, Eqn::V>,
+    /// The `c` of the last [StepVjp::step_vjp] solve, whose preconditioner quality
+    /// `vjp_convergence` has measured: a replay at another `c` must not trust that estimate.
+    vjp_c: Option<Eqn::T>,
     ode_problem: &'a OdeSolverProblem<Eqn>,
     op: Option<BdfCallable<&'a Eqn>>,
     n_equal_steps: usize,
@@ -197,9 +200,14 @@ where
         });
         let mut convergence = self.convergence.clone();
         convergence.reset_eta();
+        let mut s_convergence = self.s_convergence.clone();
+        s_convergence.reset_eta();
+        let mut vjp_convergence = self.vjp_convergence.clone();
+        vjp_convergence.reset_eta();
         Self {
-            s_convergence: convergence.clone(),
-            vjp_convergence: convergence.clone(),
+            s_convergence,
+            vjp_convergence,
+            vjp_c: None,
             nonlinear_solver,
             ode_problem: problem,
             convergence,
@@ -307,9 +315,15 @@ where
             &problem.atol,
             problem.ode_options.nonlinear_solver_tolerance,
         );
-        convergence.set_max_iter(config.maximum_newton_iterations);
-        let s_convergence = convergence.clone();
-        let vjp_convergence = convergence.clone();
+        let options = &problem.ode_options;
+        convergence.set_max_iter(options.max_nonlinear_solver_iterations);
+        // the derivative solves (the sensitivities alongside the main equations, and step_vjp)
+        // have settings of their own
+        let mut derivative_convergence = convergence.clone();
+        derivative_convergence.set_tolerance(options.derivative_solve_tolerance);
+        derivative_convergence.set_max_iter(options.derivative_solve_max_iter);
+        let s_convergence = derivative_convergence.clone();
+        let vjp_convergence = derivative_convergence;
 
         let op = if integrate_main_eqn {
             // setup linear solver for first step
@@ -358,6 +372,7 @@ where
             convergence,
             s_convergence,
             vjp_convergence,
+            vjp_c: None,
             s_op: None,
             op,
             ode_problem: problem,
@@ -1011,12 +1026,6 @@ where
         // and retry once rather than reject the step. Without them (an adjoint solve backwards)
         // it is the step's own solve
         let derivative = self.op.is_some();
-        if derivative {
-            self.s_convergence
-                .set_tolerance(self.config.derivative_solve_tolerance);
-            self.s_convergence
-                .set_max_iter(self.config.derivative_solve_max_iter);
-        }
         let mut result = self.sensitivity_corrector_solve(t_new);
         if derivative && result.is_err() {
             let y_new = self.y_new.clone();
@@ -1699,45 +1708,6 @@ where
         }
     }
 
-    /// Run a solve with the operator's Jacobian at `end`, the state at the end of the step,
-    /// using the current Newton matrix as a preconditioner, with `x` holding the initial guess
-    /// and returning the solution. If that is too poor a preconditioner for the solve to
-    /// converge, refresh it at `end` and retry once.
-    fn vjp_solve(
-        &mut self,
-        end: &BdfState<Eqn::V, M>,
-        x: &mut Eqn::V,
-        solve: impl Fn(
-            &NewtonNonlinearSolver<Eqn::M, LS, NoLineSearch>,
-            &BdfCallable<&'a Eqn>,
-            &mut Eqn::V,
-            &mut Convergence<'a, Eqn::V>,
-        ) -> Result<(), DiffsolError>,
-    ) -> Result<(), DiffsolError> {
-        let x0 = x.clone();
-        // a matrix factorised here is already fresh, so a failed solve with it is not retried
-        let mut refreshed = !self.nonlinear_solver.is_jacobian_set();
-        if refreshed {
-            self.refresh_jacobian_for_derivative(&end.y, end.t);
-        }
-        loop {
-            self.vjp_convergence
-                .set_tolerance(self.config.derivative_solve_tolerance);
-            self.vjp_convergence
-                .set_max_iter(self.config.derivative_solve_max_iter);
-            let op = self.op.as_ref().unwrap();
-            match solve(&self.nonlinear_solver, op, x, &mut self.vjp_convergence) {
-                Ok(()) => return Ok(()),
-                Err(_) if !refreshed => {
-                    self.refresh_jacobian_for_derivative(&end.y, end.t);
-                    x.copy_from(&x0);
-                    refreshed = true;
-                }
-                Err(e) => return Err(e),
-            }
-        }
-    }
-
     /// Check the inputs of [StepVjp::step_vjp], and return the record of the step that ended at
     /// `end`: the solver integrates the main equations, `end` is the end of a step, the
     /// cotangent has the sizes of `end` and `p_bar` has `nparams` elements, the cotangent's
@@ -1826,6 +1796,13 @@ where
         // differentiate with the step's own c, which step_vjp restores afterwards
         let alpha = self.alpha[order];
         self.op.as_mut().unwrap().set_c(h, alpha);
+        // as the forward solve does when its step size changes: the convergence rate measured
+        // at another c says nothing about how well the Newton matrix preconditions this one
+        let step_c = self.op.as_ref().unwrap().c;
+        if self.vjp_c != Some(step_c) {
+            self.vjp_convergence.reset_eta_timestep_change();
+            self.vjp_c = Some(step_c);
+        }
         let one = Eqn::T::one();
         let zero = Eqn::T::zero();
 
@@ -1834,37 +1811,61 @@ where
         c.diff.column_mut(0).axpy(one, &c.y, one);
         Self::ad_rescale(&mut c.diff, end.order, h, h_end, true);
         c.diff.column_mut(1).axpy(one / h, &c.dy, one);
-        c.y.fill(zero);
-        c.dy.fill(zero);
 
+        // c.y and c.dy are now folded in, so until the readouts at the end they hold the
+        // corrector's right-hand side d_bar and its solution w
         // update of the history, then the corrector: (M - c J)ᵀ w = d_bar
-        let mut d_bar = c.y.clone();
-        c.diff.update_backward_diff_transpose(order, &mut d_bar);
-        // start from, and measure errors relative to, d_bar: for small c, w is close to M^-T d_bar
-        // TODO: this solve takes ~2 more iterations than the JVP's (e.g. 2.7 vs 1.1 on average).
-        let mut w = d_bar.clone();
-        self.vjp_solve(end, &mut w, |nl, op, x, convergence| {
-            nl.solve_jacobian_transpose_in_place(op, &end.y, end.t, &d_bar, x, &d_bar, convergence)
-        })?;
+        c.diff.update_backward_diff_transpose(order, &mut c.y);
+        // The solve uses the current Newton matrix as a preconditioner. If that is too poor for it
+        // to converge, refresh it at the end of the step and retry once; a matrix factorised here
+        // is already fresh, so a failed solve with it is not retried
+        let mut refreshed = !self.nonlinear_solver.is_jacobian_set();
+        if refreshed {
+            self.refresh_jacobian_for_derivative(&end.y, end.t);
+        }
+        loop {
+            // start from, and measure errors relative to, d_bar: for small c, w is close to
+            // M^-T d_bar
+            // TODO: this solve takes ~2 more iterations than the JVP's (e.g. 2.7 vs 1.1 on
+            // average).
+            c.dy.copy_from(&c.y);
+            let result = self.nonlinear_solver.solve_jacobian_transpose_in_place(
+                self.op.as_ref().unwrap(),
+                &end.y,
+                end.t,
+                &c.y,
+                &mut c.dy,
+                &c.y,
+                &mut self.vjp_convergence,
+            );
+            match result {
+                Ok(()) => break,
+                Err(_) if !refreshed => {
+                    self.refresh_jacobian_for_derivative(&end.y, end.t);
+                    refreshed = true;
+                }
+                Err(e) => return Err(e),
+            }
+        }
 
         // the operator's inputs: the history (through psi), the prediction and the parameters;
-        // the prediction also enters through d = y - y_pred
-        let mut y_pred_bar = d_bar;
-        y_pred_bar.mul_assign(Scale(-one));
+        // the prediction also enters through d = y - y_pred, so its cotangent starts at -d_bar
+        c.y.mul_assign(Scale(-one));
         self.op.as_ref().unwrap().adjoint_inputs(
             &end.y,
             end.t,
-            &w,
+            &c.dy,
             &self.gamma.as_slice()[1..],
             self.alpha.as_slice(),
             order,
             &mut c.diff,
-            &mut y_pred_bar,
+            &mut c.y,
             p_bar,
         );
-        for j in 0..=order {
-            c.diff.column_mut(j).axpy(one, &y_pred_bar, one);
-        }
+        // the prediction sums columns 0..=order (_predict_using_diff), so its cotangent is
+        // added to each of them
+        let ones = [one; COEFFS_LEN];
+        c.diff.ger_cols(0, order + 1, one, &ones, &c.y);
 
         // the rescale before the accepted attempt, then the initialisation of the history
         Self::ad_rescale(&mut c.diff, order, h_ref, h, true);
@@ -1872,7 +1873,10 @@ where
             c.y.copy_from_view(&c.diff.column(0));
             c.dy.copy_from_view(&c.diff.column(1));
             c.dy.mul_assign(Scale(h_ref));
-            c.diff = M::zeros(c.diff.nrows(), c.diff.ncols(), c.diff.context().clone());
+            c.diff.fill(zero);
+        } else {
+            c.y.fill(zero);
+            c.dy.fill(zero);
         }
 
         // the cotangent now sits at the start of the step
@@ -3368,23 +3372,36 @@ mod test {
         );
     }
 
-    /// The BDF solver with forward sensitivities on the step-AD test model, its derivative
-    /// solves converged to `1e-6` (`max_iter` limits them, if given), stepped to `t = 5`. Returns
-    /// the solver, and the time after each step.
+    /// The step-AD test model, its derivative solves converged to `1e-6` (`max_iter` limits
+    /// them, if given).
+    fn ad_test_problem_for_sens(
+        dae: bool,
+        max_iter: Option<usize>,
+    ) -> crate::OdeSolverProblem<crate::ode_equations::test_models::ad_test_model::AdTestEqn<M>>
+    {
+        let mut problem = crate::ode_equations::test_models::ad_test_model::ad_test_problem::<M>(
+            [1.5, 3.0, 1.0],
+            dae,
+            1e-8,
+        );
+        problem.ode_options.derivative_solve_tolerance = 1e-6;
+        if let Some(max_iter) = max_iter {
+            problem.ode_options.derivative_solve_max_iter = max_iter;
+        }
+        problem
+    }
+
+    /// The BDF solver with forward sensitivities on `problem`, stepped to `t = 5`. Returns the
+    /// solver, and the time after each step.
     fn sens_run_on_ad_test_model(
         problem: &crate::OdeSolverProblem<
             crate::ode_equations::test_models::ad_test_model::AdTestEqn<M>,
         >,
-        max_iter: Option<usize>,
     ) -> (
         impl OdeSolverMethod<'_, crate::ode_equations::test_models::ad_test_model::AdTestEqn<M>>,
         Vec<f64>,
     ) {
         let mut solver = problem.bdf_sens::<LS>().unwrap();
-        solver.config_mut().derivative_solve_tolerance = 1e-6;
-        if let Some(max_iter) = max_iter {
-            solver.config_mut().derivative_solve_max_iter = max_iter;
-        }
         solver.set_stop_time(5.0).unwrap();
         let mut times = Vec::new();
         while !matches!(solver.step().unwrap(), OdeSolverStopReason::TstopReached) {
@@ -3399,11 +3416,11 @@ mod test {
     /// rather than rejecting the step, and still reaches the same sensitivities.
     #[test]
     fn bdf_sens_solve_refreshes() {
-        use crate::ode_equations::test_models::ad_test_model::ad_test_problem;
         for dae in [false, true] {
-            let problem = ad_test_problem::<M>([1.5, 3.0, 1.0], dae, 1e-8);
-            let (plain, _) = sens_run_on_ad_test_model(&problem, None);
-            let (solver, _) = sens_run_on_ad_test_model(&problem, Some(2));
+            let plain_problem = ad_test_problem_for_sens(dae, None);
+            let (plain, _) = sens_run_on_ad_test_model(&plain_problem);
+            let problem = ad_test_problem_for_sens(dae, Some(2));
+            let (solver, _) = sens_run_on_ad_test_model(&problem);
             let stats = solver.get_statistics();
             assert!(stats.number_of_derivative_jacobian_refreshes > 0);
             assert_eq!(
@@ -3423,9 +3440,8 @@ mod test {
     /// their own convergence state, so they leave the Newton solves alone.
     #[test]
     fn bdf_sens_takes_the_same_steps() {
-        use crate::ode_equations::test_models::ad_test_model::ad_test_problem;
         for dae in [false, true] {
-            let problem = ad_test_problem::<M>([1.5, 3.0, 1.0], dae, 1e-8);
+            let problem = ad_test_problem_for_sens(dae, None);
             let mut plain = problem.bdf::<LS>().unwrap();
             plain.set_stop_time(5.0).unwrap();
             let mut plain_times = Vec::new();
@@ -3433,7 +3449,7 @@ mod test {
                 plain_times.push(plain.state().t);
             }
             plain_times.push(plain.state().t);
-            let (solver, times) = sens_run_on_ad_test_model(&problem, None);
+            let (solver, times) = sens_run_on_ad_test_model(&problem);
             assert_eq!(
                 solver
                     .get_statistics()

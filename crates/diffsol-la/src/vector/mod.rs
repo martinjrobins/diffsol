@@ -504,7 +504,9 @@ pub trait Vector:
     }
 
     /// The dot product with `other`, summed over every element of every batch lane. `other`
-    /// broadcasts into this vector's lanes, as in [`Self::reduce_elem`].
+    /// broadcasts into this vector's lanes, as in [`Self::reduce_elem`]. The per-lane sums are
+    /// added on the host, which on a device backend means a copy back to the host each call:
+    /// meant for tests and checks rather than inner loops.
     fn dot(&self, other: &Self) -> Self::T {
         let mut lanes = Self::zeros(1, self.context().clone());
         Self::reduce_elem(

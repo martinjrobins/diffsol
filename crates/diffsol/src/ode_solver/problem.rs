@@ -82,6 +82,13 @@ impl<T: Scalar> Default for InitialConditionSolverOptions<T> {
 /// limits the number of Newton steps per stage. `nonlinear_solver_tolerance` is a scaling
 /// factor in the convergence test (smaller values produce a tighter tolerance).
 ///
+/// ## Derivative Solves (BDF)
+///
+/// The forward sensitivities solved alongside the main equations, and the solves of
+/// [crate::StepVjp], are linear solves preconditioned by the Newton matrix, with their own
+/// `derivative_solve_tolerance` and `derivative_solve_max_iter`. Both differentiate the steps the
+/// solver takes, exactly up to that tolerance; see the fields for how to choose it.
+///
 /// ## Jacobian Updates (Implicit Methods)
 ///
 /// The Jacobian matrix is updated when:
@@ -104,6 +111,10 @@ pub struct OdeSolverOptions<T: Scalar> {
     pub max_nonlinear_solver_failures: usize,
     /// Newton convergence test scaling factor (default: 0.2).
     pub nonlinear_solver_tolerance: T,
+    /// Derivative convergence test scaling factor (default 0.2)
+    pub derivative_solve_tolerance: T,
+    /// Maximum number of iterations per derivative solve (default: 10).
+    pub derivative_solve_max_iter: usize,
     /// Minimum allowed step size (absolute value, default: 1e-13).
     pub min_timestep: T,
     /// Upper bound on step-size growth `h_new/h_old` (default: solver-specific when `None`).
@@ -136,6 +147,8 @@ impl<T: Scalar> Default for OdeSolverOptions<T> {
             max_error_test_failures: 40,
             max_nonlinear_solver_failures: 50,
             nonlinear_solver_tolerance: T::from_f64(0.2).unwrap(),
+            derivative_solve_tolerance: T::from_f64(0.2).unwrap(),
+            derivative_solve_max_iter: 10,
             min_timestep: T::from_f64(1e-13).unwrap(),
             max_timestep_growth: None,
             min_timestep_growth: None,

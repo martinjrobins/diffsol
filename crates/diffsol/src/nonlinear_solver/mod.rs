@@ -143,7 +143,7 @@ pub trait NonLinearSolver<M: Matrix>: Default {
     fn solve_jacobian_in_place<
         C: TimeAwareNonLinearOpJacobian<V = M::V, T = M::T, M = M, C = M::C>,
     >(
-        &self,
+        &mut self,
         op: &C,
         x_lin: &M::V,
         t: M::T,
@@ -158,7 +158,7 @@ pub trait NonLinearSolver<M: Matrix>: Default {
     fn solve_jacobian_transpose_in_place<
         C: TimeAwareNonLinearOpAdjoint<V = M::V, T = M::T, M = M, C = M::C>,
     >(
-        &self,
+        &mut self,
         op: &C,
         x_lin: &M::V,
         t: M::T,
@@ -222,7 +222,7 @@ impl<M: Matrix, S: NlNonLinearSolver<M>> NonLinearSolver<M> for S {
     fn solve_jacobian_in_place<
         C: TimeAwareNonLinearOpJacobian<V = M::V, T = M::T, M = M, C = M::C>,
     >(
-        &self,
+        &mut self,
         op: &C,
         x_lin: &M::V,
         t: M::T,
@@ -247,7 +247,7 @@ impl<M: Matrix, S: NlNonLinearSolver<M>> NonLinearSolver<M> for S {
     fn solve_jacobian_transpose_in_place<
         C: TimeAwareNonLinearOpAdjoint<V = M::V, T = M::T, M = M, C = M::C>,
     >(
-        &self,
+        &mut self,
         op: &C,
         x_lin: &M::V,
         t: M::T,

@@ -25,10 +25,11 @@
 //!
 //! For the forward mode, use the forward sensitivities of
 //! [crate::SensitivitiesOdeSolverMethod]. With [crate::Bdf], they differentiate the same steps
-//! the same way, solved to the same `derivative_solve_tolerance` (see [crate::BdfConfig]), so the
-//! two agree as closely as that tolerance. Leave the sensitivities out of error control (the
-//! default, see [crate::OdeBuilder::sens_rtol]) for the steps to be those of a run without them,
-//! as long as no sensitivity solve needs a fresh Newton matrix.
+//! the same way, solved to the same `derivative_solve_tolerance` (see
+//! [crate::OdeSolverOptions]), so the two agree as closely as that tolerance. Leave the
+//! sensitivities out of error control (the default, see [crate::OdeBuilder::sens_rtol]) for the
+//! steps to be those of a run without them, as long as no sensitivity solve needs a fresh Newton
+//! matrix.
 
 use crate::{error::DiffsolError, OdeEquationsImplicitAdjoint, OdeSolverMethod};
 
@@ -50,6 +51,9 @@ pub trait StepVjp<'a, Eqn: OdeEquationsImplicitAdjoint + 'a>: OdeSolverMethod<'a
     /// Its linear solves use the solver's own Newton matrix as a preconditioner. If that is too
     /// poor for them to converge, it is refreshed, which a later [OdeSolverMethod::step] then
     /// starts from.
+    ///
+    /// The mass matrix is taken to be independent of the parameters, as for the forward
+    /// sensitivities: for a model whose mass matrix depends on them, `p_bar` misses that term.
     fn step_vjp(
         &mut self,
         end: &Self::State,
@@ -126,35 +130,26 @@ mod tests {
 
                 type E = AdTestEqn<M>;
 
-                /// A solver with its derivative solves converged to `DERIVATIVE_TOL`.
                 fn new_solver(
                     p: &Problem,
                 ) -> impl OdeSolverMethod<'_, E, State = $State, Config = $Config> + StepVjp<'_, E>
                 {
-                    let mut solver = p.$new::<$LS>().unwrap();
-                    solver.config_mut().derivative_solve_tolerance = DERIVATIVE_TOL;
-                    solver
+                    p.$new::<$LS>().unwrap()
                 }
 
-                /// As [new_solver], started from `state`.
                 fn solver_from_state(
                     p: &Problem,
                     state: $State,
                 ) -> impl OdeSolverMethod<'_, E, State = $State> + StepVjp<'_, E> {
-                    let mut solver = p.$from_state::<$LS>(state).unwrap();
-                    solver.config_mut().derivative_solve_tolerance = DERIVATIVE_TOL;
-                    solver
+                    p.$from_state::<$LS>(state).unwrap()
                 }
 
-                /// A solver with forward sensitivities, its derivative solves converged to
-                /// `DERIVATIVE_TOL`.
+                /// A solver with forward sensitivities.
                 fn new_sens_solver(
                     p: &Problem,
                 ) -> impl OdeSolverMethod<'_, E, State = $State, Config = $Config> + StepVjp<'_, E>
                 {
-                    let mut solver = p.$new_sens::<$LS>().unwrap();
-                    solver.config_mut().derivative_solve_tolerance = DERIVATIVE_TOL;
-                    solver
+                    p.$new_sens::<$LS>().unwrap()
                 }
 
                 /// A tolerance for [Vector::assert_eq_norm], as its `atol` with `tol` as its `rtol`.
@@ -162,8 +157,11 @@ mod tests {
                     V::from_element(3, tol, Default::default())
                 }
 
+                /// The test model, with its derivative solves converged to `DERIVATIVE_TOL`.
                 fn problem(dae: bool) -> Problem {
-                    ad_test_problem::<M>(P, dae, 1e-8)
+                    let mut problem = ad_test_problem::<M>(P, dae, 1e-8);
+                    problem.ode_options.derivative_solve_tolerance = DERIVATIVE_TOL;
+                    problem
                 }
 
                 fn problem_at(p: &V, dae: bool) -> Problem {
@@ -510,9 +508,9 @@ mod tests {
                 /// alone, apart from the derivatives' own refreshes.
                 #[test]
                 fn step_vjp_leaves_the_statistics_unchanged() {
-                    let problem = problem(true);
+                    let mut problem = problem(true);
+                    problem.ode_options.derivative_solve_max_iter = 1;
                     let mut solver = new_solver(&problem);
-                    solver.config_mut().derivative_solve_max_iter = 1;
                     solver.set_stop_time(T_FINAL).unwrap();
                     let checkpoints = solve_to_stop(&mut solver);
                     let plain = solver.get_statistics().clone();

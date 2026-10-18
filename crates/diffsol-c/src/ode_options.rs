@@ -13,6 +13,8 @@ pub struct OdeSolverOptionsSnapshot {
     pub threshold_to_update_jacobian: f64,
     pub threshold_to_update_rhs_jacobian: f64,
     pub min_timestep: f64,
+    pub derivative_solve_tolerance: f64,
+    pub derivative_solve_max_iter: usize,
 }
 
 impl OdeSolverOptionsSnapshot {
@@ -25,6 +27,8 @@ impl OdeSolverOptionsSnapshot {
             threshold_to_update_jacobian: solve.ode_threshold_to_update_jacobian(),
             threshold_to_update_rhs_jacobian: solve.ode_threshold_to_update_rhs_jacobian(),
             min_timestep: solve.ode_min_timestep(),
+            derivative_solve_tolerance: solve.ode_derivative_solve_tolerance(),
+            derivative_solve_max_iter: solve.ode_derivative_solve_max_iter(),
         }
     }
 
@@ -36,6 +40,8 @@ impl OdeSolverOptionsSnapshot {
         solve.set_ode_threshold_to_update_jacobian(self.threshold_to_update_jacobian);
         solve.set_ode_threshold_to_update_rhs_jacobian(self.threshold_to_update_rhs_jacobian);
         solve.set_ode_min_timestep(self.min_timestep);
+        solve.set_ode_derivative_solve_tolerance(self.derivative_solve_tolerance);
+        solve.set_ode_derivative_solve_max_iter(self.derivative_solve_max_iter);
     }
 }
 
@@ -116,6 +122,24 @@ impl OdeSolverOptions {
         self.guard()?.solve.set_ode_min_timestep(value);
         Ok(())
     }
+    /// The tolerance of the BDF derivative solves (forward sensitivities, step VJPs).
+    pub fn get_derivative_solve_tolerance(&self) -> Result<f64, DiffsolRtError> {
+        Ok(self.guard()?.solve.ode_derivative_solve_tolerance())
+    }
+    pub fn set_derivative_solve_tolerance(&self, value: f64) -> Result<(), DiffsolRtError> {
+        self.guard()?
+            .solve
+            .set_ode_derivative_solve_tolerance(value);
+        Ok(())
+    }
+    /// The iteration limit of the BDF derivative solves.
+    pub fn get_derivative_solve_max_iter(&self) -> Result<usize, DiffsolRtError> {
+        Ok(self.guard()?.solve.ode_derivative_solve_max_iter())
+    }
+    pub fn set_derivative_solve_max_iter(&self, value: usize) -> Result<(), DiffsolRtError> {
+        self.guard()?.solve.set_ode_derivative_solve_max_iter(value);
+        Ok(())
+    }
 }
 
 impl Serialize for OdeSolverOptions {
@@ -166,6 +190,11 @@ mod tests {
             options.set_threshold_to_update_jacobian(1e-3).unwrap();
             options.set_threshold_to_update_rhs_jacobian(2e-3).unwrap();
             options.set_min_timestep(1e-4).unwrap();
+            // the derivative solves' settings are their own, with the Newton solve's defaults
+            assert_eq!(options.get_derivative_solve_max_iter().unwrap(), 10);
+            assert_eq!(options.get_derivative_solve_tolerance().unwrap(), 0.2);
+            options.set_derivative_solve_tolerance(1e-6).unwrap();
+            options.set_derivative_solve_max_iter(31).unwrap();
 
             assert_eq!(options.get_max_nonlinear_solver_iterations().unwrap(), 17);
             assert_eq!(options.get_max_error_test_failures().unwrap(), 19);
@@ -177,6 +206,8 @@ mod tests {
                 2e-3
             );
             assert_eq!(options.get_min_timestep().unwrap(), 1e-4);
+            assert_eq!(options.get_derivative_solve_tolerance().unwrap(), 1e-6);
+            assert_eq!(options.get_derivative_solve_max_iter().unwrap(), 31);
 
             let value = serde_json::to_value(&options).unwrap();
             assert_eq!(value["max_nonlinear_solver_iterations"], 17);
@@ -186,6 +217,8 @@ mod tests {
             assert_eq!(value["threshold_to_update_jacobian"], 1e-3);
             assert_eq!(value["threshold_to_update_rhs_jacobian"], 2e-3);
             assert_eq!(value["min_timestep"], 1e-4);
+            assert_eq!(value["derivative_solve_tolerance"], 1e-6);
+            assert_eq!(value["derivative_solve_max_iter"], 31);
         }
     }
 }

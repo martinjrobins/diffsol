@@ -197,7 +197,7 @@ where
             &problem.atol,
             problem.ode_options.nonlinear_solver_tolerance,
         );
-        convergence.set_max_iter(config.maximum_newton_iterations);
+        convergence.set_max_iter(problem.ode_options.max_nonlinear_solver_iterations);
 
         let gamma = rk.tableau().a(1, 1);
         let op = if integrate_main_eqn {

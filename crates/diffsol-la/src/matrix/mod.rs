@@ -3,7 +3,7 @@ use std::ops::{Add, AddAssign, Mul, Sub, SubAssign};
 
 use crate::error::LaError;
 use crate::scalar::Scale;
-use crate::{Context, IndexType, Scalar, Vector, VectorIndex};
+use crate::{Context, IndexType, Scalar, Vector, VectorIndex, VectorViewMut};
 
 use extract_block::combine;
 use num_traits::{One, Zero};
@@ -363,6 +363,17 @@ pub trait DenseMatrix:
         self.mul_cols_by(n, &t[..n * n]);
     }
 
+    /// Set every entry of every batch to `value`, in place.
+    ///
+    /// The default copies one column of `value`s into each column, so it needs no
+    /// backend-specific code; the host backends override it with their own fill.
+    fn fill(&mut self, value: Self::T) {
+        let col = Self::V::from_element(self.nrows(), value, self.context().clone());
+        for j in 0..self.ncols() {
+            self.column_mut(j).copy_from(&col);
+        }
+    }
+
     /// Right-multiply a range of columns by the transpose of a small matrix, in place:
     ///
     /// ```text
@@ -428,6 +439,38 @@ pub trait DenseMatrix:
         beta: Self::T,
         y: &mut Self::V,
     );
+
+    /// Rank-one update over a range of columns, with host-side coefficients: BLAS `ger`
+    /// ("general rank-1") restricted to `start..end`, and the transpose of [`Self::gemv_cols`].
+    ///
+    /// ```text
+    /// self[:, start..end] += alpha * y * xᵀ,   i.e.   self[:, j] += alpha * x[j - start] * y
+    /// ```
+    ///
+    /// Where [`Self::gemv_cols`] sums the columns into a vector, this adds a vector into each
+    /// column: if `y = alpha * A[:, start..end] * x`, the cotangent of `A` gains
+    /// `alpha * y_bar * xᵀ`, which is `A_bar.ger_cols(start, end, alpha, x, &y_bar)`.
+    ///
+    /// As for [`Self::gemv_cols`], `x` is a host slice of at least `end - start` coefficients,
+    /// shared by every batch, and only the columns in the range are touched. `y` has this
+    /// matrix's rows and lanes.
+    fn ger_cols(
+        &mut self,
+        start: IndexType,
+        end: IndexType,
+        alpha: Self::T,
+        x: &[Self::T],
+        y: &Self::V,
+    ) {
+        assert!(
+            x.len() >= end.saturating_sub(start),
+            "ger_cols needs a coefficient per column in the range"
+        );
+        for j in start..end {
+            self.column_mut(j)
+                .axpy(alpha * x[j - start], y, Self::T::one());
+        }
+    }
 
     /// Get an immutable vector view of column `i`.
     fn column(&self, i: IndexType) -> <Self::V as Vector>::View<'_>;
@@ -856,6 +899,57 @@ pub(crate) mod tests {
         assert_cols_eq(&cr, &c, ncols..ntot);
     }
 
+    pub fn test_ger_cols<M: DenseMatrix>() {
+        // columns: [1, 10], [2, 20], [3, 30], [4, 40]
+        let mk = || {
+            M::from_vec(
+                2,
+                4,
+                (1..=4)
+                    .flat_map(|j| [f::<M>(j as f64), f::<M>(10.0 * j as f64)])
+                    .collect(),
+                Default::default(),
+            )
+        };
+        let y = M::V::from_vec(vec![f::<M>(1.0), f::<M>(-1.0)], Default::default());
+
+        // columns 1 and 2 gain 2 * [3, 5] * y; x lines up with the start of the range, and
+        // the columns outside it are left alone
+        let mut a = mk();
+        a.ger_cols(1, 3, f::<M>(2.0), &[f::<M>(3.0), f::<M>(5.0)], &y);
+        let expected = M::from_vec(
+            2,
+            4,
+            [1.0, 10.0, 8.0, 14.0, 13.0, 20.0, 4.0, 40.0]
+                .into_iter()
+                .map(f::<M>)
+                .collect(),
+            Default::default(),
+        );
+        assert_mat_eq(&a, &expected);
+
+        // an empty range is a no-op
+        let mut a = mk();
+        a.ger_cols(2, 2, f::<M>(2.0), &[], &y);
+        assert_mat_eq(&a, &mk());
+    }
+
+    /// Dot test of [`DenseMatrix::ger_cols`] against [`DenseMatrix::gemv_cols`], whose
+    /// transpose in the matrix it is: `<alpha y xᵀ, A> = <y, alpha A x>` over the column range.
+    pub fn test_ger_cols_transpose<M: DenseMatrix>() {
+        let (nrows, ncols, start, end) = (3, 6, 1, 5);
+        let a = rand_mat::<M>(nrows, ncols, 0.9);
+        let y = M::V::rand(nrows, 1.7, Default::default());
+        let x = M::V::rand(end - start, 2.3, Default::default()).clone_as_vec();
+        let alpha = f::<M>(-0.6);
+
+        let mut update = M::zeros(nrows, ncols, Default::default());
+        update.ger_cols(start, end, alpha, &x, &y);
+        let mut ax = M::V::zeros(nrows, Default::default());
+        a.gemv_cols(start, end, alpha, &x, f::<M>(0.0), &mut ax);
+        assert_close::<M>(mat_dot(&update, &a, 0..ncols), y.dot(&ax));
+    }
+
     pub fn test_gemv_cols<M: DenseMatrix>() {
         // columns: [1, 10], [2, 20], [3, 30], [4, 40]
         let a = M::from_vec(
@@ -1026,6 +1120,24 @@ pub(crate) mod tests {
         assert_mat_eq(&tall, &expected);
     }
 
+    /// [`DenseMatrix::fill`] sets every entry of every batch, and keeps the shape.
+    pub fn test_fill<M: DenseMatrix>(ctx: M::C) {
+        let (nrows, ncols) = (3, 4);
+        let mut m = M::zeros(nrows, ncols, ctx.clone());
+        for j in 0..ncols {
+            let col = M::V::rand(nrows, (j + 1) as f64, ctx.clone());
+            m.column_mut(j).copy_from(&col);
+        }
+        m.fill(f::<M>(2.5));
+        assert_eq!((m.nrows(), m.ncols()), (nrows, ncols));
+        let expected = M::V::from_element(nrows, f::<M>(2.5), ctx);
+        for j in 0..ncols {
+            m.column(j)
+                .into_owned()
+                .assert_eq_st(&expected, f::<M>(0.0));
+        }
+    }
+
     /// Same product as [`test_mul_cols_by`] on 2 independent batches: `rhs` is shared by every
     /// batch, the columns are not.
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
@@ -1079,6 +1191,36 @@ pub(crate) mod tests {
     /// Same products as [`test_gemv_cols`], run on 2 independent batches: `x` is unbatched and
     /// therefore shared by every batch, the columns are not.
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    /// [`DenseMatrix::ger_cols`] on 2 batches: the coefficients are shared, `y` is per batch.
+    pub fn test_batched_ger_cols<M: DenseMatrix>(ctx: M::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        // batch 0 columns: [1, 10], [2, 20]; batch 1 columns: [3, 30], [4, 40]
+        let mut a = M::from_vec(
+            2,
+            2,
+            (1..=4)
+                .flat_map(|j| [f::<M>(j as f64), f::<M>(10.0 * j as f64)])
+                .collect(),
+            ctx.clone(),
+        );
+        // y is [1, 0] in batch 0 and [0, 1] in batch 1
+        let y = M::V::from_vec(
+            vec![f::<M>(1.0), f::<M>(0.0), f::<M>(0.0), f::<M>(1.0)],
+            ctx.clone(),
+        );
+        a.ger_cols(0, 2, f::<M>(1.0), &[f::<M>(2.0), f::<M>(3.0)], &y);
+        let expected = M::from_vec(
+            2,
+            2,
+            [3.0, 10.0, 5.0, 20.0, 3.0, 32.0, 4.0, 43.0]
+                .into_iter()
+                .map(f::<M>)
+                .collect(),
+            ctx,
+        );
+        assert_mat_eq(&a, &expected);
+    }
+
     pub fn test_batched_gemv_cols_m<M: DenseMatrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
 
@@ -2921,6 +3063,14 @@ macro_rules! generate_dense_matrix_tests_nonbatched {
             fn [<test_gemv_cols_ $suffix>]() {
                 $crate::matrix::tests::test_gemv_cols::<$M>();
             }
+            #[test]
+            fn [<test_ger_cols_ $suffix>]() {
+                $crate::matrix::tests::test_ger_cols::<$M>();
+            }
+            #[test]
+            fn [<test_ger_cols_transpose_ $suffix>]() {
+                $crate::matrix::tests::test_ger_cols_transpose::<$M>();
+            }
 
             #[test]
             fn [<test_gemv_cols_many_columns_ $suffix>]() {
@@ -2930,6 +3080,10 @@ macro_rules! generate_dense_matrix_tests_nonbatched {
             #[test]
             fn [<test_mul_cols_by_ $suffix>]() {
                 $crate::matrix::tests::test_mul_cols_by::<$M>();
+            }
+            #[test]
+            fn [<test_fill_ $suffix>]() {
+                $crate::matrix::tests::test_fill::<$M>(Default::default());
             }
             #[test]
             fn [<test_resize_cols_ $suffix>]() {
@@ -2984,10 +3138,18 @@ macro_rules! generate_dense_matrix_tests_batched {
             fn [<test_batched_gemv_cols_ $suffix>]() {
                 $crate::matrix::tests::test_batched_gemv_cols_m::<$M>($ctx2);
             }
+            #[test]
+            fn [<test_batched_ger_cols_ $suffix>]() {
+                $crate::matrix::tests::test_batched_ger_cols::<$M>($ctx2);
+            }
 
             #[test]
             fn [<test_batched_mul_cols_by_ $suffix>]() {
                 $crate::matrix::tests::test_batched_mul_cols_by::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_fill_ $suffix>]() {
+                $crate::matrix::tests::test_fill::<$M>($ctx2);
             }
             #[test]
             fn [<test_batched_from_diagonal_dense_ $suffix>]() {

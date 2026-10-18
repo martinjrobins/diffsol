@@ -5,7 +5,7 @@ use crate::{
 };
 use num_traits::Zero;
 
-use super::state::StateCommon;
+use super::state::{zeros_mat_with_directions, zeros_with_directions, StateCommon};
 
 /// What a [crate::Bdf] step needs to replay itself for [crate::StepVjp]:
 /// the scalars that, with the end-of-step state, fix the step as a linear map.
@@ -228,23 +228,34 @@ where
         }
     }
 
+    /// Builds the new state directly, rather than cloning this one only to replace every vector
+    /// and matrix, and keeps the step data and the history flags.
     fn zeros_like_with_directions(&self, ndirections: usize) -> Result<Self, DiffsolError> {
-        let mut z = self.clone();
-        for v in [
-            &mut z.y, &mut z.dy, &mut z.g, &mut z.dg, &mut z.s, &mut z.ds, &mut z.sg, &mut z.dsg,
-        ] {
-            let ctx = v
-                .context()
-                .clone_with_nbatch(v.context().nbatch() * ndirections)?;
-            *v = V::zeros(v.len(), ctx);
-        }
-        for m in [&mut z.diff, &mut z.sdiff, &mut z.gdiff, &mut z.sgdiff] {
-            let ctx = m
-                .context()
-                .clone_with_nbatch(m.context().nbatch() * ndirections)?;
-            *m = M::zeros(m.nrows(), m.ncols(), ctx);
-        }
-        Ok(z)
+        let v = |v: &V| zeros_with_directions(v, ndirections);
+        let m = |m: &M| zeros_mat_with_directions(m, ndirections);
+        Ok(Self {
+            order: self.order,
+            diff: m(&self.diff)?,
+            sdiff: m(&self.sdiff)?,
+            gdiff: m(&self.gdiff)?,
+            sgdiff: m(&self.sgdiff)?,
+            y: v(&self.y)?,
+            dy: v(&self.dy)?,
+            g: v(&self.g)?,
+            dg: v(&self.dg)?,
+            s: v(&self.s)?,
+            ds: v(&self.ds)?,
+            sg: v(&self.sg)?,
+            dsg: v(&self.dsg)?,
+            t: self.t,
+            h: self.h,
+            diff_initialised: self.diff_initialised,
+            sdiff_initialised: self.sdiff_initialised,
+            gdiff_initialised: self.gdiff_initialised,
+            sgdiff_initialised: self.sgdiff_initialised,
+            last_step: self.last_step,
+            h_init: self.h_init,
+        })
     }
 
     fn into_common(self) -> StateCommon<V> {

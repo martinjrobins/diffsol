@@ -70,7 +70,7 @@ pub trait NonLinearSolver<M: Matrix>: Default {
     /// fails to converge, and the caller can [Self::reset_jacobian] and retry.
     #[allow(clippy::too_many_arguments)]
     fn solve_jacobian_in_place<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M, C = M::C>>(
-        &self,
+        &mut self,
         op: &C,
         x_lin: &M::V,
         b: &M::V,
@@ -85,7 +85,7 @@ pub trait NonLinearSolver<M: Matrix>: Default {
     fn solve_jacobian_transpose_in_place<
         C: NonLinearOpAdjoint<V = M::V, T = M::T, M = M, C = M::C>,
     >(
-        &self,
+        &mut self,
         op: &C,
         x_lin: &M::V,
         b: &M::V,

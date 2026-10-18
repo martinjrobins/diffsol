@@ -16,6 +16,30 @@ use crate::{
 };
 use crate::{non_linear_solver_error, BacktrackingLineSearch, NoLineSearch};
 
+/// Zeros of `v`'s length with `ndirections` lanes for each of its lanes, lane
+/// `b * ndirections + k` holding direction `k` of batch `b`: one vector of a state from
+/// [OdeSolverState::zeros_like_with_directions].
+pub(crate) fn zeros_with_directions<V: Vector>(
+    v: &V,
+    ndirections: usize,
+) -> Result<V, DiffsolError> {
+    let ctx = v
+        .context()
+        .clone_with_nbatch(v.context().nbatch() * ndirections)?;
+    Ok(V::zeros(v.len(), ctx))
+}
+
+/// As [zeros_with_directions], for a matrix of a state, such as a BDF history.
+pub(crate) fn zeros_mat_with_directions<M: Matrix>(
+    m: &M,
+    ndirections: usize,
+) -> Result<M, DiffsolError> {
+    let ctx = m
+        .context()
+        .clone_with_nbatch(m.context().nbatch() * ndirections)?;
+    Ok(M::zeros(m.nrows(), m.ncols(), ctx))
+}
+
 /// A state holding those variables that are common to all ODE solver states,
 /// can be used to create a new state for a specific solver.
 pub struct StateCommon<V: Vector> {
@@ -881,10 +905,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
         let mut z = self.clone();
         let zm = z.as_mut();
         for v in [zm.y, zm.dy, zm.g, zm.dg, zm.s, zm.ds, zm.sg, zm.dsg] {
-            let ctx = v
-                .context()
-                .clone_with_nbatch(v.context().nbatch() * ndirections)?;
-            *v = V::zeros(v.len(), ctx);
+            *v = zeros_with_directions(v, ndirections)?;
         }
         Ok(z)
     }

@@ -1,5 +1,6 @@
 use diffsol_la::{Context, IndexType, LinearOp as LaLinearOp, LinearSolver, Matrix, Vector};
 use num_traits::One;
+use std::collections::HashMap;
 
 use crate::{
     convergence::{Convergence, ConvergenceStatus},
@@ -86,12 +87,18 @@ impl<C: NonLinearOpJacobian> LaLinearOp for JacobianRef<'_, C> {
     }
 }
 
+/// The work vector in `tmps` for a solve of `x`, with its lane count.
+fn work_vector<'a, V: Vector>(tmps: &'a mut HashMap<usize, V>, x: &V) -> &'a mut V {
+    tmps.entry(x.context().nbatch())
+        .or_insert_with(|| V::zeros(x.len(), x.context().clone()))
+}
+
 pub struct NewtonNonlinearSolver<M: Matrix, Ls: LinearSolver<M>, Lsearch: LineSearch<M::V>> {
     linear_solver: Ls,
     line_search: Lsearch,
     is_jacobian_set: bool,
-    /// Work vectors, one per batch count the solver has been asked for.
-    tmps: Vec<M::V>,
+    /// Work vectors, one per lane count the solver has been asked for.
+    tmps: HashMap<usize, M::V>,
 }
 
 impl<M: Matrix, Ls: LinearSolver<M>, Lsearch: LineSearch<M::V>>
@@ -102,7 +109,7 @@ impl<M: Matrix, Ls: LinearSolver<M>, Lsearch: LineSearch<M::V>>
             linear_solver,
             line_search,
             is_jacobian_set: false,
-            tmps: Vec::new(),
+            tmps: HashMap::new(),
         }
     }
     pub fn linear_solver(&self) -> &Ls {
@@ -133,7 +140,7 @@ impl<M: Matrix, Ls: LinearSolver<M>, Lsearch: LineSearch<M::V>> NonLinearSolver<
         self.linear_solver
             .set_sparsity(&JacobianRef::sparsity_only(op));
         self.is_jacobian_set = false;
-        self.tmps = vec![C::V::zeros(op.nstates(), op.context().clone())];
+        self.tmps.clear();
     }
 
     fn reset_jacobian<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M, C = M::C>>(
@@ -151,7 +158,7 @@ impl<M: Matrix, Ls: LinearSolver<M>, Lsearch: LineSearch<M::V>> NonLinearSolver<
     }
 
     fn solve_jacobian_in_place<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M, C = M::C>>(
-        &self,
+        &mut self,
         op: &C,
         x_lin: &M::V,
         b: &M::V,
@@ -162,7 +169,7 @@ impl<M: Matrix, Ls: LinearSolver<M>, Lsearch: LineSearch<M::V>> NonLinearSolver<
         if !self.is_jacobian_set {
             return Err(non_linear_solver_error!(JacobianNotReset));
         }
-        let mut tmp = x.clone();
+        let tmp = work_vector(&mut self.tmps, x);
         // F(x) = J x - b
         let fun = |x: &M::V, y: &mut M::V| {
             op.jac_mul_inplace(x_lin, x, y);
@@ -171,7 +178,7 @@ impl<M: Matrix, Ls: LinearSolver<M>, Lsearch: LineSearch<M::V>> NonLinearSolver<
         let linear_solver = |x: &mut M::V| self.linear_solver.solve_in_place(x).map_err(Into::into);
         newton_iteration(
             x,
-            &mut tmp,
+            tmp,
             error_y,
             fun,
             linear_solver,
@@ -183,7 +190,7 @@ impl<M: Matrix, Ls: LinearSolver<M>, Lsearch: LineSearch<M::V>> NonLinearSolver<
     fn solve_jacobian_transpose_in_place<
         C: NonLinearOpAdjoint<V = M::V, T = M::T, M = M, C = M::C>,
     >(
-        &self,
+        &mut self,
         op: &C,
         x_lin: &M::V,
         b: &M::V,
@@ -194,7 +201,7 @@ impl<M: Matrix, Ls: LinearSolver<M>, Lsearch: LineSearch<M::V>> NonLinearSolver<
         if !self.is_jacobian_set {
             return Err(non_linear_solver_error!(JacobianNotReset));
         }
-        let mut tmp = x.clone();
+        let tmp = work_vector(&mut self.tmps, x);
         // F(x) = J^T x - b, where the op gives -J^T x
         let fun = |x: &M::V, y: &mut M::V| {
             op.jac_transpose_mul_inplace(x_lin, x, y);
@@ -207,7 +214,7 @@ impl<M: Matrix, Ls: LinearSolver<M>, Lsearch: LineSearch<M::V>> NonLinearSolver<
         };
         newton_iteration(
             x,
-            &mut tmp,
+            tmp,
             error_y,
             fun,
             linear_solver,
@@ -233,22 +240,7 @@ impl<M: Matrix, Ls: LinearSolver<M>, Lsearch: LineSearch<M::V>> NonLinearSolver<
             };
             return Err(NlError::from(error));
         }
-        // the working vector has to match the solution's batch count. A sensitivity step
-        // alternates between the two counts, so keep a vector per count rather than
-        // reallocating on every switch
-        let nbatch = xn.context().nbatch();
-        let existing = self
-            .tmps
-            .iter()
-            .position(|t| t.context().nbatch() == nbatch);
-        let tmp = match existing {
-            Some(i) => &mut self.tmps[i],
-            None => {
-                self.tmps
-                    .push(C::V::zeros(op.nstates(), xn.context().clone()));
-                self.tmps.last_mut().unwrap()
-            }
-        };
+        let tmp = work_vector(&mut self.tmps, xn);
         let linear_solver = |x: &mut C::V| self.linear_solver.solve_in_place(x).map_err(Into::into);
         let fun = |x: &C::V, y: &mut C::V| op.call_inplace(x, y);
         newton_iteration(
