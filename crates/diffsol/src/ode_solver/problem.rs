@@ -111,9 +111,9 @@ pub struct OdeSolverOptions<T: Scalar> {
     pub max_nonlinear_solver_failures: usize,
     /// Newton convergence test scaling factor (default: 0.2).
     pub nonlinear_solver_tolerance: T,
-    /// Derivative convergence test scaling factor (default 0.2)
+    /// Derivative convergence test scaling factor, used for sensitivities, adjoints and vjp (default 0.2)
     pub derivative_solve_tolerance: T,
-    /// Maximum number of iterations per derivative solve (default: 10).
+    /// Maximum number of iterations per derivative solve, used for sensitivities, adjoints and vjp (default: 10).
     pub derivative_solve_max_iter: usize,
     /// Minimum allowed step size (absolute value, default: 1e-13).
     pub min_timestep: T,

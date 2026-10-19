@@ -13,8 +13,18 @@ pub struct OdeSolverOptionsSnapshot {
     pub threshold_to_update_jacobian: f64,
     pub threshold_to_update_rhs_jacobian: f64,
     pub min_timestep: f64,
+    #[serde(default = "default_derivative_solve_tolerance")]
     pub derivative_solve_tolerance: f64,
+    #[serde(default = "default_derivative_solve_max_iter")]
     pub derivative_solve_max_iter: usize,
+}
+
+fn default_derivative_solve_tolerance() -> f64 {
+    diffsol::OdeSolverOptions::<f64>::default().derivative_solve_tolerance
+}
+
+fn default_derivative_solve_max_iter() -> usize {
+    diffsol::OdeSolverOptions::<f64>::default().derivative_solve_max_iter
 }
 
 impl OdeSolverOptionsSnapshot {

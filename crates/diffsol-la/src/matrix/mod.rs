@@ -1188,9 +1188,6 @@ pub(crate) mod tests {
         assert_eq!(y.clone_as_vec(), vec![total, f::<M>(10.0) * total]);
     }
 
-    /// Same products as [`test_gemv_cols`], run on 2 independent batches: `x` is unbatched and
-    /// therefore shared by every batch, the columns are not.
-    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     /// [`DenseMatrix::ger_cols`] on 2 batches: the coefficients are shared, `y` is per batch.
     pub fn test_batched_ger_cols<M: DenseMatrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
@@ -1221,6 +1218,9 @@ pub(crate) mod tests {
         assert_mat_eq(&a, &expected);
     }
 
+    /// Same products as [`test_gemv_cols`], run on 2 independent batches: `x` is unbatched and
+    /// therefore shared by every batch, the columns are not.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_gemv_cols_m<M: DenseMatrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
 
