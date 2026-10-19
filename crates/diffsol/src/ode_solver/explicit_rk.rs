@@ -312,6 +312,7 @@ where
         // w = k_bar, as vjp_stage_rhs gives it
         for i in (1..self.rk.tableau().s()).rev() {
             self.rk.vjp_stage_rhs(i, cotangent);
+            self.rk.vjp_stage_value(i, end);
             self.rk.vjp_stage_inputs(i, step, end, cotangent, p_bar);
         }
         self.rk.vjp_finish(step, end, cotangent);

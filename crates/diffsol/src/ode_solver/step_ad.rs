@@ -31,7 +31,10 @@
 //! sensitivities out of error control (the default, see [crate::OdeBuilder::sens_rtol]) for the
 //! steps to be those of a run without them, as long as no sensitivity solve fails.
 
-use crate::{error::DiffsolError, OdeEquationsImplicitAdjoint, OdeSolverMethod};
+use crate::{
+    error::{DiffsolError, OdeSolverError},
+    Context, Matrix, OdeEquationsImplicitAdjoint, OdeSolverMethod, Vector,
+};
 
 /// Reverse-mode derivative (vector-Jacobian product) of a checkpointed step.
 pub trait StepVjp<'a, Eqn: OdeEquationsImplicitAdjoint + 'a>: OdeSolverMethod<'a, Eqn> {
@@ -43,12 +46,17 @@ pub trait StepVjp<'a, Eqn: OdeEquationsImplicitAdjoint + 'a>: OdeSolverMethod<'a
     ///
     /// Fails with `NoStepToDifferentiate` if `end` is not the end of a step (it is the initial
     /// state, or was modified after the step), with `StepDifferentiationSizeMismatch` if
-    /// `cotangent` does not have the sizes of `end` or `p_bar` does not have `nparams` elements.
+    /// `cotangent` does not have the sizes of `end` (including the number of stages, for a
+    /// Runge-Kutta solver) or `p_bar` does not have `nparams` elements, and with
+    /// `StepDifferentiationBatchMismatch` if the lanes of `cotangent` and `p_bar` do not fit
+    /// those of `end` (see the [module docs](self)). On any other error, `cotangent` and `p_bar`
+    /// are left partly transformed and must not be reused.
     ///
     /// Its linear solves use the solver's own Newton matrix as a preconditioner, kept up to date
     /// as a step would: on the solver's Jacobian update schedule, advanced by each replayed step,
     /// and, if a solve fails, with the Jacobian updates a step makes after a failed Newton solve,
-    /// without the smaller step size a replayed step cannot take.
+    /// as long as they change the matrix, without the smaller step size a replayed step cannot
+    /// take.
     ///
     /// The mass matrix is taken to be independent of the parameters, as for the forward
     /// sensitivities: for a model whose mass matrix depends on them, `p_bar` misses that term.
@@ -60,9 +68,80 @@ pub trait StepVjp<'a, Eqn: OdeEquationsImplicitAdjoint + 'a>: OdeSolverMethod<'a
     ) -> Result<(), DiffsolError>;
 }
 
+/// Check the inputs of a [StepVjp::step_vjp], with the states given as their `(y, dy, diff)`:
+/// that `end`'s `diff` has `diff_cols` columns (a state of another tableau or order may not),
+/// that `cotangent` has the sizes of `end` and `p_bar` has `nparams` elements, and that their
+/// lanes fit (see the [module docs](self)).
+pub(crate) fn check_step_vjp_inputs<M: Matrix>(
+    end: (&M::V, &M::V, &M),
+    diff_cols: usize,
+    cotangent: (&M::V, &M::V, &M),
+    p_bar: &M::V,
+    nparams: usize,
+) -> Result<(), DiffsolError> {
+    let (end_y, end_dy, end_diff) = end;
+    let (y, dy, diff) = cotangent;
+    // sizes as (rows, columns of a matrix), formatted only on a mismatch
+    let shape = |m: &M| (m.nrows(), Some(m.ncols()));
+    let vector = |v: &M::V| (v.len(), None);
+    for (what, found, expected) in [
+        (
+            "diff of the state",
+            shape(end_diff),
+            (end_y.len(), Some(diff_cols)),
+        ),
+        ("y", vector(y), vector(end_y)),
+        ("dy", vector(dy), vector(end_dy)),
+        ("diff", shape(diff), shape(end_diff)),
+        ("the parameter cotangent", vector(p_bar), (nparams, None)),
+    ] {
+        if found != expected {
+            let size = |(rows, cols): (usize, Option<usize>)| match cols {
+                Some(cols) => format!("{rows} x {cols}"),
+                None => rows.to_string(),
+            };
+            return Err(DiffsolError::from(
+                OdeSolverError::StepDifferentiationSizeMismatch {
+                    what,
+                    found: size(found),
+                    expected: size(expected),
+                },
+            ));
+        }
+    }
+    let state_lanes = end_y.context().nbatch();
+    let lanes = y.context().nbatch();
+    let mismatch = |what, found, expected: String| {
+        Err(DiffsolError::from(
+            OdeSolverError::StepDifferentiationBatchMismatch {
+                what,
+                found,
+                expected,
+                state_lanes,
+            },
+        ))
+    };
+    if !lanes.is_multiple_of(state_lanes) {
+        return mismatch("y", lanes, format!("a multiple of {state_lanes}"));
+    }
+    for (what, found) in [
+        ("dy", dy.context().nbatch()),
+        ("diff", diff.context().nbatch()),
+    ] {
+        if found != lanes {
+            return mismatch(what, found, lanes.to_string());
+        }
+    }
+    let p_lanes = p_bar.context().nbatch();
+    if p_lanes != lanes {
+        return mismatch("the parameter cotangent", p_lanes, lanes.to_string());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    //! Tests for the step derivatives. The reference derivatives are finite differences of 
+    //! Tests for the step derivatives. The reference derivatives are finite differences of
     //! single steps and, for whole trajectories, the solver's own forward sensitivities.
 
     use crate::Vector;

@@ -137,8 +137,8 @@
 //! `derivative_solve_tolerance` (see [OdeSolverOptions]): make it small for gradients that agree
 //! with finite differences of the solver. [ExplicitRk] needs no solve, so its sensitivities are
 //! exact. Left out of error control, the sensitivities do not change the steps, unless a
-//! sensitivity solve fails: that fails the step attempt, which is retried as for a failed Newton
-//! solve, after a Jacobian update and then with a smaller step size. For the reverse mode of the
+//! sensitivity solve fails: it is then retried after a Jacobian update, and if that fails too the
+//! step attempt is retried with a smaller step size. For the reverse mode of the
 //! same derivative ('discretise-then-optimise'), see [StepVjp]. For a solution to the adjoint
 //! equations ('optimise-then-discretise'), see the Adjoint section below.
 //!

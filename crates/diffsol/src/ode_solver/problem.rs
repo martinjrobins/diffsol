@@ -87,7 +87,10 @@ impl<T: Scalar> Default for InitialConditionSolverOptions<T> {
 /// The forward sensitivities solved alongside the main equations, and the solves of
 /// [crate::StepVjp], are linear solves preconditioned by the Newton matrix, with their own
 /// `derivative_solve_tolerance` and `derivative_solve_max_iter`. Both differentiate the steps the
-/// solver takes, exactly up to that tolerance; see the fields for how to choose it.
+/// solver takes, exactly up to that tolerance; see the fields for how to choose it. An adjoint
+/// solve backwards is not one of these: the adjoint equations are what that solver integrates,
+/// so their solves use `nonlinear_solver_tolerance` and `max_nonlinear_solver_iterations`, scaled
+/// to the error control of the adjoint like any Newton solve.
 ///
 /// ## Jacobian Updates (Implicit Methods)
 ///
@@ -111,9 +114,11 @@ pub struct OdeSolverOptions<T: Scalar> {
     pub max_nonlinear_solver_failures: usize,
     /// Newton convergence test scaling factor (default: 0.2).
     pub nonlinear_solver_tolerance: T,
-    /// Derivative convergence test scaling factor, used for sensitivities, adjoints and vjp (default 0.2)
+    /// Derivative convergence test scaling factor, used for the forward sensitivities and
+    /// [crate::StepVjp] (default 0.2).
     pub derivative_solve_tolerance: T,
-    /// Maximum number of iterations per derivative solve, used for sensitivities, adjoints and vjp (default: 10).
+    /// Maximum number of iterations per derivative solve, used for the forward sensitivities and
+    /// [crate::StepVjp] (default: 10).
     pub derivative_solve_max_iter: usize,
     /// Minimum allowed step size (absolute value, default: 1e-13).
     pub min_timestep: T,

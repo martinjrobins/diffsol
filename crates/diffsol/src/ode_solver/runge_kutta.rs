@@ -1,3 +1,4 @@
+use super::step_ad::check_step_vjp_inputs;
 use crate::error::DiffsolError;
 use crate::error::OdeSolverError;
 use crate::ode_solver::sdirk_state::RkStepRecord;
@@ -83,7 +84,7 @@ where
     /// The lane count of the cotangent being pulled back, set by [Self::vjp_start].
     vjp_lanes: usize,
     /// Column `i` holds the coefficients of stage `i`'s value relative to the end of the step,
-    /// for [Self::vjp_stage_inputs]: see [Self::stage_coeffs_from_end].
+    /// for [Self::vjp_stage_value]: see [Self::stage_coeffs_from_end].
     vjp_stage_value_coeffs: TableauMat<Eqn::T>,
 }
 
@@ -211,7 +212,7 @@ where
             prev_error_norm: None,
             vjp_work: HashMap::new(),
             vjp_lanes: 0,
-            vjp_stage_value_coeffs: Self::stage_coeffs_from_end(&tableau, true),
+            vjp_stage_value_coeffs: Self::stage_coeffs_from_end(&tableau),
         })
     }
 
@@ -371,20 +372,15 @@ where
     }
 
     /// The coefficients of the stages relative to the end of a step, a stiffly accurate one's
-    /// `y`: column `i` holds `c_ij` such that `y + sum_j c_ij K_j` is stage `i`'s value `Y_i`,
-    /// or with `include_diagonal` false, its known part `Y_i - a_ii K_i`. With
-    /// `y0 = y - sum_j b_j K_j`, `c_ij = a_ij - b_j` for `j < i` (and `j = i` with the diagonal),
-    /// and `-b_j` otherwise.
-    pub(crate) fn stage_coeffs_from_end(
-        tableau: &Tableau<Eqn::T>,
-        include_diagonal: bool,
-    ) -> TableauMat<Eqn::T> {
+    /// `y`: column `i` holds `c_ij` such that `y + sum_j c_ij K_j` is stage `i`'s value `Y_i`.
+    /// With `y0 = y - sum_j b_j K_j`, `c_ij = a_ij - b_j` for `j <= i`, and `-b_j` otherwise.
+    fn stage_coeffs_from_end(tableau: &Tableau<Eqn::T>) -> TableauMat<Eqn::T> {
         let s = tableau.s();
         let b = tableau.b();
         let mut coeffs = TableauMat::zeros(s, s);
         for i in 0..s {
             for (j, c) in coeffs.as_col_slice_mut(i).iter_mut().enumerate() {
-                let a_ij = if j < i || (include_diagonal && j == i) {
+                let a_ij = if j <= i {
                     tableau.a(i, j)
                 } else {
                     Eqn::T::zero()
@@ -1367,57 +1363,13 @@ where
         let step = end
             .last_step
             .ok_or(ode_solver_error!(NoStepToDifferentiate))?;
-        let nparams = self.problem.eqn.rhs().nparams();
-        // sizes as (rows, columns of a matrix), formatted only on a mismatch
-        let shape = |m: &M| (m.nrows(), Some(m.ncols()));
-        let vector = |v: &Eqn::V| (v.len(), None);
-        for (what, found, expected) in [
-            ("y", vector(&cotangent.y), vector(&end.y)),
-            ("dy", vector(&cotangent.dy), vector(&end.dy)),
-            ("diff", shape(&cotangent.diff), shape(&end.diff)),
-            ("the parameter cotangent", vector(p_bar), (nparams, None)),
-        ] {
-            if found != expected {
-                let size = |(rows, cols): (usize, Option<usize>)| match cols {
-                    Some(cols) => format!("{rows} x {cols}"),
-                    None => rows.to_string(),
-                };
-                return Err(DiffsolError::from(
-                    OdeSolverError::StepDifferentiationSizeMismatch {
-                        what,
-                        found: size(found),
-                        expected: size(expected),
-                    },
-                ));
-            }
-        }
-        let state_lanes = end.y.context().nbatch();
-        let lanes = cotangent.y.context().nbatch();
-        let mismatch = |what, found, expected: String| {
-            Err(DiffsolError::from(
-                OdeSolverError::StepDifferentiationBatchMismatch {
-                    what,
-                    found,
-                    expected,
-                    state_lanes,
-                },
-            ))
-        };
-        if !lanes.is_multiple_of(state_lanes) {
-            return mismatch("y", lanes, format!("a multiple of {state_lanes}"));
-        }
-        for (what, found) in [
-            ("dy", cotangent.dy.context().nbatch()),
-            ("diff", cotangent.diff.context().nbatch()),
-        ] {
-            if found != lanes {
-                return mismatch(what, found, lanes.to_string());
-            }
-        }
-        let p_lanes = p_bar.context().nbatch();
-        if p_lanes != lanes {
-            return mismatch("the parameter cotangent", p_lanes, lanes.to_string());
-        }
+        check_step_vjp_inputs(
+            (&end.y, &end.dy, &end.diff),
+            self.tableau.s(),
+            (&cotangent.y, &cotangent.dy, &cotangent.diff),
+            p_bar,
+            self.problem.eqn.rhs().nparams(),
+        )?;
         Ok(step)
     }
 
@@ -1496,9 +1448,27 @@ where
         (&mut work.w, &mut c.dy)
     }
 
-    /// Pull the solution `w` of stage `i`'s transposed solve back through `h f(Y_i, t_i; p)`:
-    /// to the earlier stages' increments and the start of the step through `Y_i`, and to the
-    /// parameters, added to `p_bar`.
+    /// The value `Y_i` of stage `i` of the step that ended at `end`, which the forward step
+    /// evaluated f at, for [Self::vjp_stage_inputs]. It is taken relative to the end of the step
+    /// so that y0 is never formed.
+    pub(crate) fn vjp_stage_value(&mut self, i: usize, end: &RkState<Eqn::V, M>) -> &Eqn::V {
+        let work = self.vjp_work.get_mut(&self.vjp_lanes).unwrap();
+        work.y_i.copy_from(&end.y);
+        end.diff.gemv_cols(
+            0,
+            self.tableau.s(),
+            Eqn::T::one(),
+            self.vjp_stage_value_coeffs.as_col_slice(i),
+            Eqn::T::one(),
+            &mut work.y_i,
+        );
+        &work.y_i
+    }
+
+    /// Pull the solution `w` of stage `i`'s transposed solve back through `h f(Y_i, t_i; p)`,
+    /// with `Y_i` as [Self::vjp_stage_value] last computed it: to the earlier stages'
+    /// increments and the start of the step through `Y_i`, and to the parameters, added to
+    /// `p_bar`.
     pub(crate) fn vjp_stage_inputs(
         &mut self,
         i: usize,
@@ -1512,18 +1482,6 @@ where
         let t_i = self.vjp_stage_time(i, step, end);
         let rhs = self.problem.eqn.rhs();
         let work = self.vjp_work.get_mut(&self.vjp_lanes).unwrap();
-
-        // the stage value Y_i the forward step evaluated f at, taken relative to the end of the
-        // step so that y0 is never formed
-        work.y_i.copy_from(&end.y);
-        end.diff.gemv_cols(
-            0,
-            self.tableau.s(),
-            one,
-            self.vjp_stage_value_coeffs.as_col_slice(i),
-            one,
-            &mut work.y_i,
-        );
 
         // Y_i depends on y0 and the earlier increments with cotangent h J_i^T w, and p with
         // cotangent h f_p^T w. The ops give the negated transposes; c.dy holds -J_i^T w
