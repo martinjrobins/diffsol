@@ -29,8 +29,7 @@
 //! [crate::OdeSolverOptions]), so the two agree as closely as that tolerance, and for
 //! [crate::ExplicitRk] neither needs a solve, so they agree to rounding. Leave the
 //! sensitivities out of error control (the default, see [crate::OdeBuilder::sens_rtol]) for the
-//! steps to be those of a run without them, as long as no sensitivity solve needs a fresh Newton
-//! matrix.
+//! steps to be those of a run without them, as long as no sensitivity solve fails.
 
 use crate::{error::DiffsolError, OdeEquationsImplicitAdjoint, OdeSolverMethod};
 
@@ -44,14 +43,12 @@ pub trait StepVjp<'a, Eqn: OdeEquationsImplicitAdjoint + 'a>: OdeSolverMethod<'a
     ///
     /// Fails with `NoStepToDifferentiate` if `end` is not the end of a step (it is the initial
     /// state, or was modified after the step), with `StepDifferentiationSizeMismatch` if
-    /// `cotangent` does not have the sizes of `end` or `p_bar` does not have `nparams` elements,
-    /// and with `StepDifferentiationBatchMismatch` if the lanes of `cotangent` and `p_bar` do not
-    /// fit those of `end` (see the [module docs](self)). On any other error, `cotangent` and
-    /// `p_bar` are left partly transformed and must not be reused.
+    /// `cotangent` does not have the sizes of `end` or `p_bar` does not have `nparams` elements.
     ///
-    /// Its linear solves use the solver's own Newton matrix as a preconditioner. If that is too
-    /// poor for them to converge, it is refreshed, which a later [OdeSolverMethod::step] then
-    /// starts from.
+    /// Its linear solves use the solver's own Newton matrix as a preconditioner, kept up to date
+    /// as a step would: on the solver's Jacobian update schedule, advanced by each replayed step,
+    /// and, if a solve fails, with the Jacobian updates a step makes after a failed Newton solve,
+    /// without the smaller step size a replayed step cannot take.
     ///
     /// The mass matrix is taken to be independent of the parameters, as for the forward
     /// sensitivities: for a model whose mass matrix depends on them, `p_bar` misses that term.
@@ -65,11 +62,8 @@ pub trait StepVjp<'a, Eqn: OdeEquationsImplicitAdjoint + 'a>: OdeSolverMethod<'a
 
 #[cfg(test)]
 mod tests {
-    //! The step derivatives tested through the public API only: cotangents are seeded and read
-    //! through the state's `y` and `dy`, so the tests apply to any solver that implements
-    //! [super::StepVjp]. They are written once in `step_ad_tests!` and run for each solver and
-    //! linear solver. The reference derivatives are finite differences of single steps and, for
-    //! whole trajectories, the solver's own forward sensitivities.
+    //! Tests for the step derivatives. The reference derivatives are finite differences of 
+    //! single steps and, for whole trajectories, the solver's own forward sensitivities.
 
     use crate::Vector;
 
@@ -109,7 +103,7 @@ mod tests {
     /// the problem methods `$new`, `$from_state` (from a state of type `$State`, with a config of
     /// type `$Config`) and, with forward sensitivities, `$new_sens`, each given as the method
     /// name with any generic arguments. `dae` is whether the solver supports the DAE form of the
-    /// model, and `refreshes` whether its derivatives can refresh the Newton matrix (an explicit
+    /// model, and `refreshes` whether its derivatives can update the Newton matrix (an explicit
     /// solver has none).
     macro_rules! step_ad_tests {
         (
@@ -537,23 +531,35 @@ mod tests {
                     solver.step_vjp(&end, &mut cot, &mut with_lanes(3)).unwrap();
                 }
 
-                /// `with_derivatives` is `plain` with `refreshes` derivative refreshes added.
-                fn assert_only_derivative_refreshes_added(
-                    with_derivatives: &OdeSolverStatistics,
+                /// `with_vjp` is `plain` with `n` Jacobian updates added, where `updates(n)`: those
+                /// a failed solve is retried after, those the schedule makes after each step, and
+                /// any for a matrix that was not yet set.
+                fn assert_only_jacobian_updates_added(
+                    with_vjp: &OdeSolverStatistics,
                     plain: &OdeSolverStatistics,
-                    refreshes: impl Fn(usize) -> bool,
+                    updates: impl Fn(usize) -> bool,
                 ) {
-                    let mut with_derivatives = with_derivatives.clone();
-                    let n = with_derivatives.number_of_derivative_jacobian_refreshes;
-                    assert!(refreshes(n), "unexpected number of refreshes: {n}");
-                    with_derivatives.number_of_derivative_jacobian_refreshes = 0;
-                    assert_eq!(format!("{with_derivatives:?}"), format!("{plain:?}"));
+                    let mut with_vjp = with_vjp.clone();
+                    let n = with_vjp.number_of_linear_solver_setups
+                        - plain.number_of_linear_solver_setups;
+                    assert!(updates(n), "unexpected number of Jacobian updates: {n}");
+                    with_vjp.number_of_linear_solver_setups =
+                        plain.number_of_linear_solver_setups;
+                    with_vjp.number_of_linear_solver_setups_from_first_convergence_fail =
+                        plain.number_of_linear_solver_setups_from_first_convergence_fail;
+                    with_vjp.number_of_linear_solver_setups_from_second_convergence_fail =
+                        plain.number_of_linear_solver_setups_from_second_convergence_fail;
+                    with_vjp.number_of_linear_solver_setups_from_checkpoint =
+                        plain.number_of_linear_solver_setups_from_checkpoint;
+                    with_vjp.number_of_linear_solver_setups_from_step_success =
+                        plain.number_of_linear_solver_setups_from_step_success;
+                    assert_eq!(format!("{with_vjp:?}"), format!("{plain:?}"));
                 }
 
                 /// Pulling a cotangent back through the checkpoints leaves the solver's statistics
-                /// alone, apart from the derivatives' own refreshes.
+                /// alone, apart from the Jacobian updates it makes.
                 #[test]
-                fn step_vjp_leaves_the_statistics_unchanged() {
+                fn step_vjp_adds_only_jacobian_updates() {
                     let mut problem = problem($dae);
                     problem.ode_options.derivative_solve_max_iter = 1;
                     let mut solver = new_solver(&problem);
@@ -570,7 +576,7 @@ mod tests {
                     for checkpoint in checkpoints.iter().rev() {
                         let _ = solver.step_vjp(checkpoint, &mut cot, &mut p_bar);
                     }
-                    assert_only_derivative_refreshes_added(solver.get_statistics(), &plain, |n| {
+                    assert_only_jacobian_updates_added(solver.get_statistics(), &plain, |n| {
                         if $refreshes {
                             n > 0
                         } else {

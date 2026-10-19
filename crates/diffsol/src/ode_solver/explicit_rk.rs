@@ -307,8 +307,15 @@ where
             return Err(ode_solver_error!(StepDifferentiationNotSupported));
         }
         let step = self.rk.vjp_check_inputs(end, cotangent, p_bar)?;
-        self.rk
-            .step_vjp(step, end, cotangent, p_bar, |_i, _t, _w, _scratch| Ok(()))
+        self.rk.vjp_start(step, end, cotangent, p_bar);
+        // the stages of step(), in reverse: each is explicit, so its transposed solve is
+        // w = k_bar, as vjp_stage_rhs gives it
+        for i in (1..self.rk.tableau().s()).rev() {
+            self.rk.vjp_stage_rhs(i, cotangent);
+            self.rk.vjp_stage_inputs(i, step, end, cotangent, p_bar);
+        }
+        self.rk.vjp_finish(step, end, cotangent);
+        Ok(())
     }
 }
 
@@ -407,7 +414,6 @@ mod test {
         number_of_linear_solver_setups_from_second_convergence_fail: 0
         number_of_linear_solver_setups_from_error_test_fail: 0
         number_of_linear_solver_setups_from_step_success: 0
-        number_of_derivative_jacobian_refreshes: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 56
@@ -443,7 +449,6 @@ mod test {
         number_of_linear_solver_setups_from_second_convergence_fail: 0
         number_of_linear_solver_setups_from_error_test_fail: 0
         number_of_linear_solver_setups_from_step_success: 0
-        number_of_derivative_jacobian_refreshes: 0
         ");
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 0
@@ -471,7 +476,6 @@ mod test {
         number_of_linear_solver_setups_from_second_convergence_fail: 0
         number_of_linear_solver_setups_from_error_test_fail: 0
         number_of_linear_solver_setups_from_step_success: 0
-        number_of_derivative_jacobian_refreshes: 0
         ");
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 56
@@ -497,7 +501,6 @@ mod test {
         number_of_linear_solver_setups_from_second_convergence_fail: 0
         number_of_linear_solver_setups_from_error_test_fail: 0
         number_of_linear_solver_setups_from_step_success: 0
-        number_of_derivative_jacobian_refreshes: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 62

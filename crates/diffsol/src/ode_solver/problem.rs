@@ -82,7 +82,7 @@ impl<T: Scalar> Default for InitialConditionSolverOptions<T> {
 /// limits the number of Newton steps per stage. `nonlinear_solver_tolerance` is a scaling
 /// factor in the convergence test (smaller values produce a tighter tolerance).
 ///
-/// ## Derivative Solves (BDF)
+/// ## Derivative Solves (BDF and SDIRK)
 ///
 /// The forward sensitivities solved alongside the main equations, and the solves of
 /// [crate::StepVjp], are linear solves preconditioned by the Newton matrix, with their own

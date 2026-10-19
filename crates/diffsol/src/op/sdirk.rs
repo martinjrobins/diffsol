@@ -47,14 +47,25 @@ impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
         self.eqn.out().unwrap().call_inplace(ys, t, y);
         y.mul_assign(scale(*self.h.borrow().deref()));
     }
-    pub fn rhs_jac(&self, x: &Eqn::V, t: Eqn::T) -> Ref<'_, Eqn::M> {
-        {
-            let mut rhs_jac = self.rhs_jac.borrow_mut();
-            self.set_tmp(x);
-            let tmp = self.tmp.borrow();
-            self.eqn.rhs().jacobian_inplace(&tmp, t, &mut rhs_jac);
-        }
+    /// The Jacobian of the rhs at the state `y` and time `t`.
+    pub fn rhs_jac(&self, y: &Eqn::V, t: Eqn::T) -> Ref<'_, Eqn::M> {
+        self.eqn
+            .rhs()
+            .jacobian_inplace(y, t, &mut self.rhs_jac.borrow_mut());
         self.rhs_jac.borrow()
+    }
+    /// Evaluate the rhs Jacobian (and the mass matrix) at the state `y` and time `t`, for the
+    /// next [NonLinearOpJacobian::jacobian_inplace] to combine into `M - c h f'`, whatever
+    /// stage `phi` is set up for: the stage increment that call is given then makes no
+    /// difference.
+    pub fn refresh_rhs_jacobian(&self, y: &Eqn::V, t: Eqn::T) {
+        self.eqn
+            .rhs()
+            .jacobian_inplace(y, t, &mut self.rhs_jac.borrow_mut());
+        if let Some(mass) = self.eqn.mass() {
+            mass.matrix_inplace(t, &mut self.mass_jac.borrow_mut());
+        }
+        self.jacobian_is_stale.replace(false);
     }
     pub fn mass(&self, t: Eqn::T) -> Ref<'_, Eqn::M> {
         {

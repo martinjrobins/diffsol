@@ -27,9 +27,9 @@ use super::OdeSolverStatistics;
 use std::collections::HashMap;
 use std::ops::{MulAssign, SubAssign};
 
-/// Work vectors for [Rk::step_vjp], for cotangents of one lane count. The cotangent's own `dy`
-/// is free while the stages are pulled back, and serves as a third: a scratch vector for the
-/// stage solve, then `-J^T w`.
+/// Work vectors for pulling a cotangent back through a step (see [Rk::vjp_start]), for
+/// cotangents of one lane count. The cotangent's own `dy` is free while the stages are pulled
+/// back, and serves as a third: a scratch vector for the stage solve, then `-J^T w`.
 #[derive(Clone)]
 struct RkVjpWork<V> {
     /// The value of the current stage, with the lanes of the state.
@@ -77,10 +77,13 @@ where
 
     prev_error_norm: Option<Eqn::T>,
 
-    /// Work vectors for [Self::step_vjp], keyed by the lane count of the cotangents.
+    /// Work vectors for pulling a cotangent back through a step, keyed by the lane count of the
+    /// cotangents.
     vjp_work: HashMap<usize, RkVjpWork<Eqn::V>>,
+    /// The lane count of the cotangent being pulled back, set by [Self::vjp_start].
+    vjp_lanes: usize,
     /// Column `i` holds the coefficients of stage `i`'s value relative to the end of the step,
-    /// for [Self::step_vjp]: see [Self::stage_coeffs_from_end].
+    /// for [Self::vjp_stage_inputs]: see [Self::stage_coeffs_from_end].
     vjp_stage_value_coeffs: TableauMat<Eqn::T>,
 }
 
@@ -120,6 +123,7 @@ where
             sens_out_error: self.sens_out_error.clone(),
             prev_error_norm: self.prev_error_norm,
             vjp_work: HashMap::new(),
+            vjp_lanes: 0,
             vjp_stage_value_coeffs: self.vjp_stage_value_coeffs,
         }
     }
@@ -206,6 +210,7 @@ where
             sens_out_error: None,
             prev_error_norm: None,
             vjp_work: HashMap::new(),
+            vjp_lanes: 0,
             vjp_stage_value_coeffs: Self::stage_coeffs_from_end(&tableau, true),
         })
     }
@@ -699,6 +704,8 @@ where
             );
             Self::predict_stage_sdirk(i, h, &self.state.dy, &new.diff, &mut new.dy, &self.tableau);
             if !nonlinear_solver.is_jacobian_set() {
+                // at the state at the start of the step, as a Jacobian update would
+                op.refresh_rhs_jacobian(&self.state.y, self.state.t);
                 nonlinear_solver.reset_jacobian(op, &self.state.y, t);
                 self.statistics
                     .record_linear_solver_setup(SolverState::Checkpoint);
@@ -730,11 +737,6 @@ where
         }
 
         Ok(())
-    }
-
-    /// The increment of the stage last solved by [Self::do_stage_sdirk].
-    pub(crate) fn stage_increment(&self) -> &Eqn::V {
-        &self.old_state.dy
     }
 
     /// Solve stage `i` of the augmented equations, after the main equations' stage `i` (if any)
@@ -1419,40 +1421,42 @@ where
         Ok(step)
     }
 
-    /// Pull the cotangent `c` at `end` back through the step `step` that ended there, adding
-    /// the parameter cotangent to `p_bar`.
-    ///
-    /// The step's stages solve `M K_i = h f(Y_i, t_i)` for their increments `K_i = diff[:, i]`,
-    /// with `Y_i = y0 + sum_{j <= i} a_ij K_j` and `t_i = t0 + c_i h`, and the step's outputs are
-    /// `y = y0 + sum_j b_j K_j` and `dy = K_{s-1} / h`. A method whose first stage is explicit
-    /// takes `K_0 = h dy0` from the start of the step instead.
-    ///
-    /// `stage_solve(i, t_i, w, scratch)` solves the transpose of stage `i`'s linearised
-    /// equation, `(M - a_ii h J_i)^T w = k_bar`, in place: `w` holds `k_bar` on entry and the
-    /// solution on return. `scratch` is a free vector of the same shape, for a solve that needs
-    /// `k_bar` alongside its iterate. For an explicit method `w = k_bar`, so there is nothing
-    /// to do.
-    ///
-    /// On return the cotangent is carried by `y` and `dy` (`diff` is zero), as the cotangents of
-    /// the state and, for a first stage taken from it, its derivative at the start of the step.
-    pub(crate) fn step_vjp(
+    // VJP methods
+    // ===========
+    //
+    // Pulling a cotangent back through a step, the reverse of [Self::start_step_attempt],
+    // [Self::do_stage] / [Self::do_stage_sdirk] and [Self::step_accepted]. As in the forward
+    // step, the solver owns the loop over the stages:
+    //
+    // - [Self::vjp_start] folds in the cotangent of the step's outputs,
+    // - then for each stage from the last down to the first computed one (not a first stage
+    //   taken from `dy`), [Self::vjp_stage_rhs] gives the right-hand side `k_bar` of the stage's
+    //   transposed solve `(M - a_ii h J_i)^T w = k_bar` in `w`, which the solver solves in
+    //   place (an explicit stage has `w = k_bar`), and [Self::vjp_stage_inputs] pulls `w` back
+    //   to the earlier stages, the start of the step and the parameters,
+    // - and [Self::vjp_finish] reads out the cotangent at the start of the step.
+    //
+    // The stages solve `M K_i = h f(Y_i, t_i)` for their increments `K_i = diff[:, i]`, with
+    // `Y_i = y0 + sum_{j <= i} a_ij K_j` and `t_i = t0 + c_i h`, and the step's outputs are
+    // `y = y0 + sum_j b_j K_j` and `dy = K_{s-1} / h`. A method whose first stage is explicit
+    // takes `K_0 = h dy0` from the start of the step instead.
+
+    /// Start pulling the cotangent `c` at `end` back through the step `step` that ended there:
+    /// fold the cotangents of the step's outputs into those of the stage increments, `c.diff`,
+    /// with `c.y` left as the cotangent of the start of the step.
+    pub(crate) fn vjp_start(
         &mut self,
         step: RkStepRecord<Eqn::T>,
         end: &RkState<Eqn::V, M>,
         c: &mut RkState<Eqn::V, M>,
-        p_bar: &mut Eqn::V,
-        mut stage_solve: impl FnMut(usize, Eqn::T, &mut Eqn::V, &mut Eqn::V) -> Result<(), DiffsolError>,
-    ) -> Result<(), DiffsolError> {
+        p_bar: &Eqn::V,
+    ) {
         let one = Eqn::T::one();
-        let zero = Eqn::T::zero();
         let s = self.tableau.s();
-        let h = step.h;
-        let t0 = end.t - h;
         let b = self.tableau.b();
-        let rhs = self.problem.eqn.rhs();
 
-        let lanes = c.y.context().nbatch();
-        let mut work = self.vjp_work.remove(&lanes).unwrap_or_else(|| {
+        self.vjp_lanes = c.y.context().nbatch();
+        self.vjp_work.entry(self.vjp_lanes).or_insert_with(|| {
             let state = |v: &Eqn::V| Eqn::V::zeros(v.len(), v.context().clone());
             RkVjpWork {
                 y_i: state(&end.y),
@@ -1461,63 +1465,99 @@ where
             }
         });
 
-        // fold in the outputs: y_bar stays as the cotangent of y0, and the increments get
-        // b_j y_bar, and dy_bar / h for the last one
-        c.diff.fill(zero);
+        // y_bar stays as the cotangent of y0, and the increments get b_j y_bar, and dy_bar / h
+        // for the last one
+        c.diff.fill(Eqn::T::zero());
         c.diff.ger_cols(0, s, one, b.as_slice(), &c.y);
-        c.diff.column_mut(s - 1).axpy(one / h, &c.dy, one);
+        c.diff.column_mut(s - 1).axpy(one / step.h, &c.dy, one);
+    }
 
-        let start = if self.skip_first_stage() { 1 } else { 0 };
-        let mut result = Ok(());
-        for i in (start..s).rev() {
-            let t_i = t0 + self.tableau.c()[i] * h;
-            // c.dy is folded in above, so until the readouts at the end it is free: the solve's
-            // scratch, and then -J_i^T w
-            work.w.copy_from_view(&c.diff.column(i));
-            if let Err(e) = stage_solve(i, t_i, &mut work.w, &mut c.dy) {
-                result = Err(e);
-                break;
-            }
+    /// The time of stage `i` of the step `step` that ended at `end`.
+    pub(crate) fn vjp_stage_time(
+        &self,
+        i: usize,
+        step: RkStepRecord<Eqn::T>,
+        end: &RkState<Eqn::V, M>,
+    ) -> Eqn::T {
+        end.t - step.h + self.tableau.c()[i] * step.h
+    }
 
-            // the stage value Y_i the forward step evaluated f at, taken relative to the end of
-            // the step so that y0 is never formed
-            work.y_i.copy_from(&end.y);
-            end.diff.gemv_cols(
-                0,
-                s,
-                one,
-                self.vjp_stage_value_coeffs.as_col_slice(i),
-                one,
-                &mut work.y_i,
-            );
+    /// The right-hand side `k_bar` of stage `i`'s transposed solve, written into `w`, the first
+    /// vector returned, for the solver to solve for in place. The second is a free vector of the
+    /// same shape (the cotangent's `dy`, which [Self::vjp_start] has folded in), for a solve that
+    /// needs `k_bar` alongside its iterate.
+    pub(crate) fn vjp_stage_rhs<'s>(
+        &'s mut self,
+        i: usize,
+        c: &'s mut RkState<Eqn::V, M>,
+    ) -> (&'s mut Eqn::V, &'s mut Eqn::V) {
+        let work = self.vjp_work.get_mut(&self.vjp_lanes).unwrap();
+        work.w.copy_from_view(&c.diff.column(i));
+        (&mut work.w, &mut c.dy)
+    }
 
-            // h f(Y_i, t_i; p) depends on y0 and the earlier increments through Y_i, with
-            // cotangent h J_i^T w, and on p with cotangent h f_p^T w. The ops give the
-            // negated transposes
-            rhs.jac_transpose_mul_inplace(&work.y_i, t_i, &work.w, &mut c.dy);
-            c.y.axpy(-h, &c.dy, one);
-            c.diff
-                .ger_cols(0, i, -h, self.tableau.stage_coeffs(i), &c.dy);
-            rhs.sens_transpose_mul_inplace(&work.y_i, t_i, &work.w, &mut work.fpt_w);
-            p_bar.axpy(-h, &work.fpt_w, one);
-        }
-        self.vjp_work.insert(lanes, work);
-        result?;
+    /// Pull the solution `w` of stage `i`'s transposed solve back through `h f(Y_i, t_i; p)`:
+    /// to the earlier stages' increments and the start of the step through `Y_i`, and to the
+    /// parameters, added to `p_bar`.
+    pub(crate) fn vjp_stage_inputs(
+        &mut self,
+        i: usize,
+        step: RkStepRecord<Eqn::T>,
+        end: &RkState<Eqn::V, M>,
+        c: &mut RkState<Eqn::V, M>,
+        p_bar: &mut Eqn::V,
+    ) {
+        let one = Eqn::T::one();
+        let h = step.h;
+        let t_i = self.vjp_stage_time(i, step, end);
+        let rhs = self.problem.eqn.rhs();
+        let work = self.vjp_work.get_mut(&self.vjp_lanes).unwrap();
 
+        // the stage value Y_i the forward step evaluated f at, taken relative to the end of the
+        // step so that y0 is never formed
+        work.y_i.copy_from(&end.y);
+        end.diff.gemv_cols(
+            0,
+            self.tableau.s(),
+            one,
+            self.vjp_stage_value_coeffs.as_col_slice(i),
+            one,
+            &mut work.y_i,
+        );
+
+        // Y_i depends on y0 and the earlier increments with cotangent h J_i^T w, and p with
+        // cotangent h f_p^T w. The ops give the negated transposes; c.dy holds -J_i^T w
+        rhs.jac_transpose_mul_inplace(&work.y_i, t_i, &work.w, &mut c.dy);
+        c.y.axpy(-h, &c.dy, one);
+        c.diff
+            .ger_cols(0, i, -h, self.tableau.stage_coeffs(i), &c.dy);
+        rhs.sens_transpose_mul_inplace(&work.y_i, t_i, &work.w, &mut work.fpt_w);
+        p_bar.axpy(-h, &work.fpt_w, one);
+    }
+
+    /// Finish pulling the cotangent back: on return it is carried by `y` and `dy` (`diff` is
+    /// zero), as the cotangents of the state and, for a first stage taken from it, its
+    /// derivative at the start of the step.
+    pub(crate) fn vjp_finish(
+        &self,
+        step: RkStepRecord<Eqn::T>,
+        end: &RkState<Eqn::V, M>,
+        c: &mut RkState<Eqn::V, M>,
+    ) {
+        let zero = Eqn::T::zero();
         // a first stage taken from the start of the step, K_0 = h dy0
-        if start == 1 {
+        if self.skip_first_stage() {
             c.dy.copy_from_view(&c.diff.column(0));
-            c.dy.mul_assign(scale(h));
+            c.dy.mul_assign(scale(step.h));
         } else {
             c.dy.fill(zero);
         }
         c.diff.fill(zero);
 
         // the cotangent now sits at the start of the step
-        c.t = t0;
-        c.h = h;
+        c.t = end.t - step.h;
+        c.h = step.h;
         c.last_step = None;
-        Ok(())
     }
 }
 
