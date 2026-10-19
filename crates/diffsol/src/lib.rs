@@ -133,10 +133,11 @@
 //! using the [OdeBuilder::sens_atol] and [OdeBuilder::sens_rtol] methods. Use
 //! [OdeBuilder::param_scales] to set an absolute tolerance scale for each parameter.
 //!
-//! The [Bdf] sensitivities are the derivative of the steps the solver takes
-//! ("discretise-then-optimise"), solved to the problem's `derivative_solve_tolerance` (see
-//! [OdeSolverOptions]): make it small for gradients that agree with finite differences of the
-//! solver. Left out of error control, the sensitivities do not change the steps, unless a
+//! The sensitivities are the derivative of the steps the solver takes
+//! ("discretise-then-optimise"). For [Bdf] and [Sdirk] they are solved to the problem's
+//! `derivative_solve_tolerance` (see [OdeSolverOptions]): make it small for gradients that agree
+//! with finite differences of the solver. [ExplicitRk] needs no solve, so its sensitivities are
+//! exact. Left out of error control, the sensitivities do not change the steps, unless a
 //! sensitivity solve needs a fresh Newton matrix: the refresh then also changes the main solve,
 //! and if the solve still fails the step is retried with a smaller step size. For the reverse
 //! mode of the same derivative, see [StepVjp].

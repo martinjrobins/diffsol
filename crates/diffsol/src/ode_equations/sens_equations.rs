@@ -393,6 +393,8 @@ mod tests {
     fn state_at(y: Vcpu, dy: Vcpu, ctx: <Mcpu as MatrixCommon>::C) -> RkState<Vcpu> {
         RkState {
             t: 0.0,
+            diff: <Mcpu as crate::Matrix>::zeros(0, 0, ctx),
+            last_step: None,
             y,
             dy,
             g: Vcpu::zeros(0, ctx),

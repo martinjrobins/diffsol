@@ -921,7 +921,7 @@ where
         DM: DenseMatrix<V = Eqn::V, T = Eqn::T, C = Eqn::C>,
     >(
         &self,
-        state: RkState<Eqn::V>,
+        state: RkState<Eqn::V, DM>,
         tableau: Tableau<Eqn::T>,
     ) -> Result<Sdirk<'_, Eqn, LS, DM>, DiffsolError>
     where
@@ -937,7 +937,7 @@ where
         Aug: AugmentedOdeEquationsImplicit<Eqn>,
     >(
         &self,
-        state: RkState<Eqn::V>,
+        state: RkState<Eqn::V, DM>,
         tableau: Tableau<Eqn::T>,
         aug_eqn: Aug,
     ) -> Result<Sdirk<'_, Eqn, LS, DM, Aug>, DiffsolError>
@@ -964,6 +964,8 @@ where
     {
         let mut augmented_eqn = self.adjoint_equations(checkpointer, solver, nout_override)?;
         let state = self.sdirk_state_adjoint::<LS, _>(tableau, &mut augmented_eqn)?;
+        // the solver's stage differences are allocated with its own matrix type
+        let state = RkState::new_from_common(state.into_common());
         self.sdirk_solver_adjoint_from_state::<LS, DM, _>(tableau, state, augmented_eqn)
     }
 
@@ -1005,7 +1007,7 @@ where
     >(
         &'a self,
         tableau: Tableau<Eqn::T>,
-        mut state: RkState<Eqn::V>,
+        mut state: RkState<Eqn::V, DM>,
         mut augmented_eqn: AdjointEquations<'a, Eqn, S>,
     ) -> Result<Sdirk<'a, Eqn, LS, DM, AdjointEquations<'a, Eqn, S>>, DiffsolError>
     where
@@ -1040,7 +1042,7 @@ where
         DM: DenseMatrix<V = Eqn::V, T = Eqn::T, C = Eqn::C>,
     >(
         &self,
-        state: RkState<Eqn::V>,
+        state: RkState<Eqn::V, DM>,
         tableau: Tableau<Eqn::T>,
     ) -> Result<Sdirk<'_, Eqn, LS, DM, SensEquations<'_, Eqn>>, DiffsolError>
     where
@@ -1087,7 +1089,7 @@ where
     /// An explicit RK solver instance configured for this problem
     pub fn explicit_rk_solver<DM: DenseMatrix<V = Eqn::V, T = Eqn::T, C = Eqn::C>>(
         &self,
-        state: RkState<Eqn::V>,
+        state: RkState<Eqn::V, DM>,
         tableau: Tableau<Eqn::T>,
     ) -> Result<ExplicitRk<'_, Eqn, DM>, DiffsolError>
     where
@@ -1101,7 +1103,7 @@ where
         Aug: AugmentedOdeEquations<Eqn>,
     >(
         &self,
-        state: RkState<Eqn::V>,
+        state: RkState<Eqn::V, DM>,
         tableau: Tableau<Eqn::T>,
         aug_eqn: Aug,
     ) -> Result<ExplicitRk<'_, Eqn, DM, Aug>, DiffsolError>
@@ -1127,6 +1129,8 @@ where
     {
         let mut augmented_eqn = self.adjoint_equations(checkpointer, solver, nout_override)?;
         let state = self.explicit_rk_state_adjoint(tableau, &mut augmented_eqn)?;
+        // the solver's stage differences are allocated with its own matrix type
+        let state = RkState::new_from_common(state.into_common());
         self.explicit_rk_solver_adjoint_from_state(tableau, state, augmented_eqn)
     }
 
@@ -1163,7 +1167,7 @@ where
     >(
         &'a self,
         tableau: Tableau<Eqn::T>,
-        state: RkState<Eqn::V>,
+        state: RkState<Eqn::V, DM>,
         augmented_eqn: AdjointEquations<'a, Eqn, S>,
     ) -> Result<ExplicitRk<'a, Eqn, DM, AdjointEquations<'a, Eqn, S>>, DiffsolError>
     where
@@ -1188,7 +1192,7 @@ where
     /// An explicit RK solver instance configured for forward sensitivity analysis
     pub fn explicit_rk_solver_sens<DM: DenseMatrix<V = Eqn::V, T = Eqn::T, C = Eqn::C>>(
         &self,
-        state: RkState<Eqn::V>,
+        state: RkState<Eqn::V, DM>,
         tableau: Tableau<Eqn::T>,
     ) -> Result<ExplicitRk<'_, Eqn, DM, SensEquations<'_, Eqn>>, DiffsolError>
     where

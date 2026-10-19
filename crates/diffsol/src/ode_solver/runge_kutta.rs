@@ -1,5 +1,6 @@
 use crate::error::DiffsolError;
 use crate::error::OdeSolverError;
+use crate::ode_solver::sdirk_state::RkStepRecord;
 use crate::op::sdirk::SdirkCallable;
 use crate::scale;
 use crate::AugmentedOdeEquationsImplicit;
@@ -9,9 +10,10 @@ use crate::RkState;
 use crate::RootFinder;
 use crate::Tableau;
 use crate::{
-    ode_solver_error, AugmentedOdeEquations, Convergence, DefaultDenseMatrix, DenseMatrix,
-    NonLinearOp, NonLinearSolver, OdeEquations, OdeSolverProblem, OdeSolverState, Op, Scalar,
-    Vector, VectorViewMut,
+    ode_solver_error, AugmentedOdeEquations, Context, Convergence, DefaultDenseMatrix, DenseMatrix,
+    NonLinearOp, NonLinearOpAdjoint, NonLinearOpSensAdjoint, NonLinearSolver, OdeEquations,
+    OdeEquationsImplicitAdjoint, OdeSolverProblem, OdeSolverState, Op, Scalar, Vector,
+    VectorViewMut,
 };
 use crate::{TableauMat, TableauVec};
 use log::info;
@@ -22,7 +24,21 @@ use super::jacobian_update::SolverState;
 use super::method::{check_interpolate_shape, check_interpolate_time};
 use super::pi_controller::pi_controller_raw;
 use super::OdeSolverStatistics;
+use std::collections::HashMap;
 use std::ops::{MulAssign, SubAssign};
+
+/// Work vectors for [Rk::step_vjp], for cotangents of one lane count. The cotangent's own `dy`
+/// is free while the stages are pulled back, and serves as a third: a scratch vector for the
+/// stage solve, then `-J^T w`.
+#[derive(Clone)]
+struct RkVjpWork<V> {
+    /// The value of the current stage, with the lanes of the state.
+    y_i: V,
+    /// The solution `w` of the current stage's transposed solve.
+    w: V,
+    /// `-f_p^T w` at the current stage.
+    fpt_w: V,
+}
 
 /// A Runge-Kutta method.
 ///
@@ -40,15 +56,18 @@ where
 {
     problem: &'a OdeSolverProblem<Eqn>,
     tableau: Tableau<Eqn::T>,
-    state: Box<RkState<Eqn::V>>,
+    /// The state, whose `diff` holds the stage increments of the step that ended there, which
+    /// interpolation reads.
+    state: Box<RkState<Eqn::V, M>>,
     statistics: OdeSolverStatistics,
     root_finder: Option<RootFinder<Eqn::V>>,
     tstop: Option<Eqn::T>,
-    diff: M,
     sdiff: M,
     sgdiff: M,
     gdiff: M,
-    old_state: Box<RkState<Eqn::V>>,
+    /// The state at the start of the last step, and the scratch state the next step attempt is
+    /// built in, stage increments included, until it is accepted and swapped with `state`.
+    old_state: Box<RkState<Eqn::V, M>>,
     is_state_mutated: bool,
 
     error: Option<Eqn::V>,
@@ -57,6 +76,12 @@ where
     sens_out_error: Option<Eqn::V>,
 
     prev_error_norm: Option<Eqn::T>,
+
+    /// Work vectors for [Self::step_vjp], keyed by the lane count of the cotangents.
+    vjp_work: HashMap<usize, RkVjpWork<Eqn::V>>,
+    /// Column `i` holds the coefficients of stage `i`'s value relative to the end of the step,
+    /// for [Self::step_vjp]: see [Self::stage_coeffs_from_end].
+    vjp_stage_value_coeffs: TableauMat<Eqn::T>,
 }
 
 impl<'a, Eqn, M> Drop for Rk<'a, Eqn, M>
@@ -86,7 +111,6 @@ where
             root_finder: self.root_finder.clone(),
             tstop: self.tstop,
             is_state_mutated: self.is_state_mutated,
-            diff: self.diff.clone(),
             sdiff: self.sdiff.clone(),
             sgdiff: self.sgdiff.clone(),
             gdiff: self.gdiff.clone(),
@@ -95,6 +119,8 @@ where
             sens_error: self.sens_error.clone(),
             sens_out_error: self.sens_out_error.clone(),
             prev_error_norm: self.prev_error_norm,
+            vjp_work: HashMap::new(),
+            vjp_stage_value_coeffs: self.vjp_stage_value_coeffs,
         }
     }
 }
@@ -107,7 +133,7 @@ where
 {
     pub(crate) fn new(
         problem: &'a OdeSolverProblem<Eqn>,
-        state: RkState<Eqn::V>,
+        state: RkState<Eqn::V, M>,
         tableau: Tableau<Eqn::T>,
     ) -> Result<Self, DiffsolError> {
         Self::_new(problem, state, tableau, true)
@@ -115,7 +141,7 @@ where
 
     fn _new(
         problem: &'a OdeSolverProblem<Eqn>,
-        mut state: RkState<Eqn::V>,
+        mut state: RkState<Eqn::V, M>,
         tableau: Tableau<Eqn::T>,
         integrate_main_eqn: bool,
     ) -> Result<Self, DiffsolError> {
@@ -130,6 +156,7 @@ where
         let ctx = problem.context();
 
         state.set_problem(problem)?;
+        state.set_nstages(order);
         let root_finder = if integrate_main_eqn {
             problem.eqn.root().map(|root_fn| {
                 let root_finder =
@@ -141,7 +168,6 @@ where
             None
         };
 
-        let diff = M::zeros(nstates, order, ctx.clone());
         let gdiff_rows = if problem.integrate_out {
             problem.eqn.out().unwrap().nout()
         } else {
@@ -171,7 +197,6 @@ where
             root_finder,
             tstop: None,
             is_state_mutated: false,
-            diff,
             gdiff,
             sdiff: M::zeros(0, 0, ctx.clone()),
             sgdiff: M::zeros(0, 0, ctx.clone()),
@@ -180,12 +205,14 @@ where
             sens_error: None,
             sens_out_error: None,
             prev_error_norm: None,
+            vjp_work: HashMap::new(),
+            vjp_stage_value_coeffs: Self::stage_coeffs_from_end(&tableau, true),
         })
     }
 
     pub(crate) fn new_augmented<AugmentedEqn: AugmentedOdeEquations<Eqn>>(
         problem: &'a OdeSolverProblem<Eqn>,
-        state: RkState<Eqn::V>,
+        state: RkState<Eqn::V, M>,
         tableau: Tableau<Eqn::T>,
         augmented_eqn: &AugmentedEqn,
     ) -> Result<Self, DiffsolError> {
@@ -338,6 +365,31 @@ where
         Ok(())
     }
 
+    /// The coefficients of the stages relative to the end of a step, a stiffly accurate one's
+    /// `y`: column `i` holds `c_ij` such that `y + sum_j c_ij K_j` is stage `i`'s value `Y_i`,
+    /// or with `include_diagonal` false, its known part `Y_i - a_ii K_i`. With
+    /// `y0 = y - sum_j b_j K_j`, `c_ij = a_ij - b_j` for `j < i` (and `j = i` with the diagonal),
+    /// and `-b_j` otherwise.
+    pub(crate) fn stage_coeffs_from_end(
+        tableau: &Tableau<Eqn::T>,
+        include_diagonal: bool,
+    ) -> TableauMat<Eqn::T> {
+        let s = tableau.s();
+        let b = tableau.b();
+        let mut coeffs = TableauMat::zeros(s, s);
+        for i in 0..s {
+            for (j, c) in coeffs.as_col_slice_mut(i).iter_mut().enumerate() {
+                let a_ij = if j < i || (include_diagonal && j == i) {
+                    tableau.a(i, j)
+                } else {
+                    Eqn::T::zero()
+                };
+                *c = a_ij - b[j];
+            }
+        }
+        coeffs
+    }
+
     pub(crate) fn tableau(&self) -> &Tableau<Eqn::T> {
         &self.tableau
     }
@@ -350,17 +402,18 @@ where
         &mut self.statistics
     }
 
-    pub(crate) fn set_state(&mut self, state: RkState<Eqn::V>) {
+    pub(crate) fn set_state(&mut self, state: RkState<Eqn::V, M>) {
         self.is_state_mutated = true;
         *self.state = state;
+        self.state.set_nstages(self.tableau.s());
     }
 
-    pub(crate) fn into_state(mut self) -> RkState<Eqn::V> {
+    pub(crate) fn into_state(mut self) -> RkState<Eqn::V, M> {
         let ctx = self.problem().eqn.context().clone();
         *std::mem::replace(&mut self.state, Box::new(RkState::new_empty(ctx)))
     }
 
-    pub(crate) fn checkpoint(&mut self) -> RkState<Eqn::V> {
+    pub(crate) fn checkpoint(&mut self) -> RkState<Eqn::V, M> {
         (*self.state).clone()
     }
 
@@ -372,11 +425,11 @@ where
         self.problem
     }
 
-    pub(crate) fn state(&self) -> &RkState<Eqn::V> {
+    pub(crate) fn state(&self) -> &RkState<Eqn::V, M> {
         &self.state
     }
 
-    pub(crate) fn state_mut(&mut self) -> &mut RkState<Eqn::V> {
+    pub(crate) fn state_mut(&mut self) -> &mut RkState<Eqn::V, M> {
         self.is_state_mutated = true;
         &mut self.state
     }
@@ -408,6 +461,8 @@ where
             None
         };
         let state = self.state_mut();
+        // the state is no longer the end of the recorded step
+        state.last_step = None;
         state.y.copy_from(&y);
         state.dy.copy_from(&dy);
         state.t = t;
@@ -498,7 +553,8 @@ where
         // from the last stage of the previous step
         if self.skip_first_stage() {
             trace!("Skipping first stage, setting to h * dy from previous step");
-            self.diff
+            self.old_state
+                .diff
                 .column_mut(0)
                 .axpy(h, &self.state.dy, Eqn::T::zero());
 
@@ -535,24 +591,20 @@ where
             .map(|eqn| eqn.integrate_main_eqn())
             .unwrap_or(true);
         if integrate_main_eqn {
-            self.old_state.y.copy_from(&self.state.y);
-            self.diff.gemv_cols(
+            let new = &mut *self.old_state;
+            new.y.copy_from(&self.state.y);
+            new.diff.gemv_cols(
                 0,
                 i,
                 Eqn::T::one(),
                 self.tableau.stage_coeffs(i),
                 Eqn::T::one(),
-                &mut self.old_state.y,
+                &mut new.y,
             );
 
             // update diff with solved dy
-            self.problem
-                .eqn
-                .rhs()
-                .call_inplace(&self.old_state.y, t, &mut self.old_state.dy);
-            self.diff
-                .column_mut(i)
-                .axpy(h, &self.old_state.dy, Eqn::T::zero());
+            self.problem.eqn.rhs().call_inplace(&new.y, t, &mut new.dy);
+            new.diff.column_mut(i).axpy(h, &new.dy, Eqn::T::zero());
 
             // calculate dg and store in gdiff
             if self.problem.integrate_out {
@@ -622,37 +674,30 @@ where
         }
     }
 
-    pub(crate) fn do_stage_sdirk<AugEqn>(
+    /// Solve stage `i` of the main equations, if `op` is given.
+    pub(crate) fn do_stage_sdirk(
         &mut self,
         i: usize,
         h: Eqn::T,
         op: Option<&SdirkCallable<&Eqn>>,
-        mut s_op: Option<&mut SdirkCallable<AugEqn>>,
         nonlinear_solver: &mut impl NonLinearSolver<Eqn::M>,
         convergence: &mut Convergence<'a, Eqn::V>,
     ) -> Result<(), DiffsolError>
     where
         Eqn: OdeEquationsImplicit,
-        AugEqn: AugmentedOdeEquationsImplicit<Eqn>,
     {
         let t = self.state.t + self.tableau.c()[i] * h;
         // main equation
         if let Some(op) = op {
+            let new = &mut *self.old_state;
             op.set_phi(
                 Eqn::T::one(),
-                &self.diff,
+                &new.diff,
                 i,
                 &self.state.y,
                 self.tableau.stage_coeffs(i),
             );
-            Self::predict_stage_sdirk(
-                i,
-                h,
-                &self.state.dy,
-                &self.diff,
-                &mut self.old_state.dy,
-                &self.tableau,
-            );
+            Self::predict_stage_sdirk(i, h, &self.state.dy, &new.diff, &mut new.dy, &self.tableau);
             if !nonlinear_solver.is_jacobian_set() {
                 nonlinear_solver.reset_jacobian(op, &self.state.y, t);
                 self.statistics
@@ -671,7 +716,8 @@ where
             op.get_f_eval(&self.old_state.dy, &mut self.old_state.y);
 
             // update diff with solved dy
-            self.diff.column_mut(i).copy_from(&self.old_state.dy);
+            let new = &mut *self.old_state;
+            new.diff.column_mut(i).copy_from(&new.dy);
 
             // calculate dg and store in gdiff
             if self.problem.integrate_out {
@@ -683,58 +729,78 @@ where
             }
         }
 
-        // calculate sensitivities
-        if let Some(ref mut op) = s_op {
-            // update for new state
-            op.eqn_mut()
-                .update_rhs_out_state(&self.old_state.y, &self.old_state.dy, t);
+        Ok(())
+    }
 
-            // solve for the sensitivity equations discretised using the sdirk equation, every
-            // channel at once
-            op.set_phi(
-                Eqn::T::one(),
-                &self.sdiff,
-                i,
-                &self.state.s,
-                self.tableau.stage_coeffs(i),
-            );
-            Self::predict_stage_sdirk(
-                i,
-                h,
-                &self.state.ds,
-                &self.sdiff,
-                &mut self.old_state.ds,
-                &self.tableau,
-            );
+    /// The increment of the stage last solved by [Self::do_stage_sdirk].
+    pub(crate) fn stage_increment(&self) -> &Eqn::V {
+        &self.old_state.dy
+    }
 
-            if !nonlinear_solver.is_jacobian_set() {
-                nonlinear_solver.reset_jacobian::<SdirkCallable<AugEqn>>(op, &self.old_state.s, t);
-                self.statistics
-                    .record_linear_solver_setup(SolverState::Checkpoint);
-            }
+    /// Solve stage `i` of the augmented equations, after the main equations' stage `i` (if any)
+    /// has been solved by [Self::do_stage_sdirk].
+    pub(crate) fn do_stage_sdirk_sens<AugEqn>(
+        &mut self,
+        i: usize,
+        h: Eqn::T,
+        op: &mut SdirkCallable<AugEqn>,
+        nonlinear_solver: &mut impl NonLinearSolver<Eqn::M>,
+        convergence: &mut Convergence<'a, Eqn::V>,
+    ) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquationsImplicit,
+        AugEqn: AugmentedOdeEquationsImplicit<Eqn>,
+    {
+        let t = self.state.t + self.tableau.c()[i] * h;
+        // update for new state
+        op.eqn_mut()
+            .update_rhs_out_state(&self.old_state.y, &self.old_state.dy, t);
 
-            // solve every channel at once against the already-factorised Jacobian, which is
-            // shared by all channels
-            let solver_result = nonlinear_solver.solve_in_place(
-                *op,
-                &mut self.old_state.ds,
-                t,
-                &self.state.s,
-                convergence,
-            );
-            self.statistics.number_of_nonlinear_solver_iterations += convergence.niter();
-            solver_result?;
+        // solve for the sensitivity equations discretised using the sdirk equation, every
+        // channel at once
+        op.set_phi(
+            Eqn::T::one(),
+            &self.sdiff,
+            i,
+            &self.state.s,
+            self.tableau.stage_coeffs(i),
+        );
+        Self::predict_stage_sdirk(
+            i,
+            h,
+            &self.state.ds,
+            &self.sdiff,
+            &mut self.old_state.ds,
+            &self.tableau,
+        );
 
-            op.get_f_eval(&self.old_state.ds, &mut self.old_state.s);
-            self.sdiff.column_mut(i).copy_from(&self.old_state.ds);
+        if !nonlinear_solver.is_jacobian_set() {
+            nonlinear_solver.reset_jacobian::<SdirkCallable<AugEqn>>(op, &self.old_state.s, t);
+            self.statistics
+                .record_linear_solver_setup(SolverState::Checkpoint);
+        }
 
-            // calculate sdg and store in sgdiff
-            if let Some(out) = op.eqn().out() {
-                out.call_inplace(&self.old_state.s, t, &mut self.old_state.dsg);
-                self.sgdiff
-                    .column_mut(i)
-                    .axpy(h, &self.old_state.dsg, Eqn::T::zero());
-            }
+        // solve every channel at once against the already-factorised Jacobian, which is
+        // shared by all channels
+        let solver_result = nonlinear_solver.solve_in_place(
+            op,
+            &mut self.old_state.ds,
+            t,
+            &self.state.s,
+            convergence,
+        );
+        self.statistics.number_of_nonlinear_solver_iterations += convergence.niter();
+        solver_result?;
+
+        op.get_f_eval(&self.old_state.ds, &mut self.old_state.s);
+        self.sdiff.column_mut(i).copy_from(&self.old_state.ds);
+
+        // calculate sdg and store in sgdiff
+        if let Some(out) = op.eqn().out() {
+            out.call_inplace(&self.old_state.s, t, &mut self.old_state.dsg);
+            self.sgdiff
+                .column_mut(i)
+                .axpy(h, &self.old_state.dsg, Eqn::T::zero());
         }
         Ok(())
     }
@@ -779,7 +845,7 @@ where
         let s = self.tableau.s();
         let mut error_norm = Eqn::T::zero();
         if let Some(error) = self.error.as_mut() {
-            self.diff.gemv_cols(
+            self.old_state.diff.gemv_cols(
                 0,
                 s,
                 Eqn::T::one(),
@@ -932,6 +998,7 @@ where
         }
 
         // take the step
+        self.old_state.last_step = Some(RkStepRecord { h });
         self.old_state.t = self.state.t + h;
         self.old_state.h = new_h;
         if rescale_dy {
@@ -1122,14 +1189,19 @@ where
         let scale_diff = Eqn::T::one();
         if let Some(beta_t) = self.tableau.beta_t() {
             let beta_f = Self::interpolate_beta_weights(theta, beta_t, scale_diff);
-            Self::interpolate_from_diff(&self.old_state.y, beta_f.as_slice(), &self.diff, ret);
+            Self::interpolate_from_diff(
+                &self.old_state.y,
+                beta_f.as_slice(),
+                &self.state.diff,
+                ret,
+            );
         } else {
             Self::interpolate_hermite(
                 scale_diff,
                 theta,
                 &self.old_state.y,
                 &self.state.y,
-                &self.diff,
+                &self.state.diff,
                 ret,
             );
         }
@@ -1165,7 +1237,7 @@ where
             // dy/dt = (scale_diff / dt) * diff * d_beta_f, with the scalar folded into the
             // weights so no extra pass is needed
             let d_beta_f = Self::interpolate_beta_weights_deriv(theta, beta_t, scale_diff / dt);
-            self.diff.gemv_cols(
+            self.state.diff.gemv_cols(
                 0,
                 d_beta_f.len(),
                 M::T::one(),
@@ -1180,7 +1252,7 @@ where
                 dt,
                 &self.old_state.y,
                 &self.state.y,
-                &self.diff,
+                &self.state.diff,
                 dy,
             );
         }
@@ -1270,6 +1342,181 @@ where
                 ret,
             );
         }
+        Ok(())
+    }
+}
+
+impl<'a, Eqn, M> Rk<'a, Eqn, M>
+where
+    Eqn: OdeEquationsImplicitAdjoint,
+    M: DenseMatrix<V = Eqn::V, T = Eqn::T, C = Eqn::C>,
+    Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
+{
+    /// Check the inputs of [crate::StepVjp::step_vjp], and return the record of the step that
+    /// ended at `end`: `end` is the end of a step, the cotangent has the sizes of `end` and
+    /// `p_bar` has `nparams` elements, the cotangent's lanes are a whole number of directions for
+    /// each lane of `end`, and `p_bar` has exactly as many.
+    pub(crate) fn vjp_check_inputs(
+        &self,
+        end: &RkState<Eqn::V, M>,
+        cotangent: &RkState<Eqn::V, M>,
+        p_bar: &Eqn::V,
+    ) -> Result<RkStepRecord<Eqn::T>, DiffsolError> {
+        let step = end
+            .last_step
+            .ok_or(ode_solver_error!(NoStepToDifferentiate))?;
+        let nparams = self.problem.eqn.rhs().nparams();
+        // sizes as (rows, columns of a matrix), formatted only on a mismatch
+        let shape = |m: &M| (m.nrows(), Some(m.ncols()));
+        let vector = |v: &Eqn::V| (v.len(), None);
+        for (what, found, expected) in [
+            ("y", vector(&cotangent.y), vector(&end.y)),
+            ("dy", vector(&cotangent.dy), vector(&end.dy)),
+            ("diff", shape(&cotangent.diff), shape(&end.diff)),
+            ("the parameter cotangent", vector(p_bar), (nparams, None)),
+        ] {
+            if found != expected {
+                let size = |(rows, cols): (usize, Option<usize>)| match cols {
+                    Some(cols) => format!("{rows} x {cols}"),
+                    None => rows.to_string(),
+                };
+                return Err(DiffsolError::from(
+                    OdeSolverError::StepDifferentiationSizeMismatch {
+                        what,
+                        found: size(found),
+                        expected: size(expected),
+                    },
+                ));
+            }
+        }
+        let state_lanes = end.y.context().nbatch();
+        let lanes = cotangent.y.context().nbatch();
+        let mismatch = |what, found, expected: String| {
+            Err(DiffsolError::from(
+                OdeSolverError::StepDifferentiationBatchMismatch {
+                    what,
+                    found,
+                    expected,
+                    state_lanes,
+                },
+            ))
+        };
+        if !lanes.is_multiple_of(state_lanes) {
+            return mismatch("y", lanes, format!("a multiple of {state_lanes}"));
+        }
+        for (what, found) in [
+            ("dy", cotangent.dy.context().nbatch()),
+            ("diff", cotangent.diff.context().nbatch()),
+        ] {
+            if found != lanes {
+                return mismatch(what, found, lanes.to_string());
+            }
+        }
+        let p_lanes = p_bar.context().nbatch();
+        if p_lanes != lanes {
+            return mismatch("the parameter cotangent", p_lanes, lanes.to_string());
+        }
+        Ok(step)
+    }
+
+    /// Pull the cotangent `c` at `end` back through the step `step` that ended there, adding
+    /// the parameter cotangent to `p_bar`.
+    ///
+    /// The step's stages solve `M K_i = h f(Y_i, t_i)` for their increments `K_i = diff[:, i]`,
+    /// with `Y_i = y0 + sum_{j <= i} a_ij K_j` and `t_i = t0 + c_i h`, and the step's outputs are
+    /// `y = y0 + sum_j b_j K_j` and `dy = K_{s-1} / h`. A method whose first stage is explicit
+    /// takes `K_0 = h dy0` from the start of the step instead.
+    ///
+    /// `stage_solve(i, t_i, w, scratch)` solves the transpose of stage `i`'s linearised
+    /// equation, `(M - a_ii h J_i)^T w = k_bar`, in place: `w` holds `k_bar` on entry and the
+    /// solution on return. `scratch` is a free vector of the same shape, for a solve that needs
+    /// `k_bar` alongside its iterate. For an explicit method `w = k_bar`, so there is nothing
+    /// to do.
+    ///
+    /// On return the cotangent is carried by `y` and `dy` (`diff` is zero), as the cotangents of
+    /// the state and, for a first stage taken from it, its derivative at the start of the step.
+    pub(crate) fn step_vjp(
+        &mut self,
+        step: RkStepRecord<Eqn::T>,
+        end: &RkState<Eqn::V, M>,
+        c: &mut RkState<Eqn::V, M>,
+        p_bar: &mut Eqn::V,
+        mut stage_solve: impl FnMut(usize, Eqn::T, &mut Eqn::V, &mut Eqn::V) -> Result<(), DiffsolError>,
+    ) -> Result<(), DiffsolError> {
+        let one = Eqn::T::one();
+        let zero = Eqn::T::zero();
+        let s = self.tableau.s();
+        let h = step.h;
+        let t0 = end.t - h;
+        let b = self.tableau.b();
+        let rhs = self.problem.eqn.rhs();
+
+        let lanes = c.y.context().nbatch();
+        let mut work = self.vjp_work.remove(&lanes).unwrap_or_else(|| {
+            let state = |v: &Eqn::V| Eqn::V::zeros(v.len(), v.context().clone());
+            RkVjpWork {
+                y_i: state(&end.y),
+                w: state(&c.y),
+                fpt_w: state(p_bar),
+            }
+        });
+
+        // fold in the outputs: y_bar stays as the cotangent of y0, and the increments get
+        // b_j y_bar, and dy_bar / h for the last one
+        c.diff.fill(zero);
+        c.diff.ger_cols(0, s, one, b.as_slice(), &c.y);
+        c.diff.column_mut(s - 1).axpy(one / h, &c.dy, one);
+
+        let start = if self.skip_first_stage() { 1 } else { 0 };
+        let mut result = Ok(());
+        for i in (start..s).rev() {
+            let t_i = t0 + self.tableau.c()[i] * h;
+            // c.dy is folded in above, so until the readouts at the end it is free: the solve's
+            // scratch, and then -J_i^T w
+            work.w.copy_from_view(&c.diff.column(i));
+            if let Err(e) = stage_solve(i, t_i, &mut work.w, &mut c.dy) {
+                result = Err(e);
+                break;
+            }
+
+            // the stage value Y_i the forward step evaluated f at, taken relative to the end of
+            // the step so that y0 is never formed
+            work.y_i.copy_from(&end.y);
+            end.diff.gemv_cols(
+                0,
+                s,
+                one,
+                self.vjp_stage_value_coeffs.as_col_slice(i),
+                one,
+                &mut work.y_i,
+            );
+
+            // h f(Y_i, t_i; p) depends on y0 and the earlier increments through Y_i, with
+            // cotangent h J_i^T w, and on p with cotangent h f_p^T w. The ops give the
+            // negated transposes
+            rhs.jac_transpose_mul_inplace(&work.y_i, t_i, &work.w, &mut c.dy);
+            c.y.axpy(-h, &c.dy, one);
+            c.diff
+                .ger_cols(0, i, -h, self.tableau.stage_coeffs(i), &c.dy);
+            rhs.sens_transpose_mul_inplace(&work.y_i, t_i, &work.w, &mut work.fpt_w);
+            p_bar.axpy(-h, &work.fpt_w, one);
+        }
+        self.vjp_work.insert(lanes, work);
+        result?;
+
+        // a first stage taken from the start of the step, K_0 = h dy0
+        if start == 1 {
+            c.dy.copy_from_view(&c.diff.column(0));
+            c.dy.mul_assign(scale(h));
+        } else {
+            c.dy.fill(zero);
+        }
+        c.diff.fill(zero);
+
+        // the cotangent now sits at the start of the step
+        c.t = t0;
+        c.h = h;
+        c.last_step = None;
         Ok(())
     }
 }

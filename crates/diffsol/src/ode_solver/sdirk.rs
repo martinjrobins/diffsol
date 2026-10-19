@@ -2,6 +2,7 @@ use crate::error::DiffsolError;
 use crate::error::OdeSolverError;
 use crate::matrix::MatrixRef;
 use crate::ode_solver::runge_kutta::Rk;
+use crate::ode_solver_error;
 use crate::vector::VectorRef;
 use crate::LinearSolver;
 use crate::NewtonNonlinearSolver;
@@ -9,11 +10,13 @@ use crate::NoAug;
 use crate::OdeSolverStopReason;
 use crate::RkState;
 use crate::Tableau;
+use crate::TableauMat;
 use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, AugmentedOdeEquations,
     AugmentedOdeEquationsImplicit, Convergence, DefaultDenseMatrix, DenseMatrix, JacobianUpdate,
-    Matrix, NoLineSearch, OdeEquationsImplicit, OdeEquationsImplicitSens, OdeSolverMethod,
-    OdeSolverProblem, OdeSolverState, Op, SensEquations, StateRef, StateRefMut,
+    Matrix, NoLineSearch, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
+    OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, SensEquations,
+    StateRef, StateRefMut, Vector,
 };
 use log::debug;
 use log::trace;
@@ -24,6 +27,7 @@ use super::config::SdirkConfig;
 use super::jacobian_update::SolverState;
 use super::method::AugmentedOdeSolverMethod;
 use super::sensitivities::SensitivitiesOdeSolverMethod;
+use super::step_ad::StepVjp;
 use super::OdeSolverStatistics;
 
 impl<'a, M, Eqn, LS, AugEqn> AugmentedOdeSolverMethod<'a, Eqn, AugEqn>
@@ -103,6 +107,19 @@ pub struct Sdirk<
     rk: Rk<'a, Eqn, M>,
     nonlinear_solver: NewtonNonlinearSolver<Eqn::M, LS, NoLineSearch>,
     convergence: Convergence<'a, Eqn::V>,
+    /// Convergence of the sensitivity solves alongside the main equations
+    s_convergence: Convergence<'a, Eqn::V>,
+    vjp_convergence: Convergence<'a, Eqn::V>,
+    /// The step size of the last [StepVjp::step_vjp] solve, whose preconditioner quality
+    /// `vjp_convergence` has measured: a replay at another step size must not trust that
+    /// estimate.
+    vjp_h: Option<Eqn::T>,
+    /// The stage increment a [StepVjp::step_vjp] stage solve is linearised at.
+    vjp_k: Eqn::V,
+    /// Column `i` holds the coefficients of stage `i`'s known part `Y_i - gamma K_i` relative to
+    /// the end of the step, which [StepVjp::step_vjp] sets the stage up with: see
+    /// [Rk::stage_coeffs_from_end].
+    vjp_phi_coeffs: TableauMat<Eqn::T>,
     op: Option<SdirkCallable<&'a Eqn>>,
     s_op: Option<SdirkCallable<AugmentedEqn>>,
     jacobian_update: JacobianUpdate<Eqn::T>,
@@ -132,9 +149,18 @@ where
         });
         let mut convergence = self.convergence.clone();
         convergence.reset_eta();
+        let mut s_convergence = self.s_convergence.clone();
+        s_convergence.reset_eta();
+        let mut vjp_convergence = self.vjp_convergence.clone();
+        vjp_convergence.reset_eta();
         Self {
             rk: self.rk.clone(),
             convergence,
+            s_convergence,
+            vjp_convergence,
+            vjp_h: None,
+            vjp_k: self.vjp_k.clone(),
+            vjp_phi_coeffs: self.vjp_phi_coeffs,
             nonlinear_solver,
             op,
             s_op,
@@ -158,7 +184,7 @@ where
 
     pub fn new(
         problem: &'a OdeSolverProblem<Eqn>,
-        state: RkState<Eqn::V>,
+        state: RkState<Eqn::V, M>,
         tableau: Tableau<Eqn::T>,
         linear_solver: LS,
     ) -> Result<Self, DiffsolError> {
@@ -198,6 +224,16 @@ where
             problem.ode_options.nonlinear_solver_tolerance,
         );
         convergence.set_max_iter(problem.ode_options.max_nonlinear_solver_iterations);
+        // the derivative solves (the sensitivities alongside the main equations, and step_vjp)
+        // have settings of their own
+        let mut derivative_convergence = convergence.clone();
+        derivative_convergence.set_tolerance(problem.ode_options.derivative_solve_tolerance);
+        derivative_convergence.set_max_iter(problem.ode_options.derivative_solve_max_iter);
+        let s_convergence = derivative_convergence.clone();
+        let vjp_convergence = derivative_convergence;
+        let vjp_phi_coeffs = Rk::<Eqn, M>::stage_coeffs_from_end(rk.tableau(), false);
+        let vjp_k =
+            <Eqn::V as Vector>::zeros(problem.eqn.rhs().nstates(), problem.context().clone());
 
         let gamma = rk.tableau().a(1, 1);
         let op = if integrate_main_eqn {
@@ -211,6 +247,11 @@ where
         Ok(Self {
             rk,
             convergence,
+            s_convergence,
+            vjp_convergence,
+            vjp_h: None,
+            vjp_k,
+            vjp_phi_coeffs,
             nonlinear_solver,
             op,
             s_op: None,
@@ -221,7 +262,7 @@ where
 
     pub fn new_augmented(
         problem: &'a OdeSolverProblem<Eqn>,
-        state: RkState<Eqn::V>,
+        state: RkState<Eqn::V, M>,
         tableau: Tableau<Eqn::T>,
         linear_solver: LS,
         augmented_eqn: AugmentedEqn,
@@ -271,7 +312,7 @@ where
             };
             self.jacobian_update.update_rhs_jacobian(h);
             self.jacobian_update.update_jacobian(h);
-            self.convergence.reset_eta();
+            self.reset_etas();
             did_reset
         } else if self.jacobian_update.check_jacobian_update(h, &state) {
             // shouldn't matter what we put in for x cause rhs_jacobian is already updated
@@ -287,7 +328,7 @@ where
                 false
             };
             self.jacobian_update.update_jacobian(h);
-            self.convergence.reset_eta();
+            self.reset_etas();
             did_reset
         } else {
             false
@@ -296,6 +337,108 @@ where
         if did_update {
             self.rk.statistics_mut().record_linear_solver_setup(state);
         }
+    }
+
+    /// The Newton matrix has changed, so forget the convergence rates measured with the old one.
+    fn reset_etas(&mut self) {
+        Self::reset_etas_of(
+            &mut self.convergence,
+            &mut self.s_convergence,
+            &mut self.vjp_convergence,
+        );
+    }
+
+    fn reset_etas_of(
+        convergence: &mut Convergence<'a, Eqn::V>,
+        s_convergence: &mut Convergence<'a, Eqn::V>,
+        vjp_convergence: &mut Convergence<'a, Eqn::V>,
+    ) {
+        convergence.reset_eta();
+        s_convergence.reset_eta();
+        vjp_convergence.reset_eta();
+    }
+
+    /// The step size changed, so the convergence rates measured at the old one are optimistic.
+    fn reset_etas_timestep_change(&mut self) {
+        self.convergence.reset_eta_timestep_change();
+        self.s_convergence.reset_eta_timestep_change();
+    }
+
+    /// Refactorise the Newton matrix at `(x, t)` for step size `h`, with the stage the op is set
+    /// up for, for a derivative solve (of the sensitivities, or of [StepVjp::step_vjp]) that the
+    /// current matrix is too poor a preconditioner for. The forward solve carries on with the
+    /// new matrix, so this only refreshes it earlier than its own schedule would. The caller
+    /// counts it in the statistics.
+    #[allow(clippy::too_many_arguments)]
+    fn refresh_jacobian_for_derivative(
+        op: &SdirkCallable<&'a Eqn>,
+        nonlinear_solver: &mut NewtonNonlinearSolver<Eqn::M, LS, NoLineSearch>,
+        jacobian_update: &mut JacobianUpdate<Eqn::T>,
+        convergence: &mut Convergence<'a, Eqn::V>,
+        s_convergence: &mut Convergence<'a, Eqn::V>,
+        vjp_convergence: &mut Convergence<'a, Eqn::V>,
+        x: &Eqn::V,
+        t: Eqn::T,
+        h: Eqn::T,
+    ) {
+        op.set_jacobian_is_stale();
+        nonlinear_solver.reset_jacobian(op, x, t);
+        jacobian_update.update_rhs_jacobian(h);
+        jacobian_update.update_jacobian(h);
+        Self::reset_etas_of(convergence, s_convergence, vjp_convergence);
+    }
+
+    /// Solve stage `i` of the augmented equations, if any. With the main equations, these are
+    /// the forward sensitivities, a linear solve with the stage's Jacobian, the derivative of
+    /// the stage: converge it to the derivative tolerance and, if the Newton matrix is too poor
+    /// a preconditioner for that, refresh it and retry once rather than reject the step. Without
+    /// them (an adjoint solve backwards) it is the stage's own solve.
+    fn do_stage_sens(&mut self, i: usize, h: Eqn::T) -> Result<(), DiffsolError> {
+        let Some(s_op) = self.s_op.as_mut() else {
+            return Ok(());
+        };
+        let Some(op) = self.op.as_ref() else {
+            return self.rk.do_stage_sdirk_sens(
+                i,
+                h,
+                s_op,
+                &mut self.nonlinear_solver,
+                &mut self.convergence,
+            );
+        };
+        let result = self.rk.do_stage_sdirk_sens(
+            i,
+            h,
+            s_op,
+            &mut self.nonlinear_solver,
+            &mut self.s_convergence,
+        );
+        if result.is_ok() {
+            return result;
+        }
+        // the main equations' stage i is set up in op, with its solution in the scratch state
+        let t = self.rk.state().t + self.rk.tableau().c()[i] * h;
+        Self::refresh_jacobian_for_derivative(
+            op,
+            &mut self.nonlinear_solver,
+            &mut self.jacobian_update,
+            &mut self.convergence,
+            &mut self.s_convergence,
+            &mut self.vjp_convergence,
+            self.rk.stage_increment(),
+            t,
+            h,
+        );
+        self.rk
+            .statistics_mut()
+            .number_of_derivative_jacobian_refreshes += 1;
+        self.rk.do_stage_sdirk_sens(
+            i,
+            h,
+            s_op,
+            &mut self.nonlinear_solver,
+            &mut self.s_convergence,
+        )
     }
 
     fn update_op_step_size(&mut self, h: Eqn::T) {
@@ -317,7 +460,7 @@ where
     Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
     AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn>,
 {
-    type State = RkState<Eqn::V>;
+    type State = RkState<Eqn::V, M>;
     type Config = SdirkConfig<Eqn::T>;
 
     fn config(&self) -> &SdirkConfig<Eqn::T> {
@@ -388,7 +531,7 @@ where
         self.jacobian_updates(h, SolverState::Checkpoint);
     }
 
-    fn into_state(self) -> RkState<Eqn::V> {
+    fn into_state(self) -> RkState<Eqn::V, M> {
         self.rk.into_state()
     }
 
@@ -434,10 +577,10 @@ where
                         i,
                         h,
                         self.op.as_ref(),
-                        self.s_op.as_mut(),
                         &mut self.nonlinear_solver,
                         &mut self.convergence,
                     )
+                    .and_then(|()| self.do_stage_sens(i, h))
                     .is_err()
                 {
                     if !updated_jacobian {
@@ -452,7 +595,7 @@ where
                             "Second convergence failure, reducing step size to {:.3e} and trying again",
                             h.to_f64().unwrap()
                         );
-                        self.convergence.reset_eta_timestep_change();
+                        self.reset_etas_timestep_change();
                         self.update_op_step_size(h);
                         self.jacobian_updates(h, SolverState::SecondConvergenceFail);
                     }
@@ -511,7 +654,7 @@ where
                 error_norm, h,
             );
 
-            self.convergence.reset_eta_timestep_change();
+            self.reset_etas_timestep_change();
             self.update_op_step_size(h);
             self.jacobian_updates(h, SolverState::ErrorTestFail);
             nattempts += 1;
@@ -527,7 +670,7 @@ where
         // accept the step
         let new_h = h * factor;
         if factor != Eqn::T::one() {
-            self.convergence.reset_eta_timestep_change();
+            self.reset_etas_timestep_change();
         }
 
         self.update_op_step_size(new_h);
@@ -572,6 +715,110 @@ where
     fn state_mut_back(&mut self, t: Eqn::T) -> Result<(), DiffsolError> {
         let integrate_out = self.rk.problem().integrate_out;
         self.rk.state_mut_back(t, integrate_out)
+    }
+}
+
+impl<'a, M, Eqn, AugmentedEqn, LS> StepVjp<'a, Eqn> for Sdirk<'a, Eqn, LS, M, AugmentedEqn>
+where
+    LS: LinearSolver<Eqn::M>,
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
+    Eqn: OdeEquationsImplicitAdjoint + 'a,
+    Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
+    AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn>,
+{
+    /// The cotangent is an [RkState] whose `y` and `dy` are read, as cotangents of the state and
+    /// its derivative. On return they hold the cotangents at the start of the step; its `diff`
+    /// is zero. For a method whose first stage is solved rather than taken from `dy`, the
+    /// cotangent of `dy` at the start is zero.
+    fn step_vjp(
+        &mut self,
+        end: &Self::State,
+        cotangent: &mut Self::State,
+        p_bar: &mut Eqn::V,
+    ) -> Result<(), DiffsolError> {
+        let Some(op) = self.op.as_ref() else {
+            return Err(ode_solver_error!(StepDifferentiationNotSupported));
+        };
+        let step = self.rk.vjp_check_inputs(end, cotangent, p_bar)?;
+        let h = step.h;
+        // differentiate with the step's own h, which is put back afterwards
+        op.set_h(h);
+        // as the forward solve does when its step size changes: the convergence rate measured
+        // at another h says nothing about how well the Newton matrix preconditions this one
+        if self.vjp_h != Some(h) {
+            self.vjp_convergence.reset_eta_timestep_change();
+            self.vjp_h = Some(h);
+        }
+
+        let tableau = *self.rk.tableau();
+        let Self {
+            rk,
+            nonlinear_solver,
+            convergence,
+            s_convergence,
+            vjp_convergence,
+            vjp_k,
+            vjp_phi_coeffs,
+            jacobian_update,
+            ..
+        } = self;
+        let mut refreshes = 0;
+        let nstages = tableau.s();
+        let result = rk.step_vjp(step, end, cotangent, p_bar, |i, t_i, w, k_bar| {
+            // the solve needs its right-hand side alongside its iterate w, which starts from it:
+            // for small h, w is close to M^-T k_bar
+            k_bar.copy_from(w);
+            // set the stage up as the forward solve did, linearised at its increment, with
+            // its known part taken relative to the end of the step
+            let phi_coeffs = vjp_phi_coeffs.as_col_slice(i);
+            op.set_phi(Eqn::T::one(), &end.diff, nstages, &end.y, phi_coeffs);
+            vjp_k.copy_from_view(&end.diff.column(i));
+            // The solve uses the current Newton matrix as a preconditioner. If that is too poor
+            // for it to converge, refresh it at this stage and retry once; a matrix factorised
+            // here is already fresh, so a failed solve with it is not retried
+            let mut refresh = !nonlinear_solver.is_jacobian_set();
+            let mut refreshed = false;
+            loop {
+                if refresh {
+                    Self::refresh_jacobian_for_derivative(
+                        op,
+                        nonlinear_solver,
+                        jacobian_update,
+                        convergence,
+                        s_convergence,
+                        vjp_convergence,
+                        vjp_k,
+                        t_i,
+                        h,
+                    );
+                    refreshes += 1;
+                    refreshed = true;
+                }
+                // measure errors relative to k_bar
+                let result = nonlinear_solver.solve_jacobian_transpose_in_place(
+                    op,
+                    vjp_k,
+                    t_i,
+                    k_bar,
+                    w,
+                    k_bar,
+                    vjp_convergence,
+                );
+                match result {
+                    Ok(()) => return Ok(()),
+                    Err(_) if !refreshed => {
+                        refresh = true;
+                        w.copy_from(k_bar);
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+        });
+        rk.statistics_mut().number_of_derivative_jacobian_refreshes += refreshes;
+        // the derivative used the replayed step's h: put back the one of the solver's own state,
+        // which the forward solve and its Jacobian schedule expect
+        op.set_h(rk.state().h);
+        result
     }
 }
 
@@ -708,9 +955,9 @@ mod test {
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 10
-        number_of_steps: 91
+        number_of_steps: 90
         number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 420
+        number_of_nonlinear_solver_iterations: 418
         number_of_nonlinear_solver_fails: 0
         number_of_linear_solver_setups_from_checkpoint: 1
         number_of_linear_solver_setups_from_first_convergence_fail: 0
@@ -720,8 +967,8 @@ mod test {
         number_of_derivative_jacobian_refreshes: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 195
-        number_of_jac_muls: 232
+        number_of_calls: 209
+        number_of_jac_muls: 216
         number_of_matrix_evals: 2
         number_of_jac_adj_muls: 0
         "###);
@@ -786,9 +1033,9 @@ mod test {
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 6
-        number_of_steps: 34
+        number_of_steps: 33
         number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 240
+        number_of_nonlinear_solver_iterations: 236
         number_of_nonlinear_solver_fails: 0
         number_of_linear_solver_setups_from_checkpoint: 1
         number_of_linear_solver_setups_from_first_convergence_fail: 0
@@ -798,8 +1045,8 @@ mod test {
         number_of_derivative_jacobian_refreshes: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 112
-        number_of_jac_muls: 133
+        number_of_calls: 119
+        number_of_jac_muls: 122
         number_of_matrix_evals: 1
         number_of_jac_adj_muls: 0
         "###);
@@ -900,22 +1147,22 @@ mod test {
         let mut s = problem.tr_bdf2_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 64
-        number_of_steps: 280
-        number_of_error_test_failures: 4
-        number_of_nonlinear_solver_iterations: 2967
-        number_of_nonlinear_solver_fails: 9
+        number_of_linear_solver_setups: 65
+        number_of_steps: 296
+        number_of_error_test_failures: 5
+        number_of_nonlinear_solver_iterations: 3069
+        number_of_nonlinear_solver_fails: 4
         number_of_linear_solver_setups_from_checkpoint: 1
-        number_of_linear_solver_setups_from_first_convergence_fail: 9
+        number_of_linear_solver_setups_from_first_convergence_fail: 4
         number_of_linear_solver_setups_from_second_convergence_fail: 0
-        number_of_linear_solver_setups_from_error_test_fail: 4
-        number_of_linear_solver_setups_from_step_success: 50
-        number_of_derivative_jacobian_refreshes: 0
+        number_of_linear_solver_setups_from_error_test_fail: 5
+        number_of_linear_solver_setups_from_step_success: 55
+        number_of_derivative_jacobian_refreshes: 4
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 1534
-        number_of_jac_muls: 1480
-        number_of_matrix_evals: 14
+        number_of_calls: 1557
+        number_of_jac_muls: 1556
+        number_of_matrix_evals: 13
         number_of_jac_adj_muls: 0
         "###);
     }
@@ -952,22 +1199,22 @@ mod test {
         let mut s = problem.esdirk34_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 73
-        number_of_steps: 438
+        number_of_linear_solver_setups: 68
+        number_of_steps: 410
         number_of_error_test_failures: 1
-        number_of_nonlinear_solver_iterations: 5291
-        number_of_nonlinear_solver_fails: 7
+        number_of_nonlinear_solver_iterations: 4897
+        number_of_nonlinear_solver_fails: 4
         number_of_linear_solver_setups_from_checkpoint: 1
-        number_of_linear_solver_setups_from_first_convergence_fail: 5
-        number_of_linear_solver_setups_from_second_convergence_fail: 2
+        number_of_linear_solver_setups_from_first_convergence_fail: 3
+        number_of_linear_solver_setups_from_second_convergence_fail: 1
         number_of_linear_solver_setups_from_error_test_fail: 1
-        number_of_linear_solver_setups_from_step_success: 64
-        number_of_derivative_jacobian_refreshes: 0
+        number_of_linear_solver_setups_from_step_success: 62
+        number_of_derivative_jacobian_refreshes: 5
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 2395
-        number_of_jac_muls: 2946
-        number_of_matrix_evals: 15
+        number_of_calls: 2353
+        number_of_jac_muls: 2600
+        number_of_matrix_evals: 17
         number_of_jac_adj_muls: 0
         "###);
     }

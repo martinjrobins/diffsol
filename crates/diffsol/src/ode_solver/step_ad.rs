@@ -24,9 +24,10 @@
 //! ```
 //!
 //! For the forward mode, use the forward sensitivities of
-//! [crate::SensitivitiesOdeSolverMethod]. With [crate::Bdf], they differentiate the same steps
-//! the same way, solved to the same `derivative_solve_tolerance` (see
-//! [crate::OdeSolverOptions]), so the two agree as closely as that tolerance. Leave the
+//! [crate::SensitivitiesOdeSolverMethod]. They differentiate the same steps the same way: for
+//! [crate::Bdf] and [crate::Sdirk] both are solved to the same `derivative_solve_tolerance` (see
+//! [crate::OdeSolverOptions]), so the two agree as closely as that tolerance, and for
+//! [crate::ExplicitRk] neither needs a solve, so they agree to rounding. Leave the
 //! sensitivities out of error control (the default, see [crate::OdeBuilder::sens_rtol]) for the
 //! steps to be those of a run without them, as long as no sensitivity solve needs a fresh Newton
 //! matrix.
@@ -98,22 +99,35 @@ mod tests {
         (y, dy)
     }
 
-    /// The tests for one solver and linear solver: on matrix type `$M`, with linear solver `$LS`,
-    /// for the solver built by the problem methods `$new`, `$from_state` (from a state of type
-    /// `$State`, with a config of type `$Config`) and, with forward sensitivities, `$new_sens`.
+    /// `$items` if the flag is `true`, nothing if it is `false`.
+    macro_rules! if_flag {
+        (true, { $($items:tt)* }) => { $($items)* };
+        (false, { $($items:tt)* }) => {};
+    }
+
+    /// The tests for one solver and linear solver: on matrix type `$M`, for the solver built by
+    /// the problem methods `$new`, `$from_state` (from a state of type `$State`, with a config of
+    /// type `$Config`) and, with forward sensitivities, `$new_sens`, each given as the method
+    /// name with any generic arguments. `dae` is whether the solver supports the DAE form of the
+    /// model, and `refreshes` whether its derivatives can refresh the Newton matrix (an explicit
+    /// solver has none).
     macro_rules! step_ad_tests {
         (
             $mod_name:ident,
             M = $M:ty,
-            LS = $LS:ty,
             State = $State:ty,
             Config = $Config:ty,
-            new = $new:ident,
-            from_state = $from_state:ident,
-            new_sens = $new_sens:ident $(,)?
+            new = { $($new:tt)* },
+            from_state = { $($from_state:tt)* },
+            new_sens = { $($new_sens:tt)* },
+            dae = $dae:tt,
+            refreshes = $refreshes:tt $(,)?
         ) => {
             mod $mod_name {
                 use super::{assert_close, tangent_y_dy, DERIVATIVE_TOL, P, T_FINAL};
+
+                /// The forms of the model the solver supports: the ODE, and the DAE if `dae`.
+                const FORMS: &[bool] = if $dae { &[false, true] } else { &[false] };
                 use crate::error::{DiffsolError, OdeSolverError};
                 use crate::ode_equations::test_models::ad_test_model::{
                     ad_test_problem, AdTestEqn,
@@ -134,14 +148,14 @@ mod tests {
                     p: &Problem,
                 ) -> impl OdeSolverMethod<'_, E, State = $State, Config = $Config> + StepVjp<'_, E>
                 {
-                    p.$new::<$LS>().unwrap()
+                    p.$($new)*().unwrap()
                 }
 
                 fn solver_from_state(
                     p: &Problem,
                     state: $State,
                 ) -> impl OdeSolverMethod<'_, E, State = $State> + StepVjp<'_, E> {
-                    p.$from_state::<$LS>(state).unwrap()
+                    p.$($from_state)*(state).unwrap()
                 }
 
                 /// A solver with forward sensitivities.
@@ -149,7 +163,7 @@ mod tests {
                     p: &Problem,
                 ) -> impl OdeSolverMethod<'_, E, State = $State, Config = $Config> + StepVjp<'_, E>
                 {
-                    p.$new_sens::<$LS>().unwrap()
+                    p.$($new_sens)*().unwrap()
                 }
 
                 /// A tolerance for [Vector::assert_eq_norm], as its `atol` with `tol` as its `rtol`.
@@ -216,7 +230,14 @@ mod tests {
                 /// the step if given. `step_vjp` of the step is checked against central finite
                 /// differences of `step()` in `(y, dy, p)`, in a pseudo-random direction.
                 fn rebuilt_step(dae: bool, after: usize, tstop_fraction: Option<f64>, seed: f64) {
-                    let problem0 = problem(dae);
+                    // the steps' Newton solves converged as tightly as the derivatives': a method
+                    // that takes its first stage from a perturbed dy has to take small steps
+                    // below, and the Newton error in dy = K / h grows as h shrinks
+                    let converged = |mut problem: Problem| {
+                        problem.ode_options.nonlinear_solver_tolerance = DERIVATIVE_TOL;
+                        problem
+                    };
+                    let problem0 = converged(problem(dae));
                     let mut solver = new_solver(&problem0);
                     solver.set_stop_time(T_FINAL).unwrap();
                     for _ in 0..after {
@@ -228,12 +249,36 @@ mod tests {
                     let (y0, dy0) = y_dy(&state);
                     let t0 = state.as_ref().t;
                     let mut start = with_y_dy(&state, &y0, &dy0);
-                    // at a step size whose first attempt is accepted: the size of a retried
-                    // step depends on the error estimate, so it would differ between the
-                    // perturbed steps. A probe step finds one
+
+                    // finite differences, on steps that must take the same step size. The Newton
+                    // error in dy = (history) / h grows as h shrinks, so eps is not too small
+                    let p0 = params(&problem0);
+                    let p_dot: V = V::rand(3, 0.31 * seed, Default::default());
+                    let (y_dot, dy_dot) = tangent_y_dy(seed, dae, &p_dot);
+                    let eps = 1e-4;
+                    let fd = |a: V, b: &V| (a - b) * scale(0.5 / eps);
+                    // a perturbed problem and restart: parameters p + e p_dot, y + e y_dot and
+                    // dy + e dy_dot
+                    let problem_e = |e: f64| converged(problem_at(&axpy(&p0, e, &p_dot), dae));
+                    let restart_e = |start: &$State, e: f64| {
+                        with_y_dy(start, &axpy(&y0, e, &y_dot), &axpy(&dy0, e, &dy_dot))
+                    };
+
+                    // at a step size whose first attempt is accepted, for the step and both
+                    // perturbed ones: the size of a retried step depends on the error estimate,
+                    // so it would differ between them. Probe steps find one: a perturbed dy is
+                    // not f(y), which a method that takes its first stage from dy sees as error
                     // TODO: once https://github.com/martinjrobins/diffsol/issues/394 is fixed
                     // then we can turn off error control and this test would be simpler
-                    let h_accepted = step_from(&problem0, start.clone(), T_FINAL).state().t - t0;
+                    let h_accepted = [0.0, eps, -eps]
+                        .map(|e| {
+                            step_from(&problem_e(e), restart_e(&start, e), T_FINAL)
+                                .state()
+                                .t
+                                - t0
+                        })
+                        .into_iter()
+                        .fold(f64::INFINITY, f64::min);
                     *start.as_mut().h = 0.9 * h_accepted;
                     let tstop = tstop_fraction
                         .map(|f| t0 + f * start.as_ref().h)
@@ -248,19 +293,9 @@ mod tests {
                         );
                     }
 
-                    // finite differences, on steps that must take the same step size. The Newton
-                    // error in dy = (history) / h grows as h shrinks, so eps is not too small
-                    let p0 = params(&problem0);
-                    let p_dot: V = V::rand(3, 0.31 * seed, Default::default());
-                    let (y_dot, dy_dot) = tangent_y_dy(seed, dae, &p_dot);
-                    let eps = 1e-4;
-                    let fd = |a: V, b: &V| (a - b) * scale(0.5 / eps);
-                    // a perturbed restart: parameters p + e p_dot, y + e y_dot and dy + e dy_dot
                     let perturbed = |e: f64| {
-                        let problem = problem_at(&axpy(&p0, e, &p_dot), dae);
-                        let restart =
-                            with_y_dy(&start, &axpy(&y0, e, &y_dot), &axpy(&dy0, e, &dy_dot));
-                        let solver = step_from(&problem, restart, tstop);
+                        let problem = problem_e(e);
+                        let solver = step_from(&problem, restart_e(&start, e), tstop);
                         assert_eq!(solver.state().t, t_end, "the perturbed step changed size");
                         y_dy(&solver.state_clone())
                     };
@@ -285,11 +320,16 @@ mod tests {
 
                 fn rebuilt_steps(dae: bool) {
                     // the first step, steps partway through after order and step-size changes,
-                    // and one whose first attempt is shortened by a stop time
+                    // and one whose first attempt is shortened by a stop time. A solver that
+                    // takes fewer steps to the stop time has them clamped to the last but one
+                    let problem = problem(dae);
+                    let mut solver = new_solver(&problem);
+                    solver.set_stop_time(T_FINAL).unwrap();
+                    let last = solve_to_stop(&mut solver).len() - 2;
                     for (i, after) in [0, 5, 40, 100].into_iter().enumerate() {
-                        rebuilt_step(dae, after, None, 0.3 + i as f64);
+                        rebuilt_step(dae, after.min(last), None, 0.3 + i as f64);
                     }
-                    rebuilt_step(dae, 40, Some(0.4), 7.1);
+                    rebuilt_step(dae, 40.min(last), Some(0.4), 7.1);
                 }
 
                 #[test]
@@ -297,10 +337,12 @@ mod tests {
                     rebuilt_steps(false);
                 }
 
-                #[test]
-                fn rebuilt_steps_dae() {
-                    rebuilt_steps(true);
-                }
+                if_flag!($dae, {
+                    #[test]
+                    fn rebuilt_steps_dae() {
+                        rebuilt_steps(true);
+                    }
+                });
 
                 /// Step `solver` until it reaches its stop time with `step`, and return the state
                 /// after each step.
@@ -377,10 +419,12 @@ mod tests {
                     sensitivities(false);
                 }
 
-                #[test]
-                fn sensitivities_dae() {
-                    sensitivities(true);
-                }
+                if_flag!($dae, {
+                    #[test]
+                    fn sensitivities_dae() {
+                        sensitivities(true);
+                    }
+                });
 
                 /// A `set_stop_time` between steps rescales the solver's history after the
                 /// checkpoint of the step before was taken: the next step's replay starts from the
@@ -452,10 +496,12 @@ mod tests {
                     batched_directions(false);
                 }
 
-                #[test]
-                fn batched_directions_dae() {
-                    batched_directions(true);
-                }
+                if_flag!($dae, {
+                    #[test]
+                    fn batched_directions_dae() {
+                        batched_directions(true);
+                    }
+                });
 
                 /// A parameter cotangent with fewer lanes than the cotangent, or with the wrong
                 /// number of elements, is an error.
@@ -508,7 +554,7 @@ mod tests {
                 /// alone, apart from the derivatives' own refreshes.
                 #[test]
                 fn step_vjp_leaves_the_statistics_unchanged() {
-                    let mut problem = problem(true);
+                    let mut problem = problem($dae);
                     problem.ode_options.derivative_solve_max_iter = 1;
                     let mut solver = new_solver(&problem);
                     solver.set_stop_time(T_FINAL).unwrap();
@@ -525,7 +571,11 @@ mod tests {
                         let _ = solver.step_vjp(checkpoint, &mut cot, &mut p_bar);
                     }
                     assert_only_derivative_refreshes_added(solver.get_statistics(), &plain, |n| {
-                        n > 0
+                        if $refreshes {
+                            n > 0
+                        } else {
+                            n == 0
+                        }
                     });
                 }
 
@@ -533,7 +583,7 @@ mod tests {
                 /// derivative leaves nothing behind that changes the forward solve.
                 #[test]
                 fn step_after_step_vjp() {
-                    for dae in [false, true] {
+                    for &dae in FORMS {
                         let problem = problem(dae);
                         let mut plain = new_solver(&problem);
                         let mut solver = new_solver(&problem);
@@ -594,21 +644,67 @@ mod tests {
     step_ad_tests!(
         bdf_dense,
         M = crate::NalgebraMat<f64>,
-        LS = crate::NalgebraLU<f64>,
         State = crate::BdfState<crate::NalgebraVec<f64>>,
         Config = crate::BdfConfig<f64>,
-        new = bdf,
-        from_state = bdf_solver,
-        new_sens = bdf_sens,
+        new = { bdf::<crate::NalgebraLU<f64>> },
+        from_state = { bdf_solver::<crate::NalgebraLU<f64>> },
+        new_sens = { bdf_sens::<crate::NalgebraLU<f64>> },
+        dae = true,
+        refreshes = true,
     );
     step_ad_tests!(
         bdf_sparse,
         M = crate::FaerSparseMat<f64>,
-        LS = crate::FaerSparseLU<f64>,
         State = crate::BdfState<crate::FaerVec<f64>>,
         Config = crate::BdfConfig<f64>,
-        new = bdf,
-        from_state = bdf_solver,
-        new_sens = bdf_sens,
+        new = { bdf::<crate::FaerSparseLU<f64>> },
+        from_state = { bdf_solver::<crate::FaerSparseLU<f64>> },
+        new_sens = { bdf_sens::<crate::FaerSparseLU<f64>> },
+        dae = true,
+        refreshes = true,
+    );
+    step_ad_tests!(
+        tr_bdf2_dense,
+        M = crate::NalgebraMat<f64>,
+        State = crate::RkState<crate::NalgebraVec<f64>>,
+        Config = crate::SdirkConfig<f64>,
+        new = { tr_bdf2::<crate::NalgebraLU<f64>> },
+        from_state = { tr_bdf2_solver::<crate::NalgebraLU<f64>> },
+        new_sens = { tr_bdf2_sens::<crate::NalgebraLU<f64>> },
+        dae = true,
+        refreshes = true,
+    );
+    step_ad_tests!(
+        tr_bdf2_sparse,
+        M = crate::FaerSparseMat<f64>,
+        State = crate::RkState<crate::FaerVec<f64>>,
+        Config = crate::SdirkConfig<f64>,
+        new = { tr_bdf2::<crate::FaerSparseLU<f64>> },
+        from_state = { tr_bdf2_solver::<crate::FaerSparseLU<f64>> },
+        new_sens = { tr_bdf2_sens::<crate::FaerSparseLU<f64>> },
+        dae = true,
+        refreshes = true,
+    );
+    step_ad_tests!(
+        esdirk34_dense,
+        M = crate::NalgebraMat<f64>,
+        State = crate::RkState<crate::NalgebraVec<f64>>,
+        Config = crate::SdirkConfig<f64>,
+        new = { esdirk34::<crate::NalgebraLU<f64>> },
+        from_state = { esdirk34_solver::<crate::NalgebraLU<f64>> },
+        new_sens = { esdirk34_sens::<crate::NalgebraLU<f64>> },
+        dae = true,
+        refreshes = true,
+    );
+    step_ad_tests!(
+        tsit45_dense,
+        M = crate::NalgebraMat<f64>,
+        State = crate::RkState<crate::NalgebraVec<f64>>,
+        Config = crate::ExplicitRkConfig<f64>,
+        new = { tsit45 },
+        from_state = { tsit45_solver },
+        new_sens = { tsit45_sens },
+        dae = false,
+        refreshes = false,
     );
 }
