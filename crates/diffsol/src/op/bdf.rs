@@ -1,21 +1,30 @@
 use crate::{
-    matrix::DenseMatrix, LinearOp, Matrix, MatrixSparsity, NonLinearOp, NonLinearOpJacobian,
-    OdeEquationsImplicit, Op, Vector,
+    matrix::DenseMatrix, Context, LinearOp, LinearOpTranspose, Matrix, MatrixSparsity, NonLinearOp,
+    NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSensAdjoint, OdeEquationsImplicit,
+    OdeEquationsImplicitAdjoint, Op, Scale, Vector,
 };
 use log::debug;
 use num_traits::{One, ToPrimitive, Zero};
 use std::{
     cell::{Ref, RefCell},
-    ops::{Deref, SubAssign},
+    collections::HashMap,
+    ops::{Deref, MulAssign, SubAssign},
 };
+
+/// Work vectors keyed by the lane count of the vectors they are for.
+type ByLanes<T> = RefCell<HashMap<usize, T>>;
 
 /// A NonLinearOp implementation of the BDF implicit equation system.
 /// i.e. F(y) = M (y' + psi) - c * f(y) = 0
 pub struct BdfCallable<Eqn: OdeEquationsImplicit> {
     pub(crate) eqn: Eqn,
-    psi_neg_y0: RefCell<Eqn::V>,
-    c: RefCell<Eqn::T>,
+    psi_neg_y0: Eqn::V,
+    /// The coefficient `c = h * alpha` of `f` in the BDF equation.
+    pub(crate) c: Eqn::T,
     tmp: RefCell<Eqn::V>,
+    /// Work vectors for [Self::adjoint_inputs], one `(M^T w, f_p^T w)` pair per lane count of
+    /// the cotangents it has been given, allocated on first use.
+    adjoint_tmps: ByLanes<(Eqn::V, Eqn::V)>,
     rhs_jac: RefCell<Eqn::M>,
     mass_jac: RefCell<Eqn::M>,
     jacobian_is_stale: RefCell<bool>,
@@ -26,9 +35,10 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
     pub fn clone_state(&self, eqn: Eqn) -> Self {
         Self {
             eqn,
-            psi_neg_y0: RefCell::new(self.psi_neg_y0.borrow().clone()),
-            c: RefCell::new(*self.c.borrow()),
+            psi_neg_y0: self.psi_neg_y0.clone(),
+            c: self.c,
             tmp: RefCell::new(self.tmp.borrow().clone()),
+            adjoint_tmps: RefCell::new(HashMap::new()),
             rhs_jac: RefCell::new(self.rhs_jac.borrow().clone()),
             mass_jac: RefCell::new(self.mass_jac.borrow().clone()),
             jacobian_is_stale: RefCell::new(*self.jacobian_is_stale.borrow()),
@@ -50,9 +60,8 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
         order: usize,
         d: &mut Eqn::V,
     ) {
-        self.set_psi(diff, gamma, alpha, order, d);
-        let c = self.c.borrow();
-        d.axpy(*c, dg, -Eqn::T::one());
+        Self::set_psi(diff, gamma, alpha, order, d);
+        d.axpy(self.c, dg, -Eqn::T::one());
     }
     /// `vec_ctx` is the context to allocate the state-shaped working vectors with. It is the
     /// equation's own context for the main equations, and the augmented context (one batch lane
@@ -60,8 +69,8 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
     pub fn new_no_jacobian(eqn: Eqn, vec_ctx: Eqn::C) -> Self {
         let n = eqn.rhs().nstates();
         let ctx = eqn.context();
-        let c = RefCell::new(Eqn::T::zero());
-        let psi_neg_y0 = RefCell::new(<Eqn::V as Vector>::zeros(n, vec_ctx.clone()));
+        let c = Eqn::T::zero();
+        let psi_neg_y0 = <Eqn::V as Vector>::zeros(n, vec_ctx.clone());
         let jacobian_is_stale = RefCell::new(true);
         let tmp = RefCell::new(<Eqn::V as Vector>::zeros(n, vec_ctx));
         let rhs_jac = RefCell::new(<Eqn::M as Matrix>::zeros(0, 0, ctx.clone()));
@@ -75,6 +84,7 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
             mass_jac,
             jacobian_is_stale,
             tmp,
+            adjoint_tmps: RefCell::new(HashMap::new()),
             sparsity,
         }
     }
@@ -107,8 +117,8 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
     pub fn new(eqn: Eqn, vec_ctx: Eqn::C) -> Self {
         let n = eqn.rhs().nstates();
         let ctx = eqn.context();
-        let c = RefCell::new(Eqn::T::zero());
-        let psi_neg_y0 = RefCell::new(<Eqn::V as Vector>::zeros(n, vec_ctx.clone()));
+        let c = Eqn::T::zero();
+        let psi_neg_y0 = <Eqn::V as Vector>::zeros(n, vec_ctx.clone());
         let jacobian_is_stale = RefCell::new(true);
         let tmp = RefCell::new(<Eqn::V as Vector>::zeros(n, vec_ctx));
 
@@ -161,31 +171,26 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
             mass_jac,
             jacobian_is_stale,
             tmp,
+            adjoint_tmps: RefCell::new(HashMap::new()),
             sparsity,
         }
     }
 
     #[cfg(test)]
-    fn set_c_direct(&mut self, c: Eqn::T) {
-        self.c.replace(c);
-    }
-
-    #[cfg(test)]
     fn set_psi_neg_y0_direct(&mut self, psi_neg_y0: Eqn::V) {
-        self.psi_neg_y0.replace(psi_neg_y0);
+        self.psi_neg_y0 = psi_neg_y0;
     }
 
     pub fn tmp(&self) -> Ref<'_, Eqn::V> {
         self.tmp.borrow()
     }
 
-    pub fn set_c(&self, h: Eqn::T, alpha: Eqn::T) {
-        self.c.replace(h * alpha);
+    pub fn set_c(&mut self, h: Eqn::T, alpha: Eqn::T) {
+        self.c = h * alpha;
     }
     /// `gamma` must be `gamma[1..]`, i.e. offset to line up with the `1..order + 1` column
     /// range psi sums over.
     fn set_psi<M: DenseMatrix<V = Eqn::V, T = Eqn::T>>(
-        &self,
         diff: &M,
         gamma: &[Eqn::T],
         alpha: &[Eqn::T],
@@ -197,18 +202,29 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
         diff.gemv_cols(1, order + 1, alpha[order], gamma, Eqn::T::zero(), psi);
     }
     pub fn set_psi_and_y0<M: DenseMatrix<V = Eqn::V, T = Eqn::T>>(
-        &self,
+        &mut self,
         diff: &M,
         gamma: &[Eqn::T],
         alpha: &[Eqn::T],
         order: usize,
         y0: &Eqn::V,
     ) {
-        let mut psi = self.psi_neg_y0.borrow_mut();
-        self.set_psi(diff, gamma, alpha, order, &mut psi);
-
-        // now negate y0
-        psi.sub_assign(y0);
+        Self::psi_neg_y0_into(diff, gamma, alpha, order, y0, &mut self.psi_neg_y0);
+    }
+    /// The history input `psi - y0` of the operator, from the differences `diff` and the
+    /// prediction `y0`, written into `out`. This is linear in `(diff, y0)`, so it also maps their
+    /// tangents. `gamma` must be `gamma[1..]`, offset to line up with the `1..order + 1` column
+    /// range psi sums over.
+    fn psi_neg_y0_into<M: DenseMatrix<V = Eqn::V, T = Eqn::T>>(
+        diff: &M,
+        gamma: &[Eqn::T],
+        alpha: &[Eqn::T],
+        order: usize,
+        y0: &Eqn::V,
+        out: &mut Eqn::V,
+    ) {
+        Self::set_psi(diff, gamma, alpha, order, out);
+        out.sub_assign(y0);
     }
     pub fn set_jacobian_is_stale(&self) {
         self.jacobian_is_stale.replace(true);
@@ -240,12 +256,11 @@ impl<Eqn: OdeEquationsImplicit> Op for BdfCallable<Eqn> {
 impl<Eqn: OdeEquationsImplicit> NonLinearOp for BdfCallable<Eqn> {
     // F(y) = M (y - y0 + psi) - c * f(y) = 0
     fn call_inplace(&self, x: &Eqn::V, t: Eqn::T, y: &mut Eqn::V) {
-        let psi_neg_y0_ref = self.psi_neg_y0.borrow();
-        let psi_neg_y0 = psi_neg_y0_ref.deref();
+        let psi_neg_y0 = &self.psi_neg_y0;
 
         self.eqn.rhs().call_inplace(x, t, y);
 
-        let c = *self.c.borrow().deref();
+        let c = self.c;
         // y = M tmp - c * y, for tmp = x + psi_neg_y0
         if let Some(mass) = self.eqn.mass() {
             let mut tmp = self.tmp.borrow_mut();
@@ -266,7 +281,7 @@ impl<Eqn: OdeEquationsImplicit> NonLinearOpJacobian for BdfCallable<Eqn> {
     // (M - c * f'(y)) v
     fn jac_mul_inplace(&self, x: &Eqn::V, t: Eqn::T, v: &Eqn::V, y: &mut Eqn::V) {
         self.eqn.rhs().jac_mul_inplace(x, t, v, y);
-        let c = *self.c.borrow().deref();
+        let c = self.c;
         // y = Mv - c y
         if let Some(mass) = self.eqn.mass() {
             mass.gemv_inplace(v, t, -c, y);
@@ -281,7 +296,7 @@ impl<Eqn: OdeEquationsImplicit> NonLinearOpJacobian for BdfCallable<Eqn> {
             // calculate the mass and rhs jacobians
             let mut rhs_jac = self.rhs_jac.borrow_mut();
             self.eqn.rhs().jacobian_inplace(x, t, &mut rhs_jac);
-            let c = *self.c.borrow().deref();
+            let c = self.c;
             debug!("Recomputing RHS Jacobian, c = {}", c.to_f64().unwrap());
             if self.eqn.mass().is_none() {
                 let mass_jac = self.mass_jac.borrow();
@@ -296,7 +311,7 @@ impl<Eqn: OdeEquationsImplicit> NonLinearOpJacobian for BdfCallable<Eqn> {
             // only c has changed, so just do the addition
             let rhs_jac = self.rhs_jac.borrow();
             let mass_jac = self.mass_jac.borrow();
-            let c = *self.c.borrow().deref();
+            let c = self.c;
             debug!(
                 "Reusing Jacobian, updating with new c = {}",
                 c.to_f64().unwrap()
@@ -309,16 +324,189 @@ impl<Eqn: OdeEquationsImplicit> NonLinearOpJacobian for BdfCallable<Eqn> {
     }
 }
 
+/// `-(M - c f'(y))^T v`
+impl<Eqn: OdeEquationsImplicitAdjoint> NonLinearOpAdjoint for BdfCallable<Eqn> {
+    fn jac_transpose_mul_inplace(&self, x: &Eqn::V, t: Eqn::T, v: &Eqn::V, y: &mut Eqn::V) {
+        // y = -f'(y)^T v, then y = -M^T v - c y
+        self.eqn.rhs().jac_transpose_mul_inplace(x, t, v, y);
+        let c = self.c;
+        match self.eqn.mass() {
+            Some(mass) => {
+                mass.gemv_transpose_inplace(v, t, c, y);
+                y.mul_assign(Scale(-Eqn::T::one()));
+            }
+            None => y.axpy(-Eqn::T::one(), v, -c),
+        }
+    }
+}
+
+/// `-(dF/dp)^T v = c f_p^T v`, taking the mass matrix to be independent of the parameters.
+impl<Eqn: OdeEquationsImplicitAdjoint> NonLinearOpSensAdjoint for BdfCallable<Eqn> {
+    fn sens_transpose_mul_inplace(&self, x: &Eqn::V, t: Eqn::T, v: &Eqn::V, y: &mut Eqn::V) {
+        // the rhs gives -f_p^T v
+        self.eqn.rhs().sens_transpose_mul_inplace(x, t, v, y);
+        y.mul_assign(Scale(-self.c));
+    }
+}
+
+impl<Eqn: OdeEquationsImplicitAdjoint> BdfCallable<Eqn> {
+    /// The cotangents of the inputs of `F(y) = 0` at its solution `y = x`: the history `diff`
+    /// (through `psi - y0`), the prediction `y0` and the parameters. The tangent of the solution
+    /// solves `(M - c f'(x)) y_dot = b`, with `b = -(M (psi_dot - y0_dot) + dF/dp p_dot)` and
+    /// `dF/dp = -c f_p`. Given the cotangent `w` of `b` (so `(M - c f'(x))^T w` is the cotangent
+    /// of `y`), add the cotangents of the history columns `1..=order` to `diff_bar`, of the
+    /// prediction to `y0_bar` and of the parameters to `p_bar`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn adjoint_inputs<M: DenseMatrix<V = Eqn::V, T = Eqn::T>>(
+        &self,
+        x: &Eqn::V,
+        t: Eqn::T,
+        w: &Eqn::V,
+        gamma: &[Eqn::T],
+        alpha: &[Eqn::T],
+        order: usize,
+        diff_bar: &mut M,
+        y0_bar: &mut Eqn::V,
+        p_bar: &mut Eqn::V,
+    ) {
+        let one = Eqn::T::one();
+        let mut tmps = self.adjoint_tmps.borrow_mut();
+        let (mt_w, fp_w) = tmps.entry(w.context().nbatch()).or_insert_with(|| {
+            (
+                Eqn::V::zeros(w.len(), w.context().clone()),
+                Eqn::V::zeros(p_bar.len(), p_bar.context().clone()),
+            )
+        });
+
+        // cotangent of psi - y0 is -M^T w, which is -w without a mass matrix
+        let mt_w: &Eqn::V = match self.eqn.mass() {
+            Some(mass) => {
+                mass.call_transpose_inplace(w, t, mt_w);
+                mt_w
+            }
+            None => w,
+        };
+        // psi - y0 = alpha[order] sum_{j=1}^{order} gamma_j diff_j - y0, the gemv_cols of
+        // set_psi, whose transpose adds -alpha[order] gamma_j M^T w to each diff_j
+        diff_bar.ger_cols(1, order + 1, -alpha[order], gamma, mt_w);
+        y0_bar.axpy(one, mt_w, one);
+
+        // cotangent of p is -(dF/dp)^T w
+        self.sens_transpose_mul_inplace(x, t, w, fp_w);
+        p_bar.axpy(one, fp_w, one);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::matrix::dense_nalgebra_serial::NalgebraMat;
     use crate::ode_equations::test_models::exponential_decay::exponential_decay_problem;
     use crate::vector::Vector;
-    use crate::{DenseMatrix, NalgebraVec, NonLinearOp, NonLinearOpJacobian};
+    use crate::{
+        DenseMatrix, Matrix, MatrixCommon, NalgebraVec, NonLinearOp, NonLinearOpJacobian,
+        VectorView,
+    };
 
     use super::BdfCallable;
     type Mcpu = NalgebraMat<f64>;
     type Vcpu = NalgebraVec<f64>;
+
+    /// The dot product of two matrices, as vectors of their entries.
+    fn dot_cols(a: &Mcpu, b: &Mcpu) -> f64 {
+        (0..a.ncols())
+            .map(|j| a.column(j).into_owned().dot(&b.column(j).into_owned()))
+            .sum()
+    }
+
+    /// The transposed and parameter derivatives of the BDF operator against its Jacobian and
+    /// each other, with and without a mass matrix, on a model whose Jacobian is not symmetric.
+    #[test]
+    fn test_bdf_callable_derivatives() {
+        use crate::ode_equations::test_models::ad_test_model::{ad_test_problem, AdTestEqn};
+        use crate::{
+            LinearOp, NonLinearOpAdjoint, NonLinearOpSens, NonLinearOpSensAdjoint, OdeEquations,
+            Op, Scale,
+        };
+        use std::ops::MulAssign;
+        for dae in [false, true] {
+            let problem = ad_test_problem::<Mcpu>([1.5, 3.0, 1.0], dae, 1e-8);
+            let mut op = BdfCallable::new(&problem.eqn, *problem.context());
+            let ctx = *problem.context();
+            op.set_c(0.1, 0.7);
+            let (n, np) = (problem.eqn.rhs().nstates(), problem.eqn.rhs().nparams());
+            let x = Vcpu::from_vec(vec![0.6, 0.3, 0.1], ctx);
+            let t = 0.0;
+            let w = Vcpu::rand(n, 1.7, ctx);
+            let p_dot = Vcpu::rand(np, 2.3, ctx);
+
+            // -J^T w against the dense Jacobian
+            let jac = op.jacobian(&x, t);
+            let mut jt_w = Vcpu::zeros(n, ctx);
+            op.jac_transpose_mul_inplace(&x, t, &w, &mut jt_w);
+            let w_vals = w.clone_as_vec();
+            for (i, got) in jt_w.clone_as_vec().into_iter().enumerate() {
+                let expected: f64 = -(0..n).map(|k| jac.get_index(k, i) * w_vals[k]).sum::<f64>();
+                assert!(
+                    (got - expected).abs() < 1e-12,
+                    "dae = {dae}: {got} != {expected}"
+                );
+            }
+
+            // <w, F_p p_dot> = -<-F_p^T w, p_dot>, with F_p = -c f_p
+            let mut fp = Vcpu::zeros(n, ctx);
+            problem.eqn.rhs().sens_mul_inplace(&x, t, &p_dot, &mut fp);
+            fp.mul_assign(Scale(-op.c));
+            let mut fpt = Vcpu::zeros(np, ctx);
+            op.sens_transpose_mul_inplace(&x, t, &w, &mut fpt);
+            assert!((w.dot(&fp) + fpt.dot(&p_dot)).abs() < 1e-12);
+
+            // adjoint_inputs against the tangent right-hand side it transposes,
+            // b = -(M (psi_dot - y0_dot) + F_p p_dot):
+            // <w, b> = <diff_bar, diff_dot> + <y0_bar, y0_dot> + <p_bar, p_dot>
+            let (gamma, alpha) = ([1.0, 1.5, 1.8], [0.0, 0.8, 0.9, 1.0]);
+            let order = 2;
+            let ncols = 6;
+            let diff_dot = Mcpu::from_vec(
+                n,
+                ncols,
+                Vcpu::rand(n * ncols, 0.4, ctx).clone_as_vec(),
+                ctx,
+            );
+            let y0_dot = Vcpu::rand(n, 3.1, ctx);
+            let mut psi_dot = Vcpu::zeros(n, ctx);
+            BdfCallable::<&AdTestEqn<Mcpu>>::psi_neg_y0_into(
+                &diff_dot,
+                &gamma,
+                &alpha,
+                order,
+                &y0_dot,
+                &mut psi_dot,
+            );
+            let mut b = fp.clone();
+            match problem.eqn.mass() {
+                Some(mass) => mass.gemv_inplace(&psi_dot, t, 1.0, &mut b),
+                None => b.axpy(1.0, &psi_dot, 1.0),
+            }
+            b.mul_assign(Scale(-1.0));
+            let mut diff_bar = Mcpu::zeros(n, ncols, ctx);
+            let mut y0_bar = Vcpu::zeros(n, ctx);
+            let mut p_bar = Vcpu::zeros(np, ctx);
+            op.adjoint_inputs(
+                &x,
+                t,
+                &w,
+                &gamma,
+                &alpha,
+                order,
+                &mut diff_bar,
+                &mut y0_bar,
+                &mut p_bar,
+            );
+            let lhs = w.dot(&b);
+            let rhs = dot_cols(&diff_bar, &diff_dot) + y0_bar.dot(&y0_dot) + p_bar.dot(&p_dot);
+            assert!((lhs - rhs).abs() < 1e-12, "dae = {dae}: {lhs} != {rhs}");
+        }
+    }
 
     #[test]
     fn test_bdf_callable() {
@@ -327,7 +515,7 @@ mod tests {
         let ctx = problem.context();
         let c = 0.1;
         let phi_neg_y0 = Vcpu::from_vec(vec![1.1, 1.2], *ctx);
-        bdf_callable.set_c_direct(c);
+        bdf_callable.c = c;
         bdf_callable.set_psi_neg_y0_direct(phi_neg_y0);
         // check that the bdf function is correct
         let y = Vcpu::from_vec(vec![1.0, 1.0], *ctx);

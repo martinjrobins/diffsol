@@ -386,6 +386,9 @@ pub mod ode_c;
 ///   [OdeSolverOptions::get_threshold_to_update_jacobian],
 ///   [OdeSolverOptions::get_threshold_to_update_rhs_jacobian].
 /// - Step size: [OdeSolverOptions::get_min_timestep].
+/// - BDF derivative solves (forward sensitivities, step VJPs):
+///   [OdeSolverOptions::get_derivative_solve_tolerance],
+///   [OdeSolverOptions::get_derivative_solve_max_iter].
 ///
 /// Also includes [OdeSolverOptionsSnapshot], a serializable snapshot used for serde
 /// round-tripping of solver configuration.

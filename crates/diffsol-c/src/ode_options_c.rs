@@ -104,3 +104,31 @@ c_setter_simple!(
 c_getter_simple!(diffsol_ode_options, OdeSolverOptions, f64, min_timestep);
 
 c_setter_simple!(diffsol_ode_options, OdeSolverOptions, f64, min_timestep);
+
+c_getter_simple!(
+    diffsol_ode_options,
+    OdeSolverOptions,
+    f64,
+    derivative_solve_tolerance
+);
+
+c_setter_simple!(
+    diffsol_ode_options,
+    OdeSolverOptions,
+    f64,
+    derivative_solve_tolerance
+);
+
+c_getter_simple!(
+    diffsol_ode_options,
+    OdeSolverOptions,
+    usize,
+    derivative_solve_max_iter
+);
+
+c_setter_simple!(
+    diffsol_ode_options,
+    OdeSolverOptions,
+    usize,
+    derivative_solve_max_iter
+);

@@ -12,6 +12,7 @@
 //! factorisation can serve several right-hand-side lanes (grouped broadcast).
 
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::ffi::c_int;
 use std::mem::MaybeUninit;
 
@@ -210,7 +211,6 @@ unsafe fn getrs_batched<T: ScalarCuda>(
 /// array currently points into, or 0 before it is first filled.
 struct XPtrs {
     base: u64,
-    nbatch: usize,
     buf: DeviceBuffer<u64>,
 }
 
@@ -229,7 +229,7 @@ pub struct OxideLU<T: ScalarCuda> {
     a_ptrs_bcast: RefCell<Option<(usize, DeviceBuffer<u64>)>>,
     /// One pointer per right-hand-side lane, one slot per lane count.
     /// (lane counts can alternate with sensitivity solves)
-    x_ptrs: RefCell<Vec<XPtrs>>,
+    x_ptrs: RefCell<HashMap<usize, XPtrs>>,
     /// The pivots of [`Self::pivots`] replicated per right-hand-side lane, for
     /// grouped broadcast, keyed on that lane count.
     piv_bcast: RefCell<Option<(usize, DeviceBuffer<i32>)>>,
@@ -256,7 +256,7 @@ impl<T: ScalarCuda> Default for OxideLU<T> {
             linearisation_set: false,
             a_ptrs: None,
             a_ptrs_bcast: RefCell::new(None),
-            x_ptrs: RefCell::new(Vec::new()),
+            x_ptrs: RefCell::new(HashMap::new()),
             piv_bcast: RefCell::new(None),
             piv_dirty: Cell::new(true),
         }
@@ -322,19 +322,11 @@ impl<T: ScalarCuda> OxideLU<T> {
     ) -> u64 {
         let base = x.data.cu_deviceptr();
         let mut slots = self.x_ptrs.borrow_mut();
-        let slot = match slots.iter().position(|s| s.nbatch == nbatch) {
-            Some(i) => &mut slots[i],
-            None => {
-                let buf = DeviceBuffer::zeroed(&ctx.stream, nbatch)
-                    .expect("Failed to allocate rhs pointers");
-                slots.push(XPtrs {
-                    base: 0,
-                    nbatch,
-                    buf,
-                });
-                slots.last_mut().unwrap()
-            }
-        };
+        let slot = slots.entry(nbatch).or_insert_with(|| XPtrs {
+            base: 0,
+            buf: DeviceBuffer::zeroed(&ctx.stream, nbatch)
+                .expect("Failed to allocate rhs pointers"),
+        });
         if slot.base != base {
             let ptrs = lane_ptrs::<T>(base, nstates, nbatch, nbatch);
             slot.buf

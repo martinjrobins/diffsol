@@ -197,7 +197,7 @@ where
             &problem.atol,
             problem.ode_options.nonlinear_solver_tolerance,
         );
-        convergence.set_max_iter(config.maximum_newton_iterations);
+        convergence.set_max_iter(problem.ode_options.max_nonlinear_solver_iterations);
 
         let gamma = rk.tableau().a(1, 1);
         let op = if integrate_main_eqn {
@@ -307,10 +307,6 @@ where
             s_op.set_h(h);
         }
     }
-
-    pub fn get_statistics(&self) -> &OdeSolverStatistics {
-        self.rk.get_statistics()
-    }
 }
 
 impl<'a, M, Eqn, AugmentedEqn, LS> OdeSolverMethod<'a, Eqn> for Sdirk<'a, Eqn, LS, M, AugmentedEqn>
@@ -330,6 +326,10 @@ where
 
     fn config_mut(&mut self) -> &mut SdirkConfig<Eqn::T> {
         &mut self.config
+    }
+
+    fn get_statistics(&self) -> &OdeSolverStatistics {
+        self.rk.get_statistics()
     }
 
     fn problem(&self) -> &'a OdeSolverProblem<Eqn> {
@@ -691,6 +691,7 @@ mod test {
         number_of_linear_solver_setups_from_second_convergence_fail: 0
         number_of_linear_solver_setups_from_error_test_fail: 0
         number_of_linear_solver_setups_from_step_success: 7
+        number_of_derivative_jacobian_refreshes: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 112
@@ -716,6 +717,7 @@ mod test {
         number_of_linear_solver_setups_from_second_convergence_fail: 0
         number_of_linear_solver_setups_from_error_test_fail: 0
         number_of_linear_solver_setups_from_step_success: 9
+        number_of_derivative_jacobian_refreshes: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 195
@@ -741,6 +743,7 @@ mod test {
         number_of_linear_solver_setups_from_second_convergence_fail: 0
         number_of_linear_solver_setups_from_error_test_fail: 0
         number_of_linear_solver_setups_from_step_success: 5
+        number_of_derivative_jacobian_refreshes: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 68
@@ -766,6 +769,7 @@ mod test {
         number_of_linear_solver_setups_from_second_convergence_fail: 0
         number_of_linear_solver_setups_from_error_test_fail: 0
         number_of_linear_solver_setups_from_step_success: 5
+        number_of_derivative_jacobian_refreshes: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 28
@@ -791,6 +795,7 @@ mod test {
         number_of_linear_solver_setups_from_second_convergence_fail: 0
         number_of_linear_solver_setups_from_error_test_fail: 0
         number_of_linear_solver_setups_from_step_success: 5
+        number_of_derivative_jacobian_refreshes: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 112
@@ -855,9 +860,9 @@ mod test {
             .unwrap();
         test_adjoint(adjoint_solver, dgdu, 40.0);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 381
-        number_of_jac_muls: 30
-        number_of_matrix_evals: 10
+        number_of_calls: 373
+        number_of_jac_muls: 24
+        number_of_matrix_evals: 8
         number_of_jac_adj_muls: 117
         "###);
     }
@@ -878,6 +883,7 @@ mod test {
         number_of_linear_solver_setups_from_second_convergence_fail: 0
         number_of_linear_solver_setups_from_error_test_fail: 5
         number_of_linear_solver_setups_from_step_success: 53
+        number_of_derivative_jacobian_refreshes: 0
         ");
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 1613
@@ -904,6 +910,7 @@ mod test {
         number_of_linear_solver_setups_from_second_convergence_fail: 0
         number_of_linear_solver_setups_from_error_test_fail: 4
         number_of_linear_solver_setups_from_step_success: 50
+        number_of_derivative_jacobian_refreshes: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 1534
@@ -929,6 +936,7 @@ mod test {
         number_of_linear_solver_setups_from_second_convergence_fail: 1
         number_of_linear_solver_setups_from_error_test_fail: 1
         number_of_linear_solver_setups_from_step_success: 60
+        number_of_derivative_jacobian_refreshes: 0
         ");
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 2537
@@ -954,6 +962,7 @@ mod test {
         number_of_linear_solver_setups_from_second_convergence_fail: 2
         number_of_linear_solver_setups_from_error_test_fail: 1
         number_of_linear_solver_setups_from_step_success: 64
+        number_of_derivative_jacobian_refreshes: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 2395
@@ -979,6 +988,7 @@ mod test {
         number_of_linear_solver_setups_from_second_convergence_fail: 0
         number_of_linear_solver_setups_from_error_test_fail: 1
         number_of_linear_solver_setups_from_step_success: 68
+        number_of_derivative_jacobian_refreshes: 0
         ");
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 2624
