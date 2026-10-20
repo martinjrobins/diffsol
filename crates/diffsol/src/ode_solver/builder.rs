@@ -1950,7 +1950,6 @@ where
         )?;
         OdeSolverProblem::new(
             eqn,
-            // AW: Keep the state tolerance pair only when state tolerance error control is enabled.
             self.state_tol_error_control.then_some((self.rtol, atol)),
             self.sens_rtol,
             sens_atol,
@@ -2047,7 +2046,6 @@ where
         eqn.set_params(&p);
         OdeSolverProblem::new(
             eqn,
-            // AW: Keep the state tolerance pair only when state tolerance error control is enabled.
             self.state_tol_error_control.then_some((self.rtol, atol)),
             self.sens_rtol,
             sens_atol,

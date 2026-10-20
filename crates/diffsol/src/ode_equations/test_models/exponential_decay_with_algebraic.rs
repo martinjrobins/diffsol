@@ -341,7 +341,7 @@ pub fn exponential_decay_with_algebraic_adjoint_problem<M: Matrix + 'static>(
         rtol: problem
             .state_tolerances
             .as_ref()
-            .unwrap() // AW maybe change back to expect
+            .expect("state tolerances are required to set solution metadata")
             .0,
         ..Default::default()
     };
@@ -526,8 +526,8 @@ pub fn exponential_decay_with_algebraic_with_reset_problem_sens<M: Matrix + 'sta
     let s_y0 = M::V::from_element(nstates, s_y0_val, ctx.clone());
 
     let mut soln = OdeSolverSolution {
-        atol: problem.state_tolerances.as_ref().unwrap().1.clone(),
-        rtol: problem.state_tolerances.as_ref().unwrap().0,
+        atol: problem.state_tolerances.as_ref().expect("state tolerances are required to set solution metadata").1.clone(),
+        rtol: problem.state_tolerances.as_ref().expect("state tolerances are required to set solution metadata").0,
         ..Default::default()
     };
     soln.push_sens(y_stop, t_stop, &[s_k, s_y0]);

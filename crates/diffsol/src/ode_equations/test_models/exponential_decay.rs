@@ -165,13 +165,13 @@ pub fn exponential_decay_problem_diffsl<
         atol: problem
             .state_tolerances
             .as_ref()
-            .unwrap() // AW maybe convert back to .expect with message
+            .expect("state tolerances are required to set solution metadata")
             .1
             .clone(),
         rtol: problem
             .state_tolerances
             .as_ref()
-            .unwrap() // AW maybe convert back to .expect with message
+            .expect("state tolerances are required to set solution metadata")
             .0,
         ..Default::default()
     };
@@ -212,13 +212,13 @@ pub fn exponential_decay_problem<M: Matrix + 'static>(
         atol: problem
             .state_tolerances
             .as_ref()
-            .unwrap() // AW maybe convert back to .expect with message
+            .expect("state tolerances are required to set solution metadata")
             .1
             .clone(),
         rtol: problem
             .state_tolerances
             .as_ref()
-            .unwrap() // AW maybe convert back to .expect with message
+            .expect("state tolerances are required to set solution metadata")
             .0,
         ..Default::default()
     };
@@ -258,13 +258,13 @@ pub fn exponential_decay_problem_batched<M: Matrix + 'static>(
         atol: problem
             .state_tolerances
             .as_ref()
-            .unwrap() // AW maybe convert back to .expect with message
+            .expect("state tolerances are required to set solution metadata")
             .1
             .clone(),
         rtol: problem
             .state_tolerances
             .as_ref()
-            .unwrap() // AW maybe convert back to .expect with message
+            .expect("state tolerances are required to set solution metadata")
             .0,
         ..Default::default()
     };
@@ -308,13 +308,13 @@ pub fn exponential_decay_problem_with_mass<M: Matrix + 'static>(
         atol: problem
             .state_tolerances
             .as_ref()
-            .unwrap() // AW maybe convert back to .expect with message
+            .expect("state tolerances are required to set solution metadata")
             .1
             .clone(),
         rtol: problem
             .state_tolerances
             .as_ref()
-            .unwrap() // AW maybe convert back to .expect with message
+            .expect("state tolerances are required to set solution metadata")
             .0,
         ..Default::default()
     };
@@ -361,13 +361,13 @@ pub fn exponential_decay_problem_with_root<M: Matrix + 'static>(
         atol: problem
             .state_tolerances
             .as_ref()
-            .unwrap() // AW maybe convert back to .expect with message
+            .expect("state tolerances are required to set solution metadata")
             .1
             .clone(),
         rtol: problem
             .state_tolerances
             .as_ref()
-            .unwrap() // AW maybe convert back to .expect with message
+            .expect("state tolerances are required to set solution metadata")
             .0,
         ..Default::default()
     };
@@ -425,13 +425,13 @@ pub fn exponential_decay_problem_adjoint<M: Matrix>(
         atol: problem
             .state_tolerances
             .as_ref()
-            .unwrap() // AW maybe convert back to .expect with message
+            .expect("state tolerances are required to set solution metadata")
             .1
             .clone(),
         rtol: problem
             .state_tolerances
             .as_ref()
-            .unwrap() // AW maybe convert back to .expect with message
+            .expect("state tolerances are required to set solution metadata")
             .0,
         ..Default::default()
     };
@@ -677,7 +677,7 @@ pub fn exponential_decay_with_single_reset_root_problem_adjoint<M: Matrix + 'sta
             problem
                 .state_tolerances
                 .as_ref()
-                .unwrap() // AW maybe convert back to .expect with message
+                .expect("state tolerances are required to set solution metadata")
                 .1
                 .clone()
         }),
@@ -685,7 +685,7 @@ pub fn exponential_decay_with_single_reset_root_problem_adjoint<M: Matrix + 'sta
             problem
                 .state_tolerances
                 .as_ref()
-                .unwrap() // AW maybe convert back to .expect with message
+                .expect("state tolerances are required to set solution metadata")
                 .0,
         ),
         ..Default::default()
@@ -872,13 +872,13 @@ pub fn exponential_decay_with_reset_problem<M: Matrix + 'static>() -> (
         atol: problem
             .state_tolerances
             .as_ref()
-            .unwrap() // AW maybe convert back to .expect with message
+            .expect("state tolerances are required to set solution metadata")
             .1
             .clone(),
         rtol: problem
             .state_tolerances
             .as_ref()
-            .unwrap() // AW maybe convert back to .expect with message
+            .expect("state tolerances are required to set solution metadata")
             .0,
         ..Default::default()
     };
@@ -916,13 +916,13 @@ pub fn exponential_decay_with_two_roots_problem<M: Matrix + 'static>() -> (
         atol: problem
             .state_tolerances
             .as_ref()
-            .unwrap() // AW maybe convert back to .expect with message
+            .expect("state tolerances are required to set solution metadata")
             .1
             .clone(),
         rtol: problem
             .state_tolerances
             .as_ref()
-            .unwrap() // AW maybe convert back to .expect with message
+            .expect("state tolerances are required to set solution metadata")
             .0,
         ..Default::default()
     };
@@ -1088,13 +1088,13 @@ pub fn exponential_decay_with_reset_problem_sens<M: Matrix + 'static>() -> (
         atol: problem
             .state_tolerances
             .as_ref()
-            .unwrap() // AW maybe convert back to .expect with message
+            .expect("state tolerances are required to set solution metadata")
             .1
             .clone(),
         rtol: problem
             .state_tolerances
             .as_ref()
-            .unwrap() // AW maybe convert back to .expect with message
+            .expect("state tolerances are required to set solution metadata")
             .0,
         ..Default::default()
     };
@@ -1357,13 +1357,13 @@ pub fn exponential_decay_problem_batched_adjoint<M: Matrix + 'static>(
         atol: problem
             .state_tolerances
             .as_ref()
-            .unwrap() // AW maybe convert back to .expect with message
+            .expect("state tolerances are required to set solution metadata")
             .1
             .clone(),
         rtol: problem
             .state_tolerances
             .as_ref()
-            .unwrap() // AW maybe convert back to .expect with message
+            .expect("state tolerances are required to set solution metadata")
             .0,
         ..Default::default()
     };
@@ -1557,13 +1557,13 @@ pub fn exponential_decay_with_constant_reset_problem_sens<M: Matrix + 'static>()
         atol: problem
             .state_tolerances
             .as_ref()
-            .unwrap() // AW maybe convert back to .expect with message
+            .expect("state tolerances are required to set solution metadata")
             .1
             .clone(),
         rtol: problem
             .state_tolerances
             .as_ref()
-            .unwrap() // AW maybe convert back to .expect with message
+            .expect("state tolerances are required to set solution metadata")
             .0,
         ..Default::default()
     };
@@ -1633,13 +1633,13 @@ pub fn exponential_decay_problem_batched_sens_with_reset<M: Matrix + 'static>(
         atol: problem
             .state_tolerances
             .as_ref()
-            .unwrap() // AW maybe convert back to .expect with message
+            .expect("state tolerances are required to set solution metadata")
             .1
             .clone(),
         rtol: problem
             .state_tolerances
             .as_ref()
-            .unwrap() // AW maybe convert back to .expect with message
+            .expect("state tolerances are required to set solution metadata")
             .0,
         ..Default::default()
     };
@@ -1761,13 +1761,13 @@ pub fn exponential_decay_problem_batched_adjoint_with_reset<M: Matrix + 'static>
         atol: problem
             .state_tolerances
             .as_ref()
-            .unwrap() // AW maybe convert back to .expect with message
+            .expect("state tolerances are required to set solution metadata")
             .1
             .clone(),
         rtol: problem
             .state_tolerances
             .as_ref()
-            .unwrap() // AW maybe convert back to .expect with message
+            .expect("state tolerances are required to set solution metadata")
             .0,
         ..Default::default()
     };
