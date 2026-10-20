@@ -1,11 +1,34 @@
 use crate::{OdeSolverOptions, Scalar};
 
+#[derive(Clone, Copy)]
 pub enum SolverState {
     StepSuccess,
     FirstConvergenceFail,
     SecondConvergenceFail,
     ErrorTestFail,
     Checkpoint,
+}
+
+/// Run `solve` and, after each failure, the first of the remaining Jacobian updates `retries`
+/// that changes the Newton matrix (`update` makes one and returns whether it did), then `solve`
+/// again. Once no update left changes the matrix, the last failure is returned.
+pub(crate) fn solve_with_jacobian_updates<S, E>(
+    solver: &mut S,
+    retries: &[SolverState],
+    mut solve: impl FnMut(&mut S) -> Result<(), E>,
+    mut update: impl FnMut(&mut S, SolverState) -> bool,
+) -> Result<(), E> {
+    let mut retries = retries.iter().copied();
+    loop {
+        match solve(solver) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                if !retries.any(|state| update(solver, state)) {
+                    return Err(e);
+                }
+            }
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -55,8 +78,11 @@ impl<T: Scalar> JacobianUpdate<T> {
                     || (h / self.h_at_last_jacobian_update - T::one()).abs()
                         > self.threshold_to_update_jacobian
             }
-            SolverState::FirstConvergenceFail => true,
-            SolverState::SecondConvergenceFail => true,
+            // after a failed solve, a Newton matrix with the same Jacobian and step size would
+            // fail the same way
+            SolverState::FirstConvergenceFail | SolverState::SecondConvergenceFail => {
+                h != self.h_at_last_jacobian_update
+            }
             SolverState::ErrorTestFail => true,
             SolverState::Checkpoint => true,
         }

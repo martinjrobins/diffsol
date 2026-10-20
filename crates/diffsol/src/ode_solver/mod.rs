@@ -48,11 +48,6 @@ pub struct OdeSolverStatistics {
     pub number_of_linear_solver_setups_from_error_test_fail: usize,
     /// Jacobian/LU setups triggered by the normal step-success heuristic.
     pub number_of_linear_solver_setups_from_step_success: usize,
-    /// Jacobian/LU setups made for the derivative solves (the forward sensitivities, and
-    /// [crate::StepVjp]) when the existing factorisation was too poor a preconditioner for them
-    /// to converge to `derivative_solve_tolerance`. They are separate from the solve's own
-    /// setups, and not included in `number_of_linear_solver_setups`.
-    pub number_of_derivative_jacobian_refreshes: usize,
 }
 
 impl OdeSolverStatistics {

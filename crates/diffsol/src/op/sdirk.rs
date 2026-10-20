@@ -1,6 +1,7 @@
 use crate::{
-    scale, DenseMatrix, LinearOp, Matrix, MatrixSparsity, NonLinearOpJacobian, OdeEquations,
-    OdeEquationsImplicit, Vector,
+    scale, DenseMatrix, LinearOp, LinearOpTranspose, Matrix, MatrixSparsity, NonLinearOpAdjoint,
+    NonLinearOpJacobian, OdeEquations, OdeEquationsImplicit, OdeEquationsImplicitAdjoint, Scale,
+    Vector,
 };
 use log::{debug, trace};
 use num_traits::ToPrimitive;
@@ -46,14 +47,25 @@ impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
         self.eqn.out().unwrap().call_inplace(ys, t, y);
         y.mul_assign(scale(*self.h.borrow().deref()));
     }
-    pub fn rhs_jac(&self, x: &Eqn::V, t: Eqn::T) -> Ref<'_, Eqn::M> {
-        {
-            let mut rhs_jac = self.rhs_jac.borrow_mut();
-            self.set_tmp(x);
-            let tmp = self.tmp.borrow();
-            self.eqn.rhs().jacobian_inplace(&tmp, t, &mut rhs_jac);
-        }
+    /// The Jacobian of the rhs at the state `y` and time `t`.
+    pub fn rhs_jac(&self, y: &Eqn::V, t: Eqn::T) -> Ref<'_, Eqn::M> {
+        self.eqn
+            .rhs()
+            .jacobian_inplace(y, t, &mut self.rhs_jac.borrow_mut());
         self.rhs_jac.borrow()
+    }
+    /// Evaluate the rhs Jacobian (and the mass matrix) at the state `y` and time `t`, for the
+    /// next [NonLinearOpJacobian::jacobian_inplace] to combine into `M - c h f'`, whatever
+    /// stage `phi` is set up for: the stage increment that call is given then makes no
+    /// difference.
+    pub fn refresh_rhs_jacobian(&self, y: &Eqn::V, t: Eqn::T) {
+        self.eqn
+            .rhs()
+            .jacobian_inplace(y, t, &mut self.rhs_jac.borrow_mut());
+        if let Some(mass) = self.eqn.mass() {
+            mass.matrix_inplace(t, &mut self.mass_jac.borrow_mut());
+        }
+        self.jacobian_is_stale.replace(false);
     }
     pub fn mass(&self, t: Eqn::T) -> Ref<'_, Eqn::M> {
         {
@@ -312,6 +324,24 @@ impl<Eqn: OdeEquationsImplicit> NonLinearOpJacobian for SdirkCallable<Eqn> {
     }
 }
 
+/// `-(M - c h f'(phi + c x))^T v`
+impl<Eqn: OdeEquationsImplicitAdjoint> NonLinearOpAdjoint for SdirkCallable<Eqn> {
+    fn jac_transpose_mul_inplace(&self, x: &Eqn::V, t: Eqn::T, v: &Eqn::V, y: &mut Eqn::V) {
+        self.set_tmp(x);
+        let tmp = self.tmp.borrow();
+        let ch = self.c * *self.h.borrow();
+        // y = -f'^T v, then y = -M^T v - c h y
+        self.eqn.rhs().jac_transpose_mul_inplace(&tmp, t, v, y);
+        match self.eqn.mass() {
+            Some(mass) => {
+                mass.gemv_transpose_inplace(v, t, ch, y);
+                y.mul_assign(Scale(-Eqn::T::one()));
+            }
+            None => y.axpy(-Eqn::T::one(), v, -ch),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::matrix::dense_nalgebra_serial::NalgebraMat;
@@ -344,6 +374,37 @@ mod tests {
             let mut jac_mul_v2 = Vcpu::from_vec(vec![0.0, 0.0, 0.0], *ctx);
             jac.gemv(1.0, &v, 0.0, &mut jac_mul_v2);
             jac_mul_v.assert_eq_st(&jac_mul_v2, 1e-10);
+        }
+    }
+
+    /// The transposed Jacobian product of the SDIRK operator against its Jacobian, with and
+    /// without a mass matrix, on a model whose Jacobian is not symmetric.
+    #[test]
+    fn test_sdirk_callable_jac_transpose() {
+        use crate::ode_equations::test_models::ad_test_model::ad_test_problem;
+        use crate::{NonLinearOpAdjoint, OdeEquations, Op};
+        for dae in [false, true] {
+            let problem = ad_test_problem::<Mcpu>([1.5, 3.0, 1.0], dae, 1e-8);
+            let ctx = *problem.context();
+            let mut op = SdirkCallable::new(&problem.eqn, 0.3, ctx);
+            op.set_h(0.7);
+            op.set_c(0.4);
+            op.set_phi_direct(&Vcpu::from_vec(vec![0.5, 0.2, 0.1], ctx));
+            let n = problem.eqn.rhs().nstates();
+            let x = Vcpu::from_vec(vec![0.6, 0.3, 0.1], ctx);
+            let t = 0.2;
+            let w = Vcpu::rand(n, 1.7, ctx);
+            let jac = op.jacobian(&x, t);
+            let mut jt_w = Vcpu::zeros(n, ctx);
+            op.jac_transpose_mul_inplace(&x, t, &w, &mut jt_w);
+            let w_vals = w.clone_as_vec();
+            for (i, got) in jt_w.clone_as_vec().into_iter().enumerate() {
+                let expected: f64 = -(0..n).map(|k| jac.get_index(k, i) * w_vals[k]).sum::<f64>();
+                assert!(
+                    (got - expected).abs() < 1e-12,
+                    "dae = {dae}: {got} != {expected}"
+                );
+            }
         }
     }
 
