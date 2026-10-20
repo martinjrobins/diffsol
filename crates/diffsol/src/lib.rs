@@ -387,7 +387,7 @@ pub mod sundials_sys;
 
 pub use diffsol_la::LinearOp as LaLinearOp;
 pub use linear_solver::LinearSolver;
-pub use linear_solver::{FaerLU, FaerSparseLU, NalgebraLU, NalgebraNativeLU};
+pub use linear_solver::{FaerLU, FaerSparseLU, NalgebraLU};
 
 pub use diffsol_la::{Context, FaerContext, NalgebraContext};
 
