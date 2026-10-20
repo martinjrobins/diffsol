@@ -58,6 +58,9 @@ where
     sens_out_error: Option<Eqn::V>,
 
     prev_error_norm: Option<Eqn::T>,
+    // Count test-only error norm calls so tests can verify fixed-step paths skip them.
+    #[cfg(test)]
+    error_norm_evaluations: usize,
 }
 
 impl<'a, Eqn, M> Drop for Rk<'a, Eqn, M>
@@ -97,6 +100,8 @@ where
             sens_error: self.sens_error.clone(),
             sens_out_error: self.sens_out_error.clone(),
             prev_error_norm: self.prev_error_norm,
+            #[cfg(test)]
+            error_norm_evaluations: 0,
         }
     }
 }
@@ -183,6 +188,8 @@ where
             sens_error: None,
             sens_out_error: None,
             prev_error_norm: None,
+            #[cfg(test)]
+            error_norm_evaluations: 0,
         })
     }
 
@@ -784,6 +791,11 @@ where
         augmented_eqn: Option<&mut impl AugmentedOdeEquations<Eqn>>,
         linear_solver: impl FnOnce(&mut Eqn::V) -> Result<(), DiffsolError>,
     ) -> Result<Eqn::T, DiffsolError> {
+        // Track this call in tests to confirm fixed-step mode bypasses error control.
+        #[cfg(test)]
+        {
+            self.error_norm_evaluations += 1;
+        }
         if self.problem.state_tolerances.is_none() {
             return Ok(Eqn::T::zero());
         }
@@ -857,6 +869,12 @@ where
             error_norm = error_norm.max(err);
         }
         Ok(error_norm)
+    }
+
+    // Expose the test-only counter so solver tests can assert error control was skipped.
+    #[cfg(test)]
+    pub(crate) fn error_norm_evaluations(&self) -> usize {
+        self.error_norm_evaluations
     }
 
     pub(crate) fn error_test_fail(

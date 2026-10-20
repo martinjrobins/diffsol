@@ -368,8 +368,10 @@ mod test {
     #[test]
     fn test_tsit45_nalgebra_exponential_decay() {
         let (problem, soln) = exponential_decay_problem::<M>(false);
+        assert!(problem.state_tolerances.is_some());
         let mut s = problem.tsit45().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
+        assert!(s.rk.error_norm_evaluations() > 0);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 0
         number_of_steps: 9
@@ -569,16 +571,21 @@ mod test {
             solver.step().unwrap(),
             OdeSolverStopReason::InternalTimestep
         );
+        assert_eq!(solver.rk.error_norm_evaluations(), 0);
         assert!((solver.state().t - 0.1).abs() < 1e-12);
         assert!((solver.state().h - 0.05).abs() < 1e-12);
 
         assert_eq!(solver.step().unwrap(), OdeSolverStopReason::TstopReached);
+        assert_eq!(solver.rk.error_norm_evaluations(), 0);
         assert!((solver.state().t - 0.15).abs() < 1e-12);
         assert!((solver.state().h - 0.1).abs() < 1e-12);
 
         solver.step().unwrap();
+        assert_eq!(solver.rk.error_norm_evaluations(), 0);
         assert!((solver.state().t - 0.25).abs() < 1e-12);
         assert!((solver.state().h - 0.1).abs() < 1e-12);
+        assert_eq!(solver.get_statistics().number_of_steps, 3);
+        assert_eq!(solver.get_statistics().number_of_error_test_failures, 0);
     }
 
     #[cfg(feature = "cuda")]
