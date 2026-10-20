@@ -78,7 +78,6 @@ where
     sens_out_error: Option<Eqn::V>,
 
     prev_error_norm: Option<Eqn::T>,
-
     /// Work vectors for pulling a cotangent back through a step, keyed by the lane count of the
     /// cotangents.
     vjp_work: HashMap<usize, RkVjpWork<Eqn::V>>,
@@ -87,6 +86,9 @@ where
     /// Column `i` holds the coefficients of stage `i`'s value relative to the end of the step,
     /// for [Self::vjp_stage_value]: see [Self::stage_coeffs_from_end].
     vjp_stage_value_coeffs: TableauMat<Eqn::T>,
+    // Count test-only error norm calls so tests can verify fixed-step paths skip them.
+    #[cfg(test)]
+    error_norm_evaluations: usize,
 }
 
 impl<'a, Eqn, M> Drop for Rk<'a, Eqn, M>
@@ -128,6 +130,8 @@ where
             vjp_work: HashMap::new(),
             vjp_lanes: 0,
             vjp_stage_value_coeffs: self.vjp_stage_value_coeffs,
+            #[cfg(test)]
+            error_norm_evaluations: 0,
         }
     }
 }
@@ -216,6 +220,8 @@ where
             vjp_work: HashMap::new(),
             vjp_lanes: 0,
             vjp_stage_value_coeffs: Self::stage_coeffs_from_end(&tableau),
+            #[cfg(test)]
+            error_norm_evaluations: 0,
         })
     }
 
@@ -848,6 +854,11 @@ where
         augmented_eqn: Option<&mut impl AugmentedOdeEquations<Eqn>>,
         linear_solver: impl FnOnce(&mut Eqn::V) -> Result<(), DiffsolError>,
     ) -> Result<Eqn::T, DiffsolError> {
+        // Track this call in tests to confirm fixed-step mode bypasses error control.
+        #[cfg(test)]
+        {
+            self.error_norm_evaluations += 1;
+        }
         if self.problem.state_tolerances.is_none() {
             return Ok(Eqn::T::zero());
         }
@@ -924,6 +935,12 @@ where
             error_norm = error_norm.max(err);
         }
         Ok(error_norm)
+    }
+
+    // Expose the test-only counter so solver tests can assert error control was skipped.
+    #[cfg(test)]
+    pub(crate) fn error_norm_evaluations(&self) -> usize {
+        self.error_norm_evaluations
     }
 
     pub(crate) fn error_test_fail(

@@ -814,7 +814,7 @@ mod test {
             test_state_mut_on_problem,
         },
         scale, ConstantOp, Context, DenseMatrix, FaerSparseLU, FaerSparseMat, MatrixCommon,
-        NalgebraLU, NalgebraVec, OdeEquations, OdeSolverMethod, Op, Vector, VectorView,
+        NalgebraLU, NalgebraVec, OdeBuilder, OdeEquations, OdeSolverMethod, Op, Vector, VectorView,
     };
 
     type M = NalgebraMat<f64>;
@@ -936,8 +936,10 @@ mod test {
     #[test]
     fn test_esdirk34_nalgebra_exponential_decay() {
         let (problem, soln) = exponential_decay_problem::<M>(false);
+        assert!(problem.state_tolerances.is_some());
         let mut s = problem.esdirk34::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
+        assert!(s.rk.error_norm_evaluations() > 0);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 6
         number_of_steps: 18
@@ -1006,6 +1008,55 @@ mod test {
         number_of_matrix_evals: 1
         number_of_jac_adj_muls: 0
         "###);
+    }
+
+    #[test]
+    fn sdirk_without_state_tolerances_keeps_step_size_and_skips_error_norm() {
+        let problem = OdeBuilder::<M>::new()
+            .h0(0.1)
+            .disable_state_error_control()
+            .rhs_implicit(
+                |y, _p, _t, dy| dy[0] = -y[0],
+                |_y, _p, _t, v, jv| jv[0] = -v[0],
+            )
+            .init(|_p, _t, y| y[0] = 1.0, 1)
+            .build()
+            .unwrap();
+        let mut solver = problem.esdirk34::<LS>().unwrap();
+        solver.set_stop_time(0.15).unwrap();
+
+        for (expected_time, expected_h) in [(0.1, 0.05), (0.15, 0.1), (0.25, 0.1)] {
+            solver.step().unwrap();
+            assert!((solver.state().t - expected_time).abs() < 1e-12);
+            assert!((solver.state().h - expected_h).abs() < 1e-12);
+            assert_eq!(solver.rk.error_norm_evaluations(), 0);
+        }
+
+        assert_eq!(solver.get_statistics().number_of_steps, 3);
+        assert_eq!(solver.get_statistics().number_of_error_test_failures, 0);
+    }
+
+    #[test]
+    fn sdirk_without_state_tolerances_retries_nonlinear_failures() {
+        let problem = OdeBuilder::<M>::new()
+            .h0(2.0)
+            .disable_state_error_control()
+            .rhs_implicit(
+                |y, _p, _t, dy| dy[0] = y[0] * y[0],
+                |y, _p, _t, v, jv| jv[0] = 2.0 * y[0] * v[0],
+            )
+            .init(|_p, _t, y| y[0] = 1.0, 1)
+            .build()
+            .unwrap();
+        let mut solver = problem.esdirk34::<LS>().unwrap();
+
+        solver.step().unwrap();
+
+        assert_eq!(solver.get_statistics().number_of_steps, 1);
+        assert!(solver.get_statistics().number_of_nonlinear_solver_fails > 0);
+        assert_eq!(solver.get_statistics().number_of_error_test_failures, 0);
+        assert!(solver.state().h < 2.0);
+        assert_eq!(solver.rk.error_norm_evaluations(), 0);
     }
 
     #[test]
