@@ -574,7 +574,7 @@ where
                 // A converged nonlinear solve is enough to accept this step. Keep h unchanged;
                 // nonlinear solve failures above can still reduce h and retry the step.
                 self.update_op_step_size(h);
-                self.jacobian_updates(h, SolverState::StepSuccess);
+                self.jacobian_updates_at(h, SolverState::StepSuccess, None);
                 self.jacobian_update.step();
                 self.rk.reset_prev_error();
                 return self.rk.step_accepted(h, h, true);

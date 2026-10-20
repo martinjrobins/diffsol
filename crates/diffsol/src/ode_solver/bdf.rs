@@ -1618,7 +1618,7 @@ where
                 if let Some(s_op) = self.s_op.as_mut() {
                     s_op.set_c(self.state.h, self.alpha[self.state.order]);
                 }
-                self._jacobian_updates(c, SolverState::StepSuccess);
+                self._jacobian_updates_at(c, SolverState::StepSuccess, None);
             }
 
             self.prev_error_norm = None;

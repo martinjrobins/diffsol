@@ -300,8 +300,7 @@ pub fn ad_test_problem<M: Matrix>(
     let atol = M::V::from_element(N, f(rtol), ctx);
     OdeSolverProblem::new(
         eqn,
-        f(rtol),
-        atol,
+        Some((f(rtol), atol)),
         None,
         None,
         None,
