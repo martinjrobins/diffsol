@@ -482,7 +482,9 @@ mod tests {
                     let start = solver.state_clone();
                     let checkpoints = solve_to_stop(&mut solver);
                     let n = checkpoints.len();
-                    for end in (1..n).step_by(3).chain([n]) {
+                    // each pull back runs through every step before its end, so a few ends
+                    // spread over the trajectory test all the steps, at a cost linear in n
+                    for end in (1..n).step_by(n.div_ceil(10)).chain([n]) {
                         assert_vjp_matches_sensitivities(&mut solver, &start, &checkpoints, end);
                     }
                 }
