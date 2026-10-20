@@ -33,9 +33,13 @@ each matrix type also has an associated type that defines its corresponding vect
 So whenever you create a builder you are also defining what matrix, vector and scalar types to use for the problem that you will create using that builder.
 
 By default, state error control is enabled with relative and absolute tolerances of `1e-6`. To use fixed-step operation, call
-`disable_state_error_control()` on the builder. Successful steps then keep the current step size and skip error estimates;
-nonlinear solve failures can still cause a retry with a smaller step. A step may be temporarily shortened to land on a requested
-stop time, after which the previous step size is restored.
+`disable_state_error_control()` on the builder. Successful steps then keep the current step size and skip error estimates for
+the state, outputs, and forward sensitivities. Nonlinear solve failures can still cause a retry with a smaller step. A step may
+be temporarily shortened to land on a requested stop time, after which the previous step size is restored.
+
+This differs from `turn_off_output_error_control()` and `turn_off_sensitivities_error_control()`: those methods remove only
+the selected output or sensitivity contribution while state error control remains active. Output or sensitivity values are
+still integrated when their error contribution is turned off.
 
 For BDF, set an upper order with `max_bdf_order(order)`. The supported range is 1 through 5, and the default is 5. For example,
 `.max_bdf_order(3)` limits BDF to order 3.
