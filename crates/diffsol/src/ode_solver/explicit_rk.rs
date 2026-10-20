@@ -653,16 +653,8 @@ mod test {
         let expected = y0.clone() * scale(f64::exp(-k * t_root));
         y.assert_eq_norm(
             &expected,
-            &problem
-                .state_tolerances
-                .as_ref()
-                .expect("state tolerances must be set for this test")
-                .1,
-            problem
-                .state_tolerances
-                .as_ref()
-                .expect("state tolerances must be set for this test")
-                .0,
+            &crate::ode_solver::tests::state_tolerances(&problem).1,
+            crate::ode_solver::tests::state_tolerances(&problem).0,
             15.0,
         );
 
@@ -671,16 +663,8 @@ mod test {
         let expected_g = y0 * scale(integral);
         g.assert_eq_norm(
             &expected_g,
-            &problem
-                .state_tolerances
-                .as_ref()
-                .expect("state tolerances must be set for this test")
-                .1,
-            problem
-                .state_tolerances
-                .as_ref()
-                .expect("state tolerances must be set for this test")
-                .0,
+            &crate::ode_solver::tests::state_tolerances(&problem).1,
+            crate::ode_solver::tests::state_tolerances(&problem).0,
             15.0,
         );
     }
@@ -705,16 +689,8 @@ mod test {
                 let diff = error
                     .squared_norm(
                         old_soln,
-                        &problem
-                            .state_tolerances
-                            .as_ref()
-                            .expect("state tolerances must be set for this test")
-                            .1,
-                        problem
-                            .state_tolerances
-                            .as_ref()
-                            .expect("state tolerances must be set for this test")
-                            .0,
+                        &crate::ode_solver::tests::state_tolerances(&problem).1,
+                        crate::ode_solver::tests::state_tolerances(&problem).0,
                     )
                     .sqrt();
                 assert!(diff > 1.0e-6, "diff: {diff}");

@@ -558,26 +558,23 @@ where
     }
 
     fn set_atol(&mut self, atol: f64) {
-        let mut state_atol = self
+        let (_, current_atol) = self
             .problem
             .state_tolerances
             .as_ref()
-            .expect("C API problems have state tolerances")
-            .1
-            .clone();
+            .expect("C API problems have state tolerances");
+        let mut state_atol = current_atol.clone();
         state_atol.fill(M::T::from_f64(atol).unwrap());
         self.problem.set_state_atol(state_atol);
     }
 
     fn atol(&self) -> f64 {
-        self.problem
+        let (_, atol) = self
+            .problem
             .state_tolerances
             .as_ref()
-            .expect("C API problems have state tolerances")
-            .1
-            .get_index(0)
-            .to_f64()
-            .unwrap()
+            .expect("C API problems have state tolerances");
+        atol.get_index(0).to_f64().unwrap()
     }
 
     fn serialized_diffsl(&self) -> Result<Vec<u8>, DiffsolRtError> {
@@ -589,13 +586,12 @@ where
     }
 
     fn rtol(&self) -> f64 {
-        self.problem
+        let (rtol, _) = self
+            .problem
             .state_tolerances
             .as_ref()
-            .expect("C API problems have state tolerances")
-            .0
-            .to_f64()
-            .unwrap()
+            .expect("C API problems have state tolerances");
+        rtol.to_f64().unwrap()
     }
 
     fn set_t0(&mut self, t0: f64) {

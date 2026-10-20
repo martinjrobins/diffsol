@@ -1327,32 +1327,16 @@ mod test {
             let s = S::new_and_consistent::<LS, _>(&problem, 1).unwrap();
             s.as_ref().y.assert_eq_norm(
                 &soln.solution_points[0].state,
-                &problem
-                    .state_tolerances
-                    .as_ref()
-                    .expect("state tolerances must be set for this test")
-                    .1,
-                problem
-                    .state_tolerances
-                    .as_ref()
-                    .expect("state tolerances must be set for this test")
-                    .0,
+                &crate::ode_solver::tests::state_tolerances(&problem).1,
+                crate::ode_solver::tests::state_tolerances(&problem).0,
                 M::T::from_f64(10.).unwrap(),
             );
 
             let s = S::new_with_sensitivities_and_consistent::<LS, _>(&problem, 1).unwrap();
             s.as_ref().y.assert_eq_norm(
                 &soln.solution_points[0].state,
-                &problem
-                    .state_tolerances
-                    .as_ref()
-                    .expect("state tolerances must be set for this test")
-                    .1,
-                problem
-                    .state_tolerances
-                    .as_ref()
-                    .expect("state tolerances must be set for this test")
-                    .0,
+                &crate::ode_solver::tests::state_tolerances(&problem).1,
+                crate::ode_solver::tests::state_tolerances(&problem).0,
                 M::T::from_f64(10.).unwrap(),
             );
             let sens_soln = soln.sens_solution_points.as_ref().unwrap();
@@ -1362,16 +1346,8 @@ mod test {
                 crate::ode_equations::augmented_channel(s.as_ref().s, nchannels, i, &mut s_i);
                 s_i.assert_eq_norm(
                     &ssoln[0].state,
-                    &problem
-                        .state_tolerances
-                        .as_ref()
-                        .expect("state tolerances must be set for this test")
-                        .1,
-                    problem
-                        .state_tolerances
-                        .as_ref()
-                        .expect("state tolerances must be set for this test")
-                        .0,
+                    &crate::ode_solver::tests::state_tolerances(&problem).1,
+                    crate::ode_solver::tests::state_tolerances(&problem).0,
                     M::T::from_f64(10.).unwrap(),
                 );
             }
@@ -1416,30 +1392,14 @@ mod test {
             let tol = M::T::from_f64(10.).unwrap();
             s.as_ref().y.assert_eq_norm(
                 &y_expect,
-                &problem
-                    .state_tolerances
-                    .as_ref()
-                    .expect("state tolerances must be set for this test")
-                    .1,
-                problem
-                    .state_tolerances
-                    .as_ref()
-                    .expect("state tolerances must be set for this test")
-                    .0,
+                &crate::ode_solver::tests::state_tolerances(&problem).1,
+                crate::ode_solver::tests::state_tolerances(&problem).0,
                 tol,
             );
             s.as_ref().dy.assert_eq_norm(
                 &dy_expect,
-                &problem
-                    .state_tolerances
-                    .as_ref()
-                    .expect("state tolerances must be set for this test")
-                    .1,
-                problem
-                    .state_tolerances
-                    .as_ref()
-                    .expect("state tolerances must be set for this test")
-                    .0,
+                &crate::ode_solver::tests::state_tolerances(&problem).1,
+                crate::ode_solver::tests::state_tolerances(&problem).0,
                 tol,
             );
         }
@@ -1484,30 +1444,14 @@ mod test {
         let tol = M::T::from_f64(10.).unwrap();
         s.as_ref().y.assert_eq_norm(
             &from([2.0, 1.0]),
-            &problem
-                .state_tolerances
-                .as_ref()
-                .expect("state tolerances must be set for this test")
-                .1,
-            problem
-                .state_tolerances
-                .as_ref()
-                .expect("state tolerances must be set for this test")
-                .0,
+            &crate::ode_solver::tests::state_tolerances(&problem).1,
+            crate::ode_solver::tests::state_tolerances(&problem).0,
             tol,
         );
         s.as_ref().dy.assert_eq_norm(
             &from([-1.0, 0.0]),
-            &problem
-                .state_tolerances
-                .as_ref()
-                .expect("state tolerances must be set for this test")
-                .1,
-            problem
-                .state_tolerances
-                .as_ref()
-                .expect("state tolerances must be set for this test")
-                .0,
+            &crate::ode_solver::tests::state_tolerances(&problem).1,
+            crate::ode_solver::tests::state_tolerances(&problem).0,
             tol,
         );
     }
@@ -1545,30 +1489,14 @@ mod test {
         let tol = M::T::from_f64(10.).unwrap();
         s.as_ref().y.assert_eq_norm(
             &from([1.0, 1.0]),
-            &problem
-                .state_tolerances
-                .as_ref()
-                .expect("state tolerances must be set for this test")
-                .1,
-            problem
-                .state_tolerances
-                .as_ref()
-                .expect("state tolerances must be set for this test")
-                .0,
+            &crate::ode_solver::tests::state_tolerances(&problem).1,
+            crate::ode_solver::tests::state_tolerances(&problem).0,
             tol,
         );
         s.as_ref().dy.assert_eq_norm(
             &from([-1.0, 0.0]),
-            &problem
-                .state_tolerances
-                .as_ref()
-                .expect("state tolerances must be set for this test")
-                .1,
-            problem
-                .state_tolerances
-                .as_ref()
-                .expect("state tolerances must be set for this test")
-                .0,
+            &crate::ode_solver::tests::state_tolerances(&problem).1,
+            crate::ode_solver::tests::state_tolerances(&problem).0,
             tol,
         );
     }
@@ -1584,16 +1512,8 @@ mod test {
         let mut state = BdfState::<V>::new_without_initialise(&problem).unwrap();
         state.as_mut().set_step_size(
             problem.h0,
-            &problem
-                .state_tolerances
-                .as_ref()
-                .expect("state tolerances must be set for this test")
-                .1,
-            problem
-                .state_tolerances
-                .as_ref()
-                .expect("state tolerances must be set for this test")
-                .0,
+            crate::ode_solver::tests::state_tolerances(&problem).1,
+            crate::ode_solver::tests::state_tolerances(&problem).0,
             &problem.eqn,
             1,
         );
@@ -1615,16 +1535,8 @@ mod test {
 
         state.as_mut().set_step_size(
             problem.h0,
-            &problem
-                .state_tolerances
-                .as_ref()
-                .expect("state tolerances must be set for this test")
-                .1,
-            problem
-                .state_tolerances
-                .as_ref()
-                .expect("state tolerances must be set for this test")
-                .0,
+            crate::ode_solver::tests::state_tolerances(&problem).1,
+            crate::ode_solver::tests::state_tolerances(&problem).0,
             &problem.eqn,
             1,
         );

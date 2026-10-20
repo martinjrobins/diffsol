@@ -1151,16 +1151,8 @@ mod test {
             let y_i = y.column(i).into_owned();
             y_i.assert_eq_norm(
                 &expect(*t_i),
-                &problem
-                    .state_tolerances
-                    .as_ref()
-                    .expect("state tolerances must be set for this test")
-                    .1,
-                problem
-                    .state_tolerances
-                    .as_ref()
-                    .expect("state tolerances must be set for this test")
-                    .0,
+                &crate::ode_solver::tests::state_tolerances(&problem).1,
+                crate::ode_solver::tests::state_tolerances(&problem).0,
                 15.0,
             );
         }
@@ -1183,16 +1175,8 @@ mod test {
         let expected = NalgebraVec::from_vec(vec![0.6, 0.6], *problem.context());
         y_last.assert_eq_norm(
             &expected,
-            &problem
-                .state_tolerances
-                .as_ref()
-                .expect("state tolerances must be set for this test")
-                .1,
-            problem
-                .state_tolerances
-                .as_ref()
-                .expect("state tolerances must be set for this test")
-                .0,
+            &crate::ode_solver::tests::state_tolerances(&problem).1,
+            crate::ode_solver::tests::state_tolerances(&problem).0,
             15.0,
         );
     }
@@ -1218,16 +1202,8 @@ mod test {
             let y_i = y.column(i).into_owned();
             y_i.assert_eq_norm(
                 &expect(*t_i),
-                &problem
-                    .state_tolerances
-                    .as_ref()
-                    .expect("state tolerances must be set for this test")
-                    .1,
-                problem
-                    .state_tolerances
-                    .as_ref()
-                    .expect("state tolerances must be set for this test")
-                    .0,
+                &crate::ode_solver::tests::state_tolerances(&problem).1,
+                crate::ode_solver::tests::state_tolerances(&problem).0,
                 15.0,
             );
         }
@@ -1245,16 +1221,8 @@ mod test {
             let y_i = y.column(i).into_owned();
             y_i.assert_eq_norm(
                 &soln_pt.state,
-                &problem
-                    .state_tolerances
-                    .as_ref()
-                    .expect("state tolerances must be set for this test")
-                    .1,
-                problem
-                    .state_tolerances
-                    .as_ref()
-                    .expect("state tolerances must be set for this test")
-                    .0,
+                &crate::ode_solver::tests::state_tolerances(&problem).1,
+                crate::ode_solver::tests::state_tolerances(&problem).0,
                 15.0,
             );
         }
@@ -1281,16 +1249,8 @@ mod test {
         );
         y_root_minus_one.assert_eq_norm(
             &expected_minus_one,
-            &problem
-                .state_tolerances
-                .as_ref()
-                .expect("state tolerances must be set for this test")
-                .1,
-            problem
-                .state_tolerances
-                .as_ref()
-                .expect("state tolerances must be set for this test")
-                .0,
+            &crate::ode_solver::tests::state_tolerances(&problem).1,
+            crate::ode_solver::tests::state_tolerances(&problem).0,
             15.0,
         );
 
@@ -1298,16 +1258,8 @@ mod test {
         let expected = NalgebraVec::from_vec(vec![0.6, 0.6], *problem.context());
         y_last.assert_eq_norm(
             &expected,
-            &problem
-                .state_tolerances
-                .as_ref()
-                .expect("state tolerances must be set for this test")
-                .1,
-            problem
-                .state_tolerances
-                .as_ref()
-                .expect("state tolerances must be set for this test")
-                .0,
+            &crate::ode_solver::tests::state_tolerances(&problem).1,
+            crate::ode_solver::tests::state_tolerances(&problem).0,
             15.0,
         );
     }
@@ -1332,16 +1284,8 @@ mod test {
         let expected = y0 * scale(integral);
         y_last.assert_eq_norm(
             &expected,
-            &problem
-                .state_tolerances
-                .as_ref()
-                .expect("state tolerances must be set for this test")
-                .1,
-            problem
-                .state_tolerances
-                .as_ref()
-                .expect("state tolerances must be set for this test")
-                .0,
+            &crate::ode_solver::tests::state_tolerances(&problem).1,
+            crate::ode_solver::tests::state_tolerances(&problem).0,
             15.0,
         );
     }
@@ -1358,16 +1302,8 @@ mod test {
             let y_i = y.column(i).into_owned();
             y_i.assert_eq_norm(
                 &soln_pt.state,
-                &problem
-                    .state_tolerances
-                    .as_ref()
-                    .expect("state tolerances must be set for this test")
-                    .1,
-                problem
-                    .state_tolerances
-                    .as_ref()
-                    .expect("state tolerances must be set for this test")
-                    .0,
+                &crate::ode_solver::tests::state_tolerances(&problem).1,
+                crate::ode_solver::tests::state_tolerances(&problem).0,
                 15.0,
             );
         }
@@ -1397,16 +1333,8 @@ mod test {
             let y_i = y.column(i).into_owned();
             y_i.assert_eq_norm(
                 &soln_pt.state,
-                &problem
-                    .state_tolerances
-                    .as_ref()
-                    .expect("state tolerances must be set for this test")
-                    .1,
-                problem
-                    .state_tolerances
-                    .as_ref()
-                    .expect("state tolerances must be set for this test")
-                    .0,
+                &crate::ode_solver::tests::state_tolerances(&problem).1,
+                crate::ode_solver::tests::state_tolerances(&problem).0,
                 15.0,
             );
         }
@@ -1440,16 +1368,8 @@ mod test {
             let y_i = y.column(i).into_owned();
             y_i.assert_eq_norm(
                 &soln_pt.state,
-                &problem
-                    .state_tolerances
-                    .as_ref()
-                    .expect("state tolerances must be set for this test")
-                    .1,
-                problem
-                    .state_tolerances
-                    .as_ref()
-                    .expect("state tolerances must be set for this test")
-                    .0,
+                &crate::ode_solver::tests::state_tolerances(&problem).1,
+                crate::ode_solver::tests::state_tolerances(&problem).0,
                 15.0,
             );
         }
@@ -1494,16 +1414,8 @@ mod test {
             let y_i = dense_soln.ys.column(i).into_owned();
             y_i.assert_eq_norm(
                 &soln_pt.state,
-                &problem
-                    .state_tolerances
-                    .as_ref()
-                    .expect("state tolerances must be set for this test")
-                    .1,
-                problem
-                    .state_tolerances
-                    .as_ref()
-                    .expect("state tolerances must be set for this test")
-                    .0,
+                &crate::ode_solver::tests::state_tolerances(&problem).1,
+                crate::ode_solver::tests::state_tolerances(&problem).0,
                 15.0,
             );
         }
@@ -1551,16 +1463,8 @@ mod test {
         let expected = NalgebraVec::from_vec(vec![decay; 2], *problem.context());
         dense_soln.ys.column(0).into_owned().assert_eq_norm(
             &expected,
-            &problem
-                .state_tolerances
-                .as_ref()
-                .expect("state tolerances must be set for this test")
-                .1,
-            problem
-                .state_tolerances
-                .as_ref()
-                .expect("state tolerances must be set for this test")
-                .0,
+            &crate::ode_solver::tests::state_tolerances(&problem).1,
+            crate::ode_solver::tests::state_tolerances(&problem).0,
             15.0,
         );
 
@@ -1639,16 +1543,8 @@ mod test {
                 let got = soln.ys.column(i).into_owned();
                 got.assert_eq_norm(
                     &expected,
-                    &problem
-                        .state_tolerances
-                        .as_ref()
-                        .expect("state tolerances must be set for this test")
-                        .1,
-                    problem
-                        .state_tolerances
-                        .as_ref()
-                        .expect("state tolerances must be set for this test")
-                        .0,
+                    &crate::ode_solver::tests::state_tolerances(&problem).1,
+                    crate::ode_solver::tests::state_tolerances(&problem).0,
                     15.0,
                 );
             }
@@ -1710,16 +1606,8 @@ mod test {
             let y_i = y.column(i).into_owned();
             y_i.assert_eq_norm(
                 &expect(*t_i),
-                &problem
-                    .state_tolerances
-                    .as_ref()
-                    .expect("state tolerances must be set for this test")
-                    .1,
-                problem
-                    .state_tolerances
-                    .as_ref()
-                    .expect("state tolerances must be set for this test")
-                    .0,
+                &crate::ode_solver::tests::state_tolerances(&problem).1,
+                crate::ode_solver::tests::state_tolerances(&problem).0,
                 15.0,
             );
         }
@@ -1732,16 +1620,8 @@ mod test {
                 .unwrap();
             y.assert_eq_norm(
                 &point.state,
-                &problem
-                    .state_tolerances
-                    .as_ref()
-                    .expect("state tolerances must be set for this test")
-                    .1,
-                problem
-                    .state_tolerances
-                    .as_ref()
-                    .expect("state tolerances must be set for this test")
-                    .0,
+                &crate::ode_solver::tests::state_tolerances(&problem).1,
+                crate::ode_solver::tests::state_tolerances(&problem).0,
                 250.0,
             );
         }
@@ -1772,16 +1652,8 @@ mod test {
         let expected_reset = NalgebraVec::from_element(reset_state.len(), 0.4, *problem.context());
         reset_state.assert_eq_norm(
             &expected_reset,
-            &problem
-                .state_tolerances
-                .as_ref()
-                .expect("state tolerances must be set for this test")
-                .1,
-            problem
-                .state_tolerances
-                .as_ref()
-                .expect("state tolerances must be set for this test")
-                .0,
+            &crate::ode_solver::tests::state_tolerances(&problem).1,
+            crate::ode_solver::tests::state_tolerances(&problem).0,
             20.0,
         );
     }
@@ -1813,16 +1685,8 @@ mod test {
         );
         ys.column(1).into_owned().assert_eq_norm(
             &expected_post_reset,
-            &problem
-                .state_tolerances
-                .as_ref()
-                .expect("state tolerances must be set for this test")
-                .1,
-            problem
-                .state_tolerances
-                .as_ref()
-                .expect("state tolerances must be set for this test")
-                .0,
+            &crate::ode_solver::tests::state_tolerances(&problem).1,
+            crate::ode_solver::tests::state_tolerances(&problem).0,
             20.0,
         );
     }

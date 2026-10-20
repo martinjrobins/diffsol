@@ -103,6 +103,17 @@ pub(crate) mod tests {
     };
     use num_traits::{FromPrimitive, One, Signed, ToPrimitive, Zero};
 
+    // Get the tolerance pair for tests that require state error control.
+    pub(crate) fn state_tolerances<Eqn: OdeEquations>(
+        problem: &OdeSolverProblem<Eqn>,
+    ) -> (Eqn::T, &Eqn::V) {
+        let (rtol, atol) = problem
+            .state_tolerances
+            .as_ref()
+            .expect("state tolerances must be set for this test");
+        (*rtol, atol)
+    }
+
     pub fn test_ode_solver<'a, M, Eqn, Method>(
         method: &mut Method,
         solution: OdeSolverSolution<M::V>,

@@ -470,16 +470,8 @@ mod tests {
                 .unwrap();
             y.assert_eq_norm(
                 &point.state,
-                &problem
-                    .state_tolerances
-                    .as_ref()
-                    .expect("state tolerances must be set for this test")
-                    .1,
-                problem
-                    .state_tolerances
-                    .as_ref()
-                    .expect("state tolerances must be set for this test")
-                    .0,
+                &crate::ode_solver::tests::state_tolerances(&problem).1,
+                crate::ode_solver::tests::state_tolerances(&problem).0,
                 10.0,
             );
         }

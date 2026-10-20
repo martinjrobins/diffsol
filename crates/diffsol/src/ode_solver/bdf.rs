@@ -902,18 +902,14 @@ where
         let state = &self.state;
         let order = state.order;
         let output_in_error_control = self.ode_problem.output_in_error_control();
-        let integrate_sens = self.s_op.is_some();
-        let sens_in_error_control =
-            integrate_sens && self.s_op.as_ref().unwrap().eqn().include_in_error_control();
-        let integrate_sens_out =
-            integrate_sens && self.s_op.as_ref().unwrap().eqn().out().is_some();
-        let sens_output_in_error_control = integrate_sens_out
-            && self
-                .s_op
-                .as_ref()
-                .unwrap()
-                .eqn()
-                .include_out_in_error_control();
+        let (sens_in_error_control, sens_output_in_error_control) =
+            self.s_op.as_ref().map_or((false, false), |s_op| {
+                let eqn = s_op.eqn();
+                (
+                    eqn.include_in_error_control(),
+                    eqn.out().is_some() && eqn.include_out_in_error_control(),
+                )
+            });
 
         let mut error_norm = M::T::zero();
         if self.op.is_some() {
@@ -957,18 +953,14 @@ where
             .set(self.error_norm_evaluations.get() + 1);
         let state = &self.state;
         let output_in_error_control = self.ode_problem.output_in_error_control();
-        let integrate_sens = self.s_op.is_some();
-        let sens_in_error_control =
-            integrate_sens && self.s_op.as_ref().unwrap().eqn().include_in_error_control();
-        let integrate_sens_out =
-            integrate_sens && self.s_op.as_ref().unwrap().eqn().out().is_some();
-        let sens_output_in_error_control = integrate_sens_out
-            && self
-                .s_op
-                .as_ref()
-                .unwrap()
-                .eqn()
-                .include_out_in_error_control();
+        let (sens_in_error_control, sens_output_in_error_control) =
+            self.s_op.as_ref().map_or((false, false), |s_op| {
+                let eqn = s_op.eqn();
+                (
+                    eqn.include_in_error_control(),
+                    eqn.out().is_some() && eqn.include_out_in_error_control(),
+                )
+            });
 
         let mut error_norm = M::T::zero();
         if self.op.is_some() {
@@ -2655,17 +2647,10 @@ mod test {
         let (_problem, mut soln) = exponential_decay_with_algebraic_problem_sens::<M>();
         let (problem, _soln) =
             exponential_decay_with_algebraic_problem_diffsl::<M, diffsl::LlvmModule>(false);
-        soln.atol = problem
-            .state_tolerances
-            .as_ref()
-            .expect("state tolerances must be set for this test")
+        soln.atol = crate::ode_solver::tests::state_tolerances(&problem)
             .1
             .clone();
-        soln.rtol = problem
-            .state_tolerances
-            .as_ref()
-            .expect("state tolerances must be set for this test")
-            .0;
+        soln.rtol = crate::ode_solver::tests::state_tolerances(&problem).0;
         let mut s = problem.bdf_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
@@ -3341,16 +3326,8 @@ mod test {
         let expected = y0.clone() * scale(f64::exp(-k * t_root));
         y.assert_eq_norm(
             &expected,
-            &problem
-                .state_tolerances
-                .as_ref()
-                .expect("state tolerances must be set for this test")
-                .1,
-            problem
-                .state_tolerances
-                .as_ref()
-                .expect("state tolerances must be set for this test")
-                .0,
+            &crate::ode_solver::tests::state_tolerances(&problem).1,
+            crate::ode_solver::tests::state_tolerances(&problem).0,
             15.0,
         );
 
@@ -3359,16 +3336,8 @@ mod test {
         let expected_g = y0 * scale(integral);
         g.assert_eq_norm(
             &expected_g,
-            &problem
-                .state_tolerances
-                .as_ref()
-                .expect("state tolerances must be set for this test")
-                .1,
-            problem
-                .state_tolerances
-                .as_ref()
-                .expect("state tolerances must be set for this test")
-                .0,
+            &crate::ode_solver::tests::state_tolerances(&problem).1,
+            crate::ode_solver::tests::state_tolerances(&problem).0,
             15.0,
         );
     }
@@ -3394,16 +3363,8 @@ mod test {
                 let diff = error
                     .squared_norm(
                         old_soln,
-                        &problem
-                            .state_tolerances
-                            .as_ref()
-                            .expect("state tolerances must be set for this test")
-                            .1,
-                        problem
-                            .state_tolerances
-                            .as_ref()
-                            .expect("state tolerances must be set for this test")
-                            .0,
+                        &crate::ode_solver::tests::state_tolerances(&problem).1,
+                        crate::ode_solver::tests::state_tolerances(&problem).0,
                     )
                     .sqrt();
                 assert!(diff > 1.0e-6, "diff: {diff}");
