@@ -22,6 +22,11 @@ an implicit solver to retry with a smaller step. Output and sensitivity errors a
 Calling `rtol(...)` or `atol(...)` later in the builder chain turns state error control back on; either method keeps the other
 tolerance at its current value.
 
+This disables error control for the step as a whole: state, output, and forward sensitivity error contributions are all skipped.
+By contrast, [`OdeBuilder::turn_off_output_error_control`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html#method.turn_off_output_error_control)
+and [`OdeBuilder::turn_off_sensitivities_error_control`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html#method.turn_off_sensitivities_error_control)
+disable only the selected contribution. State error control stays active, and the corresponding outputs or sensitivities are still integrated.
+
 If a step would pass a requested stop time, the solver shortens that boundary step to land on the stop time, then restores the
 previous step size. BDF continues to increase its order as history builds, up to its maximum order. The default maximum is 5;
 set a smaller limit with `OdeBuilder::max_bdf_order`, for example `.max_bdf_order(3)`.
