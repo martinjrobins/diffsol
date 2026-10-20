@@ -1,4 +1,5 @@
-use nalgebra::Dyn;
+use nalgebra::linalg::{gauss_step, gauss_step_swap};
+use nalgebra::{Dim, Dyn, Matrix as NaMatrix, StorageMut};
 
 use crate::context::broadcast_batch;
 use crate::{
@@ -6,55 +7,117 @@ use crate::{
     LinearOp, LinearSolver, Matrix, NalgebraContext, NalgebraScalar, NalgebraVec,
 };
 
-/// A [LinearSolver] that uses the LU decomposition in the [`nalgebra` library](https://nalgebra.org/) to solve the linear system.
-///
-/// Exported as [NalgebraNativeLU](crate::NalgebraNativeLU): re-allocates its factorization
-/// (a matrix clone plus a fresh permutation sequence) on every
-/// [`set_linearisation`](LinearSolver::set_linearisation) call, unlike the default
-/// [NalgebraLU](crate::NalgebraLU), which reuses its workspace in place. Kept around for
-/// comparison/benchmarking.
-#[derive(Clone)]
-pub struct LU<T>
-where
-    T: NalgebraScalar,
-{
-    matrix: Option<NalgebraMat<T>>,
-    lu: Vec<nalgebra::LU<T, Dyn, Dyn>>,
+// `gauss_step`/`gauss_step_swap` are `#[doc(hidden)]` in nalgebra (not officially documented,
+// though `pub fn` and re-exported at the crate root) -- they are the exact elimination steps
+// `nalgebra::linalg::LU::new` calls internally.
+
+/// LU factorization state for a (possibly batched) [NalgebraMat], factorized and solved
+/// entirely in place: `a` is written to directly by `LinearOp::matrix_inplace` in
+/// [ReusableLU::set_linearisation] (no separate scratch matrix + clone, as
+/// `nalgebra::linalg::LU::new` would need), then decomposed in place, batch block by batch
+/// block.
+struct BatchLu<T: NalgebraScalar> {
+    a: NalgebraMat<T>,
+    /// Row-swap history per batch (replaces nalgebra's `PermutationSequence`), reused across
+    /// `factor` calls.
+    piv: Vec<Vec<(usize, usize)>>,
 }
 
-impl<T> Default for LU<T>
-where
-    T: NalgebraScalar,
-{
-    fn default() -> Self {
+impl<T: NalgebraScalar> BatchLu<T> {
+    fn new(a: NalgebraMat<T>) -> Self {
+        let nbatch = a.context.nbatch();
         Self {
-            lu: Vec::new(),
-            matrix: None,
+            a,
+            piv: vec![Vec::new(); nbatch],
         }
     }
-}
 
-impl<T: NalgebraScalar> LU<T> {
-    fn solve(&self, state: &mut NalgebraVec<T>, transpose: bool) -> Result<(), LaError> {
-        if self.lu.is_empty() {
-            return Err(linear_solver_error!(LuNotInitialized));
+    fn nbatch(&self) -> usize {
+        self.piv.len()
+    }
+
+    fn logical_ncols(&self) -> usize {
+        self.a.data.ncols() / self.nbatch()
+    }
+
+    /// Factorize `self.a` in place, one square batch block at a time. Body copied from
+    /// `nalgebra::linalg::LU::new`, run against a mutable view of each block instead of an
+    /// owned matrix.
+    fn factor(&mut self) {
+        let ncols = self.logical_ncols();
+        for batch in 0..self.nbatch() {
+            let piv = &mut self.piv[batch];
+            piv.clear();
+            let mut block = self.a.data.columns_mut(batch * ncols, ncols);
+            for i in 0..ncols {
+                let p = block.view_range(i.., i).icamax() + i;
+                let diag = block[(p, i)];
+                if diag.is_zero() {
+                    continue;
+                }
+                if p != i {
+                    piv.push((i, p));
+                    block.columns_range_mut(..i).swap_rows(i, p);
+                    gauss_step_swap(&mut block, diag, i, p);
+                } else {
+                    gauss_step(&mut block, diag, i);
+                }
+            }
         }
+    }
+
+    /// Solve `block(batch) * x = b` in place, `b` holding the input and receiving the
+    /// solution. Body copied from `nalgebra::linalg::LU::solve_mut`.
+    fn solve_block<C2: Dim, S2: StorageMut<T, Dyn, C2>>(
+        &self,
+        batch: usize,
+        b: &mut NaMatrix<T, Dyn, C2, S2>,
+    ) -> bool {
+        let ncols = self.logical_ncols();
+        let block = self.a.data.columns(batch * ncols, ncols);
+        for &(i, p) in &self.piv[batch] {
+            b.swap_rows(i, p);
+        }
+        let _ = block.solve_lower_triangular_with_diag_mut(b, T::one());
+        block.solve_upper_triangular_mut(b)
+    }
+
+    /// Solve `block(batch)^T * x = b` in place: `U^T z = b`, `L^T w = z`, then undo the pivots.
+    fn solve_transpose_block<C2: Dim, S2: StorageMut<T, Dyn, C2>>(
+        &self,
+        batch: usize,
+        b: &mut NaMatrix<T, Dyn, C2, S2>,
+    ) -> bool {
+        let ncols = self.logical_ncols();
+        let block = self.a.data.columns(batch * ncols, ncols);
+        if !block.tr_solve_upper_triangular_mut(b) {
+            return false;
+        }
+        // L has a unit diagonal, which nalgebra's transposed solves can't assume
+        for c in 0..b.ncols() {
+            for i in (0..ncols.saturating_sub(1)).rev() {
+                let s = block.view_range(i + 1.., i).dot(&b.view_range(i + 1.., c));
+                b[(i, c)] -= s;
+            }
+        }
+        for &(i, p) in self.piv[batch].iter().rev() {
+            b.swap_rows(i, p);
+        }
+        true
+    }
+
+    fn solve(&self, state: &mut NalgebraVec<T>, transpose: bool) -> Result<(), LaError> {
         state
             .context
-            .assert_broadcastable_into(self.lu.len(), "lu_solve");
+            .assert_broadcastable_into(self.nbatch(), "lu_solve");
         let nb = state.context.nbatch();
         for batch in 0..nb {
-            let lu = &self.lu[broadcast_batch(batch, self.lu.len(), nb)];
+            let lu_batch = broadcast_batch(batch, self.nbatch(), nb);
             let mut state_batch = state.data.column_mut(batch);
             let ok = if transpose {
-                // P A = L U, so A^T x = b is U^T L^T P x = b
-                // ponytail: l()/u() copy the factors each call; fine for this comparison solver
-                let ok = lu.u().tr_solve_upper_triangular_mut(&mut state_batch)
-                    && lu.l().tr_solve_lower_triangular_mut(&mut state_batch);
-                lu.p().inv_permute_rows(&mut state_batch);
-                ok
+                self.solve_transpose_block(lu_batch, &mut state_batch)
             } else {
-                lu.solve_mut(&mut state_batch)
+                self.solve_block(lu_batch, &mut state_batch)
             };
             if !ok {
                 return Err(linear_solver_error!(LuSolveFailed));
@@ -64,13 +127,35 @@ impl<T: NalgebraScalar> LU<T> {
     }
 }
 
-impl<T: NalgebraScalar> LinearSolver<NalgebraMat<T>> for LU<T> {
+/// The default nalgebra [LinearSolver], exported as [NalgebraLU](crate::NalgebraLU). Factorizes
+/// its matrix entirely in place (no per-call matrix clone + fresh permutation sequence, both of
+/// which `nalgebra::linalg::LU::new` allocates every time).
+pub struct ReusableLU<T>
+where
+    T: NalgebraScalar,
+{
+    lu: Option<BatchLu<T>>,
+}
+
+impl<T: NalgebraScalar> Default for ReusableLU<T> {
+    fn default() -> Self {
+        Self { lu: None }
+    }
+}
+
+impl<T: NalgebraScalar> LinearSolver<NalgebraMat<T>> for ReusableLU<T> {
     fn solve_in_place(&self, state: &mut NalgebraVec<T>) -> Result<(), LaError> {
-        self.solve(state, false)
+        let Some(lu) = self.lu.as_ref() else {
+            return Err(linear_solver_error!(LuNotInitialized));
+        };
+        lu.solve(state, false)
     }
 
     fn solve_transpose_in_place(&self, state: &mut NalgebraVec<T>) -> Result<(), LaError> {
-        self.solve(state, true)
+        let Some(lu) = self.lu.as_ref() else {
+            return Err(linear_solver_error!(LuNotInitialized));
+        };
+        lu.solve(state, true)
     }
 
     fn set_linearisation<
@@ -79,16 +164,9 @@ impl<T: NalgebraScalar> LinearSolver<NalgebraMat<T>> for LU<T> {
         &mut self,
         op: &C,
     ) {
-        let matrix = self.matrix.as_mut().expect("Matrix not set");
-        op.matrix_inplace(matrix);
-        if matrix.context.nbatch() == 1 {
-            self.lu = vec![matrix.data.clone().lu()];
-            return;
-        }
-        let ncols = matrix.data.ncols() / matrix.context.nbatch();
-        self.lu = (0..matrix.context.nbatch())
-            .map(|batch| matrix.data.columns(batch * ncols, ncols).into_owned().lu())
-            .collect();
+        let lu = self.lu.as_mut().expect("Matrix not set");
+        op.matrix_inplace(&mut lu.a);
+        lu.factor();
     }
 
     fn set_sparsity<
@@ -99,8 +177,8 @@ impl<T: NalgebraScalar> LinearSolver<NalgebraMat<T>> for LU<T> {
     ) {
         let ncols = op.ncols();
         let nrows = op.nrows();
-        let matrix = C::M::new_from_sparsity(nrows, ncols, op.sparsity(), *op.context());
-        self.matrix = Some(matrix);
+        let a = C::M::new_from_sparsity(nrows, ncols, op.sparsity(), *op.context());
+        self.lu = Some(BatchLu::new(a));
     }
 }
 
@@ -111,13 +189,87 @@ mod tests {
     crate::linear_solver::generate_lu_tests!(
         f64,
         NalgebraMat<f64>,
-        LU<f64>,
+        ReusableLU<f64>,
         NalgebraContext::with_nbatch(2)
     );
     crate::linear_solver::generate_lu_tests!(
         f32,
         NalgebraMat<f32>,
-        LU<f32>,
+        ReusableLU<f32>,
         NalgebraContext::with_nbatch(2)
     );
+
+    /// A square matrix stored as a [NalgebraMat], built by direct indexing.
+    fn make_mat(n: usize, data: &[f64]) -> NalgebraMat<f64> {
+        let mut m: NalgebraMat<f64> = Matrix::new_from_sparsity(n, n, None, Default::default());
+        for i in 0..n {
+            for j in 0..n {
+                m[(i, j)] = data[i * n + j];
+            }
+        }
+        m
+    }
+
+    /// `ReusableLU` should agree with `nalgebra::linalg::LU` on the same matrices, including
+    /// across repeated `factor` calls that exercise the in-place refactor path, and including
+    /// cases that require row pivoting (first case has a zero (0,0) entry).
+    #[test]
+    fn matches_nalgebra_lu() {
+        let cases: Vec<(usize, Vec<f64>)> = vec![
+            (1, vec![2.0]),
+            (2, vec![0.0, 1.0, 1.0, 1.0]),
+            (3, vec![2.0, 1.0, 1.0, 4.0, 3.0, 3.0, 8.0, 7.0, 9.0]),
+            (
+                5,
+                vec![
+                    2.0, 0.0, 1.0, 0.0, 0.0, 1.0, 3.0, 0.0, 0.0, 1.0, 0.0, 1.0, 4.0, 1.0, 0.0, 0.0,
+                    0.0, 2.0, 5.0, 1.0, 1.0, 0.0, 0.0, 1.0, 6.0,
+                ],
+            ),
+        ];
+        for (n, data) in cases {
+            let nm = make_mat(n, &data);
+            let b = nalgebra::DMatrix::<f64>::from_fn(n, 1, |i, _| (i + 1) as f64);
+
+            let mut lu = BatchLu::new(nm.clone());
+            lu.factor();
+            let mut got = b.clone();
+            assert!(lu.solve_block(0, &mut got));
+
+            let m = nalgebra::DMatrix::from_row_slice(n, n, &data);
+            let expected_lu = m.lu();
+            let mut expected = b.clone();
+            assert!(expected_lu.solve_mut(&mut expected));
+
+            for i in 0..n {
+                assert!(
+                    (got[(i, 0)] - expected[(i, 0)]).abs() < 1e-9,
+                    "n={n} row={i}: got {} expected {}",
+                    got[(i, 0)],
+                    expected[(i, 0)]
+                );
+            }
+
+            // refactoring in place (buffer reuse path) should give the same answer again --
+            // `a` must be repopulated first, mirroring what `set_linearisation` does via
+            // `matrix_inplace` before each `factor()` call (factoring an already-factored
+            // matrix again is not a supported operation).
+            lu.a = make_mat(n, &data);
+            lu.factor();
+            let mut got2 = b.clone();
+            assert!(lu.solve_block(0, &mut got2));
+            for i in 0..n {
+                assert!((got2[(i, 0)] - expected[(i, 0)]).abs() < 1e-9);
+            }
+        }
+    }
+
+    #[test]
+    fn singular_matrix_fails_like_nalgebra_lu() {
+        let nm = make_mat(2, &[1.0, 2.0, 2.0, 4.0]);
+        let mut lu = BatchLu::new(nm);
+        lu.factor();
+        let mut b = nalgebra::DMatrix::<f64>::from_row_slice(2, 1, &[1.0, 2.0]);
+        assert!(!lu.solve_block(0, &mut b));
+    }
 }

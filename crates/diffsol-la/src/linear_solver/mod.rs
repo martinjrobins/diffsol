@@ -17,8 +17,7 @@ pub mod cuda;
 pub mod cuda_oxide;
 
 pub use faer::lu::LU as FaerLU;
-pub use nalgebra::lu::LU as NalgebraNativeLU;
-pub use nalgebra::reusable_lu::ReusableLU as NalgebraLU;
+pub use nalgebra::lu::ReusableLU as NalgebraLU;
 
 /// A solver for the linear problem `Ax = b`, where `A` is a [LinearOp].
 pub trait LinearSolver<M: Matrix>: Default {
