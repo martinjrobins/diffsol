@@ -1650,7 +1650,7 @@ where
     ///
     /// Successful steps are accepted without calculating an error or adjusting the step size.
     /// Output and sensitivity error contributions are also skipped.
-    ///  A failed nonlinear solve is retried once at the same step size; if it fails again, the solver returns an error. 
+    ///  A failed nonlinear solve is retried once at the same step size; if it fails again, the solver returns an error.
     /// A step may be shortened to reach a requested stop time. Fixed-step mode then resumes with the
     /// initial step size; adaptive mode keeps the step size chosen after that step. Calling
     /// [`rtol`](Self::rtol) or [`atol`](Self::atol) afterward turns error control back on.

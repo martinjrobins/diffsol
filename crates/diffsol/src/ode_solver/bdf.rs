@@ -745,24 +745,22 @@ where
         tstop: Eqn::T,
     ) -> Result<Option<OdeSolverStopReason<Eqn::T>>, DiffsolError> {
         // check if the we are at tstop
-        let state_t = self.state.t;
-        let state_h = self.state.h;
         let troundoff = <Eqn::T as FromPrimitive>::from_f64(100.0).unwrap()
             * Eqn::T::EPSILON
-            * (abs(state_t) + abs(state_h));
-        if abs(state_t - tstop) <= troundoff {
+            * (abs(self.state.t) + abs(self.state.h));
+        if abs(self.state.t - tstop) <= troundoff {
             self.tstop = None;
             if self.ode_problem.state_tolerances.is_none() {
                 let factor = self.ode_problem.h0 / self.state.h;
                 self._update_step_size(factor)?;
             }
             return Ok(Some(OdeSolverStopReason::TstopReached));
-        } else if (state_h > M::T::zero() && tstop < state_t - troundoff)
-            || (state_h < M::T::zero() && tstop > state_t + troundoff)
+        } else if (self.state.h > M::T::zero() && tstop < self.state.t - troundoff)
+            || (self.state.h < M::T::zero() && tstop > self.state.t + troundoff)
         {
             let error = OdeSolverError::StopTimeBeforeCurrentTime {
                 stop_time: self.tstop.unwrap().to_f64().unwrap(),
-                state_time: state_t.to_f64().unwrap(),
+                state_time: self.state.t.to_f64().unwrap(),
             };
             self.tstop = None;
 
@@ -770,14 +768,14 @@ where
         }
 
         // check if the next step will be beyond tstop, if so adjust the step size
-        if (state_h > M::T::zero() && state_t + state_h > tstop + troundoff)
-            || (state_h < M::T::zero() && state_t + state_h < tstop - troundoff)
+        if (self.state.h > M::T::zero() && self.state.t + self.state.h > tstop + troundoff)
+            || (self.state.h < M::T::zero() && self.state.t + self.state.h < tstop - troundoff)
         {
             debug!(
                 "Adjusting step size to hit tstop at t = {}",
                 tstop.to_f64().unwrap()
             );
-            let factor = (tstop - state_t) / state_h;
+            let factor = (tstop - self.state.t) / self.state.h;
             // update step size ignoring the possible "step size too small" error
             let _ = self._update_step_size(factor);
         }
