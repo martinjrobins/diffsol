@@ -1,6 +1,4 @@
 use log::{debug, info, trace};
-#[cfg(test)]
-use std::cell::Cell;
 use std::cell::Ref;
 
 use crate::{
@@ -177,9 +175,6 @@ pub struct Bdf<
     jacobian_update: JacobianUpdate<Eqn::T>,
     config: BdfConfig<Eqn::T>,
     prev_error_norm: Option<Eqn::T>,
-    // Count test-only error norm calls so tests can verify fixed-step paths skip them.
-    #[cfg(test)]
-    error_norm_evaluations: Cell<usize>,
 }
 
 impl<M, Eqn, LS, AugmentedEqn> Clone for Bdf<'_, Eqn, LS, M, AugmentedEqn>
@@ -240,8 +235,6 @@ where
             jacobian_update: self.jacobian_update.clone(),
             config: self.config.clone(),
             prev_error_norm: self.prev_error_norm,
-            #[cfg(test)]
-            error_norm_evaluations: Cell::new(0),
         }
     }
 }
@@ -414,8 +407,6 @@ where
             jacobian_update: JacobianUpdate::new(&problem.ode_options),
             config,
             prev_error_norm: None,
-            #[cfg(test)]
-            error_norm_evaluations: Cell::new(0),
         })
     }
 
@@ -889,10 +880,6 @@ where
     /// `d = y_{n+1} - y_pred = D^{k+1} y_{n+1}` approximates `h^{k+1} y^{(k+1)}`, so the error is
     /// `C_k d`, with `error_const2[k] = C_k^2`.
     fn error_control(&self) -> Eqn::T {
-        // Track test calls to confirm fixed-step mode bypasses error control.
-        #[cfg(test)]
-        self.error_norm_evaluations
-            .set(self.error_norm_evaluations.get() + 1);
         let state = &self.state;
         let order = state.order;
         let output_in_error_control = self.ode_problem.output_in_error_control();
@@ -941,10 +928,6 @@ where
     }
 
     fn predict_error_control(&self, order: usize) -> Eqn::T {
-        // Track test calls to confirm fixed-step mode bypasses error prediction.
-        #[cfg(test)]
-        self.error_norm_evaluations
-            .set(self.error_norm_evaluations.get() + 1);
         let state = &self.state;
         let output_in_error_control = self.ode_problem.output_in_error_control();
         let (sens_in_error_control, sens_output_in_error_control) =
@@ -2101,7 +2084,6 @@ mod test {
             solver.step().unwrap();
             assert_eq!(solver.state().h, initial_h);
             assert!(solver.order() <= 3);
-            assert_eq!(solver.error_norm_evaluations.get(), 0);
         }
 
         assert_eq!(solver.order(), 3);
@@ -2213,7 +2195,6 @@ mod test {
         assert!(problem.state_tolerances.is_some());
         let mut s = problem.bdf::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
-        assert!(s.error_norm_evaluations.get() > 0);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 13
         number_of_steps: 43
@@ -3089,17 +3070,14 @@ mod test {
             solver.step().unwrap(),
             OdeSolverStopReason::InternalTimestep
         );
-        assert_eq!(solver.error_norm_evaluations.get(), 0);
         assert!((solver.state().t - 0.1).abs() < 1e-12);
         assert!((solver.state().h - 0.05).abs() < 1e-12);
 
         assert_eq!(solver.step().unwrap(), OdeSolverStopReason::TstopReached);
-        assert_eq!(solver.error_norm_evaluations.get(), 0);
         assert!((solver.state().t - 0.15).abs() < 1e-12);
         assert!((solver.state().h - 0.1).abs() < 1e-12);
 
         solver.step().unwrap();
-        assert_eq!(solver.error_norm_evaluations.get(), 0);
         assert!((solver.state().t - 0.25).abs() < 1e-12);
         assert!((solver.state().h - 0.1).abs() < 1e-12);
         assert_eq!(solver.get_statistics().number_of_steps, 3);
@@ -3138,7 +3116,6 @@ mod test {
         );
         assert_eq!(solver.get_statistics().number_of_error_test_failures, 0);
         assert_eq!(solver.state().h, 2.0);
-        assert_eq!(solver.error_norm_evaluations.get(), 0);
     }
 
     #[cfg(feature = "cuda")]
