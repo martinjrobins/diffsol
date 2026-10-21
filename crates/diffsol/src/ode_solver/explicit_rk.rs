@@ -554,9 +554,6 @@ mod test {
             .tsit45_solver_adjoint(checkpointer, Some(s), Some(dgdp.ncols()))
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
-        // TODO - Current failure: expected 1,094 RHS calls and 1,242 adjoint Jacobian
-        // multiplies; the latest run reports 1,104 calls and 1,254 multiplies.
-        // State tolerances are enabled here, so this is not the no-tolerance path.
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 1094
         number_of_jac_muls: 0

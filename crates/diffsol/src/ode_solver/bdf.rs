@@ -519,41 +519,53 @@ where
         state: SolverState,
         at: Option<(&Eqn::V, Eqn::T)>,
     ) -> bool {
+        self._jacobian_updates_at_with_rhs_refresh(c, state, at, false)
+    }
+
+    /// Update the Newton matrix, forcing a full RHS Jacobian refresh when requested.
+    fn _jacobian_updates_at_with_rhs_refresh(
+        &mut self,
+        c: Eqn::T,
+        state: SolverState,
+        at: Option<(&Eqn::V, Eqn::T)>,
+        force_rhs_refresh: bool,
+    ) -> bool {
         let (y, t) = at.unwrap_or((&self.state.y, self.state.t));
-        let did_update = if self.jacobian_update.check_rhs_jacobian_update(c, &state) {
-            let did_reset = if let Some(op) = self.op.as_mut() {
-                op.set_jacobian_is_stale();
-                self.nonlinear_solver.reset_jacobian(op, y, t);
-                true
-            } else if let Some(s_op) = self.s_op.as_mut() {
-                s_op.set_jacobian_is_stale();
-                self.nonlinear_solver
-                    .reset_jacobian(s_op, &self.state.s, self.state.t);
-                true
+        let did_update =
+            if force_rhs_refresh || self.jacobian_update.check_rhs_jacobian_update(c, &state) {
+                let did_reset = if let Some(op) = self.op.as_mut() {
+                    op.set_jacobian_is_stale();
+                    self.nonlinear_solver.reset_jacobian(op, y, t);
+                    true
+                } else if let Some(s_op) = self.s_op.as_mut() {
+                    s_op.set_jacobian_is_stale();
+                    self.nonlinear_solver
+                        .reset_jacobian(s_op, &self.state.s, self.state.t);
+                    true
+                } else {
+                    false
+                };
+                self.jacobian_update.update_rhs_jacobian(c);
+                self.jacobian_update.update_jacobian(c);
+                self.reset_etas();
+                did_reset
+            } else if self.jacobian_update.check_jacobian_update(c, &state) {
+                let did_reset = if let Some(op) = self.op.as_mut() {
+                    self.nonlinear_solver.reset_jacobian(op, y, t);
+                    true
+                } else if let Some(s_op) = self.s_op.as_mut() {
+                    self.nonlinear_solver
+                        .reset_jacobian(s_op, &self.state.s, self.state.t);
+                    true
+                } else {
+                    false
+                };
+                self.jacobian_update.update_jacobian(c);
+                self.reset_etas();
+                did_reset
             } else {
                 false
             };
-            self.jacobian_update.update_rhs_jacobian(c);
-            self.jacobian_update.update_jacobian(c);
-            self.reset_etas();
-            did_reset
-        } else if self.jacobian_update.check_jacobian_update(c, &state) {
-            let did_reset = if let Some(op) = self.op.as_mut() {
-                self.nonlinear_solver.reset_jacobian(op, y, t);
-                true
-            } else if let Some(s_op) = self.s_op.as_mut() {
-                self.nonlinear_solver
-                    .reset_jacobian(s_op, &self.state.s, self.state.t);
-                true
-            } else {
-                false
-            };
-            self.jacobian_update.update_jacobian(c);
-            self.reset_etas();
-            did_reset
-        } else {
-            false
-        };
 
         if did_update {
             self.statistics.record_linear_solver_setup(state);
@@ -1321,9 +1333,10 @@ where
             "Taking BDF step at time {} with step size {} and order {}",
             self.state.t, self.state.h, self.state.order
         );
-        let mut safety: Eqn::T;
+        let mut safety = Eqn::T::zero();
         let mut error_norm: Eqn::T;
         let problem = self.ode_problem;
+        let use_error_control = problem.state_tolerances().is_some();
         let integrate_out = problem.integrate_out;
         let integrate_sens = self.s_op.is_some();
         let old_num_error_test_failures = self.statistics.number_of_error_test_failures;
@@ -1423,7 +1436,7 @@ where
                     ));
                 }
                 if convergence_fail {
-                    if problem.state_tolerances().is_none() {
+                    if !use_error_control {
                         // Fixed-step mode retries once after refreshing the RHS Jacobian. If that
                         // retry fails, return the nonlinear solve error without reducing h.
                         return Err(solve_result.unwrap_err());
@@ -1451,24 +1464,36 @@ where
                     // newton iteration did not converge, so update jacobian and try again
                     debug!("First convergence failure, updating Jacobian and trying again",);
                     self.prev_error_norm = None;
-                    self._jacobian_updates_at(
-                        self.state.h * self.alpha[order],
-                        SolverState::FirstConvergenceFail,
-                        None,
-                    );
+                    if use_error_control {
+                        self._jacobian_updates_at(
+                            self.state.h * self.alpha[order],
+                            SolverState::FirstConvergenceFail,
+                            None,
+                        );
+                    } else {
+                        // Fixed-step retries must refresh the RHS Jacobian even if h was changed
+                        // temporarily to reach a stop time.
+                        self._jacobian_updates_at_with_rhs_refresh(
+                            self.state.h * self.alpha[order],
+                            SolverState::FirstConvergenceFail,
+                            None,
+                            true,
+                        );
+                    }
                     convergence_fail = true;
                     // same prediction as last time
                 }
                 continue;
             }
 
-            error_norm = if self.ode_problem.state_tolerances().is_some() {
-                self.error_control()
-            } else {
-                Eqn::T::zero()
-            };
+            if !use_error_control {
+                // A successful solve accepts this fixed-size step without estimating its error.
+                error_norm = Eqn::T::zero();
+                break;
+            }
+            error_norm = self.error_control();
 
-            // need to caulate safety even if step is accepted
+            // Calculate safety even if the step is accepted.
             let maxiter = self.convergence.max_iter() as f64;
             let niter = self.convergence.niter() as f64;
             safety = <Eqn::T as FromPrimitive>::from_f64(
@@ -1476,18 +1501,15 @@ where
             )
             .unwrap();
 
-            // do the error test
+            // Do the error test.
             if error_norm <= Eqn::T::one() {
-                // step is accepted
                 debug!(
                     "Step accepted with error norm {:.3e}",
                     error_norm.to_f64().unwrap()
                 );
                 break;
             } else {
-                // step is rejected
-                // calculate optimal step size factor using PI controller
-                // and reduce step size and try again
+                // Calculate the optimal step size factor and retry with a smaller step.
                 let mut factor = safety
                     * pi_controller_raw(
                         error_norm,
@@ -1512,10 +1534,9 @@ where
                     None,
                 );
 
-                // new prediction
+                // New prediction.
                 self._predict_forward();
 
-                // update statistics
                 self.statistics.number_of_error_test_failures += 1;
                 if self.statistics.number_of_error_test_failures - old_num_error_test_failures
                     >= self.config.maximum_error_test_failures
@@ -1573,55 +1594,28 @@ where
 
         // update statistics
         self.statistics.number_of_steps += 1;
-        self.prev_error_norm = Some(error_norm);
+        self.prev_error_norm = use_error_control.then_some(error_norm);
 
-        if self.ode_problem.state_tolerances().is_none() {
-            // Increase order as accepted steps build the history BDF needs for higher orders.
-            // This does not require state error tolerances: no error is predicted and h stays fixed.
-            self.n_equal_steps += 1;
-            if self.n_equal_steps > self.state.order && self.state.order < self.config.maximum_order
-            {
+        // a change in order is only done after running at order k for k + 1 steps
+        // (see page 83 of [2])
+        self.n_equal_steps += 1;
+
+        if self.n_equal_steps > self.state.order && !use_error_control {
+            // Grow order as accepted steps build the history, without estimating error or
+            // changing the fixed step size.
+            if self.state.order < self.config.maximum_order {
                 self.state.order += 1;
                 self.n_equal_steps = 0;
                 self.u = Self::_compute_r(self.state.order, Eqn::T::one());
 
-                let c = self.state.h * self.alpha[self.state.order];
                 if let Some(op) = self.op.as_mut() {
                     op.set_c(self.state.h, self.alpha[self.state.order]);
                 }
                 if let Some(s_op) = self.s_op.as_mut() {
                     s_op.set_c(self.state.h, self.alpha[self.state.order]);
                 }
-                self._jacobian_updates_at(c, SolverState::StepSuccess, None);
             }
-
-            self.prev_error_norm = None;
-            if let (Some(root_fn), Some(root_finder)) =
-                (self.ode_problem.eqn.root(), self.root_finder.as_ref())
-            {
-                let ret = root_finder.check_root(
-                    &|t: <Eqn as Op>::T, y: &mut <Eqn as Op>::V| self.interpolate_inplace(t, y),
-                    &root_fn,
-                    self.state.as_ref().y,
-                    self.state.as_ref().t,
-                );
-                if let Some((root, root_idx)) = ret {
-                    return Ok(OdeSolverStopReason::RootFound(root, root_idx));
-                }
-            }
-            if let Some(tstop) = self.tstop {
-                if let Some(reason) = self.handle_tstop(tstop).unwrap() {
-                    return Ok(reason);
-                }
-            }
-            return Ok(OdeSolverStopReason::InternalTimestep);
-        }
-
-        // a change in order is only done after running at order k for k + 1 steps
-        // (see page 83 of [2])
-        self.n_equal_steps += 1;
-
-        if self.n_equal_steps > self.state.order {
+        } else if self.n_equal_steps > self.state.order {
             let order = self.state.order;
             // similar to the optimal step size factor we calculated above for the current
             // order k, we need to calculate the optimal step size factors for orders
@@ -2410,9 +2404,6 @@ mod test {
             .bdf_solver_adjoint::<LS, _>(checkpointer, Some(s), Some(dgdp.ncols()))
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
-        // TODO - Current failure: expected 518 RHS calls and 627 adjoint Jacobian
-        // multiplies; the latest run reports 531 calls and 654 multiplies.
-        // State tolerances are enabled here, so this is not the no-tolerance path.
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 522
         number_of_jac_muls: 2
@@ -2532,9 +2523,6 @@ mod test {
             .bdf_solver_adjoint::<LS, _>(checkpointer, Some(s), Some(dgdp.ncols()))
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
-        // Current failure: expected 241 RHS calls and 294 adjoint Jacobian
-        // multiplies; the latest run reports 247 calls and 306 multiplies.
-        // State tolerances are enabled here, so this is not the no-tolerance path.
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 232
         number_of_jac_muls: 12
@@ -3089,21 +3077,56 @@ mod test {
     }
 
     #[test]
-    fn bdf_without_state_tolerances_retries_once_without_reducing_step() {
+    fn bdf_without_state_tolerances_checks_roots_after_accepting_step() {
         let problem = OdeBuilder::<M>::new()
-            .h0(2.0)
+            .h0(0.1)
             .disable_state_error_control()
             .rhs_implicit(
-                |y, _p, _t, dy| dy[0] = y[0] * y[0],
-                |y, _p, _t, v, jv| jv[0] = 2.0 * y[0] * v[0],
+                |y, _p, _t, dy| dy[0] = -y[0],
+                |_y, _p, _t, v, jv| jv[0] = -v[0],
             )
+            .root(|x, _p, _t, y| y[0] = x[0] - 0.95, 1)
             .init(|_p, _t, y| y[0] = 1.0, 1)
             .build()
             .unwrap();
         let mut solver = problem.bdf::<LS>().unwrap();
 
+        let reason = solver.step().unwrap();
+
+        assert!(matches!(reason, OdeSolverStopReason::RootFound(t, 0) if t > 0.0 && t < 0.1));
+        assert_eq!(solver.get_statistics().number_of_steps, 1);
+        assert_eq!(solver.state().h, 0.1);
+        assert_eq!(solver.get_statistics().number_of_error_test_failures, 0);
+    }
+
+    #[test]
+    fn bdf_without_state_tolerances_retries_once_without_reducing_step() {
+        use std::{cell::Cell, rc::Rc};
+
+        let jacobian_evaluations = Rc::new(Cell::new(0));
+        let jacobian_evaluations_in_jacobian = Rc::clone(&jacobian_evaluations);
+        let problem = OdeBuilder::<M>::new()
+            .h0(2.0)
+            .disable_state_error_control()
+            .rhs_implicit(
+                |y, _p, _t, dy| dy[0] = 10.0 * y[0] * y[0],
+                move |y, _p, _t, v, jv| {
+                    jacobian_evaluations_in_jacobian
+                        .set(jacobian_evaluations_in_jacobian.get() + 1);
+                    jv[0] = 20.0 * y[0] * v[0];
+                },
+            )
+            .init(|_p, _t, y| y[0] = 1.0, 1)
+            .build()
+            .unwrap();
+        let mut solver = problem.bdf::<LS>().unwrap();
+        solver.set_stop_time(0.1).unwrap();
+        let initial_jacobian_evaluations = jacobian_evaluations.get();
+        assert_eq!(solver.state().h, 0.1);
+
         assert!(solver.step().is_err());
 
+        assert!(jacobian_evaluations.get() > initial_jacobian_evaluations);
         assert_eq!(solver.get_statistics().number_of_steps, 0);
         assert_eq!(solver.get_statistics().number_of_nonlinear_solver_fails, 2);
         assert!(
@@ -3119,7 +3142,7 @@ mod test {
             0
         );
         assert_eq!(solver.get_statistics().number_of_error_test_failures, 0);
-        assert_eq!(solver.state().h, 2.0);
+        assert_eq!(solver.state().h, 0.1);
     }
 
     #[cfg(feature = "cuda")]
