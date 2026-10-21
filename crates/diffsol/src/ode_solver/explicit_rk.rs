@@ -211,7 +211,7 @@ where
             for i in 1..self.rk.tableau().s() {
                 self.rk.do_stage(i, h, self.augmented_eqn.as_mut());
             }
-            if self.rk.problem().state_tolerances.is_none() {
+            if self.rk.problem().state_tolerances().is_none() {
                 // With state tolerances disabled, accept a successfully computed step at the
                 // current size without evaluating any error contributions or the controller.
                 self.rk.reset_prev_error();
@@ -408,7 +408,7 @@ mod test {
     #[test]
     fn test_tsit45_nalgebra_exponential_decay() {
         let (problem, soln) = exponential_decay_problem::<M>(false);
-        assert!(problem.state_tolerances.is_some());
+        assert!(problem.state_tolerances().is_some());
         let mut s = problem.tsit45().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
         assert!(s.rk.error_norm_evaluations() > 0);

@@ -214,8 +214,8 @@ where
 
         // set max iterations for nonlinear solver
         let mut convergence = Convergence::with_tolerance(
-            problem.nonlinear_tolerances.0,
-            &problem.nonlinear_tolerances.1,
+            problem.rtol,
+            &problem.atol,
             problem.ode_options.nonlinear_solver_tolerance,
         );
         convergence.set_max_iter(problem.ode_options.max_nonlinear_solver_iterations);
@@ -542,7 +542,7 @@ where
                         updated_jacobian = true;
                         self.jacobian_updates_at(h, SolverState::FirstConvergenceFail, None);
                     } else {
-                        if self.problem().state_tolerances.is_none() {
+                        if self.problem().state_tolerances().is_none() {
                             self.rk.solve_fail(
                                 h,
                                 self.config.minimum_timestep,
@@ -570,7 +570,7 @@ where
                     continue 'step;
                 }
             }
-            if self.problem().state_tolerances.is_none() {
+            if self.problem().state_tolerances().is_none() {
                 // A converged solve is enough to accept the step; skip error control and keep h.
                 break 'step (Eqn::T::one(), Eqn::T::zero());
             }
@@ -639,7 +639,7 @@ where
         }
 
         self.update_op_step_size(new_h);
-        if self.problem().state_tolerances.is_some() {
+        if self.problem().state_tolerances().is_some() {
             self.rk.set_prev_error(error_norm);
         } else {
             self.rk.reset_prev_error();
@@ -935,7 +935,7 @@ mod test {
     #[test]
     fn test_esdirk34_nalgebra_exponential_decay() {
         let (problem, soln) = exponential_decay_problem::<M>(false);
-        assert!(problem.state_tolerances.is_some());
+        assert!(problem.state_tolerances().is_some());
         let mut s = problem.esdirk34::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
         assert!(s.rk.error_norm_evaluations() > 0);
@@ -1039,6 +1039,8 @@ mod test {
     fn sdirk_without_state_tolerances_retries_once_without_reducing_step() {
         let problem = OdeBuilder::<M>::new()
             .h0(2.0)
+            .rtol(2e-5)
+            .atol([3e-7])
             .disable_state_error_control()
             .rhs_implicit(
                 |y, _p, _t, dy| dy[0] = y[0] * y[0],
@@ -1047,6 +1049,9 @@ mod test {
             .init(|_p, _t, y| y[0] = 1.0, 1)
             .build()
             .unwrap();
+        assert!(!problem.use_error_control);
+        assert_eq!(problem.rtol, 2e-5);
+        assert_eq!(problem.atol.get_index(0), 3e-7);
         let mut solver = problem.esdirk34::<LS>().unwrap();
 
         assert!(solver.step().is_err());

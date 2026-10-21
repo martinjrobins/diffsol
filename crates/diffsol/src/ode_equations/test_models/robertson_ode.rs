@@ -60,8 +60,7 @@ pub fn robertson_ode_diffsl_problem<
         .unwrap();
     let mut soln = soln::<M::V>(problem.context().clone());
     let (rtol, atol) = problem
-        .state_tolerances
-        .as_ref()
+        .state_tolerances()
         .expect("state tolerances must be set for this test");
     soln.rtol = *rtol;
     soln.atol = atol.clone();
@@ -468,7 +467,9 @@ pub fn robertson_ode_elem_problem<M: Matrix + 'static>(
     let eqn = RobertsonOdeElem::new(p, t0);
     let problem = OdeSolverProblem::new(
         eqn,
-        Some((rtol, atol)),
+        rtol,
+        atol,
+        true,
         None,
         None,
         None,

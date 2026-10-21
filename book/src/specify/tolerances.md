@@ -31,8 +31,9 @@ then resumes with the initial step size (`h0`). Adaptive mode does not restore t
 BDF continues to increase its order as history builds, up to its maximum order. The default maximum is 5; set a smaller limit
 with `OdeBuilder::max_order`, for example `.max_order(3)`.
 
-The built problem stores state tolerances as the optional pair `(rtol, atol)`. This pair is absent when state error control is off.
-The tolerance fields on `OdeSolverSolution` are separate comparison metadata; changing them does not configure a solver.
+The problem keeps `rtol` and `atol` available for nonlinear solver scaling, even when state error control is off. The
+`use_error_control` setting determines whether those tolerances are used to accept or reject steps. The tolerance fields
+on `OdeSolverSolution` are separate comparison metadata; changing them does not configure a solver.
 
 ## Output error control
 

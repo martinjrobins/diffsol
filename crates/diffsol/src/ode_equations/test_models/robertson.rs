@@ -49,8 +49,7 @@ pub fn robertson_diffsl_problem<
         .unwrap();
     let mut soln = soln::<M::V>(problem.context().clone());
     let (rtol, atol) = problem
-        .state_tolerances
-        .as_ref()
+        .state_tolerances()
         .expect("state tolerances must be set for this test");
     soln.rtol = *rtol;
     soln.atol = atol.clone();

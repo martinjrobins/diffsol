@@ -6,7 +6,7 @@ use crate::{
     AugmentedOdeEquationsImplicit, Bdf, BdfState, CheckpointingPath, Context, DefaultDenseMatrix,
     DenseMatrix, ExplicitRk, LinearSolver, MatrixRef, NewtonNonlinearSolver, NoLineSearch,
     OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
-    OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverState, Op, RkState, Scalar, Sdirk,
+    OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverState, RkState, Scalar, Sdirk,
     SensEquations, Tableau, VectorRef,
 };
 
@@ -185,12 +185,12 @@ where
 {
     /// The ODE equations to be solved, which satisfy the `OdeEquations` trait.
     pub eqn: Eqn,
-    /// Relative and absolute tolerances for state error control. Both are `None` when state error
-    /// control is disabled. When present, the state equations are controlled using the norm
-    /// `sum_i(y_i / (atol_i + rtol * |y0_i|)) < 1`.
-    pub state_tolerances: Option<(Eqn::T, Eqn::V)>,
-    // Nonlinear solvers still need scaling tolerances when state error control is disabled.
-    pub(crate) nonlinear_tolerances: (Eqn::T, Eqn::V),
+    /// Relative tolerance used for state error control and nonlinear solver scaling.
+    pub rtol: Eqn::T,
+    /// Absolute tolerance vector used for state error control and nonlinear solver scaling.
+    pub atol: Eqn::V,
+    /// Whether state error estimates control step acceptance and step size.
+    pub use_error_control: bool,
     /// Initial time for the ODE solve.
     pub t0: Eqn::T,
     /// Initial step size for the ODE solver.
@@ -540,38 +540,35 @@ where
             && self.out_atol.is_some()
     }
 
+    /// Returns state tolerances when they contribute to step error control.
+    pub fn state_tolerances(&self) -> Option<(&Eqn::T, &Eqn::V)> {
+        self.use_error_control.then_some((&self.rtol, &self.atol))
+    }
+
     /// Set the state relative tolerance after building the problem.
     ///
-    /// This enables state error control and keeps the current absolute tolerance. If state error
-    /// control was disabled, the absolute tolerance from the nonlinear solver scaling is used.
+    /// This enables state error control and also updates the tolerance used for nonlinear solver
+    /// scaling.
     pub fn set_state_rtol(&mut self, rtol: Eqn::T) {
-        let atol = self
-            .state_tolerances
-            .as_ref()
-            .map(|(_, atol)| atol.clone())
-            .unwrap_or_else(|| self.nonlinear_tolerances.1.clone());
-        self.nonlinear_tolerances = (rtol.clone(), atol.clone());
-        self.state_tolerances = Some((rtol, atol));
+        self.rtol = rtol;
+        self.use_error_control = true;
     }
 
     /// Set the state absolute tolerance vector after building the problem.
     ///
-    /// This enables state error control and keeps the current relative tolerance. If state error
-    /// control was disabled, the relative tolerance from the nonlinear solver scaling is used.
+    /// This enables state error control and also updates the tolerance used for nonlinear solver
+    /// scaling.
     pub fn set_state_atol(&mut self, atol: Eqn::V) {
-        let rtol = self
-            .state_tolerances
-            .as_ref()
-            .map(|(rtol, _)| rtol.clone())
-            .unwrap_or_else(|| self.nonlinear_tolerances.0.clone());
-        self.nonlinear_tolerances = (rtol.clone(), atol.clone());
-        self.state_tolerances = Some((rtol, atol));
+        self.atol = atol;
+        self.use_error_control = true;
     }
 
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         eqn: Eqn,
-        state_tolerances: Option<(Eqn::T, Eqn::V)>,
+        rtol: Eqn::T,
+        atol: Eqn::V,
+        use_error_control: bool,
         sens_rtol: Option<Eqn::T>,
         sens_atol: Option<Eqn::V>,
         out_rtol: Option<Eqn::T>,
@@ -584,20 +581,11 @@ where
         ic_options: InitialConditionSolverOptions<Eqn::T>,
         ode_options: OdeSolverOptions<Eqn::T>,
     ) -> Result<Self, DiffsolError> {
-        let nonlinear_tolerances = state_tolerances.clone().unwrap_or_else(|| {
-            (
-                Eqn::T::from_f64(1e-6).unwrap(),
-                Eqn::V::from_element(
-                    eqn.rhs().nstates(),
-                    Eqn::T::from_f64(1e-6).unwrap(),
-                    eqn.context().clone(),
-                ),
-            )
-        });
         Ok(Self {
             eqn,
-            state_tolerances,
-            nonlinear_tolerances,
+            rtol,
+            atol,
+            use_error_control,
             out_atol,
             out_rtol,
             param_atol,
@@ -775,7 +763,7 @@ where
             .as_mut()
             .set_consistent_augmented(self, augmented_eqn, &mut newton_solver)?;
         let h = state.h;
-        if let Some((rtol, atol)) = self.state_tolerances.as_ref() {
+        if let Some((rtol, atol)) = self.state_tolerances() {
             state
                 .as_mut()
                 // the heuristic works on the main state and the main tolerances, so it is the main
@@ -1038,7 +1026,7 @@ where
             .as_mut()
             .set_consistent_augmented(self, augmented_eqn, &mut newton_solver)?;
         let h = state.h;
-        if let Some((rtol, atol)) = self.state_tolerances.as_ref() {
+        if let Some((rtol, atol)) = self.state_tolerances() {
             state
                 .as_mut()
                 // see the comment in `bdf_state_adjoint_from_state`
@@ -1199,7 +1187,7 @@ where
         }
 
         let h = state.h;
-        if let Some((rtol, atol)) = self.state_tolerances.as_ref() {
+        if let Some((rtol, atol)) = self.state_tolerances() {
             state
                 .as_mut()
                 // see the comment in `bdf_state_adjoint_from_state`

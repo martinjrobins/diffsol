@@ -33,7 +33,7 @@ pub struct OdeBuilder<
     h0: M::T,
     rtol: M::T,
     atol: Vec<M::T>,
-    state_tol_error_control: bool,
+    use_error_control: bool,
     sens_atol: Option<Vec<M::T>>,
     param_scales: Option<Vec<M::T>>,
     sens_rtol: Option<M::T>,
@@ -125,7 +125,7 @@ where
             h0: M::T::one(),
             rtol: default_rtol,
             atol: default_atol.clone(),
-            state_tol_error_control: true,
+            use_error_control: true,
             p: vec![],
             use_coloring: false,
             integrate_out: false,
@@ -170,7 +170,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
-            state_tol_error_control: self.state_tol_error_control,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -222,7 +222,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
-            state_tol_error_control: self.state_tol_error_control,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -278,7 +278,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
-            state_tol_error_control: self.state_tol_error_control,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -341,7 +341,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
-            state_tol_error_control: self.state_tol_error_control,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -406,7 +406,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
-            state_tol_error_control: self.state_tol_error_control,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -453,7 +453,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
-            state_tol_error_control: self.state_tol_error_control,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -494,7 +494,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
-            state_tol_error_control: self.state_tol_error_control,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -544,7 +544,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
-            state_tol_error_control: self.state_tol_error_control,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -595,7 +595,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
-            state_tol_error_control: self.state_tol_error_control,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -639,7 +639,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
-            state_tol_error_control: self.state_tol_error_control,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -687,7 +687,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
-            state_tol_error_control: self.state_tol_error_control,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -741,7 +741,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
-            state_tol_error_control: self.state_tol_error_control,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -790,7 +790,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
-            state_tol_error_control: self.state_tol_error_control,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -839,7 +839,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
-            state_tol_error_control: self.state_tol_error_control,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -897,7 +897,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
-            state_tol_error_control: self.state_tol_error_control,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -959,7 +959,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
-            state_tol_error_control: self.state_tol_error_control,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -1006,7 +1006,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
-            state_tol_error_control: self.state_tol_error_control,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -1054,7 +1054,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
-            state_tol_error_control: self.state_tol_error_control,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -1108,7 +1108,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
-            state_tol_error_control: self.state_tol_error_control,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -1163,7 +1163,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
-            state_tol_error_control: self.state_tol_error_control,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -1222,7 +1222,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
-            state_tol_error_control: self.state_tol_error_control,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -1271,7 +1271,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
-            state_tol_error_control: self.state_tol_error_control,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -1326,7 +1326,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
-            state_tol_error_control: self.state_tol_error_control,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -1386,7 +1386,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
-            state_tol_error_control: self.state_tol_error_control,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -1450,7 +1450,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
-            state_tol_error_control: self.state_tol_error_control,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -1628,7 +1628,7 @@ where
     /// State error control remains enabled, and the absolute tolerance keeps its current value.
     pub fn rtol(mut self, rtol: f64) -> Self {
         self.rtol = M::T::from_f64(rtol).unwrap();
-        self.state_tol_error_control = true;
+        self.use_error_control = true;
         self
     }
 
@@ -1642,7 +1642,7 @@ where
             .into_iter()
             .map(|x| M::T::from_f64(x).unwrap())
             .collect();
-        self.state_tol_error_control = true;
+        self.use_error_control = true;
         self
     }
 
@@ -1655,7 +1655,7 @@ where
     /// initial step size; adaptive mode keeps the step size chosen after that step. Calling
     /// [`rtol`](Self::rtol) or [`atol`](Self::atol) afterward turns error control back on.
     pub fn disable_state_error_control(mut self) -> Self {
-        self.state_tol_error_control = false;
+        self.use_error_control = false;
         self
     }
 
@@ -1946,7 +1946,9 @@ where
         )?;
         OdeSolverProblem::new(
             eqn,
-            self.state_tol_error_control.then_some((self.rtol, atol)),
+            self.rtol,
+            atol,
+            self.use_error_control,
             self.sens_rtol,
             sens_atol,
             self.out_rtol,
@@ -2042,7 +2044,9 @@ where
         eqn.set_params(&p);
         OdeSolverProblem::new(
             eqn,
-            self.state_tol_error_control.then_some((self.rtol, atol)),
+            self.rtol,
+            atol,
+            self.use_error_control,
             self.sens_rtol,
             sens_atol,
             self.out_rtol,
@@ -2062,6 +2066,41 @@ where
 mod tests {
     use super::OdeBuilder;
     use crate::{Context, VectorView};
+
+    #[test]
+    fn disabled_error_control_keeps_tolerances_for_nonlinear_scaling() {
+        type M = crate::NalgebraMat<f64>;
+        let problem = OdeBuilder::<M>::new()
+            .rtol(2e-5)
+            .atol([3e-7])
+            .disable_state_error_control()
+            .rhs(|x, _p, _t, y| y[0] = -x[0])
+            .init(|_p, _t, y| y[0] = 1.0, 1)
+            .build()
+            .unwrap();
+
+        assert_eq!(problem.rtol, 2e-5);
+        assert_eq!(problem.atol.get_index(0), 3e-7);
+        assert!(!problem.use_error_control);
+        assert!(problem.state_tolerances().is_none());
+    }
+
+    #[test]
+    fn enabled_error_control_uses_state_tolerances() {
+        type M = crate::NalgebraMat<f64>;
+        let problem = OdeBuilder::<M>::new()
+            .rtol(2e-5)
+            .atol([3e-7])
+            .rhs(|x, _p, _t, y| y[0] = -x[0])
+            .init(|_p, _t, y| y[0] = 1.0, 1)
+            .build()
+            .unwrap();
+
+        assert!(problem.use_error_control);
+        let (rtol, atol) = problem.state_tolerances().unwrap();
+        assert_eq!(*rtol, problem.rtol);
+        assert_eq!(atol.get_index(0), problem.atol.get_index(0));
+    }
 
     #[cfg(feature = "autodiff")]
     #[test]

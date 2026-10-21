@@ -614,8 +614,7 @@ where
             aug_ctx.clone(),
         ));
         let (rtol, atol) = problem
-            .state_tolerances
-            .as_ref()
+            .state_tolerances()
             .map(|(rtol, atol)| (Some(*rtol), Some(atol)))
             .unwrap_or((None, None));
         let out_atol = problem.param_atol.as_ref();

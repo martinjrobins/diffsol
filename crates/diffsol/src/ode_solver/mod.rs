@@ -108,8 +108,7 @@ pub(crate) mod tests {
         problem: &OdeSolverProblem<Eqn>,
     ) -> (Eqn::T, &Eqn::V) {
         let (rtol, atol) = problem
-            .state_tolerances
-            .as_ref()
+            .state_tolerances()
             .expect("state tolerances must be set for this test");
         (*rtol, atol)
     }
@@ -174,8 +173,7 @@ pub(crate) mod tests {
                 } else {
                     let (rtol, atol) = method
                         .problem()
-                        .state_tolerances
-                        .as_ref()
+                        .state_tolerances()
                         .expect("state tolerances must be set for this test");
                     (*rtol, atol)
                 };
@@ -846,7 +844,9 @@ pub(crate) mod tests {
             .vector_from_element(1, M::T::from_f64(1e-6).unwrap());
         OdeSolverProblem::new(
             eqn,
-            Some((M::T::from_f64(1e-6).unwrap(), atol)),
+            M::T::from_f64(1e-6).unwrap(),
+            atol,
+            true,
             None,
             None,
             None,
@@ -972,8 +972,7 @@ pub(crate) mod tests {
         let dy = s.interpolate_dy(tmid).unwrap();
         let (rtol, atol) = s
             .problem()
-            .state_tolerances
-            .as_ref()
+            .state_tolerances()
             .expect("state tolerances must be set for this test");
         let rtol = *rtol;
         let atol = atol.clone();
@@ -1135,8 +1134,7 @@ pub(crate) mod tests {
         // carry on solving with both solvers, they should produce about the same results (probably might diverge a bit, but should always match the solution)
         let (rtol, atol) = solver1
             .problem()
-            .state_tolerances
-            .as_ref()
+            .state_tolerances()
             .expect("state tolerances must be set for this test");
         let rtol = *rtol;
         let atol = atol.clone();
@@ -1197,8 +1195,7 @@ pub(crate) mod tests {
             let error = soln.clone() - &point.state;
             let (rtol, atol) = s
                 .problem()
-                .state_tolerances
-                .as_ref()
+                .state_tolerances()
                 .expect("state tolerances must be set for this test");
             let error_norm = error.squared_norm(&error, atol, *rtol).sqrt();
             assert!(

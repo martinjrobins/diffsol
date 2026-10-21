@@ -98,10 +98,8 @@ mod tests {
         let times: Vec<_> = (0..=400).map(|i| i as f64 * 0.1).collect();
 
         let diffsl_problem = problem_diffsl();
-        let (rtol, atol) = diffsl_problem
-            .state_tolerances
-            .as_ref()
-            .expect("state tolerances are enabled for this comparison");
+        let rtol = diffsl_problem.rtol;
+        let atol = diffsl_problem.atol.clone();
         let mut diffsl_solver = diffsl_problem.bdf::<LS>().unwrap();
         let (diffsl_solution, _) = diffsl_solver.solve_dense(&times).unwrap();
 
@@ -112,7 +110,7 @@ mod tests {
         for col in 0..times.len() {
             let diffsl = diffsl_solution.column(col).into_owned();
             let closures = closures_solution.column(col).into_owned();
-            diffsl.assert_eq_norm(&closures, atol, *rtol, 2.0);
+            diffsl.assert_eq_norm(&closures, &atol, rtol, 2.0);
         }
     }
 }

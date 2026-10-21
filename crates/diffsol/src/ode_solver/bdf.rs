@@ -312,8 +312,8 @@ where
         state.check_consistent_with_problem(problem)?;
 
         let mut convergence = Convergence::with_tolerance(
-            problem.nonlinear_tolerances.0,
-            &problem.nonlinear_tolerances.1,
+            problem.rtol,
+            &problem.atol,
             problem.ode_options.nonlinear_solver_tolerance,
         );
         let options = &problem.ode_options;
@@ -741,7 +741,7 @@ where
             * (abs(self.state.t) + abs(self.state.h));
         if abs(self.state.t - tstop) <= troundoff {
             self.tstop = None;
-            if self.ode_problem.state_tolerances.is_none() {
+            if self.ode_problem.state_tolerances().is_none() {
                 let factor = self.ode_problem.h0 / self.state.h;
                 self._update_step_size(factor)?;
             }
@@ -894,7 +894,7 @@ where
 
         let mut error_norm = M::T::zero();
         if self.op.is_some() {
-            if let Some((rtol, atol)) = self.ode_problem.state_tolerances.as_ref() {
+            if let Some((rtol, atol)) = self.ode_problem.state_tolerances() {
                 let err =
                     self.y_delta.squared_norm(&state.y, atol, *rtol) * self.error_const2[order];
                 error_norm = error_norm.max(err);
@@ -941,7 +941,7 @@ where
 
         let mut error_norm = M::T::zero();
         if self.op.is_some() {
-            if let Some((rtol, atol)) = self.ode_problem.state_tolerances.as_ref() {
+            if let Some((rtol, atol)) = self.ode_problem.state_tolerances() {
                 let err = state
                     .diff
                     .column(order + 1)
@@ -1423,7 +1423,7 @@ where
                     ));
                 }
                 if convergence_fail {
-                    if problem.state_tolerances.is_none() {
+                    if problem.state_tolerances().is_none() {
                         // Fixed-step mode retries once after refreshing the RHS Jacobian. If that
                         // retry fails, return the nonlinear solve error without reducing h.
                         return Err(solve_result.unwrap_err());
@@ -1462,7 +1462,7 @@ where
                 continue;
             }
 
-            error_norm = if self.ode_problem.state_tolerances.is_some() {
+            error_norm = if self.ode_problem.state_tolerances().is_some() {
                 self.error_control()
             } else {
                 Eqn::T::zero()
@@ -1575,7 +1575,7 @@ where
         self.statistics.number_of_steps += 1;
         self.prev_error_norm = Some(error_norm);
 
-        if self.ode_problem.state_tolerances.is_none() {
+        if self.ode_problem.state_tolerances().is_none() {
             // Increase order as accepted steps build the history BDF needs for higher orders.
             // This does not require state error tolerances: no error is predicted and h stays fixed.
             self.n_equal_steps += 1;
@@ -2065,6 +2065,8 @@ mod test {
     fn bdf_without_state_tolerances_keeps_step_size_and_grows_order_to_limit() {
         let problem = OdeBuilder::<M>::new()
             .h0(0.05)
+            .rtol(2e-5)
+            .atol([3e-7])
             .max_order(3)
             .disable_state_error_control()
             .rhs_implicit(
@@ -2074,7 +2076,9 @@ mod test {
             .init(|_p, _t, y| y[0] = 1.0, 1)
             .build()
             .unwrap();
-        assert!(problem.state_tolerances.is_none());
+        assert!(problem.state_tolerances().is_none());
+        assert_eq!(problem.rtol, 2e-5);
+        assert_eq!(problem.atol.get_index(0), 3e-7);
 
         let mut solver = problem.bdf::<LS>().unwrap();
         let initial_h = solver.state().h;
@@ -2192,7 +2196,7 @@ mod test {
     #[test]
     fn bdf_test_nalgebra_exponential_decay() {
         let (problem, soln) = exponential_decay_problem::<M>(false);
-        assert!(problem.state_tolerances.is_some());
+        assert!(problem.state_tolerances().is_some());
         let mut s = problem.bdf::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"

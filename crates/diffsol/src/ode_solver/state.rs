@@ -146,7 +146,7 @@ impl<V: Vector> StateRefMut<'_, V> {
             self.y.len()
         );
 
-        let (rtol, atol) = &ode_problem.nonlinear_tolerances;
+        let (rtol, atol) = (&ode_problem.rtol, &ode_problem.atol);
         root_solver.set_problem(&f);
         let mut y_tmp = self.dy.clone();
         y_tmp.copy_from_indices(self.y, &f.algebraic_indices);
@@ -216,8 +216,8 @@ impl<V: Vector> StateRefMut<'_, V> {
         }
 
         let mut convergence = Convergence::with_tolerance(
-            ode_problem.nonlinear_tolerances.0,
-            &ode_problem.nonlinear_tolerances.1,
+            ode_problem.rtol,
+            &ode_problem.atol,
             ode_problem.ode_options.nonlinear_solver_tolerance,
         );
         convergence.set_max_iter(ode_problem.ic_options.max_newton_iterations);
@@ -968,7 +968,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
         Eqn: OdeEquations<T = V::T, V = V, C = V::C>,
     {
         let mut ret = Self::new_without_initialise(ode_problem)?;
-        if let Some((rtol, atol)) = ode_problem.state_tolerances.as_ref() {
+        if let Some((rtol, atol)) = ode_problem.state_tolerances() {
             ret.as_mut()
                 .set_step_size(ode_problem.h0, atol, *rtol, &ode_problem.eqn, solver_order);
         }
@@ -1000,7 +1000,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
             let mut root_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
             ret.as_mut().set_consistent(ode_problem, &mut root_solver)?;
         }
-        if let Some((rtol, atol)) = ode_problem.state_tolerances.as_ref() {
+        if let Some((rtol, atol)) = ode_problem.state_tolerances() {
             ret.as_mut()
                 .set_step_size(ode_problem.h0, atol, *rtol, &ode_problem.eqn, solver_order);
         }
@@ -1025,7 +1025,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
         augmented_eqn
             .rhs()
             .call_inplace(state.s, *state.t, state.ds);
-        if let Some((rtol, atol)) = ode_problem.state_tolerances.as_ref() {
+        if let Some((rtol, atol)) = ode_problem.state_tolerances() {
             ret.as_mut()
                 .set_step_size(ode_problem.h0, atol, *rtol, &ode_problem.eqn, solver_order);
         }
@@ -1073,7 +1073,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
                 &mut root_solver_sens,
             )?;
         }
-        if let Some((rtol, atol)) = ode_problem.state_tolerances.as_ref() {
+        if let Some((rtol, atol)) = ode_problem.state_tolerances() {
             ret.as_mut()
                 .set_step_size(ode_problem.h0, atol, *rtol, &ode_problem.eqn, solver_order);
         }

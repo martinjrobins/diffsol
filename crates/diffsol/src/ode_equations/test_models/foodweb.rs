@@ -1101,7 +1101,9 @@ where
     let eqn = FoodWeb::new(context, t0);
     let problem = OdeSolverProblem::new(
         eqn,
-        Some((rtol, atol)),
+        rtol,
+        atol,
+        true,
         None,
         None,
         None,
@@ -1661,7 +1663,9 @@ where
     let eqn = FoodWebElem::new(context, t0);
     let problem = OdeSolverProblem::new(
         eqn,
-        Some((rtol, atol)),
+        rtol,
+        atol,
+        true,
         None,
         None,
         None,
@@ -1698,8 +1702,7 @@ mod elem_tests {
         let (elem, _) = foodweb_elem_problem::<M, NX>(1);
         let (lane, _) = foodweb_problem::<M, NX>();
         let (rtol, atol) = elem
-            .state_tolerances
-            .as_ref()
+            .state_tolerances()
             .expect("state tolerances must be set for this test");
 
         let y0 = elem.eqn.init().call(0.0);

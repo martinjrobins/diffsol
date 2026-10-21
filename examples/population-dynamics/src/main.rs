@@ -201,12 +201,8 @@ mod tests {
         let times: Vec<_> = (0..=400).map(|i| i as f64 * 0.1).collect();
 
         let mut diffsl_problem = problem_diffsl(1.0);
-        let (rtol, atol) = diffsl_problem
-            .state_tolerances
-            .as_ref()
-            .expect("state tolerances are enabled for this comparison");
-        let rtol = *rtol;
-        let atol = atol.clone();
+        let rtol = diffsl_problem.rtol;
+        let atol = diffsl_problem.atol.clone();
         // Tighter integration keeps accumulated errors below the default comparison tolerance.
         diffsl_problem.set_state_rtol(1e-8);
         let mut tight_atol = atol.clone();

@@ -818,7 +818,7 @@ where
         let troundoff =
             Eqn::T::from_f64(100.0).unwrap() * Eqn::T::EPSILON * (abs(state.t) + abs(state.h));
         if abs(state.t - tstop) <= troundoff {
-            if self.problem.state_tolerances.is_none() {
+            if self.problem.state_tolerances().is_none() {
                 state.h = self.problem.h0;
             }
             return Ok(Some(OdeSolverStopReason::TstopReached));
@@ -854,7 +854,7 @@ where
         {
             self.error_norm_evaluations += 1;
         }
-        if self.problem.state_tolerances.is_none() {
+        if self.problem.state_tolerances().is_none() {
             return Ok(Eqn::T::zero());
         }
         let s = self.tableau.s();
@@ -873,8 +873,7 @@ where
             // compute error norm
             let (rtol, atol) = self
                 .problem
-                .state_tolerances
-                .as_ref()
+                .state_tolerances()
                 .expect("state tolerances checked above");
             let err = error.squared_norm(&self.state.y, atol, *rtol);
             error_norm = error_norm.max(err);
