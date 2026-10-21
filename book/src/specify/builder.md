@@ -8,7 +8,7 @@ You can set many configuration options such as:
 - relative tolerance (`OdeBuilder::rtol`)
 - absolute tolerance (`OdeBuilder::atol`)
 - fixed-step operation (`OdeBuilder::disable_state_error_control`)
-- maximum BDF order (`OdeBuilder::max_bdf_order`)
+- maximum BDF order (`OdeBuilder::max_order`)
 - parameters (`OdeBuilder::p`)
 - equations (`OdeBuilder::rhs`, `OdeBuilder::init`, `OdeBuilder::mass` etc.)
 
@@ -41,5 +41,5 @@ This differs from `turn_off_output_error_control()` and `turn_off_sensitivities_
 the selected output or sensitivity contribution while state error control remains active. Output or sensitivity values are
 still integrated when their error contribution is turned off.
 
-For BDF, set an upper order with `max_bdf_order(order)`. The supported range is 1 through 5, and the default is 5. For example,
-`.max_bdf_order(3)` limits BDF to order 3.
+For BDF, set an upper order with `max_order(order)`. The supported range is 1 through 5, and the default is 5. For example,
+`.max_order(3)` limits BDF to order 3.

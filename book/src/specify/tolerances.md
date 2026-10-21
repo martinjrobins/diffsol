@@ -29,7 +29,7 @@ disable only the selected contribution. State error control stays active, and th
 
 If a step would pass a requested stop time, the solver shortens that boundary step to land on the stop time, then restores the
 previous step size. BDF continues to increase its order as history builds, up to its maximum order. The default maximum is 5;
-set a smaller limit with `OdeBuilder::max_bdf_order`, for example `.max_bdf_order(3)`.
+set a smaller limit with `OdeBuilder::max_order`, for example `.max_order(3)`.
 
 The built problem stores state tolerances as the optional pair `(rtol, atol)`. This pair is absent when state error control is off.
 The tolerance fields on `OdeSolverSolution` are separate comparison metadata; changing them does not configure a solver.

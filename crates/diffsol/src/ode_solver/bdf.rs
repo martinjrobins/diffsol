@@ -2049,7 +2049,7 @@ mod test {
         assert_eq!(default_solver.config().maximum_order, 5);
 
         let limited_problem = OdeBuilder::<M>::new()
-            .max_bdf_order(2)
+            .max_order(2)
             .rhs_implicit(
                 |y, _p, _t, dy| dy[0] = -y[0],
                 |_y, _p, _t, v, jv| jv[0] = -v[0],
@@ -2065,7 +2065,7 @@ mod test {
     fn bdf_without_state_tolerances_keeps_step_size_and_grows_order_to_limit() {
         let problem = OdeBuilder::<M>::new()
             .h0(0.05)
-            .max_bdf_order(3)
+            .max_order(3)
             .disable_state_error_control()
             .rhs_implicit(
                 |y, _p, _t, dy| dy[0] = -y[0],
@@ -2097,7 +2097,7 @@ mod test {
             .h0(0.01)
             .rtol(1e-4)
             .atol([1e-6])
-            .max_bdf_order(2)
+            .max_order(2)
             .rhs_implicit(
                 |y, _p, _t, dy| dy[0] = -y[0],
                 |_y, _p, _t, v, jv| jv[0] = -v[0],
