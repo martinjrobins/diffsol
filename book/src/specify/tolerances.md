@@ -17,8 +17,7 @@ so the builder method [`OdeBuilder::atol`](https://docs.rs/diffsol/latest/diffso
 
 State error control is enabled by default, with `rtol = 1e-6` and `atol = [1e-6]`. To turn it off, call
 [`OdeBuilder::disable_state_error_control`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html#method.disable_state_error_control).
-After a successful step, the solver skips error estimates and keeps the current step size. Nonlinear solve failures can still cause
-an implicit solver to retry with a smaller step. Output and sensitivity errors are also skipped while state error control is off.
+After a successful step, the solver skips error estimates and keeps the current step size. In implicit solvers, a failed nonlinear solve is retried once at the same step size; if it fails again, the solver returns an error. Output and sensitivity errors are also skipped while state error control is off.
 Calling `rtol(...)` or `atol(...)` later in the builder chain turns state error control back on; either method keeps the other
 tolerance at its current value.
 
@@ -27,9 +26,10 @@ By contrast, [`OdeBuilder::turn_off_output_error_control`](https://docs.rs/diffs
 and [`OdeBuilder::turn_off_sensitivities_error_control`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html#method.turn_off_sensitivities_error_control)
 disable only the selected contribution. State error control stays active, and the corresponding outputs or sensitivities are still integrated.
 
-If a step would pass a requested stop time, the solver shortens that boundary step to land on the stop time, then restores the
-previous step size. BDF continues to increase its order as history builds, up to its maximum order. The default maximum is 5;
-set a smaller limit with `OdeBuilder::max_order`, for example `.max_order(3)`.
+If a step would pass a requested stop time, the solver shortens that boundary step to land on the stop time. Fixed-step mode
+then resumes with the initial step size (`h0`). Adaptive mode does not restore the step size from before the stop-time step.
+BDF continues to increase its order as history builds, up to its maximum order. The default maximum is 5; set a smaller limit
+with `OdeBuilder::max_order`, for example `.max_order(3)`.
 
 The built problem stores state tolerances as the optional pair `(rtol, atol)`. This pair is absent when state error control is off.
 The tolerance fields on `OdeSolverSolution` are separate comparison metadata; changing them does not configure a solver.
