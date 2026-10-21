@@ -63,7 +63,6 @@ where
     statistics: OdeSolverStatistics,
     root_finder: Option<RootFinder<Eqn::V>>,
     tstop: Option<Eqn::T>,
-    tstop_restore_h: Option<Eqn::T>,
     sdiff: M,
     sgdiff: M,
     gdiff: M,
@@ -117,7 +116,6 @@ where
             statistics: self.statistics.clone(),
             root_finder: self.root_finder.clone(),
             tstop: self.tstop,
-            tstop_restore_h: self.tstop_restore_h,
             is_state_mutated: self.is_state_mutated,
             sdiff: self.sdiff.clone(),
             sgdiff: self.sgdiff.clone(),
@@ -207,7 +205,6 @@ where
             statistics,
             root_finder,
             tstop: None,
-            tstop_restore_h: None,
             is_state_mutated: false,
             gdiff,
             sdiff: M::zeros(0, 0, ctx.clone()),
@@ -816,14 +813,13 @@ where
         &mut self,
         tstop: Eqn::T,
     ) -> Result<Option<OdeSolverStopReason<Eqn::T>>, DiffsolError> {
-        let (state, tstop_restore_h) = (&mut self.state, &mut self.tstop_restore_h);
-        let state = state.as_mut();
+        let state = self.state.as_mut();
         // check if the we are at tstop
         let troundoff =
             Eqn::T::from_f64(100.0).unwrap() * Eqn::T::EPSILON * (abs(state.t) + abs(state.h));
         if abs(state.t - tstop) <= troundoff {
-            if let Some(h) = tstop_restore_h.take() {
-                state.h = h;
+            if self.problem.state_tolerances.is_none() {
+                state.h = self.problem.h0;
             }
             return Ok(Some(OdeSolverStopReason::TstopReached));
         } else if (state.h > Eqn::T::zero() && tstop < state.t - troundoff)
@@ -842,7 +838,6 @@ where
             || (state.h < Eqn::T::zero() && state.t + state.h < tstop - troundoff)
         {
             let factor = (tstop - state.t) / state.h;
-            tstop_restore_h.get_or_insert(state.h);
             state.h.mul_assign(factor);
         }
         Ok(None)

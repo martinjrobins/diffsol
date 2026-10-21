@@ -521,35 +521,35 @@ where
                 .start_step_attempt(h, self.s_op.as_mut().map(|s_op| s_op.eqn_mut()));
             for i in start..self.rk.tableau().s() {
                 trace!("SDIRK Stage {}:", i);
-                let failed = if self
-                    .rk
-                    .do_stage_sdirk(
-                        i,
-                        h,
-                        self.op.as_ref(),
-                        &mut self.nonlinear_solver,
-                        &mut self.convergence,
-                    )
-                    .is_err()
-                {
-                    true
-                } else if self.do_stage_sens(i, h).is_err() {
-                    // with the main equations, the sensitivity solve has already updated the
-                    // Newton matrix as for a first failure, and retried: cut the step
-                    if self.op.is_some() {
+                let main_solve_result = self.rk.do_stage_sdirk(
+                    i,
+                    h,
+                    self.op.as_ref(),
+                    &mut self.nonlinear_solver,
+                    &mut self.convergence,
+                );
+                let main_solve_succeeded = main_solve_result.is_ok();
+                let solve_result = main_solve_result.and_then(|()| self.do_stage_sens(i, h));
+                if let Err(solve_error) = solve_result {
+                    // With the main equations, a failed sensitivity solve has already updated the
+                    // Newton matrix and retried once.
+                    if main_solve_succeeded && self.op.is_some() {
                         updated_jacobian = true;
                     }
-                    true
-                } else {
-                    false
-                };
-                if failed {
                     if !updated_jacobian {
                         // newton iteration did not converge, so update jacobian and try again
                         debug!("First convergence failure, updating Jacobian and trying again",);
                         updated_jacobian = true;
                         self.jacobian_updates_at(h, SolverState::FirstConvergenceFail, None);
                     } else {
+                        if self.problem().state_tolerances.is_none() {
+                            self.rk.solve_fail(
+                                h,
+                                self.config.minimum_timestep,
+                                self.config.maximum_newton_fails,
+                            )?;
+                            return Err(solve_error);
+                        }
                         // newton iteration did not converge and jacobian has been updated, so we reduce step size and try again
                         h *= Eqn::T::from_f64(0.3).unwrap();
                         debug!(
@@ -1037,7 +1037,7 @@ mod test {
     }
 
     #[test]
-    fn sdirk_without_state_tolerances_retries_nonlinear_failures() {
+    fn sdirk_without_state_tolerances_retries_once_without_reducing_step() {
         let problem = OdeBuilder::<M>::new()
             .h0(2.0)
             .disable_state_error_control()
@@ -1050,12 +1050,24 @@ mod test {
             .unwrap();
         let mut solver = problem.esdirk34::<LS>().unwrap();
 
-        solver.step().unwrap();
+        assert!(solver.step().is_err());
 
-        assert_eq!(solver.get_statistics().number_of_steps, 1);
-        assert!(solver.get_statistics().number_of_nonlinear_solver_fails > 0);
+        assert_eq!(solver.get_statistics().number_of_steps, 0);
+        assert_eq!(solver.get_statistics().number_of_nonlinear_solver_fails, 2);
+        assert!(
+            solver
+                .get_statistics()
+                .number_of_linear_solver_setups_from_first_convergence_fail
+                > 0
+        );
+        assert_eq!(
+            solver
+                .get_statistics()
+                .number_of_linear_solver_setups_from_second_convergence_fail,
+            0
+        );
         assert_eq!(solver.get_statistics().number_of_error_test_failures, 0);
-        assert!(solver.state().h < 2.0);
+        assert_eq!(solver.state().h, 2.0);
         assert_eq!(solver.rk.error_norm_evaluations(), 0);
     }
 

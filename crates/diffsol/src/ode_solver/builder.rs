@@ -1646,13 +1646,14 @@ where
         self
     }
 
-    /// Turn off state erro control and use fixed steps after a successful solve.
+    /// Turn off state error control and use fixed steps after a successful solve.
     ///
     /// Successful steps are accepted without calculating an error or adjusting the step size.
-    /// Output and sensitivity error contributions are also skipped. 
-    /// Failed nonlinear solves can still retry with a smaller step. A step may be shortened to land on a requested stop time,
-    /// then the previous step size is restored. 
-    /// Calling [`rtol`](Self::rtol) or [`atol`](Self::atol) afterward turns error control back on.
+    /// Output and sensitivity error contributions are also skipped.
+    ///  A failed nonlinear solve is retried once at the same step size; if it fails again, the solver returns an error. 
+    /// A step may be shortened to reach a requested stop time. Fixed-step mode then resumes with the
+    /// initial step size; adaptive mode keeps the step size chosen after that step. Calling
+    /// [`rtol`](Self::rtol) or [`atol`](Self::atol) afterward turns error control back on.
     pub fn disable_state_error_control(mut self) -> Self {
         self.state_tol_error_control = false;
         self

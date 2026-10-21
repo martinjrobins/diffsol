@@ -172,7 +172,6 @@ pub struct Bdf<
     statistics: OdeSolverStatistics,
     state: BdfState<Eqn::V, M>,
     tstop: Option<Eqn::T>,
-    tstop_restore_h: Option<Eqn::T>,
     root_finder: Option<RootFinder<Eqn::V>>,
     is_state_modified: bool,
     jacobian_update: JacobianUpdate<Eqn::T>,
@@ -236,7 +235,6 @@ where
             statistics: OdeSolverStatistics::default(),
             state: self.state.clone(),
             tstop: self.tstop,
-            tstop_restore_h: self.tstop_restore_h,
             root_finder: self.root_finder.clone(),
             is_state_modified: self.is_state_modified,
             jacobian_update: self.jacobian_update.clone(),
@@ -411,7 +409,6 @@ where
             },
             state,
             tstop: None,
-            tstop_restore_h: None,
             root_finder,
             is_state_modified,
             jacobian_update: JacobianUpdate::new(&problem.ode_options),
@@ -755,8 +752,8 @@ where
             * (abs(state_t) + abs(state_h));
         if abs(state_t - tstop) <= troundoff {
             self.tstop = None;
-            if let Some(h) = self.tstop_restore_h.take() {
-                let factor = h / self.state.h;
+            if self.ode_problem.state_tolerances.is_none() {
+                let factor = self.ode_problem.h0 / self.state.h;
                 self._update_step_size(factor)?;
             }
             return Ok(Some(OdeSolverStopReason::TstopReached));
@@ -781,7 +778,6 @@ where
                 tstop.to_f64().unwrap()
             );
             let factor = (tstop - state_t) / state_h;
-            self.tstop_restore_h.get_or_insert(state_h);
             // update step size ignoring the possible "step size too small" error
             let _ = self._update_step_size(factor);
         }
@@ -1446,6 +1442,11 @@ where
                     ));
                 }
                 if convergence_fail {
+                    if problem.state_tolerances.is_none() {
+                        // Fixed-step mode retries once after refreshing the RHS Jacobian. If that
+                        // retry fails, return the nonlinear solve error without reducing h.
+                        return Err(solve_result.unwrap_err());
+                    }
                     // newton iteration did not converge, but jacobian has already been
                     // evaluated so reduce step size by 0.3 (as per [1]) and try again
                     self.prev_error_norm = None;
@@ -3108,7 +3109,7 @@ mod test {
     }
 
     #[test]
-    fn bdf_without_state_tolerances_retries_nonlinear_failures() {
+    fn bdf_without_state_tolerances_retries_once_without_reducing_step() {
         let problem = OdeBuilder::<M>::new()
             .h0(2.0)
             .disable_state_error_control()
@@ -3121,12 +3122,24 @@ mod test {
             .unwrap();
         let mut solver = problem.bdf::<LS>().unwrap();
 
-        solver.step().unwrap();
+        assert!(solver.step().is_err());
 
-        assert_eq!(solver.get_statistics().number_of_steps, 1);
-        assert!(solver.get_statistics().number_of_nonlinear_solver_fails > 0);
+        assert_eq!(solver.get_statistics().number_of_steps, 0);
+        assert_eq!(solver.get_statistics().number_of_nonlinear_solver_fails, 2);
+        assert!(
+            solver
+                .get_statistics()
+                .number_of_linear_solver_setups_from_first_convergence_fail
+                > 0
+        );
+        assert_eq!(
+            solver
+                .get_statistics()
+                .number_of_linear_solver_setups_from_second_convergence_fail,
+            0
+        );
         assert_eq!(solver.get_statistics().number_of_error_test_failures, 0);
-        assert!(solver.state().h < 2.0);
+        assert_eq!(solver.state().h, 2.0);
         assert_eq!(solver.error_norm_evaluations.get(), 0);
     }
 
