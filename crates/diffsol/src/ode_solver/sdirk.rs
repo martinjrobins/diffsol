@@ -571,13 +571,8 @@ where
                 }
             }
             if self.problem().state_tolerances.is_none() {
-                // A converged nonlinear solve is enough to accept this step. Keep h unchanged;
-                // nonlinear solve failures above can still reduce h and retry the step.
-                self.update_op_step_size(h);
-                self.jacobian_updates_at(h, SolverState::StepSuccess, None);
-                self.jacobian_update.step();
-                self.rk.reset_prev_error();
-                return self.rk.step_accepted(h, h, true);
+                // A converged solve is enough to accept the step; skip error control and keep h.
+                break 'step (Eqn::T::one(), Eqn::T::zero());
             }
             let error_norm = if self.problem().eqn().mass().is_some() && self.op.is_some() {
                 let linear_solver = |x: &mut Eqn::V| {
@@ -644,7 +639,11 @@ where
         }
 
         self.update_op_step_size(new_h);
-        self.rk.set_prev_error(error_norm);
+        if self.problem().state_tolerances.is_some() {
+            self.rk.set_prev_error(error_norm);
+        } else {
+            self.rk.reset_prev_error();
+        }
         let result = self.rk.step_accepted(h, new_h, true);
         // update the Jacobian for the next step if due, at the new state, then advance the
         // schedule, so that a Jacobian evaluated here is a step old by the next one
