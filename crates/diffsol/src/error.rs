@@ -62,6 +62,25 @@ pub enum OdeSolverError {
     StateNotSet,
     #[error("Sensitivity solve failed")]
     SensitivitySolveFailed,
+    #[error("No step has been taken to differentiate")]
+    NoStepToDifferentiate,
+    #[error("Step derivatives need the main equations to be integrated")]
+    StepDifferentiationNotSupported,
+    #[error(
+        "Step derivative lanes mismatch: {what} has {found} lanes, expected {expected} (the solver state has {state_lanes})"
+    )]
+    StepDifferentiationBatchMismatch {
+        what: &'static str,
+        found: usize,
+        expected: String,
+        state_lanes: usize,
+    },
+    #[error("Step derivative size mismatch: {what} has {found}, expected {expected}")]
+    StepDifferentiationSizeMismatch {
+        what: &'static str,
+        found: String,
+        expected: String,
+    },
     #[error(
         "Too many nonlinear solver failures within one step ({num_failures}) at time = {time}"
     )]

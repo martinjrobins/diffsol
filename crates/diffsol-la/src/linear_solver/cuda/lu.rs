@@ -61,6 +61,66 @@ impl<T: ScalarCuda> Drop for CudaLU<T> {
     }
 }
 
+impl<T: ScalarCuda> CudaLU<T> {
+    fn solve_impl(&self, x: &mut CudaVec<T>, transpose: bool) -> Result<(), LaError> {
+        let matrix = if let Some(ref matrix) = self.matrix {
+            if matrix.nrows() != matrix.ncols() {
+                Err(linear_solver_error!(LinearSolverMatrixNotSquare))?;
+            }
+            matrix
+        } else {
+            Err(linear_solver_error!(LinearSolverNotSetup))?
+        };
+        if !self.linearisation_set {
+            Err(linear_solver_error!(LinearSolverNotSetup))?;
+        }
+        let nbatch = x.context.nbatch();
+        let lu_nbatch = matrix.context().nbatch();
+        x.context.assert_broadcastable_into(lu_nbatch, "lu_solve");
+        let nrows = matrix.nrows();
+        let ncols = matrix.ncols();
+        let x_nstates = x.data.len() / nbatch;
+        if x_nstates != nrows {
+            Err(linear_solver_error!(LinearSolverMatrixVectorNotCompatible))?;
+        }
+        let mut nfo = self.nfo.as_ref().expect("NFO not set").borrow_mut();
+        let stream = &x.context.stream;
+        let lda = i32::try_from(nrows).unwrap();
+        let n = i32::try_from(nrows).unwrap();
+        let nrhs = 1i32;
+        let (a_ptr, _) = matrix.data.device_ptr(stream);
+        let (p_ptr, _) = self.pivots.as_ref().unwrap().device_ptr(stream);
+        let (x_ptr, _) = x.data.device_ptr_mut(stream);
+        let (n_ptr, _) = nfo.device_ptr_mut(stream);
+        for b in 0..nbatch {
+            // one factorization can serve several right-hand side batches
+            let lu_b = broadcast_batch(b, lu_nbatch, nbatch);
+            let a_offset = lu_b * nrows * ncols;
+            let p_offset = lu_b * nrows;
+            let x_offset = b * x_nstates;
+            unsafe {
+                cusolverDnDgetrs(
+                    self.handle,
+                    if transpose {
+                        cublasOperation_t::CUBLAS_OP_T
+                    } else {
+                        cublasOperation_t::CUBLAS_OP_N
+                    },
+                    n,
+                    nrhs,
+                    (a_ptr as *const f64).add(a_offset),
+                    lda,
+                    (p_ptr as *const i32).add(p_offset),
+                    (x_ptr as *mut f64).add(x_offset),
+                    n,
+                    (n_ptr as *mut i32).add(lu_b),
+                )
+            };
+        }
+        Ok(())
+    }
+}
+
 impl<T: ScalarCuda> LinearSolver<CudaMat<T>> for CudaLU<T> {
     fn set_linearisation<C: LinearOp<T = T, V = CudaVec<T>, M = CudaMat<T>, C = CudaContext>>(
         &mut self,
@@ -102,57 +162,11 @@ impl<T: ScalarCuda> LinearSolver<CudaMat<T>> for CudaLU<T> {
     }
 
     fn solve_in_place(&self, x: &mut CudaVec<T>) -> Result<(), LaError> {
-        let matrix = if let Some(ref matrix) = self.matrix {
-            if matrix.nrows() != matrix.ncols() {
-                Err(linear_solver_error!(LinearSolverMatrixNotSquare))?;
-            }
-            matrix
-        } else {
-            Err(linear_solver_error!(LinearSolverNotSetup))?
-        };
-        if !self.linearisation_set {
-            Err(linear_solver_error!(LinearSolverNotSetup))?;
-        }
-        let nbatch = x.context.nbatch();
-        let lu_nbatch = matrix.context().nbatch();
-        x.context.assert_broadcastable_into(lu_nbatch, "lu_solve");
-        let nrows = matrix.nrows();
-        let ncols = matrix.ncols();
-        let x_nstates = x.data.len() / nbatch;
-        if x_nstates != nrows {
-            Err(linear_solver_error!(LinearSolverMatrixVectorNotCompatible))?;
-        }
-        let mut nfo = self.nfo.as_ref().expect("NFO not set").borrow_mut();
-        let stream = &x.context.stream;
-        let lda = i32::try_from(nrows).unwrap();
-        let n = i32::try_from(nrows).unwrap();
-        let nrhs = 1i32;
-        let (a_ptr, _) = matrix.data.device_ptr(stream);
-        let (p_ptr, _) = self.pivots.as_ref().unwrap().device_ptr(stream);
-        let (x_ptr, _) = x.data.device_ptr_mut(stream);
-        let (n_ptr, _) = nfo.device_ptr_mut(stream);
-        for b in 0..nbatch {
-            // one factorization can serve several right-hand side batches
-            let lu_b = broadcast_batch(b, lu_nbatch, nbatch);
-            let a_offset = lu_b * nrows * ncols;
-            let p_offset = lu_b * nrows;
-            let x_offset = b * x_nstates;
-            unsafe {
-                cusolverDnDgetrs(
-                    self.handle,
-                    cublasOperation_t::CUBLAS_OP_N,
-                    n,
-                    nrhs,
-                    (a_ptr as *const f64).add(a_offset),
-                    lda,
-                    (p_ptr as *const i32).add(p_offset),
-                    (x_ptr as *mut f64).add(x_offset),
-                    n,
-                    (n_ptr as *mut i32).add(lu_b),
-                )
-            };
-        }
-        Ok(())
+        self.solve_impl(x, false)
+    }
+
+    fn solve_transpose_in_place(&self, x: &mut CudaVec<T>) -> Result<(), LaError> {
+        self.solve_impl(x, true)
     }
 
     fn set_sparsity<C: LinearOp<T = T, V = CudaVec<T>, M = CudaMat<T>, C = CudaContext>>(
@@ -204,7 +218,9 @@ impl<T: ScalarCuda> LinearSolver<CudaMat<T>> for CudaLU<T> {
 mod tests {
     use super::*;
     use crate::{
-        linear_solver::tests::{diagonal_op, test_grouped_lu_solve, test_narrow_state_lu_solve},
+        linear_solver::tests::{
+            diagonal_op, test_grouped_lu_solve, test_narrow_state_lu_solve, test_transpose_lu_solve,
+        },
         Vector,
     };
 
@@ -233,6 +249,11 @@ mod tests {
     #[test]
     fn test_grouped_lu() {
         test_grouped_lu_solve::<CudaMat<f64>, CudaLU<f64>>(CudaContext::default().with_nbatch(2));
+    }
+
+    #[test]
+    fn test_transpose_lu() {
+        test_transpose_lu_solve::<CudaMat<f64>, CudaLU<f64>>(CudaContext::default().with_nbatch(2));
     }
 }
 

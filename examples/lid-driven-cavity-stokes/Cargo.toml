@@ -16,6 +16,6 @@ diffsl-llvm = []
 diffsol = { path = "../../crates/diffsol" }
 faer = { version = "0.24", default-features = false, features = ["sparse"] }
 ndarray = "0.15"
-ndarray-npy = "0.8"
+ndarray-npy = { version = "0.8", default-features = false }
 serde_json = "1"
 

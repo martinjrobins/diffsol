@@ -478,6 +478,9 @@ impl<T: FaerScalar> Matrix for FaerMat<T> {
     }
 }
 impl<T: FaerScalar> DenseMatrix for FaerMat<T> {
+    fn fill(&mut self, value: T) {
+        self.data.rb_mut().fill(value);
+    }
     fn resize_cols(&mut self, nc: usize) {
         let old = self.ncols();
         if old == nc {

@@ -1101,8 +1101,8 @@ where
 
 /// 🔴 lu_solve — one solve per Newton iteration. `nparams > 1` is the grouped broadcast the
 /// sensitivity equations run: `nbatch * nparams` right-hand side lanes over `nbatch`
-/// factorisations.
-fn bench_lu_solve<M, LS>(c: &mut Criterion, label: &str, nparams: usize)
+/// factorisations. `transpose` times `A^T x = b` instead.
+fn bench_lu_solve<M, LS>(c: &mut Criterion, label: &str, nparams: usize, transpose: bool)
 where
     M: Matrix<T = f64> + 'static,
     M::C: Default + Clone,
@@ -1131,7 +1131,11 @@ where
             s.set_linearisation(&op);
             let mut x = M::V::from_element(ns, 1.0, rhs_ctx);
             b.iter(|| {
-                s.solve_in_place(&mut x).unwrap();
+                if transpose {
+                    s.solve_transpose_in_place(&mut x).unwrap();
+                } else {
+                    s.solve_in_place(&mut x).unwrap();
+                }
                 black_box(&x);
                 ctx.synchronize();
             })
@@ -1385,8 +1389,9 @@ macro_rules! bench_dense_matrix_backend {
 macro_rules! bench_lu_backend {
     ($c:expr, $label:expr, $M:ty, $LS:ty) => {
         bench_lu_factor::<$M, $LS>($c, concat!("lu_factor/", $label));
-        bench_lu_solve::<$M, $LS>($c, concat!("lu_solve/", $label), 1);
-        bench_lu_solve::<$M, $LS>($c, concat!("lu_solve_grouped/", $label), LU_NPARAMS);
+        bench_lu_solve::<$M, $LS>($c, concat!("lu_solve/", $label), 1, false);
+        bench_lu_solve::<$M, $LS>($c, concat!("lu_solve_transpose/", $label), 1, true);
+        bench_lu_solve::<$M, $LS>($c, concat!("lu_solve_grouped/", $label), LU_NPARAMS, false);
         bench_lu_solve_sens::<$M, $LS>($c, concat!("lu_solve_sens/", $label));
         bench_newton_sens::<$M, $LS>($c, concat!("newton_sens/", $label));
     };
