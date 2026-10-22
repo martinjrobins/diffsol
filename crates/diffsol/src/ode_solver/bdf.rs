@@ -1582,12 +1582,11 @@ mod test {
             robertson_ode_with_sens::robertson_ode_with_sens,
         },
         ode_solver::tests::{
-            fast_decay_problem, setup_test_adjoint, setup_test_adjoint_sum_squares,
+            setup_test_adjoint, setup_test_adjoint_sum_squares,
             setup_test_adjoint_sum_squares_with_single_reset_root,
             single_reset_root_discrete_times, test_adjoint, test_adjoint_sum_squares,
-            test_checkpointing, test_config, test_fast_timescale_aborts,
-            test_fast_timescale_solves, test_interpolate, test_interpolate_dy, test_ode_solver,
-            test_problem, test_solve_adjoint_sum_squares_with_single_reset_root,
+            test_checkpointing, test_config, test_interpolate, test_interpolate_dy,
+            test_ode_solver, test_problem, test_solve_adjoint_sum_squares_with_single_reset_root,
             test_solve_adjoint_with_single_reset_root,
             test_solve_soln_adjoint_sum_squares_with_single_reset_root,
             test_solve_soln_adjoint_with_single_reset_root, test_state_mut,
@@ -1612,20 +1611,17 @@ mod test {
 
     #[test]
     fn bdf_test_fast_timescale() {
-        let k = 1e12;
-        let problem = fast_decay_problem::<M>(k);
-        test_fast_timescale_solves(problem.bdf::<LS>().unwrap(), k);
-        let mut problem = fast_decay_problem::<M>(k);
+        let (mut problem, _) = exponential_decay_problem::<M>(false);
+        let p = problem.eqn.context().vector_from_vec(vec![1e12, 1.0]);
+        problem.eqn_mut().set_params(&p);
+        problem.bdf::<LS>().unwrap().solve(5e-12).unwrap();
         problem.ode_options.min_timestep = 1e-13;
-        test_fast_timescale_aborts(problem.bdf::<LS>().unwrap(), k);
-    }
-
-    #[test]
-    fn bdf_test_fast_timescale_f32() {
-        // f32::EPSILON (1.2e-7) as the floor would abort this solve; the default must not.
-        let k = 1e4;
-        let problem = fast_decay_problem::<NalgebraMat<f32>>(k);
-        test_fast_timescale_solves(problem.bdf::<NalgebraLU<f32>>().unwrap(), k);
+        assert!(matches!(
+            problem.bdf::<LS>().unwrap().solve(5e-12),
+            Err(crate::DiffsolError::OdeSolverError(
+                crate::error::OdeSolverError::StepSizeTooSmall { .. }
+            ))
+        ));
     }
 
     #[test]

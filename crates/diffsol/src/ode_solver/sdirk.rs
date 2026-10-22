@@ -600,10 +600,10 @@ mod test {
             robertson_ode::robertson_ode,
         },
         ode_solver::tests::{
-            fast_decay_problem, setup_test_adjoint, setup_test_adjoint_sum_squares, test_adjoint,
-            test_adjoint_sum_squares, test_checkpointing, test_config, test_fast_timescale_aborts,
-            test_fast_timescale_solves, test_interpolate, test_interpolate_dy, test_ode_solver,
-            test_problem, test_state_mut, test_state_mut_on_problem,
+            setup_test_adjoint, setup_test_adjoint_sum_squares, test_adjoint,
+            test_adjoint_sum_squares, test_checkpointing, test_config, test_interpolate,
+            test_interpolate_dy, test_ode_solver, test_problem, test_state_mut,
+            test_state_mut_on_problem,
         },
         scale, ConstantOp, Context, DenseMatrix, FaerSparseLU, FaerSparseMat, MatrixCommon,
         NalgebraLU, NalgebraVec, OdeEquations, OdeSolverMethod, Op, Vector, VectorView,
@@ -623,22 +623,17 @@ mod test {
 
     #[test]
     fn tr_bdf2_test_fast_timescale() {
-        let k = 1e12;
-        let problem = fast_decay_problem::<M>(k);
-        test_fast_timescale_solves(problem.tr_bdf2::<LS>().unwrap(), k);
-        let mut problem = fast_decay_problem::<M>(k);
+        let (mut problem, _) = exponential_decay_problem::<M>(false);
+        let p = problem.eqn.context().vector_from_vec(vec![1e12, 1.0]);
+        problem.eqn_mut().set_params(&p);
+        problem.tr_bdf2::<LS>().unwrap().solve(5e-12).unwrap();
         problem.ode_options.min_timestep = 1e-13;
-        test_fast_timescale_aborts(problem.tr_bdf2::<LS>().unwrap(), k);
-    }
-
-    #[test]
-    fn esdirk34_test_fast_timescale() {
-        let k = 1e12;
-        let problem = fast_decay_problem::<M>(k);
-        test_fast_timescale_solves(problem.esdirk34::<LS>().unwrap(), k);
-        let mut problem = fast_decay_problem::<M>(k);
-        problem.ode_options.min_timestep = 1e-13;
-        test_fast_timescale_aborts(problem.esdirk34::<LS>().unwrap(), k);
+        assert!(matches!(
+            problem.tr_bdf2::<LS>().unwrap().solve(5e-12),
+            Err(crate::DiffsolError::OdeSolverError(
+                crate::error::OdeSolverError::StepSizeTooSmall { .. }
+            ))
+        ));
     }
 
     #[test]

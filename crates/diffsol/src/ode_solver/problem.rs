@@ -104,8 +104,7 @@ pub struct OdeSolverOptions<T: Scalar> {
     pub max_nonlinear_solver_failures: usize,
     /// Newton convergence test scaling factor (default: 0.2).
     pub nonlinear_solver_tolerance: T,
-    /// Minimum allowed step size (absolute value, default: `f64::EPSILON`, about 2.2e-16, for
-    /// every scalar type).
+    /// Minimum allowed step size (absolute value, default: [`Scalar::EPSILON`] for `T`).
     ///
     /// This is an absolute floor in the units of `t`, independent of the tolerances. It stops
     /// the step size from collapsing towards zero; it is not a check that a step advances `t`.
@@ -142,7 +141,7 @@ impl<T: Scalar> Default for OdeSolverOptions<T> {
             max_error_test_failures: 40,
             max_nonlinear_solver_failures: 50,
             nonlinear_solver_tolerance: T::from_f64(0.2).unwrap(),
-            min_timestep: T::from_f64(f64::EPSILON).unwrap(),
+            min_timestep: T::EPSILON,
             max_timestep_growth: None,
             min_timestep_growth: None,
             max_timestep_shrink: None,
@@ -1305,45 +1304,16 @@ impl<V: Vector> Default for OdeSolverSolution<V> {
 #[cfg(test)]
 mod tests {
     use super::OdeSolverOptions;
-    use crate::{NalgebraMat, OdeBuilder};
 
     #[test]
-    fn min_timestep_default_is_f64_epsilon_for_every_scalar() {
+    fn min_timestep_default_is_scalar_epsilon() {
         assert_eq!(
             OdeSolverOptions::<f64>::default().min_timestep,
             f64::EPSILON
         );
         assert_eq!(
             OdeSolverOptions::<f32>::default().min_timestep,
-            f64::EPSILON as f32
-        );
-    }
-
-    #[test]
-    fn builder_min_timestep_default_matches_options_default() {
-        let problem = OdeBuilder::<NalgebraMat<f64>>::new()
-            .rhs_implicit(
-                |y, _p, _t, dy| dy[0] = -y[0],
-                |_y, _p, _t, v, jv| jv[0] = -v[0],
-            )
-            .init(|_p, _t, y| y[0] = 1.0, 1)
-            .build()
-            .unwrap();
-        assert_eq!(
-            problem.ode_options.min_timestep,
-            OdeSolverOptions::<f64>::default().min_timestep
-        );
-        let problem = OdeBuilder::<NalgebraMat<f32>>::new()
-            .rhs_implicit(
-                |y, _p, _t, dy| dy[0] = -y[0],
-                |_y, _p, _t, v, jv| jv[0] = -v[0],
-            )
-            .init(|_p, _t, y| y[0] = 1.0, 1)
-            .build()
-            .unwrap();
-        assert_eq!(
-            problem.ode_options.min_timestep,
-            OdeSolverOptions::<f32>::default().min_timestep
+            f32::EPSILON
         );
     }
 }

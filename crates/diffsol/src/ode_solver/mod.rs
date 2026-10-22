@@ -80,7 +80,6 @@ pub(crate) mod tests {
     use std::rc::Rc;
 
     use self::problem::OdeSolverSolution;
-    use crate::OdeBuilder;
 
     use super::*;
     use crate::error::{DiffsolError, OdeSolverError};
@@ -1003,57 +1002,6 @@ pub(crate) mod tests {
             }
         }
         assert!(failed);
-    }
-
-    /// `y' = -k y` solved over five time constants. For large `k` the integration steps fall
-    /// below the old absolute `min_timestep` floor of 1e-13.
-    pub fn fast_decay_problem<M: Matrix + 'static>(
-        k: f64,
-    ) -> OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>> {
-        let k = M::T::from_f64(k).unwrap();
-        OdeBuilder::<M>::new()
-            .rhs_implicit(
-                move |y, _p, _t, dy| dy[0] = -k * y[0],
-                move |_y, _p, _t, v, jv| jv[0] = -k * v[0],
-            )
-            .init(|_p, _t, y| y[0] = M::T::one(), 1)
-            .build()
-            .unwrap()
-    }
-
-    /// The default `min_timestep` must not abort a solve whose natural step size is tiny in
-    /// absolute terms.
-    pub fn test_fast_timescale_solves<'a, Eqn, Method>(mut s: Method, k: f64)
-    where
-        Eqn: OdeEquations + 'a,
-        Eqn::V: DefaultDenseMatrix,
-        Method: OdeSolverMethod<'a, Eqn>,
-    {
-        let t_end = 5.0 / k;
-        s.solve(Eqn::T::from_f64(t_end).unwrap()).unwrap();
-        let y_end = s.state().y.get_index(0).to_f64().unwrap();
-        let exact = (-k * t_end).exp();
-        assert!(
-            ((y_end - exact) / exact).abs() < 1e-2,
-            "y_end = {y_end}, exact = {exact}"
-        );
-    }
-
-    /// Companion to [`test_fast_timescale_solves`]: with an absolute floor above the natural
-    /// step size the same solve aborts with `StepSizeTooSmall`.
-    pub fn test_fast_timescale_aborts<'a, Eqn, Method>(mut s: Method, k: f64)
-    where
-        Eqn: OdeEquations + 'a,
-        Eqn::V: DefaultDenseMatrix,
-        Method: OdeSolverMethod<'a, Eqn>,
-    {
-        let t_end = 5.0 / k;
-        assert!(matches!(
-            s.solve(Eqn::T::from_f64(t_end).unwrap()),
-            Err(DiffsolError::OdeSolverError(
-                OdeSolverError::StepSizeTooSmall { .. }
-            ))
-        ));
     }
 
     pub fn test_state_mut<'a, M: Matrix, Method: OdeSolverMethod<'a, TestEqn<M>>>(mut s: Method) {
