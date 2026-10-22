@@ -2,18 +2,20 @@ use super::adjoint::AdjointOdeSolverMethod;
 use super::method::AugmentedOdeSolverMethod;
 use super::runge_kutta::Rk;
 use super::sensitivities::SensitivitiesOdeSolverMethod;
+use super::step_ad::StepVjp;
 use crate::error::DiffsolError;
 use crate::ode_solver::OdeSolverStatistics;
 use crate::vector::VectorRef;
 use crate::NoAug;
+use crate::OdeEquationsImplicitAdjoint;
 use crate::OdeEquationsImplicitSens;
 use crate::OdeSolverStopReason;
 use crate::RkState;
 use crate::SensEquations;
 use crate::Tableau;
 use crate::{
-    AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, ExplicitRkConfig, OdeEquations,
-    OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, StateRef, StateRefMut,
+    ode_solver_error, AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, ExplicitRkConfig,
+    OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, StateRef, StateRefMut,
 };
 use log::debug;
 use num_traits::One;
@@ -113,7 +115,7 @@ where
 {
     pub fn new(
         problem: &'a OdeSolverProblem<Eqn>,
-        state: RkState<Eqn::V>,
+        state: RkState<Eqn::V, M>,
         tableau: Tableau<Eqn::T>,
     ) -> Result<Self, DiffsolError> {
         Rk::<Eqn, M>::check_explicit_rk(problem, &tableau)?;
@@ -126,7 +128,7 @@ where
 
     pub fn new_augmented(
         problem: &'a OdeSolverProblem<Eqn>,
-        state: RkState<Eqn::V>,
+        state: RkState<Eqn::V, M>,
         tableau: Tableau<Eqn::T>,
         augmented_eqn: AugmentedEqn,
     ) -> Result<Self, DiffsolError> {
@@ -137,10 +139,6 @@ where
             config: ExplicitRkConfig::new(&problem.ode_options),
         })
     }
-
-    pub fn get_statistics(&self) -> &OdeSolverStatistics {
-        self.rk.get_statistics()
-    }
 }
 
 impl<'a, Eqn, M, AugmentedEqn> OdeSolverMethod<'a, Eqn> for ExplicitRk<'a, Eqn, M, AugmentedEqn>
@@ -150,7 +148,7 @@ where
     AugmentedEqn: AugmentedOdeEquations<Eqn>,
     Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
 {
-    type State = RkState<Eqn::V>;
+    type State = RkState<Eqn::V, M>;
     type Config = ExplicitRkConfig<Eqn::T>;
 
     fn config(&self) -> &ExplicitRkConfig<Eqn::T> {
@@ -159,6 +157,10 @@ where
 
     fn config_mut(&mut self) -> &mut ExplicitRkConfig<Eqn::T> {
         &mut self.config
+    }
+
+    fn get_statistics(&self) -> &OdeSolverStatistics {
+        self.rk.get_statistics()
     }
 
     fn problem(&self) -> &'a OdeSolverProblem<Eqn> {
@@ -181,7 +183,7 @@ where
         self.rk.set_state(state);
     }
 
-    fn into_state(self) -> RkState<Eqn::V> {
+    fn into_state(self) -> RkState<Eqn::V, M> {
         self.rk.into_state()
     }
 
@@ -277,6 +279,44 @@ where
     fn state_mut_back(&mut self, t: Eqn::T) -> Result<(), DiffsolError> {
         let integrate_out = self.rk.problem().integrate_out;
         self.rk.state_mut_back(t, integrate_out)
+    }
+}
+
+impl<'a, Eqn, M, AugmentedEqn> StepVjp<'a, Eqn> for ExplicitRk<'a, Eqn, M, AugmentedEqn>
+where
+    Eqn: OdeEquationsImplicitAdjoint + 'a,
+    M: DenseMatrix<V = Eqn::V, T = Eqn::T, C = Eqn::C>,
+    AugmentedEqn: AugmentedOdeEquations<Eqn>,
+    Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
+{
+    /// The cotangent is an [RkState] whose `y` and `dy` are read, as cotangents of the state and
+    /// its derivative. On return they hold the cotangents at the start of the step; its `diff`
+    /// is zero. The stages are explicit, so there are no linear solves.
+    fn step_vjp(
+        &mut self,
+        end: &Self::State,
+        cotangent: &mut Self::State,
+        p_bar: &mut Eqn::V,
+    ) -> Result<(), DiffsolError> {
+        if !self
+            .augmented_eqn
+            .as_ref()
+            .map(|eqn| eqn.integrate_main_eqn())
+            .unwrap_or(true)
+        {
+            return Err(ode_solver_error!(StepDifferentiationNotSupported));
+        }
+        let step = self.rk.vjp_check_inputs(end, cotangent, p_bar)?;
+        self.rk.vjp_start(step, end, cotangent, p_bar);
+        // the stages of step(), in reverse: each is explicit, so its transposed solve is
+        // w = k_bar, as vjp_stage_rhs gives it
+        for i in (1..self.rk.tableau().s()).rev() {
+            self.rk.vjp_stage_rhs(i, cotangent);
+            self.rk.vjp_stage_value(i, end);
+            self.rk.vjp_stage_inputs(i, step, end, cotangent, p_bar);
+        }
+        self.rk.vjp_finish(step, end, cotangent);
+        Ok(())
     }
 }
 

@@ -82,3 +82,10 @@ pub trait NonLinearOpJacobian: NonLinearOp {
         None
     }
 }
+
+/// A non-linear operator that can also multiply by the (negative) transpose of its Jacobian.
+pub trait NonLinearOpAdjoint: NonLinearOp {
+    /// Compute the product of the negative transpose of the Jacobian with a given vector,
+    /// `-J(x)^T * v`, and store it in `y`. The sign matches the adjoint operators of `diffsol`.
+    fn jac_transpose_mul_inplace(&self, x: &Self::V, v: &Self::V, y: &mut Self::V);
+}

@@ -886,6 +886,8 @@ mod tests {
         let ctx = problem.eqn.context();
         let state = RkState {
             t: 0.0,
+            diff: Mcpu::zeros(0, 0, *ctx),
+            last_step: None,
             y: Vcpu::from_vec(vec![2.0], *ctx),
             dy: Vcpu::from_vec(vec![0.0], *ctx),
             g: Vcpu::zeros(0, *ctx),
@@ -933,6 +935,8 @@ mod tests {
         let ctx = problem.eqn.context();
         let state = RkState {
             t: 0.0,
+            diff: Mcpu::zeros(0, 0, *ctx),
+            last_step: None,
             y: Vcpu::from_vec(vec![1.0, 1.0], *ctx),
             dy: Vcpu::from_vec(vec![1.0, 1.0], *ctx),
             g: Vcpu::zeros(0, *ctx),
@@ -1026,6 +1030,8 @@ mod tests {
         let ctx = problem.eqn.context();
         let state = RkState {
             t: 0.0,
+            diff: crate::FaerMat::zeros(0, 0, *ctx),
+            last_step: None,
             y: FaerVec::from_vec(vec![1.0, 1.0], *ctx),
             dy: FaerVec::from_vec(vec![1.0, 1.0], *ctx),
             g: FaerVec::zeros(0, *ctx),

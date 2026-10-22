@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0](https://github.com/martinjrobins/diffsol/compare/diffsol-nl-v0.2.0...diffsol-nl-v0.3.0) - 2026-10-20
+
+### Added
+
+- *(diffsol)* vjp and jvp of step for OdeSolverMethods ([#409](https://github.com/martinjrobins/diffsol/pull/409))
+
 ## [0.2.0](https://github.com/martinjrobins/diffsol/compare/diffsol-nl-v0.1.1...diffsol-nl-v0.2.0) - 2026-09-21
 
 ### Added

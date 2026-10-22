@@ -1,5 +1,6 @@
 use crate::{
     error::DiffsolError, Matrix, NonLinearOp as TimeAwareNonLinearOp,
+    NonLinearOpAdjoint as TimeAwareNonLinearOpAdjoint,
     NonLinearOpJacobian as TimeAwareNonLinearOpJacobian,
 };
 use diffsol_nl::NonLinearSolver as NlNonLinearSolver;
@@ -80,6 +81,12 @@ impl<C: TimeAwareNonLinearOpJacobian> diffsol_nl::NonLinearOpJacobian for NonLin
     }
 }
 
+impl<C: TimeAwareNonLinearOpAdjoint> diffsol_nl::NonLinearOpAdjoint for NonLinearisedRef<'_, C> {
+    fn jac_transpose_mul_inplace(&self, x: &Self::V, v: &Self::V, y: &mut Self::V) {
+        self.op.jac_transpose_mul_inplace(x, self.t, v, y);
+    }
+}
+
 /// A solver for the (time-aware) nonlinear problem `F(x, t) = 0` for fixed `t`.
 pub trait NonLinearSolver<M: Matrix>: Default {
     /// Set the problem to be solved, any previous problem is discarded.
@@ -128,6 +135,38 @@ pub trait NonLinearSolver<M: Matrix>: Default {
     /// Solve the linearised problem `J * x = b`, where `J` was calculated using [Self::reset_jacobian].
     /// The input `b` is provided in `x`, and the solution is returned in `x`.
     fn solve_linearised_in_place(&self, x: &mut M::V) -> Result<(), DiffsolError>;
+
+    /// Solve `J(x_lin, t) * x = b` with the operator's own Jacobian, using the one set by
+    /// [Self::reset_jacobian] as the Newton matrix. `x` holds the initial guess. See
+    /// [`diffsol_nl::NonLinearSolver::solve_jacobian_in_place`].
+    #[allow(clippy::too_many_arguments)]
+    fn solve_jacobian_in_place<
+        C: TimeAwareNonLinearOpJacobian<V = M::V, T = M::T, M = M, C = M::C>,
+    >(
+        &mut self,
+        op: &C,
+        x_lin: &M::V,
+        t: M::T,
+        b: &M::V,
+        x: &mut M::V,
+        error_y: &M::V,
+        convergence: &mut Convergence<'_, M::V>,
+    ) -> Result<(), DiffsolError>;
+
+    /// As [Self::solve_jacobian_in_place], for the transposed problem `J(x_lin, t)^T * x = b`.
+    #[allow(clippy::too_many_arguments)]
+    fn solve_jacobian_transpose_in_place<
+        C: TimeAwareNonLinearOpAdjoint<V = M::V, T = M::T, M = M, C = M::C>,
+    >(
+        &mut self,
+        op: &C,
+        x_lin: &M::V,
+        t: M::T,
+        b: &M::V,
+        x: &mut M::V,
+        error_y: &M::V,
+        convergence: &mut Convergence<'_, M::V>,
+    ) -> Result<(), DiffsolError>;
 }
 
 /// Any [`diffsol_nl::NonLinearSolver`] implementation automatically implements the
@@ -178,16 +217,66 @@ impl<M: Matrix, S: NlNonLinearSolver<M>> NonLinearSolver<M> for S {
     fn solve_linearised_in_place(&self, x: &mut M::V) -> Result<(), DiffsolError> {
         NlNonLinearSolver::solve_linearised_in_place(self, x).map_err(Into::into)
     }
+
+    #[allow(clippy::too_many_arguments)]
+    fn solve_jacobian_in_place<
+        C: TimeAwareNonLinearOpJacobian<V = M::V, T = M::T, M = M, C = M::C>,
+    >(
+        &mut self,
+        op: &C,
+        x_lin: &M::V,
+        t: M::T,
+        b: &M::V,
+        x: &mut M::V,
+        error_y: &M::V,
+        convergence: &mut Convergence<'_, M::V>,
+    ) -> Result<(), DiffsolError> {
+        NlNonLinearSolver::solve_jacobian_in_place(
+            self,
+            &NonLinearisedRef::at(op, t),
+            x_lin,
+            b,
+            x,
+            error_y,
+            convergence,
+        )
+        .map_err(Into::into)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn solve_jacobian_transpose_in_place<
+        C: TimeAwareNonLinearOpAdjoint<V = M::V, T = M::T, M = M, C = M::C>,
+    >(
+        &mut self,
+        op: &C,
+        x_lin: &M::V,
+        t: M::T,
+        b: &M::V,
+        x: &mut M::V,
+        error_y: &M::V,
+        convergence: &mut Convergence<'_, M::V>,
+    ) -> Result<(), DiffsolError> {
+        NlNonLinearSolver::solve_jacobian_transpose_in_place(
+            self,
+            &NonLinearisedRef::at(op, t),
+            x_lin,
+            b,
+            x,
+            error_y,
+            convergence,
+        )
+        .map_err(Into::into)
+    }
 }
 
 //tests
 #[cfg(test)]
 pub mod tests {
     use crate::{
-        linear_solver::nalgebra::lu::LU,
         matrix::dense_nalgebra_serial::NalgebraMat,
         op::{closure::Closure, ParameterisedOp},
-        scale, BacktrackingLineSearch, DenseMatrix, NalgebraVec, NoLineSearch, Op, Vector,
+        scale, BacktrackingLineSearch, DenseMatrix, NalgebraLU, NalgebraVec, NoLineSearch, Op,
+        Vector,
     };
 
     use super::*;
@@ -273,7 +362,7 @@ pub mod tests {
 
     #[test]
     fn test_newton_cpu_square() {
-        let lu = LU::default();
+        let lu = NalgebraLU::default();
         let (op, rtol, atol, soln) = get_square_problem::<MCpu>();
         let p = NalgebraVec::zeros(0, *op.context());
         let op = ParameterisedOp::new(&op, &p);
@@ -284,7 +373,7 @@ pub mod tests {
 
     #[test]
     fn test_newton_cpu_square_backtrack() {
-        let lu = LU::default();
+        let lu = NalgebraLU::default();
         let (op, rtol, atol, soln) = get_square_problem::<MCpu>();
         let p = NalgebraVec::zeros(0, *op.context());
         let op = ParameterisedOp::new(&op, &p);

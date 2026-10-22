@@ -27,7 +27,6 @@ pub struct BdfConfig<T> {
     pub minimum_timestep_growth: T,
     pub maximum_timestep_shrink: T,
     pub minimum_timestep_shrink: T,
-    pub maximum_newton_iterations: usize,
 }
 
 impl<T: Scalar> OdeSolverConfig<T> for BdfConfig<T> {
@@ -68,7 +67,6 @@ impl<T: Scalar> BdfConfig<T> {
             minimum_timestep_shrink: ode_options
                 .min_timestep_shrink
                 .unwrap_or_else(|| T::from_f64(0.5).unwrap()),
-            maximum_newton_iterations: ode_options.max_nonlinear_solver_iterations,
         }
     }
 }
@@ -81,7 +79,6 @@ pub struct SdirkConfig<T> {
     pub minimum_timestep_growth: T,
     pub minimum_timestep_shrink: T,
     pub maximum_timestep_shrink: T,
-    pub maximum_newton_iterations: usize,
     pub maximum_newton_fails: usize,
 }
 
@@ -102,7 +99,6 @@ impl<T: Scalar> SdirkConfig<T> {
             minimum_timestep_shrink: ode_options
                 .min_timestep_shrink
                 .unwrap_or_else(|| T::from_f64(0.5).unwrap()),
-            maximum_newton_iterations: ode_options.max_nonlinear_solver_iterations,
             maximum_newton_fails: ode_options.max_nonlinear_solver_failures,
         }
     }

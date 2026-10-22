@@ -160,7 +160,9 @@ pub(crate) trait Solve {
         update_jacobian_after_steps: usize,
         update_rhs_jacobian_after_steps: usize,
         threshold_to_update_jacobian: f64,
-        threshold_to_update_rhs_jacobian: f64
+        threshold_to_update_rhs_jacobian: f64,
+        derivative_solve_tolerance: f64,
+        derivative_solve_max_iter: usize
     }
 }
 // Public factory method for generating an instance based on matrix type
@@ -699,7 +701,9 @@ where
         update_jacobian_after_steps: usize,
         update_rhs_jacobian_after_steps: usize,
         threshold_to_update_jacobian: f64,
-        threshold_to_update_rhs_jacobian: f64
+        threshold_to_update_rhs_jacobian: f64,
+        derivative_solve_tolerance: f64,
+        derivative_solve_max_iter: usize
     }
 
     fn y0(&mut self, params: &[f64]) -> Result<HostArray, DiffsolRtError> {
