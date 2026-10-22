@@ -83,6 +83,7 @@ fn configure_serialized_ode(ode: &OdeWrapper, matrix_type: MatrixType) {
     let options = ode.get_options();
     options.set_max_nonlinear_solver_iterations(23).unwrap();
     options.set_max_error_test_failures(29).unwrap();
+    options.set_max_nonlinear_solver_failures(7).unwrap();
     options.set_update_jacobian_after_steps(31).unwrap();
     options.set_update_rhs_jacobian_after_steps(37).unwrap();
     options.set_threshold_to_update_jacobian(1e-3).unwrap();
@@ -204,6 +205,7 @@ fn assert_serialization_roundtrip(
     let options = decoded.get_options();
     assert_eq!(options.get_max_nonlinear_solver_iterations().unwrap(), 23);
     assert_eq!(options.get_max_error_test_failures().unwrap(), 29);
+    assert_eq!(options.get_max_nonlinear_solver_failures().unwrap(), 7);
     assert_eq!(options.get_update_jacobian_after_steps().unwrap(), 31);
     assert_eq!(options.get_update_rhs_jacobian_after_steps().unwrap(), 37);
     assert_close(
