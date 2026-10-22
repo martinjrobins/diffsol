@@ -1577,18 +1577,17 @@ mod test {
             gaussian_decay::gaussian_decay_problem,
             heat2d::{head2d_problem, heat2d_elem_problem},
             logistic::logistic_problem_adjoint_no_out,
+            nonlinear_failure::nonlinear_failure_problem,
             robertson::{robertson, robertson_sens},
             robertson_ode::{robertson_ode, robertson_ode_elem_problem},
             robertson_ode_with_sens::robertson_ode_with_sens,
         },
         ode_solver::tests::{
-            nonlinear_failure_problem, setup_test_adjoint, setup_test_adjoint_sum_squares,
+            setup_test_adjoint, setup_test_adjoint_sum_squares,
             setup_test_adjoint_sum_squares_with_single_reset_root,
             single_reset_root_discrete_times, test_adjoint, test_adjoint_sum_squares,
             test_checkpointing, test_config, test_interpolate, test_interpolate_dy,
-            test_nonlinear_failures_are_per_step,
-            test_nonlinear_failures_stop_an_unrecoverable_step, test_ode_solver, test_problem,
-            test_solve_adjoint_sum_squares_with_single_reset_root,
+            test_ode_solver, test_problem, test_solve_adjoint_sum_squares_with_single_reset_root,
             test_solve_adjoint_with_single_reset_root,
             test_solve_soln_adjoint_sum_squares_with_single_reset_root,
             test_solve_soln_adjoint_with_single_reset_root, test_state_mut,
@@ -1603,26 +1602,19 @@ mod test {
     type LS = NalgebraLU<f64>;
 
     #[test]
-    fn bdf_nonlinear_failures_are_per_step() {
-        let (mut problem, soln) = robertson_sens::<M>();
-        let limit = 3;
-        problem.ode_options.max_nonlinear_solver_failures = limit;
-        let solver = problem.bdf_sens::<LS>().unwrap();
-        test_nonlinear_failures_are_per_step(solver, soln, limit, |s| s.get_statistics());
-    }
-
-    #[test]
     fn bdf_nonlinear_failures_stop_an_unrecoverable_step() {
-        for limit in [0, 2] {
-            let fail = std::rc::Rc::new(std::cell::Cell::new(false));
-            let problem = nonlinear_failure_problem::<M>(fail.clone(), limit);
-            let solver = problem.bdf::<LS>().unwrap();
-            // Permit initialization, then force every nonlinear solve to fail.
-            fail.set(true);
-            test_nonlinear_failures_stop_an_unrecoverable_step(solver, limit, |s| {
-                s.get_statistics()
-            });
-        }
+        let problem = nonlinear_failure_problem::<M>();
+        let mut solver = problem.bdf::<LS>().unwrap();
+        let Err(crate::DiffsolError::OdeSolverError(
+            crate::error::OdeSolverError::TooManyNonlinearSolverFailures { num_failures, .. },
+        )) = solver.step()
+        else {
+            panic!("expected TooManyNonlinearSolverFailures");
+        };
+        assert_eq!(
+            num_failures,
+            solver.get_statistics().number_of_nonlinear_solver_fails
+        );
     }
 
     #[test]

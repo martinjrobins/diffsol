@@ -7,6 +7,7 @@ pub mod heat1d;
 pub mod heat2d;
 pub mod logistic;
 pub mod nonlinear_algebraic;
+pub mod nonlinear_failure;
 pub mod robertson;
 pub mod robertson_ode;
 pub mod robertson_ode_with_sens;

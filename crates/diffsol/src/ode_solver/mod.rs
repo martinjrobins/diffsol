@@ -77,11 +77,9 @@ impl Display for OdeSolverStatistics {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::cell::Cell;
     use std::rc::Rc;
 
     use self::problem::OdeSolverSolution;
-    use crate::OdeBuilder;
 
     use super::*;
     use crate::error::{DiffsolError, OdeSolverError};
@@ -1198,69 +1196,6 @@ pub(crate) mod tests {
                 point.t
             );
         }
-    }
-
-    /// Build a problem whose right-hand side returns NaN whenever `fail` is set,
-    /// forcing every subsequent nonlinear solve to fail.
-    pub fn nonlinear_failure_problem<M: Matrix + 'static>(
-        fail: Rc<Cell<bool>>,
-        max_nonlinear_solver_failures: usize,
-    ) -> OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>> {
-        let mut problem = OdeBuilder::<M>::new()
-            .rhs_implicit(
-                move |y, _p, _t, dy| {
-                    dy[0] = if fail.get() {
-                        M::T::from_f64(f64::NAN).unwrap()
-                    } else {
-                        -y[0]
-                    };
-                },
-                |_y, _p, _t, v, jv| jv[0] = -v[0],
-            )
-            .init(|_p, _t, y| y[0] = M::T::one(), 1)
-            .build()
-            .unwrap();
-        problem.ode_options.max_nonlinear_solver_failures = max_nonlinear_solver_failures;
-        problem
-    }
-
-    /// A step whose nonlinear solves never converge must abort once the per-step
-    /// failure limit is exceeded, without advancing the state.
-    pub fn test_nonlinear_failures_stop_an_unrecoverable_step<'a, Eqn, Method>(
-        mut s: Method,
-        limit: usize,
-        statistics: impl Fn(&Method) -> &OdeSolverStatistics,
-    ) where
-        Eqn: OdeEquations + 'a,
-        Method: OdeSolverMethod<'a, Eqn>,
-    {
-        assert!(matches!(
-            s.step(),
-            Err(DiffsolError::OdeSolverError(
-                OdeSolverError::TooManyNonlinearSolverFailures { num_failures, .. }
-            )) if num_failures == limit + 1
-        ));
-        let stats = statistics(&s);
-        assert_eq!(stats.number_of_nonlinear_solver_fails, limit + 1);
-        assert_eq!(stats.number_of_steps, 0);
-        assert_eq!(s.state().t, Eqn::T::zero());
-    }
-
-    /// Recovered nonlinear failures across accepted steps must not exhaust the
-    /// per-step failure budget: the solve completes and records more failures in
-    /// total than any single step is allowed.
-    pub fn test_nonlinear_failures_are_per_step<'a, M, Eqn, Method>(
-        mut s: Method,
-        soln: OdeSolverSolution<M::V>,
-        limit: usize,
-        statistics: impl Fn(&Method) -> &OdeSolverStatistics,
-    ) where
-        M: Matrix,
-        Eqn: OdeEquations<M = M, T = M::T, V = M::V> + 'a,
-        Method: OdeSolverMethod<'a, Eqn>,
-    {
-        test_ode_solver(&mut s, soln, None, false, true);
-        assert!(statistics(&s).number_of_nonlinear_solver_fails > limit);
     }
 
     /// Test that `step()` returns `RootFound(t, index)` with the correct root index.

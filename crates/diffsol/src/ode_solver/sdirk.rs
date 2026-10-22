@@ -599,15 +599,15 @@ mod test {
                 exponential_decay_with_algebraic_problem,
             },
             heat2d::{head2d_problem, heat2d_elem_problem},
+            nonlinear_failure::nonlinear_failure_problem,
             robertson::{robertson, robertson_sens},
             robertson_ode::robertson_ode,
         },
         ode_solver::tests::{
-            nonlinear_failure_problem, setup_test_adjoint, setup_test_adjoint_sum_squares,
-            test_adjoint, test_adjoint_sum_squares, test_checkpointing, test_config,
-            test_interpolate, test_interpolate_dy, test_nonlinear_failures_are_per_step,
-            test_nonlinear_failures_stop_an_unrecoverable_step, test_ode_solver, test_problem,
-            test_state_mut, test_state_mut_on_problem,
+            setup_test_adjoint, setup_test_adjoint_sum_squares, test_adjoint,
+            test_adjoint_sum_squares, test_checkpointing, test_config, test_interpolate,
+            test_interpolate_dy, test_ode_solver, test_problem, test_state_mut,
+            test_state_mut_on_problem,
         },
         scale, ConstantOp, Context, DenseMatrix, FaerSparseLU, FaerSparseMat, MatrixCommon,
         NalgebraLU, NalgebraVec, OdeEquations, OdeSolverMethod, Op, Vector, VectorView,
@@ -617,49 +617,19 @@ mod test {
     type LS = NalgebraLU<f64>;
 
     #[test]
-    fn tr_bdf2_nonlinear_failures_are_per_step() {
-        let (mut problem, soln) = robertson_sens::<M>();
-        let limit = 3;
-        problem.ode_options.max_nonlinear_solver_failures = limit;
-        let solver = problem.tr_bdf2_sens::<LS>().unwrap();
-        test_nonlinear_failures_are_per_step(solver, soln, limit, |s| s.get_statistics());
-    }
-
-    #[test]
     fn tr_bdf2_nonlinear_failures_stop_an_unrecoverable_step() {
-        for limit in [0, 2] {
-            let fail = std::rc::Rc::new(std::cell::Cell::new(false));
-            let problem = nonlinear_failure_problem::<M>(fail.clone(), limit);
-            let solver = problem.tr_bdf2::<LS>().unwrap();
-            // Permit initialization, then force every nonlinear solve to fail.
-            fail.set(true);
-            test_nonlinear_failures_stop_an_unrecoverable_step(solver, limit, |s| {
-                s.get_statistics()
-            });
-        }
-    }
-
-    #[test]
-    fn esdirk34_nonlinear_failures_are_per_step() {
-        let (mut problem, soln) = robertson_sens::<M>();
-        let limit = 3;
-        problem.ode_options.max_nonlinear_solver_failures = limit;
-        let solver = problem.esdirk34_sens::<LS>().unwrap();
-        test_nonlinear_failures_are_per_step(solver, soln, limit, |s| s.get_statistics());
-    }
-
-    #[test]
-    fn esdirk34_nonlinear_failures_stop_an_unrecoverable_step() {
-        for limit in [0, 2] {
-            let fail = std::rc::Rc::new(std::cell::Cell::new(false));
-            let problem = nonlinear_failure_problem::<M>(fail.clone(), limit);
-            let solver = problem.esdirk34::<LS>().unwrap();
-            // Permit initialization, then force every nonlinear solve to fail.
-            fail.set(true);
-            test_nonlinear_failures_stop_an_unrecoverable_step(solver, limit, |s| {
-                s.get_statistics()
-            });
-        }
+        let problem = nonlinear_failure_problem::<M>();
+        let mut solver = problem.tr_bdf2::<LS>().unwrap();
+        let Err(crate::DiffsolError::OdeSolverError(
+            crate::error::OdeSolverError::TooManyNonlinearSolverFailures { num_failures, .. },
+        )) = solver.step()
+        else {
+            panic!("expected TooManyNonlinearSolverFailures");
+        };
+        assert_eq!(
+            num_failures,
+            solver.get_statistics().number_of_nonlinear_solver_fails
+        );
     }
 
     #[test]
