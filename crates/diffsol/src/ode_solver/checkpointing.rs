@@ -468,7 +468,12 @@ mod tests {
             checkpointer
                 .interpolate(Some(&mut solver), point.t, &mut y)
                 .unwrap();
-            y.assert_eq_norm(&point.state, &problem.atol, problem.rtol, 10.0);
+            y.assert_eq_norm(
+                &point.state,
+                &crate::ode_solver::tests::state_tolerances(&problem).1,
+                crate::ode_solver::tests::state_tolerances(&problem).0,
+                10.0,
+            );
         }
     }
 

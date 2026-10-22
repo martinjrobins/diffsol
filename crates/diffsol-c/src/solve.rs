@@ -558,7 +558,9 @@ where
     }
 
     fn set_atol(&mut self, atol: f64) {
-        self.problem.atol.fill(M::T::from_f64(atol).unwrap());
+        let mut state_atol = self.problem.atol.clone();
+        state_atol.fill(M::T::from_f64(atol).unwrap());
+        self.problem.set_state_atol(state_atol);
     }
 
     fn atol(&self) -> f64 {
@@ -570,7 +572,7 @@ where
     }
 
     fn set_rtol(&mut self, rtol: f64) {
-        self.problem.rtol = M::T::from_f64(rtol).unwrap();
+        self.problem.set_state_rtol(M::T::from_f64(rtol).unwrap());
     }
 
     fn rtol(&self) -> f64 {

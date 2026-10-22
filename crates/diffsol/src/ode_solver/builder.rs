@@ -33,6 +33,7 @@ pub struct OdeBuilder<
     h0: M::T,
     rtol: M::T,
     atol: Vec<M::T>,
+    use_error_control: bool,
     sens_atol: Option<Vec<M::T>>,
     param_scales: Option<Vec<M::T>>,
     sens_rtol: Option<M::T>,
@@ -124,6 +125,7 @@ where
             h0: M::T::one(),
             rtol: default_rtol,
             atol: default_atol.clone(),
+            use_error_control: true,
             p: vec![],
             use_coloring: false,
             integrate_out: false,
@@ -168,6 +170,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -219,6 +222,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -274,6 +278,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -336,6 +341,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -400,6 +406,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -446,6 +453,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -486,6 +494,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -535,6 +544,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -585,6 +595,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -628,6 +639,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -675,6 +687,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -728,6 +741,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -776,6 +790,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -824,6 +839,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -881,6 +897,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -942,6 +959,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -988,6 +1006,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -1035,6 +1054,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -1088,6 +1108,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -1142,6 +1163,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -1200,6 +1222,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -1248,6 +1271,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -1302,6 +1326,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -1361,6 +1386,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -1424,6 +1450,7 @@ where
             h0: self.h0,
             rtol: self.rtol,
             atol: self.atol,
+            use_error_control: self.use_error_control,
             sens_atol: self.sens_atol,
             param_scales: self.param_scales,
             sens_rtol: self.sens_rtol,
@@ -1589,13 +1616,24 @@ where
         self
     }
 
+    /// Set the maximum order for the solver.
+    ///
+    /// The requested order is clamped to the supported range 1–5. The default is 5.
+    pub fn max_order(mut self, max_order: usize) -> Self {
+        self.ode_options.max_order = max_order.clamp(1, 5);
+        self
+    }
+
     /// Set the relative tolerance for the ODE solver. The state variables will be controlled to this relative tolerance.
+    /// State error control remains enabled, and the absolute tolerance keeps its current value.
     pub fn rtol(mut self, rtol: f64) -> Self {
         self.rtol = M::T::from_f64(rtol).unwrap();
+        self.use_error_control = true;
         self
     }
 
     /// Set the absolute tolerance for the ODE solver. The state variables will be controlled to this absolute tolerance. Can be a single value (used for all states) or a vector (one per state).
+    /// State error control remains enabled, and the relative tolerance keeps its current value.
     pub fn atol<V>(mut self, atol: V) -> Self
     where
         V: IntoIterator<Item = f64>,
@@ -1604,6 +1642,20 @@ where
             .into_iter()
             .map(|x| M::T::from_f64(x).unwrap())
             .collect();
+        self.use_error_control = true;
+        self
+    }
+
+    /// Turn off state error control and use fixed steps after a successful solve.
+    ///
+    /// Successful steps are accepted without calculating an error or adjusting the step size.
+    /// Output and sensitivity error contributions are also skipped.
+    ///  A failed nonlinear solve is retried once at the same step size; if it fails again, the solver returns an error.
+    /// A step may be shortened to reach a requested stop time. Fixed-step mode then resumes with the
+    /// initial step size; adaptive mode keeps the step size chosen after that step. Calling
+    /// [`rtol`](Self::rtol) or [`atol`](Self::atol) afterward turns error control back on.
+    pub fn disable_state_error_control(mut self) -> Self {
+        self.use_error_control = false;
         self
     }
 
@@ -1742,6 +1794,7 @@ where
 
     fn build_ode_options<T: Scalar>(ode_options: OdeSolverOptions<f64>) -> OdeSolverOptions<T> {
         OdeSolverOptions {
+            max_order: ode_options.max_order,
             max_error_test_failures: ode_options.max_error_test_failures,
             max_nonlinear_solver_iterations: ode_options.max_nonlinear_solver_iterations,
             min_timestep: T::from_f64(ode_options.min_timestep).unwrap(),
@@ -1895,6 +1948,7 @@ where
             eqn,
             self.rtol,
             atol,
+            self.use_error_control,
             self.sens_rtol,
             sens_atol,
             self.out_rtol,
@@ -1992,6 +2046,7 @@ where
             eqn,
             self.rtol,
             atol,
+            self.use_error_control,
             self.sens_rtol,
             sens_atol,
             self.out_rtol,
@@ -2011,6 +2066,41 @@ where
 mod tests {
     use super::OdeBuilder;
     use crate::{Context, VectorView};
+
+    #[test]
+    fn disabled_error_control_keeps_tolerances_for_nonlinear_scaling() {
+        type M = crate::NalgebraMat<f64>;
+        let problem = OdeBuilder::<M>::new()
+            .rtol(2e-5)
+            .atol([3e-7])
+            .disable_state_error_control()
+            .rhs(|x, _p, _t, y| y[0] = -x[0])
+            .init(|_p, _t, y| y[0] = 1.0, 1)
+            .build()
+            .unwrap();
+
+        assert_eq!(problem.rtol, 2e-5);
+        assert_eq!(problem.atol.get_index(0), 3e-7);
+        assert!(!problem.use_error_control);
+        assert!(problem.state_tolerances().is_none());
+    }
+
+    #[test]
+    fn enabled_error_control_uses_state_tolerances() {
+        type M = crate::NalgebraMat<f64>;
+        let problem = OdeBuilder::<M>::new()
+            .rtol(2e-5)
+            .atol([3e-7])
+            .rhs(|x, _p, _t, y| y[0] = -x[0])
+            .init(|_p, _t, y| y[0] = 1.0, 1)
+            .build()
+            .unwrap();
+
+        assert!(problem.use_error_control);
+        let (rtol, atol) = problem.state_tolerances().unwrap();
+        assert_eq!(*rtol, problem.rtol);
+        assert_eq!(atol.get_index(0), problem.atol.get_index(0));
+    }
 
     #[cfg(feature = "autodiff")]
     #[test]

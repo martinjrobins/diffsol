@@ -7,6 +7,8 @@ You can set many configuration options such as:
 - initial step size (`OdeBuilder::h0`)
 - relative tolerance (`OdeBuilder::rtol`)
 - absolute tolerance (`OdeBuilder::atol`)
+- fixed-step operation (`OdeBuilder::disable_state_error_control`)
+- maximum BDF order (`OdeBuilder::max_order`)
 - parameters (`OdeBuilder::p`)
 - equations (`OdeBuilder::rhs`, `OdeBuilder::init`, `OdeBuilder::mass` etc.)
 
@@ -29,3 +31,14 @@ one of the matrix types included with diffsol:
 Each matrix type is parameterised by a scalar type that satisfies the [`Scalar`](https://docs.rs/diffsol/latest/diffsol/trait.Scalar.html) trait,
 each matrix type also has an associated type that defines its corresponding vector type (bounded by the [`Vector`](https://docs.rs/diffsol/latest/diffsol/trait.Vector.html) trait).
 So whenever you create a builder you are also defining what matrix, vector and scalar types to use for the problem that you will create using that builder.
+
+By default, state error control is enabled with relative and absolute tolerances of `1e-6`. To use fixed-step operation, call
+`disable_state_error_control()` on the builder. Successful steps then keep the current step size and skip error estimates for
+the state, outputs, and forward sensitivities. For implicit solvers, a failed nonlinear solve is retried once at the same step size; if it fails again, the solver returns an error. A step may be shortened to land on a requested stop time. Fixed-step mode then resumes with the initial step size (`h0`); adaptive mode does not restore the step size from before the stop-time step.
+
+This differs from `turn_off_output_error_control()` and `turn_off_sensitivities_error_control()`: those methods remove only
+the selected output or sensitivity contribution while state error control remains active. Output or sensitivity values are
+still integrated when their error contribution is turned off.
+
+For BDF, set an upper order with `max_order(order)`. The supported range is 1 through 5, and the default is 5. For example,
+`.max_order(3)` limits BDF to order 3.

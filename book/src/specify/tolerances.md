@@ -13,6 +13,28 @@ So that the relative tolerance `rtol` defines the error tolerance relative to th
 Note that `atol` is a vector since the scales of different state values might vary, but in practice is is common to set all the elements of `atol` to the same value,
 so the builder method [`OdeBuilder::atol`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html#method.atol) will accept a one-element collection, such as `[1e-6]`.
 
+## Fixed-step operation
+
+State error control is enabled by default, with `rtol = 1e-6` and `atol = [1e-6]`. To turn it off, call
+[`OdeBuilder::disable_state_error_control`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html#method.disable_state_error_control).
+After a successful step, the solver skips error estimates and keeps the current step size. In implicit solvers, a failed nonlinear solve is retried once at the same step size; if it fails again, the solver returns an error. Output and sensitivity errors are also skipped while state error control is off.
+Calling `rtol(...)` or `atol(...)` later in the builder chain turns state error control back on; either method keeps the other
+tolerance at its current value.
+
+This disables error control for the step as a whole: state, output, and forward sensitivity error contributions are all skipped.
+By contrast, [`OdeBuilder::turn_off_output_error_control`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html#method.turn_off_output_error_control)
+and [`OdeBuilder::turn_off_sensitivities_error_control`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html#method.turn_off_sensitivities_error_control)
+disable only the selected contribution. State error control stays active, and the corresponding outputs or sensitivities are still integrated.
+
+If a step would pass a requested stop time, the solver shortens that boundary step to land on the stop time. Fixed-step mode
+then resumes with the initial step size (`h0`). Adaptive mode does not restore the step size from before the stop-time step.
+BDF continues to increase its order as history builds, up to its maximum order. The default maximum is 5; set a smaller limit
+with `OdeBuilder::max_order`, for example `.max_order(3)`.
+
+The problem keeps `rtol` and `atol` available for nonlinear solver scaling, even when state error control is off. The
+`use_error_control` setting determines whether those tolerances are used to accept or reject steps. The tolerance fields
+on `OdeSolverSolution` are separate comparison metadata; changing them does not configure a solver.
+
 ## Output error control
 
 When integrating an output function over time, as well as the ODE state, diffsol allows you to set the step size based on the both the error in the states and output integrals.

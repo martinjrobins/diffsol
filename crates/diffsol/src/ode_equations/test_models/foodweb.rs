@@ -1103,6 +1103,7 @@ where
         eqn,
         rtol,
         atol,
+        true,
         None,
         None,
         None,
@@ -1664,6 +1665,7 @@ where
         eqn,
         rtol,
         atol,
+        true,
         None,
         None,
         None,
@@ -1699,22 +1701,25 @@ mod elem_tests {
         type M = NalgebraMat<f64>;
         let (elem, _) = foodweb_elem_problem::<M, NX>(1);
         let (lane, _) = foodweb_problem::<M, NX>();
+        let (rtol, atol) = elem
+            .state_tolerances()
+            .expect("state tolerances must be set for this test");
 
         let y0 = elem.eqn.init().call(0.0);
         y0.assert_eq_st(&lane.eqn.init().call(0.0), 1e-10);
 
         elem.eqn.rhs().call(&y0, 0.0).assert_eq_norm(
             &lane.eqn.rhs().call(&y0, 0.0),
-            &elem.atol,
-            elem.rtol,
+            atol,
+            *rtol,
             1e-5,
         );
 
         let v = NalgebraVec::from_element(NUM_SPECIES * NX * NX, 0.5, *elem.context());
         elem.eqn.rhs().jac_mul(&y0, 0.0, &v).assert_eq_norm(
             &lane.eqn.rhs().jac_mul(&y0, 0.0, &v),
-            &elem.atol,
-            elem.rtol,
+            atol,
+            *rtol,
             1e-5,
         );
 

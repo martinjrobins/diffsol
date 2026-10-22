@@ -77,7 +77,6 @@ where
     sens_out_error: Option<Eqn::V>,
 
     prev_error_norm: Option<Eqn::T>,
-
     /// Work vectors for pulling a cotangent back through a step, keyed by the lane count of the
     /// cotangents.
     vjp_work: HashMap<usize, RkVjpWork<Eqn::V>>,
@@ -86,6 +85,9 @@ where
     /// Column `i` holds the coefficients of stage `i`'s value relative to the end of the step,
     /// for [Self::vjp_stage_value]: see [Self::stage_coeffs_from_end].
     vjp_stage_value_coeffs: TableauMat<Eqn::T>,
+    // Count test-only error norm calls so tests can verify fixed-step paths skip them.
+    #[cfg(test)]
+    error_norm_evaluations: usize,
 }
 
 impl<'a, Eqn, M> Drop for Rk<'a, Eqn, M>
@@ -126,6 +128,8 @@ where
             vjp_work: HashMap::new(),
             vjp_lanes: 0,
             vjp_stage_value_coeffs: self.vjp_stage_value_coeffs,
+            #[cfg(test)]
+            error_norm_evaluations: 0,
         }
     }
 }
@@ -213,6 +217,8 @@ where
             vjp_work: HashMap::new(),
             vjp_lanes: 0,
             vjp_stage_value_coeffs: Self::stage_coeffs_from_end(&tableau),
+            #[cfg(test)]
+            error_norm_evaluations: 0,
         })
     }
 
@@ -807,11 +813,14 @@ where
         &mut self,
         tstop: Eqn::T,
     ) -> Result<Option<OdeSolverStopReason<Eqn::T>>, DiffsolError> {
-        let state = &mut self.state;
+        let state = self.state.as_mut();
         // check if the we are at tstop
         let troundoff =
             Eqn::T::from_f64(100.0).unwrap() * Eqn::T::EPSILON * (abs(state.t) + abs(state.h));
         if abs(state.t - tstop) <= troundoff {
+            if self.problem.state_tolerances().is_none() {
+                state.h = self.problem.h0;
+            }
             return Ok(Some(OdeSolverStopReason::TstopReached));
         } else if (state.h > Eqn::T::zero() && tstop < state.t - troundoff)
             || (state.h < Eqn::T::zero() && tstop > state.t + troundoff)
@@ -840,6 +849,14 @@ where
         augmented_eqn: Option<&mut impl AugmentedOdeEquations<Eqn>>,
         linear_solver: impl FnOnce(&mut Eqn::V) -> Result<(), DiffsolError>,
     ) -> Result<Eqn::T, DiffsolError> {
+        // Track this call in tests to confirm fixed-step mode bypasses error control.
+        #[cfg(test)]
+        {
+            self.error_norm_evaluations += 1;
+        }
+        if self.problem.state_tolerances().is_none() {
+            return Ok(Eqn::T::zero());
+        }
         let s = self.tableau.s();
         let mut error_norm = Eqn::T::zero();
         if let Some(error) = self.error.as_mut() {
@@ -854,9 +871,11 @@ where
             linear_solver(error)?;
 
             // compute error norm
-            let atol = &self.problem.atol;
-            let rtol = self.problem.rtol;
-            let err = error.squared_norm(&self.state.y, atol, rtol);
+            let (rtol, atol) = self
+                .problem
+                .state_tolerances()
+                .expect("state tolerances checked above");
+            let err = error.squared_norm(&self.state.y, atol, *rtol);
             error_norm = error_norm.max(err);
         }
 
@@ -910,6 +929,12 @@ where
             error_norm = error_norm.max(err);
         }
         Ok(error_norm)
+    }
+
+    // Expose the test-only counter so solver tests can assert error control was skipped.
+    #[cfg(test)]
+    pub(crate) fn error_norm_evaluations(&self) -> usize {
+        self.error_norm_evaluations
     }
 
     pub(crate) fn error_test_fail(

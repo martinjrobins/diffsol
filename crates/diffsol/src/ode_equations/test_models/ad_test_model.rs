@@ -302,6 +302,7 @@ pub fn ad_test_problem<M: Matrix>(
         eqn,
         f(rtol),
         atol,
+        true,
         None,
         None,
         None,

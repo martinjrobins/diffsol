@@ -103,6 +103,16 @@ pub(crate) mod tests {
     };
     use num_traits::{FromPrimitive, One, Signed, ToPrimitive, Zero};
 
+    // Get the tolerance pair for tests that require state error control.
+    pub(crate) fn state_tolerances<Eqn: OdeEquations>(
+        problem: &OdeSolverProblem<Eqn>,
+    ) -> (Eqn::T, &Eqn::V) {
+        let (rtol, atol) = problem
+            .state_tolerances()
+            .expect("state tolerances must be set for this test");
+        (*rtol, atol)
+    }
+
     pub fn test_ode_solver<'a, M, Eqn, Method>(
         method: &mut Method,
         solution: OdeSolverSolution<M::V>,
@@ -161,7 +171,11 @@ pub(crate) mod tests {
                     // problem rtol and atol is on the state, so just use solution tolerance here
                     (solution.rtol, &solution.atol)
                 } else {
-                    (method.problem().rtol, &method.problem().atol)
+                    let (rtol, atol) = method
+                        .problem()
+                        .state_tolerances()
+                        .expect("state tolerances must be set for this test");
+                    (*rtol, atol)
                 };
                 let error = soln.clone() - &point.state;
                 let error_norm = error.squared_norm(&point.state, atol, rtol).sqrt();
@@ -832,6 +846,7 @@ pub(crate) mod tests {
             eqn,
             M::T::from_f64(1e-6).unwrap(),
             atol,
+            true,
             None,
             None,
             None,
@@ -955,12 +970,13 @@ pub(crate) mod tests {
         let y_minus = s.interpolate(tmid - eps).unwrap();
         let fd_dy = (y_plus - y_minus) * Scale(M::T::one() / (M::T::from_f64(2.0).unwrap() * eps));
         let dy = s.interpolate_dy(tmid).unwrap();
-        dy.assert_eq_norm(
-            &fd_dy,
-            &s.problem().atol,
-            s.problem().rtol,
-            M::T::from_f64(1e3).unwrap(),
-        );
+        let (rtol, atol) = s
+            .problem()
+            .state_tolerances()
+            .expect("state tolerances must be set for this test");
+        let rtol = *rtol;
+        let atol = atol.clone();
+        dy.assert_eq_norm(&fd_dy, &atol, rtol, M::T::from_f64(1e3).unwrap());
 
         // take a second step and check consistency again
         let t1 = s.state().t;
@@ -974,12 +990,7 @@ pub(crate) mod tests {
         let fd_dy2 =
             (y_plus - y_minus) * Scale(M::T::one() / (M::T::from_f64(2.0).unwrap() * eps2));
         let dy2 = s.interpolate_dy(tmid2).unwrap();
-        dy2.assert_eq_norm(
-            &fd_dy2,
-            &s.problem().atol,
-            s.problem().rtol,
-            M::T::from_f64(1e3).unwrap(),
-        );
+        dy2.assert_eq_norm(&fd_dy2, &atol, rtol, M::T::from_f64(1e3).unwrap());
     }
 
     pub fn test_config<'a, Eqn: OdeEquations + 'a, Method: OdeSolverMethod<'a, Eqn>>(
@@ -1121,6 +1132,12 @@ pub(crate) mod tests {
         solver2.set_state(checkpoint);
 
         // carry on solving with both solvers, they should produce about the same results (probably might diverge a bit, but should always match the solution)
+        let (rtol, atol) = solver1
+            .problem()
+            .state_tolerances()
+            .expect("state tolerances must be set for this test");
+        let rtol = *rtol;
+        let atol = atol.clone();
         for point in soln.solution_points.iter().skip(half_i + 1) {
             // point should be past checkpoint
             if point.t < checkpoint_t {
@@ -1130,8 +1147,7 @@ pub(crate) mod tests {
                 solver1.step().unwrap();
                 solver2.step().unwrap();
                 let time_error = (solver1.state().t - solver2.state().t).abs()
-                    / (solver1.state().t.abs() * solver1.problem().rtol
-                        + solver1.problem().atol.get_index(0));
+                    / (solver1.state().t.abs() * rtol + atol.get_index(0));
                 assert!(
                     time_error < M::T::from_f64(20.0).unwrap(),
                     "time_error: {} at t = {}",
@@ -1140,25 +1156,15 @@ pub(crate) mod tests {
                 );
                 solver1.state().y.assert_eq_norm(
                     solver2.state().y,
-                    &solver1.problem().atol,
-                    solver1.problem().rtol,
+                    &atol,
+                    rtol,
                     M::T::from_f64(20.0).unwrap(),
                 );
             }
             let soln = solver1.interpolate(point.t).unwrap();
-            soln.assert_eq_norm(
-                &point.state,
-                &solver1.problem().atol,
-                solver1.problem().rtol,
-                M::T::from_f64(15.0).unwrap(),
-            );
+            soln.assert_eq_norm(&point.state, &atol, rtol, M::T::from_f64(15.0).unwrap());
             let soln = solver2.interpolate(point.t).unwrap();
-            soln.assert_eq_norm(
-                &point.state,
-                &solver1.problem().atol,
-                solver1.problem().rtol,
-                M::T::from_f64(15.0).unwrap(),
-            );
+            soln.assert_eq_norm(&point.state, &atol, rtol, M::T::from_f64(15.0).unwrap());
         }
     }
 
@@ -1187,9 +1193,11 @@ pub(crate) mod tests {
             }
             let soln = s.interpolate(point.t).unwrap();
             let error = soln.clone() - &point.state;
-            let error_norm = error
-                .squared_norm(&error, &s.problem().atol, s.problem().rtol)
-                .sqrt();
+            let (rtol, atol) = s
+                .problem()
+                .state_tolerances()
+                .expect("state tolerances must be set for this test");
+            let error_norm = error.squared_norm(&error, atol, *rtol).sqrt();
             assert!(
                 error_norm < Eqn::T::from_f64(19.0).unwrap(),
                 "error_norm: {} at t = {}",

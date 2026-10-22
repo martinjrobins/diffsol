@@ -521,35 +521,35 @@ where
                 .start_step_attempt(h, self.s_op.as_mut().map(|s_op| s_op.eqn_mut()));
             for i in start..self.rk.tableau().s() {
                 trace!("SDIRK Stage {}:", i);
-                let failed = if self
-                    .rk
-                    .do_stage_sdirk(
-                        i,
-                        h,
-                        self.op.as_ref(),
-                        &mut self.nonlinear_solver,
-                        &mut self.convergence,
-                    )
-                    .is_err()
-                {
-                    true
-                } else if self.do_stage_sens(i, h).is_err() {
-                    // with the main equations, the sensitivity solve has already updated the
-                    // Newton matrix as for a first failure, and retried: cut the step
-                    if self.op.is_some() {
+                let main_solve_result = self.rk.do_stage_sdirk(
+                    i,
+                    h,
+                    self.op.as_ref(),
+                    &mut self.nonlinear_solver,
+                    &mut self.convergence,
+                );
+                let main_solve_succeeded = main_solve_result.is_ok();
+                let solve_result = main_solve_result.and_then(|()| self.do_stage_sens(i, h));
+                if let Err(solve_error) = solve_result {
+                    // With the main equations, a failed sensitivity solve has already updated the
+                    // Newton matrix and retried once.
+                    if main_solve_succeeded && self.op.is_some() {
                         updated_jacobian = true;
                     }
-                    true
-                } else {
-                    false
-                };
-                if failed {
                     if !updated_jacobian {
                         // newton iteration did not converge, so update jacobian and try again
                         debug!("First convergence failure, updating Jacobian and trying again",);
                         updated_jacobian = true;
                         self.jacobian_updates_at(h, SolverState::FirstConvergenceFail, None);
                     } else {
+                        if self.problem().state_tolerances().is_none() {
+                            self.rk.solve_fail(
+                                h,
+                                self.config.minimum_timestep,
+                                self.config.maximum_newton_fails,
+                            )?;
+                            return Err(solve_error);
+                        }
                         // newton iteration did not converge and jacobian has been updated, so we reduce step size and try again
                         h *= Eqn::T::from_f64(0.3).unwrap();
                         debug!(
@@ -569,6 +569,10 @@ where
                     // try again....
                     continue 'step;
                 }
+            }
+            if self.problem().state_tolerances().is_none() {
+                // A converged solve is enough to accept the step; skip error control and keep h.
+                break 'step (Eqn::T::one(), Eqn::T::zero());
             }
             let error_norm = if self.problem().eqn().mass().is_some() && self.op.is_some() {
                 let linear_solver = |x: &mut Eqn::V| {
@@ -635,7 +639,11 @@ where
         }
 
         self.update_op_step_size(new_h);
-        self.rk.set_prev_error(error_norm);
+        if self.problem().state_tolerances().is_some() {
+            self.rk.set_prev_error(error_norm);
+        } else {
+            self.rk.reset_prev_error();
+        }
         let result = self.rk.step_accepted(h, new_h, true);
         // update the Jacobian for the next step if due, at the new state, then advance the
         // schedule, so that a Jacobian evaluated here is a step old by the next one
@@ -805,7 +813,7 @@ mod test {
             test_state_mut_on_problem,
         },
         scale, ConstantOp, Context, DenseMatrix, FaerSparseLU, FaerSparseMat, MatrixCommon,
-        NalgebraLU, NalgebraVec, OdeEquations, OdeSolverMethod, Op, Vector, VectorView,
+        NalgebraLU, NalgebraVec, OdeBuilder, OdeEquations, OdeSolverMethod, Op, Vector, VectorView,
     };
 
     type M = NalgebraMat<f64>;
@@ -927,8 +935,10 @@ mod test {
     #[test]
     fn test_esdirk34_nalgebra_exponential_decay() {
         let (problem, soln) = exponential_decay_problem::<M>(false);
+        assert!(problem.state_tolerances().is_some());
         let mut s = problem.esdirk34::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
+        assert!(s.rk.error_norm_evaluations() > 0);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 6
         number_of_steps: 18
@@ -997,6 +1007,72 @@ mod test {
         number_of_matrix_evals: 1
         number_of_jac_adj_muls: 0
         "###);
+    }
+
+    #[test]
+    fn sdirk_without_state_tolerances_keeps_step_size_and_skips_error_norm() {
+        let problem = OdeBuilder::<M>::new()
+            .h0(0.1)
+            .disable_state_error_control()
+            .rhs_implicit(
+                |y, _p, _t, dy| dy[0] = -y[0],
+                |_y, _p, _t, v, jv| jv[0] = -v[0],
+            )
+            .init(|_p, _t, y| y[0] = 1.0, 1)
+            .build()
+            .unwrap();
+        let mut solver = problem.esdirk34::<LS>().unwrap();
+        solver.set_stop_time(0.15).unwrap();
+
+        for (expected_time, expected_h) in [(0.1, 0.05), (0.15, 0.1), (0.25, 0.1)] {
+            solver.step().unwrap();
+            assert!((solver.state().t - expected_time).abs() < 1e-12);
+            assert!((solver.state().h - expected_h).abs() < 1e-12);
+            assert_eq!(solver.rk.error_norm_evaluations(), 0);
+        }
+
+        assert_eq!(solver.get_statistics().number_of_steps, 3);
+        assert_eq!(solver.get_statistics().number_of_error_test_failures, 0);
+    }
+
+    #[test]
+    fn sdirk_without_state_tolerances_retries_once_without_reducing_step() {
+        let problem = OdeBuilder::<M>::new()
+            .h0(2.0)
+            .rtol(2e-5)
+            .atol([3e-7])
+            .disable_state_error_control()
+            .rhs_implicit(
+                |y, _p, _t, dy| dy[0] = y[0] * y[0],
+                |y, _p, _t, v, jv| jv[0] = 2.0 * y[0] * v[0],
+            )
+            .init(|_p, _t, y| y[0] = 1.0, 1)
+            .build()
+            .unwrap();
+        assert!(!problem.use_error_control);
+        assert_eq!(problem.rtol, 2e-5);
+        assert_eq!(problem.atol.get_index(0), 3e-7);
+        let mut solver = problem.esdirk34::<LS>().unwrap();
+
+        assert!(solver.step().is_err());
+
+        assert_eq!(solver.get_statistics().number_of_steps, 0);
+        assert_eq!(solver.get_statistics().number_of_nonlinear_solver_fails, 2);
+        assert!(
+            solver
+                .get_statistics()
+                .number_of_linear_solver_setups_from_first_convergence_fail
+                > 0
+        );
+        assert_eq!(
+            solver
+                .get_statistics()
+                .number_of_linear_solver_setups_from_second_convergence_fail,
+            0
+        );
+        assert_eq!(solver.get_statistics().number_of_error_test_failures, 0);
+        assert_eq!(solver.state().h, 2.0);
+        assert_eq!(solver.rk.error_norm_evaluations(), 0);
     }
 
     #[test]
@@ -1259,12 +1335,22 @@ mod test {
         let target = 0.6_f64;
         let t_root = -((target / y0.get_index(0)).ln()) / k;
         let expected = y0.clone() * scale(f64::exp(-k * t_root));
-        y.assert_eq_norm(&expected, &problem.atol, problem.rtol, 15.0);
+        y.assert_eq_norm(
+            &expected,
+            &crate::ode_solver::tests::state_tolerances(&problem).1,
+            crate::ode_solver::tests::state_tolerances(&problem).0,
+            15.0,
+        );
 
         let g = s.interpolate_out(t_root).unwrap();
         let integral = (1.0 - f64::exp(-k * t_root)) / k;
         let expected_g = y0 * scale(integral);
-        g.assert_eq_norm(&expected_g, &problem.atol, problem.rtol, 15.0);
+        g.assert_eq_norm(
+            &expected_g,
+            &crate::ode_solver::tests::state_tolerances(&problem).1,
+            crate::ode_solver::tests::state_tolerances(&problem).0,
+            15.0,
+        );
     }
 
     #[test]
@@ -1285,7 +1371,11 @@ mod test {
                 let new_soln = ys.column(ys.ncols() - 1).into_owned();
                 let error = new_soln - &*old_soln;
                 let diff = error
-                    .squared_norm(old_soln, &problem.atol, problem.rtol)
+                    .squared_norm(
+                        old_soln,
+                        &crate::ode_solver::tests::state_tolerances(&problem).1,
+                        crate::ode_solver::tests::state_tolerances(&problem).0,
+                    )
                     .sqrt();
                 assert!(diff > 1.0e-6, "diff: {diff}");
             }

@@ -54,6 +54,9 @@ fn main() {
         .p(vec![1.0, 10.0])
         .rhs(|x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]))
         .init(|_p, _t, y| y.fill(0.1), 1)
+        // Optional: accept successful steps without state error control and limit BDF to order 3.
+        .disable_state_error_control()
+        .max_order(3)
         .build()
         .unwrap();
     // ANCHOR_END: builder_intro

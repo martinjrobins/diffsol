@@ -70,9 +70,12 @@ pub fn logistic_problem_adjoint_no_out<M: Matrix + 'static>() -> (
     let r = M::T::from_f64(r).unwrap();
     let k = M::T::from_f64(k).unwrap();
     let y0 = M::T::from_f64(y0).unwrap();
+    let (rtol, atol) = problem
+        .state_tolerances()
+        .expect("state tolerances must be set for this test");
     let mut soln = OdeSolverSolution {
-        atol: problem.atol.clone(),
-        rtol: problem.rtol,
+        atol: atol.clone(),
+        rtol: *rtol,
         ..Default::default()
     };
     for i in 0..10 {

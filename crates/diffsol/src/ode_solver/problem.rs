@@ -106,6 +106,8 @@ impl<T: Scalar> Default for InitialConditionSolverOptions<T> {
 /// in explicit Runge–Kutta methods. *ACM Transactions on Mathematical Software*,
 /// 17(4), 533–554.
 pub struct OdeSolverOptions<T: Scalar> {
+    /// Maximum solver order (supported range: 1–5, default: 5).
+    pub max_order: usize,
     /// Maximum number of nonlinear solver iterations per solve (default: 10).
     pub max_nonlinear_solver_iterations: usize,
     /// Maximum number of consecutive step rejections per solve before aborting (default: 40).
@@ -148,6 +150,7 @@ pub struct OdeSolverOptions<T: Scalar> {
 impl<T: Scalar> Default for OdeSolverOptions<T> {
     fn default() -> Self {
         Self {
+            max_order: 5,
             max_nonlinear_solver_iterations: 10,
             max_error_test_failures: 40,
             max_nonlinear_solver_failures: 50,
@@ -182,10 +185,12 @@ where
 {
     /// The ODE equations to be solved, which satisfy the `OdeEquations` trait.
     pub eqn: Eqn,
-    /// Relative tolerance for the solver. The state equations are solved to this and the absolute tolerance, given by the norm `sum_i(y_i / (atol_i + rtol * |y0_i|)) < 1`.
+    /// Relative tolerance used for state error control and nonlinear solver scaling.
     pub rtol: Eqn::T,
-    /// Absolute tolerance for the solver. The state equations are solved to this and the relative tolerance, given by the norm `sum_i(y_i / (atol_i + rtol * |y0_i|)) < 1`.
+    /// Absolute tolerance vector used for state error control and nonlinear solver scaling.
     pub atol: Eqn::V,
+    /// Whether state error estimates control step acceptance and step size.
+    pub use_error_control: bool,
     /// Initial time for the ODE solve.
     pub t0: Eqn::T,
     /// Initial step size for the ODE solver.
@@ -534,11 +539,36 @@ where
             && self.out_rtol.is_some()
             && self.out_atol.is_some()
     }
+
+    /// Returns state tolerances when they contribute to step error control.
+    pub fn state_tolerances(&self) -> Option<(&Eqn::T, &Eqn::V)> {
+        self.use_error_control.then_some((&self.rtol, &self.atol))
+    }
+
+    /// Set the state relative tolerance after building the problem.
+    ///
+    /// This enables state error control and also updates the tolerance used for nonlinear solver
+    /// scaling.
+    pub fn set_state_rtol(&mut self, rtol: Eqn::T) {
+        self.rtol = rtol;
+        self.use_error_control = true;
+    }
+
+    /// Set the state absolute tolerance vector after building the problem.
+    ///
+    /// This enables state error control and also updates the tolerance used for nonlinear solver
+    /// scaling.
+    pub fn set_state_atol(&mut self, atol: Eqn::V) {
+        self.atol = atol;
+        self.use_error_control = true;
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         eqn: Eqn,
         rtol: Eqn::T,
         atol: Eqn::V,
+        use_error_control: bool,
         sens_rtol: Option<Eqn::T>,
         sens_atol: Option<Eqn::V>,
         out_rtol: Option<Eqn::T>,
@@ -555,6 +585,7 @@ where
             eqn,
             rtol,
             atol,
+            use_error_control,
             out_atol,
             out_rtol,
             param_atol,
@@ -732,13 +763,13 @@ where
             .as_mut()
             .set_consistent_augmented(self, augmented_eqn, &mut newton_solver)?;
         let h = state.h;
-        let atol = &self.atol;
-        let rtol = self.rtol;
-        state
-            .as_mut()
-            // the heuristic works on the main state and the main tolerances, so it is the main
-            // equations that are evaluated (the augmented rhs writes one channel per batch lane)
-            .set_step_size(h, atol, rtol, &self.eqn, 1);
+        if let Some((rtol, atol)) = self.state_tolerances() {
+            state
+                .as_mut()
+                // the heuristic works on the main state and the main tolerances, so it is the main
+                // equations that are evaluated (the augmented rhs writes one channel per batch lane)
+                .set_step_size(h, atol, *rtol, &self.eqn, 1);
+        }
 
         Ok(state)
     }
@@ -995,12 +1026,12 @@ where
             .as_mut()
             .set_consistent_augmented(self, augmented_eqn, &mut newton_solver)?;
         let h = state.h;
-        let atol = &self.atol;
-        let rtol = self.rtol;
-        state
-            .as_mut()
-            // see the comment in `bdf_state_adjoint_from_state`
-            .set_step_size(h, atol, rtol, &self.eqn, tableau.order());
+        if let Some((rtol, atol)) = self.state_tolerances() {
+            state
+                .as_mut()
+                // see the comment in `bdf_state_adjoint_from_state`
+                .set_step_size(h, atol, *rtol, &self.eqn, tableau.order());
+        }
         Ok(state)
     }
 
@@ -1156,12 +1187,12 @@ where
         }
 
         let h = state.h;
-        let atol = &self.atol;
-        let rtol = self.rtol;
-        state
-            .as_mut()
-            // see the comment in `bdf_state_adjoint_from_state`
-            .set_step_size(h, atol, rtol, &self.eqn, tableau.order());
+        if let Some((rtol, atol)) = self.state_tolerances() {
+            state
+                .as_mut()
+                // see the comment in `bdf_state_adjoint_from_state`
+                .set_step_size(h, atol, *rtol, &self.eqn, tableau.order());
+        }
         Ok(state)
     }
 
@@ -1237,9 +1268,11 @@ pub struct OdeSolverSolution<V: Vector> {
     pub solution_points: Vec<OdeSolverSolutionPoint<V>>,
     /// Optional sensitivity solution points, one vector per parameter
     pub sens_solution_points: Option<Vec<Vec<OdeSolverSolutionPoint<V>>>>,
-    /// Relative tolerance used for the solution
+    /// Relative tolerance metadata for comparing this solution with another result.
+    /// This does not set the tolerances used by an `OdeSolverProblem`.
     pub rtol: V::T,
-    /// Absolute tolerance used for the solution
+    /// Absolute tolerance metadata for comparing this solution with another result.
+    /// This does not set the tolerances used by an `OdeSolverProblem`.
     pub atol: V,
     /// Whether this is a backward-time integration (decreasing time)
     pub negative_time: bool,

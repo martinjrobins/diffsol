@@ -211,6 +211,12 @@ where
             for i in 1..self.rk.tableau().s() {
                 self.rk.do_stage(i, h, self.augmented_eqn.as_mut());
             }
+            if self.rk.problem().state_tolerances().is_none() {
+                // With state tolerances disabled, accept a successfully computed step at the
+                // current size without evaluating any error contributions or the controller.
+                self.rk.reset_prev_error();
+                return self.rk.step_accepted(h, h, false);
+            }
             let error_norm =
                 self.rk
                     .error_norm(h, self.augmented_eqn.as_mut(), |_err: &mut Eqn::V| Ok(()))?;
@@ -342,7 +348,7 @@ mod test {
             test_interpolate_dy, test_ode_solver, test_problem, test_state_mut,
             test_state_mut_on_problem,
         },
-        scale, ConstantOp, Context, DenseMatrix, MatrixCommon, NalgebraLU, NalgebraVec,
+        scale, ConstantOp, Context, DenseMatrix, MatrixCommon, NalgebraLU, NalgebraVec, OdeBuilder,
         OdeEquations, OdeSolverMethod, OdeSolverStopReason, Op, Vector, VectorView,
     };
 
@@ -402,8 +408,10 @@ mod test {
     #[test]
     fn test_tsit45_nalgebra_exponential_decay() {
         let (problem, soln) = exponential_decay_problem::<M>(false);
+        assert!(problem.state_tolerances().is_some());
         let mut s = problem.tsit45().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
+        assert!(s.rk.error_norm_evaluations() > 0);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 0
         number_of_steps: 9
@@ -584,6 +592,39 @@ mod test {
         test_ode_solver(&mut s, soln, None, true, false);
     }
 
+    #[test]
+    fn test_tstop_tsit45_restores_step_size_without_state_tolerances() {
+        let problem = OdeBuilder::<M>::new()
+            .h0(0.1)
+            .disable_state_error_control()
+            .rhs(|y, _p, _t, dy| dy[0] = -y[0])
+            .init(|_p, _t, y| y[0] = 1.0, 1)
+            .build()
+            .unwrap();
+        let mut solver = problem.tsit45().unwrap();
+        solver.set_stop_time(0.15).unwrap();
+
+        assert_eq!(
+            solver.step().unwrap(),
+            OdeSolverStopReason::InternalTimestep
+        );
+        assert_eq!(solver.rk.error_norm_evaluations(), 0);
+        assert!((solver.state().t - 0.1).abs() < 1e-12);
+        assert!((solver.state().h - 0.05).abs() < 1e-12);
+
+        assert_eq!(solver.step().unwrap(), OdeSolverStopReason::TstopReached);
+        assert_eq!(solver.rk.error_norm_evaluations(), 0);
+        assert!((solver.state().t - 0.15).abs() < 1e-12);
+        assert!((solver.state().h - 0.1).abs() < 1e-12);
+
+        solver.step().unwrap();
+        assert_eq!(solver.rk.error_norm_evaluations(), 0);
+        assert!((solver.state().t - 0.25).abs() < 1e-12);
+        assert!((solver.state().h - 0.1).abs() < 1e-12);
+        assert_eq!(solver.get_statistics().number_of_steps, 3);
+        assert_eq!(solver.get_statistics().number_of_error_test_failures, 0);
+    }
+
     #[cfg(feature = "cuda")]
     #[allow(deprecated)]
     #[test]
@@ -607,12 +648,22 @@ mod test {
         let target = 0.6_f64;
         let t_root = -((target / y0.get_index(0)).ln()) / k;
         let expected = y0.clone() * scale(f64::exp(-k * t_root));
-        y.assert_eq_norm(&expected, &problem.atol, problem.rtol, 15.0);
+        y.assert_eq_norm(
+            &expected,
+            &crate::ode_solver::tests::state_tolerances(&problem).1,
+            crate::ode_solver::tests::state_tolerances(&problem).0,
+            15.0,
+        );
 
         let g = s.interpolate_out(t_root).unwrap();
         let integral = (1.0 - f64::exp(-k * t_root)) / k;
         let expected_g = y0 * scale(integral);
-        g.assert_eq_norm(&expected_g, &problem.atol, problem.rtol, 15.0);
+        g.assert_eq_norm(
+            &expected_g,
+            &crate::ode_solver::tests::state_tolerances(&problem).1,
+            crate::ode_solver::tests::state_tolerances(&problem).0,
+            15.0,
+        );
     }
 
     #[test]
@@ -633,7 +684,11 @@ mod test {
                 let new_soln = ys.column(ys.ncols() - 1).into_owned();
                 let error = new_soln - &*old_soln;
                 let diff = error
-                    .squared_norm(old_soln, &problem.atol, problem.rtol)
+                    .squared_norm(
+                        old_soln,
+                        &crate::ode_solver::tests::state_tolerances(&problem).1,
+                        crate::ode_solver::tests::state_tolerances(&problem).0,
+                    )
                     .sqrt();
                 assert!(diff > 1.0e-6, "diff: {diff}");
             }

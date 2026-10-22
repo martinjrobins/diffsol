@@ -1,3 +1,4 @@
+use super::bdf_state::MAX_ORDER;
 use crate::{OdeSolverOptions, Scalar};
 
 pub trait OdeSolverConfig<T> {
@@ -20,6 +21,7 @@ pub struct OdeSolverConfigMut<'a, T> {
 
 #[derive(Debug, Clone)]
 pub struct BdfConfig<T> {
+    pub maximum_order: usize,
     pub minimum_timestep: T,
     pub maximum_error_test_failures: usize,
     pub maximum_newton_fails: usize,
@@ -52,6 +54,7 @@ impl<T: Scalar> OdeSolverConfig<T> for BdfConfig<T> {
 impl<T: Scalar> BdfConfig<T> {
     pub fn new(ode_options: &OdeSolverOptions<T>) -> Self {
         Self {
+            maximum_order: ode_options.max_order.clamp(1, MAX_ORDER as usize),
             minimum_timestep: ode_options.min_timestep,
             maximum_error_test_failures: ode_options.max_error_test_failures,
             maximum_newton_fails: ode_options.max_nonlinear_solver_failures,

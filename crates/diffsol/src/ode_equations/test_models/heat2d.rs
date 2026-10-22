@@ -686,6 +686,7 @@ pub fn heat2d_elem_problem<M: Matrix + 'static, const MGRID: usize>(
         eqn,
         rtol,
         atol,
+        true,
         None,
         None,
         None,

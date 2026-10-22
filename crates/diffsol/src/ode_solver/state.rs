@@ -146,14 +146,13 @@ impl<V: Vector> StateRefMut<'_, V> {
             self.y.len()
         );
 
-        let rtol = ode_problem.rtol;
-        let atol = &ode_problem.atol;
+        let (rtol, atol) = (&ode_problem.rtol, &ode_problem.atol);
         root_solver.set_problem(&f);
         let mut y_tmp = self.dy.clone();
         y_tmp.copy_from_indices(self.y, &f.algebraic_indices);
         let mut yerr = y_tmp.clone();
         let mut convergence = Convergence::with_tolerance(
-            rtol,
+            *rtol,
             atol,
             ode_problem.ode_options.nonlinear_solver_tolerance,
         );
@@ -969,13 +968,10 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
         Eqn: OdeEquations<T = V::T, V = V, C = V::C>,
     {
         let mut ret = Self::new_without_initialise(ode_problem)?;
-        ret.as_mut().set_step_size(
-            ode_problem.h0,
-            &ode_problem.atol,
-            ode_problem.rtol,
-            &ode_problem.eqn,
-            solver_order,
-        );
+        if let Some((rtol, atol)) = ode_problem.state_tolerances() {
+            ret.as_mut()
+                .set_step_size(ode_problem.h0, atol, *rtol, &ode_problem.eqn, solver_order);
+        }
         Ok(ret)
     }
 
@@ -1004,13 +1000,10 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
             let mut root_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
             ret.as_mut().set_consistent(ode_problem, &mut root_solver)?;
         }
-        ret.as_mut().set_step_size(
-            ode_problem.h0,
-            &ode_problem.atol,
-            ode_problem.rtol,
-            &ode_problem.eqn,
-            solver_order,
-        );
+        if let Some((rtol, atol)) = ode_problem.state_tolerances() {
+            ret.as_mut()
+                .set_step_size(ode_problem.h0, atol, *rtol, &ode_problem.eqn, solver_order);
+        }
         Ok(ret)
     }
 
@@ -1032,13 +1025,10 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
         augmented_eqn
             .rhs()
             .call_inplace(state.s, *state.t, state.ds);
-        ret.as_mut().set_step_size(
-            ode_problem.h0,
-            &ode_problem.atol,
-            ode_problem.rtol,
-            &ode_problem.eqn,
-            solver_order,
-        );
+        if let Some((rtol, atol)) = ode_problem.state_tolerances() {
+            ret.as_mut()
+                .set_step_size(ode_problem.h0, atol, *rtol, &ode_problem.eqn, solver_order);
+        }
         Ok(ret)
     }
 
@@ -1083,13 +1073,10 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
                 &mut root_solver_sens,
             )?;
         }
-        ret.as_mut().set_step_size(
-            ode_problem.h0,
-            &ode_problem.atol,
-            ode_problem.rtol,
-            &ode_problem.eqn,
-            solver_order,
-        );
+        if let Some((rtol, atol)) = ode_problem.state_tolerances() {
+            ret.as_mut()
+                .set_step_size(ode_problem.h0, atol, *rtol, &ode_problem.eqn, solver_order);
+        }
         Ok(ret)
     }
 
@@ -1340,16 +1327,16 @@ mod test {
             let s = S::new_and_consistent::<LS, _>(&problem, 1).unwrap();
             s.as_ref().y.assert_eq_norm(
                 &soln.solution_points[0].state,
-                &problem.atol,
-                problem.rtol,
+                &crate::ode_solver::tests::state_tolerances(&problem).1,
+                crate::ode_solver::tests::state_tolerances(&problem).0,
                 M::T::from_f64(10.).unwrap(),
             );
 
             let s = S::new_with_sensitivities_and_consistent::<LS, _>(&problem, 1).unwrap();
             s.as_ref().y.assert_eq_norm(
                 &soln.solution_points[0].state,
-                &problem.atol,
-                problem.rtol,
+                &crate::ode_solver::tests::state_tolerances(&problem).1,
+                crate::ode_solver::tests::state_tolerances(&problem).0,
                 M::T::from_f64(10.).unwrap(),
             );
             let sens_soln = soln.sens_solution_points.as_ref().unwrap();
@@ -1359,8 +1346,8 @@ mod test {
                 crate::ode_equations::augmented_channel(s.as_ref().s, nchannels, i, &mut s_i);
                 s_i.assert_eq_norm(
                     &ssoln[0].state,
-                    &problem.atol,
-                    problem.rtol,
+                    &crate::ode_solver::tests::state_tolerances(&problem).1,
+                    crate::ode_solver::tests::state_tolerances(&problem).0,
                     M::T::from_f64(10.).unwrap(),
                 );
             }
@@ -1403,12 +1390,18 @@ mod test {
 
             let s = S::new_and_consistent::<LS, _>(&problem, 1).unwrap();
             let tol = M::T::from_f64(10.).unwrap();
-            s.as_ref()
-                .y
-                .assert_eq_norm(&y_expect, &problem.atol, problem.rtol, tol);
-            s.as_ref()
-                .dy
-                .assert_eq_norm(&dy_expect, &problem.atol, problem.rtol, tol);
+            s.as_ref().y.assert_eq_norm(
+                &y_expect,
+                &crate::ode_solver::tests::state_tolerances(&problem).1,
+                crate::ode_solver::tests::state_tolerances(&problem).0,
+                tol,
+            );
+            s.as_ref().dy.assert_eq_norm(
+                &dy_expect,
+                &crate::ode_solver::tests::state_tolerances(&problem).1,
+                crate::ode_solver::tests::state_tolerances(&problem).0,
+                tol,
+            );
         }
     }
 
@@ -1449,12 +1442,18 @@ mod test {
             .unwrap();
 
         let tol = M::T::from_f64(10.).unwrap();
-        s.as_ref()
-            .y
-            .assert_eq_norm(&from([2.0, 1.0]), &problem.atol, problem.rtol, tol);
-        s.as_ref()
-            .dy
-            .assert_eq_norm(&from([-1.0, 0.0]), &problem.atol, problem.rtol, tol);
+        s.as_ref().y.assert_eq_norm(
+            &from([2.0, 1.0]),
+            &crate::ode_solver::tests::state_tolerances(&problem).1,
+            crate::ode_solver::tests::state_tolerances(&problem).0,
+            tol,
+        );
+        s.as_ref().dy.assert_eq_norm(
+            &from([-1.0, 0.0]),
+            &crate::ode_solver::tests::state_tolerances(&problem).1,
+            crate::ode_solver::tests::state_tolerances(&problem).0,
+            tol,
+        );
     }
 
     #[test]
@@ -1488,12 +1487,18 @@ mod test {
 
         let s = S::new_and_consistent::<LS, _>(&problem, 1).unwrap();
         let tol = M::T::from_f64(10.).unwrap();
-        s.as_ref()
-            .y
-            .assert_eq_norm(&from([1.0, 1.0]), &problem.atol, problem.rtol, tol);
-        s.as_ref()
-            .dy
-            .assert_eq_norm(&from([-1.0, 0.0]), &problem.atol, problem.rtol, tol);
+        s.as_ref().y.assert_eq_norm(
+            &from([1.0, 1.0]),
+            &crate::ode_solver::tests::state_tolerances(&problem).1,
+            crate::ode_solver::tests::state_tolerances(&problem).0,
+            tol,
+        );
+        s.as_ref().dy.assert_eq_norm(
+            &from([-1.0, 0.0]),
+            &crate::ode_solver::tests::state_tolerances(&problem).1,
+            crate::ode_solver::tests::state_tolerances(&problem).0,
+            tol,
+        );
     }
 
     #[test]
@@ -1505,9 +1510,13 @@ mod test {
         problem.h0 = -problem.h0.abs();
 
         let mut state = BdfState::<V>::new_without_initialise(&problem).unwrap();
-        state
-            .as_mut()
-            .set_step_size(problem.h0, &problem.atol, problem.rtol, &problem.eqn, 1);
+        state.as_mut().set_step_size(
+            problem.h0,
+            crate::ode_solver::tests::state_tolerances(&problem).1,
+            crate::ode_solver::tests::state_tolerances(&problem).0,
+            &problem.eqn,
+            1,
+        );
 
         assert!(state.as_ref().h < 0.0);
     }
@@ -1524,9 +1533,13 @@ mod test {
             .unwrap();
         let mut state = BdfState::<V>::new_without_initialise(&problem).unwrap();
 
-        state
-            .as_mut()
-            .set_step_size(problem.h0, &problem.atol, problem.rtol, &problem.eqn, 1);
+        state.as_mut().set_step_size(
+            problem.h0,
+            crate::ode_solver::tests::state_tolerances(&problem).1,
+            crate::ode_solver::tests::state_tolerances(&problem).0,
+            &problem.eqn,
+            1,
+        );
 
         assert!((state.as_ref().h - 1e-6).abs() < 1e-12);
     }
