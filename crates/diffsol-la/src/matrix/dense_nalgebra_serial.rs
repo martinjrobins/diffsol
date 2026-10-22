@@ -488,6 +488,9 @@ impl<T: NalgebraScalar> Matrix for NalgebraMat<T> {
     }
 }
 impl<T: NalgebraScalar> DenseMatrix for NalgebraMat<T> {
+    fn fill(&mut self, value: T) {
+        self.data.fill(value);
+    }
     fn resize_cols(&mut self, nc: usize) {
         let old = self.ncols();
         if old == nc {

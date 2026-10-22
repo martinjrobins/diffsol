@@ -142,6 +142,15 @@
 //! using the [OdeBuilder::sens_atol] and [OdeBuilder::sens_rtol] methods. Use
 //! [OdeBuilder::param_scales] to set an absolute tolerance scale for each parameter.
 //!
+//! For [Bdf] and [Sdirk] the sensitivities are solved to the problem's
+//! `derivative_solve_tolerance` (see [OdeSolverOptions]): make it small for gradients that agree
+//! with finite differences of the solver. [ExplicitRk] needs no solve, so its sensitivities are
+//! exact. Left out of error control, the sensitivities do not change the steps, unless a
+//! sensitivity solve fails: it is then retried after a Jacobian update, and if that fails too the
+//! step attempt is retried with a smaller step size. For the reverse mode of the
+//! same derivative ('discretise-then-optimise'), see [StepVjp]. For a solution to the adjoint
+//! equations ('optimise-then-discretise'), see the Adjoint section below.
+//!
 //! The easiest way to obtain the sensitivity solution is to use the
 //! [SensitivitiesOdeSolverMethod::solve_dense_sensitivities] method, which will solve the forward
 //! problem and the sensitivity equations simultaneously and return the result. If you are manually
@@ -394,7 +403,7 @@ pub mod sundials_sys;
 
 pub use diffsol_la::LinearOp as LaLinearOp;
 pub use linear_solver::LinearSolver;
-pub use linear_solver::{FaerLU, FaerSparseLU, NalgebraLU, NalgebraNativeLU};
+pub use linear_solver::{FaerLU, FaerSparseLU, NalgebraLU};
 
 pub use diffsol_la::{Context, FaerContext, NalgebraContext};
 
@@ -459,6 +468,7 @@ pub use ode_solver::{
     sensitivities::SensitivitiesOdeSolverMethod,
     solution::Solution,
     state::OdeSolverState,
+    step_ad::StepVjp,
     tableau::Tableau,
     tableau::{TableauMat, TableauVec},
 };

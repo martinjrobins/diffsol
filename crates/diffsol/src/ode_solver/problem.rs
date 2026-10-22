@@ -82,6 +82,16 @@ impl<T: Scalar> Default for InitialConditionSolverOptions<T> {
 /// limits the number of Newton steps per stage. `nonlinear_solver_tolerance` is a scaling
 /// factor in the convergence test (smaller values produce a tighter tolerance).
 ///
+/// ## Derivative Solves (BDF and SDIRK)
+///
+/// The forward sensitivities solved alongside the main equations, and the solves of
+/// [crate::StepVjp], are linear solves preconditioned by the Newton matrix, with their own
+/// `derivative_solve_tolerance` and `derivative_solve_max_iter`. Both differentiate the steps the
+/// solver takes, exactly up to that tolerance; see the fields for how to choose it. An adjoint
+/// solve backwards is not one of these: the adjoint equations are what that solver integrates,
+/// so their solves use `nonlinear_solver_tolerance` and `max_nonlinear_solver_iterations`, scaled
+/// to the error control of the adjoint like any Newton solve.
+///
 /// ## Jacobian Updates (Implicit Methods)
 ///
 /// The Jacobian matrix is updated when:
@@ -104,6 +114,12 @@ pub struct OdeSolverOptions<T: Scalar> {
     pub max_nonlinear_solver_failures: usize,
     /// Newton convergence test scaling factor (default: 0.2).
     pub nonlinear_solver_tolerance: T,
+    /// Derivative convergence test scaling factor, used for the forward sensitivities and
+    /// [crate::StepVjp] (default 0.2).
+    pub derivative_solve_tolerance: T,
+    /// Maximum number of iterations per derivative solve, used for the forward sensitivities and
+    /// [crate::StepVjp] (default: 10).
+    pub derivative_solve_max_iter: usize,
     /// Minimum allowed step size (absolute value, default: 1e-13).
     pub min_timestep: T,
     /// Upper bound on step-size growth `h_new/h_old` (default: solver-specific when `None`).
@@ -136,6 +152,8 @@ impl<T: Scalar> Default for OdeSolverOptions<T> {
             max_error_test_failures: 40,
             max_nonlinear_solver_failures: 50,
             nonlinear_solver_tolerance: T::from_f64(0.2).unwrap(),
+            derivative_solve_tolerance: T::from_f64(0.2).unwrap(),
+            derivative_solve_max_iter: 10,
             min_timestep: T::from_f64(1e-13).unwrap(),
             max_timestep_growth: None,
             min_timestep_growth: None,
@@ -908,7 +926,7 @@ where
         DM: DenseMatrix<V = Eqn::V, T = Eqn::T, C = Eqn::C>,
     >(
         &self,
-        state: RkState<Eqn::V>,
+        state: RkState<Eqn::V, DM>,
         tableau: Tableau<Eqn::T>,
     ) -> Result<Sdirk<'_, Eqn, LS, DM>, DiffsolError>
     where
@@ -924,7 +942,7 @@ where
         Aug: AugmentedOdeEquationsImplicit<Eqn>,
     >(
         &self,
-        state: RkState<Eqn::V>,
+        state: RkState<Eqn::V, DM>,
         tableau: Tableau<Eqn::T>,
         aug_eqn: Aug,
     ) -> Result<Sdirk<'_, Eqn, LS, DM, Aug>, DiffsolError>
@@ -951,6 +969,8 @@ where
     {
         let mut augmented_eqn = self.adjoint_equations(checkpointer, solver, nout_override)?;
         let state = self.sdirk_state_adjoint::<LS, _>(tableau, &mut augmented_eqn)?;
+        // the solver's stage differences are allocated with its own matrix type
+        let state = RkState::new_from_common(state.into_common());
         self.sdirk_solver_adjoint_from_state::<LS, DM, _>(tableau, state, augmented_eqn)
     }
 
@@ -992,7 +1012,7 @@ where
     >(
         &'a self,
         tableau: Tableau<Eqn::T>,
-        mut state: RkState<Eqn::V>,
+        mut state: RkState<Eqn::V, DM>,
         mut augmented_eqn: AdjointEquations<'a, Eqn, S>,
     ) -> Result<Sdirk<'a, Eqn, LS, DM, AdjointEquations<'a, Eqn, S>>, DiffsolError>
     where
@@ -1027,7 +1047,7 @@ where
         DM: DenseMatrix<V = Eqn::V, T = Eqn::T, C = Eqn::C>,
     >(
         &self,
-        state: RkState<Eqn::V>,
+        state: RkState<Eqn::V, DM>,
         tableau: Tableau<Eqn::T>,
     ) -> Result<Sdirk<'_, Eqn, LS, DM, SensEquations<'_, Eqn>>, DiffsolError>
     where
@@ -1074,7 +1094,7 @@ where
     /// An explicit RK solver instance configured for this problem
     pub fn explicit_rk_solver<DM: DenseMatrix<V = Eqn::V, T = Eqn::T, C = Eqn::C>>(
         &self,
-        state: RkState<Eqn::V>,
+        state: RkState<Eqn::V, DM>,
         tableau: Tableau<Eqn::T>,
     ) -> Result<ExplicitRk<'_, Eqn, DM>, DiffsolError>
     where
@@ -1088,7 +1108,7 @@ where
         Aug: AugmentedOdeEquations<Eqn>,
     >(
         &self,
-        state: RkState<Eqn::V>,
+        state: RkState<Eqn::V, DM>,
         tableau: Tableau<Eqn::T>,
         aug_eqn: Aug,
     ) -> Result<ExplicitRk<'_, Eqn, DM, Aug>, DiffsolError>
@@ -1114,6 +1134,8 @@ where
     {
         let mut augmented_eqn = self.adjoint_equations(checkpointer, solver, nout_override)?;
         let state = self.explicit_rk_state_adjoint(tableau, &mut augmented_eqn)?;
+        // the solver's stage differences are allocated with its own matrix type
+        let state = RkState::new_from_common(state.into_common());
         self.explicit_rk_solver_adjoint_from_state(tableau, state, augmented_eqn)
     }
 
@@ -1150,7 +1172,7 @@ where
     >(
         &'a self,
         tableau: Tableau<Eqn::T>,
-        state: RkState<Eqn::V>,
+        state: RkState<Eqn::V, DM>,
         augmented_eqn: AdjointEquations<'a, Eqn, S>,
     ) -> Result<ExplicitRk<'a, Eqn, DM, AdjointEquations<'a, Eqn, S>>, DiffsolError>
     where
@@ -1175,7 +1197,7 @@ where
     /// An explicit RK solver instance configured for forward sensitivity analysis
     pub fn explicit_rk_solver_sens<DM: DenseMatrix<V = Eqn::V, T = Eqn::T, C = Eqn::C>>(
         &self,
-        state: RkState<Eqn::V>,
+        state: RkState<Eqn::V, DM>,
         tableau: Tableau<Eqn::T>,
     ) -> Result<ExplicitRk<'_, Eqn, DM, SensEquations<'_, Eqn>>, DiffsolError>
     where

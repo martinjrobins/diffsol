@@ -100,6 +100,10 @@ where
         panic!("checkpoint replay solver config is unavailable")
     }
 
+    fn get_statistics(&self) -> &crate::ode_solver::OdeSolverStatistics {
+        panic!("checkpoint replay solver statistics are unavailable")
+    }
+
     fn jacobian(&self) -> Option<Ref<'_, Eqn::M>> {
         panic!("checkpoint replay solver is unavailable")
     }
