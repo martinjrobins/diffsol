@@ -22,6 +22,7 @@ RUN mkdir -p crates/diffsol/src crates/diffsol/benches crates/diffsol-la/src cra
     && echo '' > crates/diffsol-nl/src/lib.rs \
     && echo 'fn main() {}' > crates/diffsol/benches/ode_solvers_ci.rs \
     && echo 'fn main() {}' > crates/diffsol/benches/ode_solvers.rs \
+    && echo 'fn main() {}' > crates/diffsol/benches/ode_gradients.rs \
     && echo 'fn main() {}' > crates/diffsol/benches/lin_alg_ops.rs \
     && echo 'fn main() {}' > crates/diffsol/benches/ode_solvers_oxide.rs \
     && echo 'fn main() {}' > crates/diffsol/benches/pybamm_dfn.rs

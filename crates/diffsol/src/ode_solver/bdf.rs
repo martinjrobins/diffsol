@@ -142,9 +142,6 @@ pub struct Bdf<
     /// Convergence of the sensitivity/vjp solves alongside the main equations
     s_convergence: Convergence<'a, Eqn::V>,
     vjp_convergence: Convergence<'a, Eqn::V>,
-    /// The `c` of the last [StepVjp::step_vjp] solve, whose preconditioner quality
-    /// `vjp_convergence` has measured: a replay at another `c` must not trust that estimate.
-    vjp_c: Option<Eqn::T>,
     ode_problem: &'a OdeSolverProblem<Eqn>,
     op: Option<BdfCallable<&'a Eqn>>,
     n_equal_steps: usize,
@@ -208,7 +205,6 @@ where
         Self {
             s_convergence,
             vjp_convergence,
-            vjp_c: None,
             nonlinear_solver,
             ode_problem: problem,
             convergence,
@@ -318,13 +314,16 @@ where
         );
         let options = &problem.ode_options;
         convergence.set_max_iter(options.max_nonlinear_solver_iterations);
-        // the derivative solves (the sensitivities alongside the main equations, and step_vjp)
-        // have settings of their own
+
         let mut derivative_convergence = convergence.clone();
         derivative_convergence.set_tolerance(options.derivative_solve_tolerance);
         derivative_convergence.set_max_iter(options.derivative_solve_max_iter);
         let s_convergence = derivative_convergence.clone();
-        let vjp_convergence = derivative_convergence;
+
+        // The first update of a transposed solve in StepVjp::step_vjp often
+        // has an initial transient, so mark this
+        let mut vjp_convergence = derivative_convergence;
+        vjp_convergence.set_transient_updates(1);
 
         let op = if integrate_main_eqn {
             // setup linear solver for first step
@@ -373,7 +372,6 @@ where
             convergence,
             s_convergence,
             vjp_convergence,
-            vjp_c: None,
             s_op: None,
             op,
             ode_problem: problem,
@@ -1763,13 +1761,7 @@ where
         // differentiate with the step's own c, which step_vjp restores afterwards
         let alpha = self.alpha[order];
         self.op.as_mut().unwrap().set_c(h, alpha);
-        // as the forward solve does when its step size changes: the convergence rate measured
-        // at another c says nothing about how well the Newton matrix preconditions this one
         let step_c = self.op.as_ref().unwrap().c;
-        if self.vjp_c != Some(step_c) {
-            self.vjp_convergence.reset_eta_timestep_change();
-            self.vjp_c = Some(step_c);
-        }
         let one = Eqn::T::one();
         let zero = Eqn::T::zero();
 
@@ -1783,18 +1775,24 @@ where
         // corrector's right-hand side d_bar and its solution w
         // update of the history, then the corrector: (M - c J)ᵀ w = d_bar
         c.diff.update_backward_diff_transpose(order, &mut c.y);
+
         // The solve uses the current Newton matrix as a preconditioner.
         // The matrix updates mirror the forward pass, except that the
-        // backwards vjp steps cannot change the step size h.
-        if !self.nonlinear_solver.is_jacobian_set() {
+        // backwards vjp steps cannot change the step size h. Once the rhs Jacobian has been
+        // evaluated at the end of this step, the matrix is the solve's exact one, which no
+        // update can change, so the retries after a failure are skipped.
+        let mut rhs_jacobian_at_end = !self.nonlinear_solver.is_jacobian_set();
+        if rhs_jacobian_at_end {
             self._jacobian_updates_at(step_c, SolverState::Checkpoint, Some((&end.y, end.t)));
         }
-        // start from, and measure errors relative to, d_bar: for small c, w is close to
-        // M^-T d_bar
-        // TODO: this solve takes more iterations than the forward sensitivity solve it is
-        // the transpose of (e.g. 2.8 vs 1.3 on average for an ODE, 3.4 vs 1.3 for a DAE, at
-        // the default derivative_solve_tolerance), and for a DAE ~10% of steps need a retry
-        // after a Jacobian update.
+        // the schedule's update at the end of a forward step, in reverse: at the start of the
+        // step's pull back, update the matrix if due, and advance the schedule
+        rhs_jacobian_at_end |= self
+            .jacobian_update
+            .check_rhs_jacobian_update(step_c, &SolverState::StepSuccess);
+        self._jacobian_updates_at(step_c, SolverState::StepSuccess, Some((&end.y, end.t)));
+        self.jacobian_update.step();
+
         solve_with_jacobian_updates(
             self,
             &[
@@ -1802,18 +1800,22 @@ where
                 SolverState::SecondConvergenceFail,
             ],
             |s| {
-                c.dy.copy_from(&c.y);
                 s.nonlinear_solver.solve_jacobian_transpose_in_place(
                     s.op.as_ref().unwrap(),
                     &end.y,
                     end.t,
                     &c.y,
                     &mut c.dy,
-                    &c.y,
                     &mut s.vjp_convergence,
                 )
             },
-            |s, state| s._jacobian_updates_at(step_c, state, Some((&end.y, end.t))),
+            |s, state| {
+                if rhs_jacobian_at_end {
+                    return false;
+                }
+                rhs_jacobian_at_end = s.jacobian_update.check_rhs_jacobian_update(step_c, &state);
+                s._jacobian_updates_at(step_c, state, Some((&end.y, end.t)))
+            },
         )?;
 
         // the operator's inputs: the history (through psi), the prediction and the parameters;
@@ -1855,9 +1857,6 @@ where
         c.h_init = from_init.then_some(h_ref);
         c.diff_initialised = !from_init;
 
-        // as a forward step ends: update the matrix if due, and advance the Jacobian schedule
-        self._jacobian_updates_at(step_c, SolverState::StepSuccess, Some((&end.y, end.t)));
-        self.jacobian_update.step();
         Ok(())
     }
 }
