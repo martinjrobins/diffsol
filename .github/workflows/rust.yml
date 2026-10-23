@@ -274,7 +274,8 @@ jobs:
 
   cuda-oxide-compile:
     name: "cuda-oxide Compile/Clippy - Ubuntu - nightly-2026-08-28"
-    runs-on: ubuntu-latest
+    # NVIDIA's ubuntu2604 repo (ubuntu-latest) has no cuda-13-1 packages
+    runs-on: ubuntu-24.04
     #  Build-only for now until we get a cuda 13 enabled runner
     timeout-minutes: 75
     env:
