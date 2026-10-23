@@ -125,7 +125,9 @@ pub struct OdeSolverOptions<T: Scalar> {
     /// Maximum number of iterations per derivative solve, used for the forward sensitivities and
     /// [crate::StepVjp] (default: 10).
     pub derivative_solve_max_iter: usize,
-    /// Minimum allowed step size (absolute value, default: 1e-13).
+    /// Minimum allowed step size (absolute value, default: [`Scalar::EPSILON`] for `T`).
+    ///
+    /// Must be greater than or equal to `Scalar::EPSILON` so that each step advances `t`.
     pub min_timestep: T,
     /// Upper bound on step-size growth `h_new/h_old` (default: solver-specific when `None`).
     pub max_timestep_growth: Option<T>,
@@ -159,7 +161,7 @@ impl<T: Scalar> Default for OdeSolverOptions<T> {
             nonlinear_solver_tolerance: T::from_f64(0.2).unwrap(),
             derivative_solve_tolerance: T::from_f64(0.2).unwrap(),
             derivative_solve_max_iter: 10,
-            min_timestep: T::from_f64(1e-13).unwrap(),
+            min_timestep: T::EPSILON,
             max_timestep_growth: None,
             min_timestep_growth: None,
             max_timestep_shrink: None,
@@ -1320,5 +1322,22 @@ impl<V: Vector> Default for OdeSolverSolution<V> {
             atol: V::from_element(1, V::T::from_f64(1e-6).unwrap(), V::C::default()),
             negative_time: false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::OdeSolverOptions;
+
+    #[test]
+    fn min_timestep_default_is_scalar_epsilon() {
+        assert_eq!(
+            OdeSolverOptions::<f64>::default().min_timestep,
+            f64::EPSILON
+        );
+        assert_eq!(
+            OdeSolverOptions::<f32>::default().min_timestep,
+            f32::EPSILON
+        );
     }
 }

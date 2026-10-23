@@ -864,6 +864,21 @@ mod test {
     }
 
     #[test]
+    fn tr_bdf2_test_fast_timescale() {
+        let (mut problem, _) = exponential_decay_problem::<M>(false);
+        let p = problem.eqn.context().vector_from_vec(vec![1e12, 1.0]);
+        problem.eqn_mut().set_params(&p);
+        problem.tr_bdf2::<LS>().unwrap().solve(5e-12).unwrap();
+        problem.ode_options.min_timestep = 1e-13;
+        assert!(matches!(
+            problem.tr_bdf2::<LS>().unwrap().solve(5e-12),
+            Err(crate::DiffsolError::OdeSolverError(
+                crate::error::OdeSolverError::StepSizeTooSmall { .. }
+            ))
+        ));
+    }
+
+    #[test]
     fn sdirk_test_interpolate() {
         test_interpolate(test_problem::<M>(false).tr_bdf2::<LS>().unwrap());
     }
