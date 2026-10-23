@@ -1329,6 +1329,13 @@ where
     }
 
     fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError> {
+        if self.statistics.number_of_steps >= self.config.maximum_number_timesteps {
+            return Err(OdeSolverError::TooManyTimesteps {
+                time: self.state.t.to_f64().unwrap(),
+                num_steps: self.statistics.number_of_steps,
+            }
+            .into());
+        }
         debug!(
             "Taking BDF step at time {} with step size {} and order {}",
             self.state.t, self.state.h, self.state.order
@@ -1997,6 +2004,21 @@ mod test {
 
     type M = NalgebraMat<f64>;
     type LS = NalgebraLU<f64>;
+
+    #[test]
+    fn bdf_replay_timestep_budget() {
+        use crate::{AdjointOdeSolverMethod, OdeSolverConfig};
+
+        let (problem, _) = exponential_decay_problem_adjoint::<M>(true, true);
+        let mut solver = problem.bdf::<LS>().unwrap();
+        let (checkpoints, _, _, _) = solver.solve_with_checkpointing(10.0, Some(2)).unwrap();
+        *solver.config_mut().as_base_mut().maximum_number_timesteps =
+            solver.get_statistics().number_of_steps;
+        let adjoint = problem
+            .bdf_solver_adjoint::<LS, _>(checkpoints, Some(solver), None)
+            .unwrap();
+        adjoint.solve_adjoint_backwards_pass(&[], &[]).unwrap();
+    }
 
     #[test]
     fn bdf_nonlinear_failures_stop_an_unrecoverable_step() {

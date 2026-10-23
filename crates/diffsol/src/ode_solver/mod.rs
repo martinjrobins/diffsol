@@ -78,6 +78,7 @@ impl Display for OdeSolverStatistics {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use std::assert_matches;
     use std::rc::Rc;
 
     use self::problem::OdeSolverSolution;
@@ -980,6 +981,40 @@ pub(crate) mod tests {
             s.problem().rtol,
             M::T::from_f64(1e3).unwrap(),
         );
+    }
+
+    #[test]
+    fn max_number_timesteps() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_problem;
+        use crate::{NalgebraLU, NalgebraMat};
+
+        fn check<'a, Eqn: OdeEquations + 'a, Method: OdeSolverMethod<'a, Eqn>>(mut solver: Method)
+        where
+            Eqn::V: DefaultDenseMatrix,
+        {
+            let result = solver.solve(Eqn::T::from_f64(10.0).unwrap());
+            assert_matches!(
+                result,
+                Err(DiffsolError::OdeSolverError(
+                    OdeSolverError::TooManyTimesteps { num_steps: 2, .. }
+                ))
+            );
+            let time = solver.state().t;
+            let result = solver.step();
+            assert_matches!(
+                result,
+                Err(DiffsolError::OdeSolverError(
+                    OdeSolverError::TooManyTimesteps { num_steps: 2, .. }
+                ))
+            );
+            assert_eq!(solver.state().t, time);
+        }
+
+        let (mut problem, _) = exponential_decay_problem::<NalgebraMat<f64>>(false);
+        problem.ode_options.max_number_timesteps = 2;
+        check(problem.bdf::<NalgebraLU<f64>>().unwrap());
+        check(problem.tr_bdf2::<NalgebraLU<f64>>().unwrap());
+        check(problem.tsit45().unwrap());
     }
 
     pub fn test_config<'a, Eqn: OdeEquations + 'a, Method: OdeSolverMethod<'a, Eqn>>(

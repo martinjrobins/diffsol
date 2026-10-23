@@ -9,8 +9,8 @@ use crate::{
     error::DiffsolError, op::nonlinear_op::NonLinearOpJacobian, AugmentedOdeEquations,
     CheckpointingPath, ConstantOp, ConstantOpSensAdjoint, Context, LinearOp, LinearOpTranspose,
     Matrix, NonLinearOp, NonLinearOpAdjoint, NonLinearOpSensAdjoint, OdeEquations,
-    OdeEquationsAdjoint, OdeEquationsRef, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op,
-    Scalar, Vector,
+    OdeEquationsAdjoint, OdeEquationsRef, OdeSolverConfig, OdeSolverMethod, OdeSolverProblem,
+    OdeSolverState, Op, Scalar, Vector,
 };
 
 pub struct AdjointContext<'a, Eqn, State, Method>
@@ -57,7 +57,13 @@ where
             t0,
             checkpointers,
             active_checkpointer,
-            solver: solver.map(RefCell::new),
+            solver: solver.map(|mut solver| {
+                // Give replay a fresh budget while preserving cumulative statistics.
+                let steps = solver.get_statistics().number_of_steps;
+                let limit = solver.config_mut().as_base_mut().maximum_number_timesteps;
+                *limit = limit.saturating_add(steps);
+                RefCell::new(solver)
+            }),
             x,
             max_index,
             aug_ctx,

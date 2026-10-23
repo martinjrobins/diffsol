@@ -106,6 +106,11 @@ impl<T: Scalar> Default for InitialConditionSolverOptions<T> {
 /// in explicit Runge–Kutta methods. *ACM Transactions on Mathematical Software*,
 /// 17(4), 533–554.
 pub struct OdeSolverOptions<T: Scalar> {
+    /// Maximum number of completed timesteps (default: 5000).
+    ///
+    /// `step()` fails at the limit; successive `solve*` calls share the budget.
+    /// Zero prevents stepping. Adjoint checkpoint replay receives a fresh budget.
+    pub max_number_timesteps: usize,
     /// Maximum number of nonlinear solver iterations per solve (default: 10).
     pub max_nonlinear_solver_iterations: usize,
     /// Maximum number of consecutive step rejections per step before aborting (default: 40).
@@ -155,6 +160,7 @@ pub struct OdeSolverOptions<T: Scalar> {
 impl<T: Scalar> Default for OdeSolverOptions<T> {
     fn default() -> Self {
         Self {
+            max_number_timesteps: 5000,
             max_nonlinear_solver_iterations: 10,
             max_error_test_failures: 40,
             max_nonlinear_solver_failures: 10,

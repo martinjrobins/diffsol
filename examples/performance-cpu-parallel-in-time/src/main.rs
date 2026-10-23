@@ -155,7 +155,9 @@ fn deer() -> Vec<Vec<Vector2<f64>>> {
 
 /// Sequential reference solution at the chunk boundaries.
 fn sequential(t_boundaries: &[f64]) -> Vec<Vector2<f64>> {
-    let problem = problem(RTOL, ATOL);
+    let mut problem = problem(RTOL, ATOL);
+    // the full-horizon solve takes ~100k steps
+    problem.ode_options.max_number_timesteps = 200_000;
     let (ys, _) = problem.tsit45().unwrap().solve_dense(t_boundaries).unwrap();
     (0..t_boundaries.len())
         .map(|k| Vector2::new(ys.column(k)[0], ys.column(k)[1]))
