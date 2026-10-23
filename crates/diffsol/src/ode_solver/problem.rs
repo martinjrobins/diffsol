@@ -73,7 +73,7 @@ impl<T: Scalar> Default for InitialConditionSolverOptions<T> {
 /// The solver aborts with an error when:
 /// - The step size falls below `min_timestep`.
 /// - The number of consecutive error test failures exceeds `max_error_test_failures`.
-/// - The number of nonlinear solver failures exceeds `max_nonlinear_solver_failures`
+/// - The number of nonlinear solver failures within a step exceeds `max_nonlinear_solver_failures`
 ///   (implicit methods only).
 ///
 /// ## Nonlinear Solver (Implicit Methods)
@@ -108,9 +108,14 @@ impl<T: Scalar> Default for InitialConditionSolverOptions<T> {
 pub struct OdeSolverOptions<T: Scalar> {
     /// Maximum number of nonlinear solver iterations per solve (default: 10).
     pub max_nonlinear_solver_iterations: usize,
-    /// Maximum number of consecutive step rejections per solve before aborting (default: 40).
+    /// Maximum number of consecutive step rejections per step before aborting (default: 40).
     pub max_error_test_failures: usize,
-    /// Maximum number of nonlinear solver convergence failures per solve before aborting (default: 50).
+    /// Maximum number of nonlinear solver convergence failures allowed per step (default: 10).
+    ///
+    /// Failures are counted across all retries and stages within one call to `step()`.
+    /// Exceeding this limit aborts that step; zero aborts on the first failure.
+    /// The cumulative failure count in [`OdeSolverStatistics`](crate::ode_solver::OdeSolverStatistics)
+    /// is not reset.
     pub max_nonlinear_solver_failures: usize,
     /// Newton convergence test scaling factor (default: 0.2).
     pub nonlinear_solver_tolerance: T,
@@ -152,7 +157,7 @@ impl<T: Scalar> Default for OdeSolverOptions<T> {
         Self {
             max_nonlinear_solver_iterations: 10,
             max_error_test_failures: 40,
-            max_nonlinear_solver_failures: 50,
+            max_nonlinear_solver_failures: 10,
             nonlinear_solver_tolerance: T::from_f64(0.2).unwrap(),
             derivative_solve_tolerance: T::from_f64(0.2).unwrap(),
             derivative_solve_max_iter: 10,

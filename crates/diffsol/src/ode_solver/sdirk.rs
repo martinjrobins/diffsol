@@ -528,6 +528,7 @@ where
 
         // loop until step is accepted
         let mut nattempts = 0;
+        let mut nonlinear_failures = 0;
         let mut updated_jacobian = false;
         let start = if self.rk.skip_first_stage() { 1 } else { 0 };
         let (factor, error_norm) = 'step: loop {
@@ -576,8 +577,10 @@ where
                         self.jacobian_updates_at(h, SolverState::SecondConvergenceFail, None);
                     }
                     self.rk.reset_prev_error();
+                    nonlinear_failures += 1;
                     self.rk.solve_fail(
                         h,
+                        nonlinear_failures,
                         self.config.minimum_timestep,
                         self.config.maximum_newton_fails,
                     )?;
@@ -800,6 +803,8 @@ where
 
 #[cfg(test)]
 mod test {
+    use std::assert_matches;
+
     #[cfg(feature = "cuda")]
     #[allow(deprecated)]
     use crate::ode_equations::test_models::{
@@ -819,6 +824,7 @@ mod test {
                 exponential_decay_with_algebraic_problem,
             },
             heat2d::{head2d_problem, heat2d_elem_problem},
+            nonlinear_failure::nonlinear_failure_problem,
             robertson::{robertson, robertson_sens},
             robertson_ode::robertson_ode,
         },
@@ -834,6 +840,19 @@ mod test {
 
     type M = NalgebraMat<f64>;
     type LS = NalgebraLU<f64>;
+
+    #[test]
+    fn tr_bdf2_nonlinear_failures_stop_an_unrecoverable_step() {
+        let problem = nonlinear_failure_problem::<M>();
+        let mut solver = problem.tr_bdf2::<LS>().unwrap();
+        let result = solver.step();
+        assert_matches!(
+            result,
+            Err(crate::DiffsolError::OdeSolverError(
+                crate::error::OdeSolverError::TooManyNonlinearSolverFailures { num_failures, .. },
+            )) if num_failures == solver.get_statistics().number_of_nonlinear_solver_fails
+        );
+    }
 
     #[test]
     fn sdirk_state_mut() {

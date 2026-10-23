@@ -941,16 +941,17 @@ where
     pub(crate) fn solve_fail(
         &mut self,
         h: Eqn::T,
+        nonlinear_failures: usize,
         min_timestep: Eqn::T,
         max_nonlinear_solver_fails: usize,
     ) -> Result<(), DiffsolError> {
         self.statistics.number_of_nonlinear_solver_fails += 1;
         // if too many nonlinear solver failures, then fail
-        if self.statistics.number_of_nonlinear_solver_fails > max_nonlinear_solver_fails {
+        if nonlinear_failures > max_nonlinear_solver_fails {
             return Err(DiffsolError::from(
                 OdeSolverError::TooManyNonlinearSolverFailures {
                     time: self.state.t.to_f64().unwrap(),
-                    num_failures: max_nonlinear_solver_fails,
+                    num_failures: nonlinear_failures,
                 },
             ));
         }
