@@ -122,10 +122,7 @@ pub struct OdeSolverOptions<T: Scalar> {
     pub derivative_solve_max_iter: usize,
     /// Minimum allowed step size (absolute value, default: [`Scalar::EPSILON`] for `T`).
     ///
-    /// This is an absolute floor in the units of `t`, independent of the tolerances. It stops
-    /// the step size from collapsing towards zero; it is not a check that a step advances `t`.
-    /// Problems whose dynamics live below it must lower it or set it to zero, which disables
-    /// the check.
+    /// Must be greater than or equal to `Scalar::EPSILON` so that each step advances `t`.
     pub min_timestep: T,
     /// Upper bound on step-size growth `h_new/h_old` (default: solver-specific when `None`).
     pub max_timestep_growth: Option<T>,
