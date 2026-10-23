@@ -109,10 +109,6 @@ pub struct Sdirk<
     /// Convergence of the sensitivity solves alongside the main equations
     s_convergence: Convergence<'a, Eqn::V>,
     vjp_convergence: Convergence<'a, Eqn::V>,
-    /// The step size of the last [StepVjp::step_vjp] solve, whose preconditioner quality
-    /// `vjp_convergence` has measured: a replay at another step size must not trust that
-    /// estimate.
-    vjp_h: Option<Eqn::T>,
     /// Zero, the stage increment a [StepVjp::step_vjp] stage solve is linearised at: it sets the
     /// stage's known part to the whole stage value.
     vjp_zero: Eqn::V,
@@ -154,7 +150,6 @@ where
             convergence,
             s_convergence,
             vjp_convergence,
-            vjp_h: None,
             vjp_zero: self.vjp_zero.clone(),
             nonlinear_solver,
             op,
@@ -225,7 +220,11 @@ where
         derivative_convergence.set_tolerance(problem.ode_options.derivative_solve_tolerance);
         derivative_convergence.set_max_iter(problem.ode_options.derivative_solve_max_iter);
         let s_convergence = derivative_convergence.clone();
-        let vjp_convergence = derivative_convergence;
+        // The first update of a transposed solve in StepVjp::step_vjp, w1 = P^-T b, can be
+        // dominated by error components the preconditioner removes almost at once, so a rate
+        // measured from it can be far faster than the one the rest of the error contracts at.
+        let mut vjp_convergence = derivative_convergence;
+        vjp_convergence.set_transient_updates(1);
         let vjp_zero =
             <Eqn::V as Vector>::zeros(problem.eqn.rhs().nstates(), problem.context().clone());
 
@@ -243,7 +242,6 @@ where
             convergence,
             s_convergence,
             vjp_convergence,
-            vjp_h: None,
             vjp_zero,
             nonlinear_solver,
             op,
@@ -297,28 +295,12 @@ where
         state: SolverState,
         at: Option<(&Eqn::V, Eqn::T)>,
     ) -> bool {
-        // a state, not a stage increment: the rhs Jacobian is evaluated there directly, and the
-        // Newton matrix combined from it, whatever stage the op is set up for
-        let (y, t) = at.unwrap_or((&self.rk.state().y, self.rk.state().t));
-        let did_update = if self.jacobian_update.check_rhs_jacobian_update(h, &state) {
-            let did_reset = if let Some(op) = self.op.as_ref() {
-                op.refresh_rhs_jacobian(y, t);
-                self.nonlinear_solver.reset_jacobian(op, y, t);
-                true
-            } else if let Some(s_op) = self.s_op.as_mut() {
-                s_op.set_jacobian_is_stale();
-                self.nonlinear_solver
-                    .reset_jacobian(s_op, &self.rk.state().s, self.rk.state().t);
-                true
-            } else {
-                false
-            };
-            self.jacobian_update.update_rhs_jacobian(h);
-            self.jacobian_update.update_jacobian(h);
-            self.reset_etas();
-            did_reset
-        } else if self.jacobian_update.check_jacobian_update(h, &state) {
+        if self.jacobian_update.check_rhs_jacobian_update(h, &state) {
+            return self.refresh_jacobian_at(h, state, at);
+        }
+        let did_update = if self.jacobian_update.check_jacobian_update(h, &state) {
             // the rhs Jacobian is kept, so only h has changed and the point is not used
+            let (y, t) = at.unwrap_or((&self.rk.state().y, self.rk.state().t));
             let did_reset = if let Some(op) = self.op.as_ref() {
                 self.nonlinear_solver.reset_jacobian(op, y, t);
                 true
@@ -336,6 +318,39 @@ where
             false
         };
 
+        if did_update {
+            self.rk.statistics_mut().record_linear_solver_setup(state);
+        }
+        did_update
+    }
+
+    /// Evaluate the rhs Jacobian at `at` (a state and time), or at the solver's state if `None`,
+    /// and rebuild the Newton matrix from it for step size `h`, recorded as an update for
+    /// `state`. Returns whether the matrix was updated.
+    fn refresh_jacobian_at(
+        &mut self,
+        h: Eqn::T,
+        state: SolverState,
+        at: Option<(&Eqn::V, Eqn::T)>,
+    ) -> bool {
+        // a state, not a stage increment: the rhs Jacobian is evaluated there directly, and the
+        // Newton matrix combined from it, whatever stage the op is set up for
+        let (y, t) = at.unwrap_or((&self.rk.state().y, self.rk.state().t));
+        let did_update = if let Some(op) = self.op.as_ref() {
+            op.refresh_rhs_jacobian(y, t);
+            self.nonlinear_solver.reset_jacobian(op, y, t);
+            true
+        } else if let Some(s_op) = self.s_op.as_mut() {
+            s_op.set_jacobian_is_stale();
+            self.nonlinear_solver
+                .reset_jacobian(s_op, &self.rk.state().s, self.rk.state().t);
+            true
+        } else {
+            false
+        };
+        self.jacobian_update.update_rhs_jacobian(h);
+        self.jacobian_update.update_jacobian(h);
+        self.reset_etas();
         if did_update {
             self.rk.statistics_mut().record_linear_solver_setup(state);
         }
@@ -513,6 +528,7 @@ where
 
         // loop until step is accepted
         let mut nattempts = 0;
+        let mut nonlinear_failures = 0;
         let mut updated_jacobian = false;
         let start = if self.rk.skip_first_stage() { 1 } else { 0 };
         let (factor, error_norm) = 'step: loop {
@@ -561,8 +577,10 @@ where
                         self.jacobian_updates_at(h, SolverState::SecondConvergenceFail, None);
                     }
                     self.rk.reset_prev_error();
+                    nonlinear_failures += 1;
                     self.rk.solve_fail(
                         h,
+                        nonlinear_failures,
                         self.config.minimum_timestep,
                         self.config.maximum_newton_fails,
                     )?;
@@ -707,19 +725,23 @@ where
         let h = step.h;
         // differentiate with the step's own h, which is put back afterwards
         op.set_h(h);
-        // as the forward solve does when its step size changes: the convergence rate measured
-        // at another h says nothing about how well the Newton matrix preconditions this one
-        if self.vjp_h != Some(h) {
-            self.vjp_convergence.reset_eta_timestep_change();
-            self.vjp_h = Some(h);
-        }
 
         let result = 'stages: {
             self.rk.vjp_start(step, end, cotangent, p_bar);
-
-            if !self.nonlinear_solver.is_jacobian_set() {
+            // whether the rhs Jacobian was last evaluated at the end of this step, when an update
+            // at the end, after a first failure, would rebuild the same matrix
+            let mut rhs_jacobian_at_end = !self.nonlinear_solver.is_jacobian_set();
+            if rhs_jacobian_at_end {
                 self.jacobian_updates_at(h, SolverState::Checkpoint, Some((&end.y, end.t)));
             }
+            // the schedule's update at the end of a forward step, in reverse: at the start of the
+            // step's pull back, update the matrix if due, at the step's end, and advance the
+            // schedule
+            rhs_jacobian_at_end |= self
+                .jacobian_update
+                .check_rhs_jacobian_update(h, &SolverState::StepSuccess);
+            self.jacobian_updates_at(h, SolverState::StepSuccess, Some((&end.y, end.t)));
+            self.jacobian_update.step();
             // the stages of step(), in reverse
             let start = if self.rk.skip_first_stage() { 1 } else { 0 };
             for i in (start..self.rk.tableau().s()).rev() {
@@ -728,11 +750,9 @@ where
                 // taken as phi with a zero increment
                 let y_i = self.rk.vjp_stage_value(i, end);
                 self.op.as_ref().unwrap().set_phi_direct(y_i);
+
                 // Each stage's transposed equation (M - gamma h J_i)^T w = k_bar is solved with
-                // the current Newton matrix as a preconditioner, whose update schedule is similar
-                // to the forward pass's. The solve needs its right-hand side alongside its
-                // iterate w, which starts from it (for small h, w is close to M^-T k_bar) and
-                // measures its errors relative to it.
+                // the current Newton matrix as a preconditioner
                 let result = solve_with_jacobian_updates(
                     self,
                     &[
@@ -740,6 +760,7 @@ where
                         SolverState::SecondConvergenceFail,
                     ],
                     |s| {
+                        // the solve overwrites w, so keep its right-hand side in k_bar
                         let (w, k_bar) = s.rk.vjp_stage_rhs(i, cotangent);
                         k_bar.copy_from(w);
                         s.nonlinear_solver.solve_jacobian_transpose_in_place(
@@ -748,11 +769,22 @@ where
                             t_i,
                             k_bar,
                             w,
-                            k_bar,
                             &mut s.vjp_convergence,
                         )
                     },
-                    |s, state| s.jacobian_updates_at(h, state, Some((&end.y, end.t))),
+                    |s, state| match state {
+                        SolverState::SecondConvergenceFail => {
+                            rhs_jacobian_at_end = false;
+                            let y_i = s.rk.vjp_stage_value(i, end).clone();
+                            s.refresh_jacobian_at(h, state, Some((&y_i, t_i)))
+                        }
+                        _ if rhs_jacobian_at_end => false,
+                        _ => {
+                            rhs_jacobian_at_end =
+                                s.jacobian_update.check_rhs_jacobian_update(h, &state);
+                            s.jacobian_updates_at(h, state, Some((&end.y, end.t)))
+                        }
+                    },
                 );
                 if let Err(e) = result {
                     break 'stages Err(e);
@@ -760,11 +792,6 @@ where
                 self.rk.vjp_stage_inputs(i, step, end, cotangent, p_bar);
             }
             self.rk.vjp_finish(step, end, cotangent);
-
-            // as a forward step ends: update the matrix if due, at the step's end, and advance
-            // the Jacobian schedule
-            self.jacobian_updates_at(h, SolverState::StepSuccess, Some((&end.y, end.t)));
-            self.jacobian_update.step();
             Ok(())
         };
         // the derivative used the replayed step's h: put back the one of the solver's own state,
@@ -776,6 +803,8 @@ where
 
 #[cfg(test)]
 mod test {
+    use std::assert_matches;
+
     #[cfg(feature = "cuda")]
     #[allow(deprecated)]
     use crate::ode_equations::test_models::{
@@ -795,6 +824,7 @@ mod test {
                 exponential_decay_with_algebraic_problem,
             },
             heat2d::{head2d_problem, heat2d_elem_problem},
+            nonlinear_failure::nonlinear_failure_problem,
             robertson::{robertson, robertson_sens},
             robertson_ode::robertson_ode,
         },
@@ -812,12 +842,40 @@ mod test {
     type LS = NalgebraLU<f64>;
 
     #[test]
+    fn tr_bdf2_nonlinear_failures_stop_an_unrecoverable_step() {
+        let problem = nonlinear_failure_problem::<M>();
+        let mut solver = problem.tr_bdf2::<LS>().unwrap();
+        let result = solver.step();
+        assert_matches!(
+            result,
+            Err(crate::DiffsolError::OdeSolverError(
+                crate::error::OdeSolverError::TooManyNonlinearSolverFailures { num_failures, .. },
+            )) if num_failures == solver.get_statistics().number_of_nonlinear_solver_fails
+        );
+    }
+
+    #[test]
     fn sdirk_state_mut() {
         test_state_mut(test_problem::<M>(false).tr_bdf2::<LS>().unwrap());
     }
     #[test]
     fn sdirk_config() {
         test_config(robertson_ode::<M>(false, 1).0.esdirk34::<LS>().unwrap());
+    }
+
+    #[test]
+    fn tr_bdf2_test_fast_timescale() {
+        let (mut problem, _) = exponential_decay_problem::<M>(false);
+        let p = problem.eqn.context().vector_from_vec(vec![1e12, 1.0]);
+        problem.eqn_mut().set_params(&p);
+        problem.tr_bdf2::<LS>().unwrap().solve(5e-12).unwrap();
+        problem.ode_options.min_timestep = 1e-13;
+        assert!(matches!(
+            problem.tr_bdf2::<LS>().unwrap().solve(5e-12),
+            Err(crate::DiffsolError::OdeSolverError(
+                crate::error::OdeSolverError::StepSizeTooSmall { .. }
+            ))
+        ));
     }
 
     #[test]
