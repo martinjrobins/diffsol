@@ -269,10 +269,10 @@ impl<M: Matrix, S: NlNonLinearSolver<M>> NonLinearSolver<M> for S {
 #[cfg(test)]
 pub mod tests {
     use crate::{
-        linear_solver::nalgebra::lu::LU,
         matrix::dense_nalgebra_serial::NalgebraMat,
         op::{closure::Closure, ParameterisedOp},
-        scale, BacktrackingLineSearch, DenseMatrix, NalgebraVec, NoLineSearch, Op, Vector,
+        scale, BacktrackingLineSearch, DenseMatrix, NalgebraLU, NalgebraVec, NoLineSearch, Op,
+        Vector,
     };
 
     use super::*;
@@ -358,7 +358,7 @@ pub mod tests {
 
     #[test]
     fn test_newton_cpu_square() {
-        let lu = LU::default();
+        let lu = NalgebraLU::default();
         let (op, rtol, atol, soln) = get_square_problem::<MCpu>();
         let p = NalgebraVec::zeros(0, *op.context());
         let op = ParameterisedOp::new(&op, &p);
@@ -369,7 +369,7 @@ pub mod tests {
 
     #[test]
     fn test_newton_cpu_square_backtrack() {
-        let lu = LU::default();
+        let lu = NalgebraLU::default();
         let (op, rtol, atol, soln) = get_square_problem::<MCpu>();
         let p = NalgebraVec::zeros(0, *op.context());
         let op = ParameterisedOp::new(&op, &p);

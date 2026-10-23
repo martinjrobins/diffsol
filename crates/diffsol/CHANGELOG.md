@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0](https://github.com/martinjrobins/diffsol/compare/diffsol-v0.17.1...diffsol-v0.18.0) - 2026-10-20
+
+### Added
+
+- *(diffsol)* [**breaking**] vjp for runge-kutta ([#413](https://github.com/martinjrobins/diffsol/pull/413))
+- *(diffsol)* vjp and jvp of step for OdeSolverMethods ([#409](https://github.com/martinjrobins/diffsol/pull/409))
+- *(diffsol-la)* add transposed linear solve ([#406](https://github.com/martinjrobins/diffsol/pull/406))
+- *(diffsol-la)* support f32 for cuda-oxide, deprecate C cuda feature ([#387](https://github.com/martinjrobins/diffsol/pull/387))
+- *(diffsol-la)* make cuda-oxide containers generic on ScalarCuda ([#386](https://github.com/martinjrobins/diffsol/pull/386))
+- *(diffsol-la)* generic cuda-oxide kernels ([#381](https://github.com/martinjrobins/diffsol/pull/381))
+
+### Fixed
+
+- *(ic)* re-evaluate the ic jacobian at the current iterate ([#392](https://github.com/martinjrobins/diffsol/pull/392))
+
+### Other
+
+- *(diffsol-la)* [**breaking**] remove old nalgebra LU solver keeping only non-allocating LU ([#417](https://github.com/martinjrobins/diffsol/pull/417))
+- *(readme)* add closure example ([#388](https://github.com/martinjrobins/diffsol/pull/388))
+- *(contributing)* add LLM summary to readme
+
 ## [0.17.1](https://github.com/martinjrobins/diffsol/compare/diffsol-v0.17.0...diffsol-v0.17.1) - 2026-09-28
 
 ### Added

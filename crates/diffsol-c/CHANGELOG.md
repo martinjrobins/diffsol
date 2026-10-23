@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0](https://github.com/martinjrobins/diffsol/compare/diffsol-c-v0.6.1...diffsol-c-v0.7.0) - 2026-10-20
+
+### Added
+
+- *(diffsol)* vjp and jvp of step for OdeSolverMethods ([#409](https://github.com/martinjrobins/diffsol/pull/409))
+- *(diffsol-la)* support f32 for cuda-oxide, deprecate C cuda feature ([#387](https://github.com/martinjrobins/diffsol/pull/387))
+
 ## [0.6.1](https://github.com/martinjrobins/diffsol/compare/diffsol-c-v0.6.0...diffsol-c-v0.6.1) - 2026-09-28
 
 ### Other
