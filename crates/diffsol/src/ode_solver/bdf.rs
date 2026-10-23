@@ -1894,6 +1894,8 @@ where
 
 #[cfg(test)]
 mod test {
+    use std::assert_matches;
+
     use crate::ode_equations::test_models::exponential_decay::{
         exponential_decay_problem_batched_sens, exponential_decay_problem_batched_sens_with_reset,
     };
@@ -1954,15 +1956,12 @@ mod test {
     fn bdf_nonlinear_failures_stop_an_unrecoverable_step() {
         let problem = nonlinear_failure_problem::<M>();
         let mut solver = problem.bdf::<LS>().unwrap();
-        let Err(crate::DiffsolError::OdeSolverError(
-            crate::error::OdeSolverError::TooManyNonlinearSolverFailures { num_failures, .. },
-        )) = solver.step()
-        else {
-            panic!("expected TooManyNonlinearSolverFailures");
-        };
-        assert_eq!(
-            num_failures,
-            solver.get_statistics().number_of_nonlinear_solver_fails
+        let result = solver.step();
+        assert_matches!(
+            result,
+            Err(crate::DiffsolError::OdeSolverError(
+                crate::error::OdeSolverError::TooManyNonlinearSolverFailures { num_failures, .. },
+            )) if num_failures == solver.get_statistics().number_of_nonlinear_solver_fails
         );
     }
 
