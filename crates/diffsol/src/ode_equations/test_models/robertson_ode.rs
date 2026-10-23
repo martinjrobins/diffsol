@@ -1,8 +1,10 @@
 use crate::{
-    find_jacobian_non_zeros, ode_solver::problem::OdeSolverSolution, ConstantOp, Context,
-    JacobianColoring, Matrix, MatrixSparsity, NonLinearOp, NonLinearOpJacobian, OdeBuilder,
-    OdeEquations, OdeEquationsImplicit, OdeEquationsRef, OdeSolverProblem, Op, ParameterisedOp,
-    UnitCallable, Vector,
+    find_adjoint_non_zeros, find_jacobian_non_zeros, ode_solver::problem::OdeSolverSolution,
+    ConstantOp, ConstantOpSens, ConstantOpSensAdjoint, Context, JacobianColoring, Matrix,
+    MatrixSparsity, NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens,
+    NonLinearOpSensAdjoint, OdeBuilder, OdeEquations, OdeEquationsImplicit,
+    OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeEquationsRef, OdeSolverProblem, Op,
+    ParameterisedOp, UnitCallable, Vector,
 };
 use num_traits::{FromPrimitive, One, Zero};
 
@@ -270,6 +272,43 @@ fn robertson_elem_jac_mul<T: crate::Scalar>(y: &mut T, x: &[T], p: &[T], v: &[T]
     };
 }
 
+/// One state of `-J^T v` for [`robertson_elem_rhs`].
+fn robertson_elem_jac_transpose_mul<T: crate::Scalar>(
+    y: &mut T,
+    x: &[T],
+    p: &[T],
+    v: &[T],
+    i: usize,
+) {
+    let two = T::one() + T::one();
+    *y = match i {
+        0 => p[0] * v[0] - p[0] * v[1],
+        1 => {
+            -p[1] * x[2] * v[0] + (p[1] * x[2] + two * p[2] * x[1]) * v[1]
+                - two * p[2] * x[1] * v[2]
+        }
+        _ => -p[1] * x[1] * v[0] + p[1] * x[1] * v[1],
+    };
+}
+
+/// One state of `f_p v` for [`robertson_elem_rhs`].
+fn robertson_elem_sens_mul<T: crate::Scalar>(y: &mut T, x: &[T], v: &[T], i: usize) {
+    *y = match i {
+        0 => -x[0] * v[0] + x[1] * x[2] * v[1],
+        1 => x[0] * v[0] - x[1] * x[2] * v[1] - x[1] * x[1] * v[2],
+        _ => x[1] * x[1] * v[2],
+    };
+}
+
+/// One parameter of `-f_p^T v` for [`robertson_elem_rhs`].
+fn robertson_elem_sens_transpose_mul<T: crate::Scalar>(y: &mut T, x: &[T], v: &[T], i: usize) {
+    *y = match i {
+        0 => x[0] * v[0] - x[0] * v[1],
+        1 => -x[1] * x[2] * v[0] + x[1] * x[2] * v[1],
+        _ => x[1] * x[1] * v[1] - x[1] * x[1] * v[2],
+    };
+}
+
 /// The Robertson kinetics with an element-parallel right-hand side.
 ///
 /// Batching takes the place of [`robertson_ode`]'s `ngroups`: every lane is an independent copy
@@ -278,6 +317,8 @@ pub struct RobertsonOdeElem<M: Matrix> {
     p: M::V,
     rhs_sparsity: Option<M::Sparsity>,
     rhs_coloring: Option<JacobianColoring<M>>,
+    rhs_adjoint_sparsity: Option<M::Sparsity>,
+    rhs_adjoint_coloring: Option<JacobianColoring<M>>,
     ctx: M::C,
 }
 
@@ -288,6 +329,8 @@ impl<M: Matrix> RobertsonOdeElem<M> {
             p,
             rhs_sparsity: None,
             rhs_coloring: None,
+            rhs_adjoint_sparsity: None,
+            rhs_adjoint_coloring: None,
             ctx,
         };
         let y0 = RobertsonOdeElemInit { eqn: &ret }.call(t0);
@@ -298,6 +341,16 @@ impl<M: Matrix> RobertsonOdeElem<M> {
         );
         ret.rhs_coloring = Some(JacobianColoring::new(
             ret.rhs_sparsity.as_ref().unwrap(),
+            &non_zeros,
+            ret.ctx.clone(),
+        ));
+        let rhs = RobertsonOdeElemRhs { eqn: &ret };
+        let non_zeros = find_adjoint_non_zeros(&rhs, &y0, t0);
+        ret.rhs_adjoint_sparsity = Some(
+            MatrixSparsity::try_from_indices(rhs.nstates(), rhs.nout(), non_zeros.clone()).unwrap(),
+        );
+        ret.rhs_adjoint_coloring = Some(JacobianColoring::new(
+            ret.rhs_adjoint_sparsity.as_ref().unwrap(),
             &non_zeros,
             ret.ctx.clone(),
         ));
@@ -372,6 +425,49 @@ impl<M: Matrix> NonLinearOpJacobian for RobertsonOdeElemRhs<'_, M> {
     }
 }
 
+impl<M: Matrix> NonLinearOpAdjoint for RobertsonOdeElemRhs<'_, M> {
+    fn jac_transpose_mul_inplace(&self, x: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
+        y.for_each_elem(
+            [x, &self.eqn.p, v],
+            |y: &mut M::T, [x, p, v]: [&[M::T]; 3], _lane: usize, i: usize| {
+                robertson_elem_jac_transpose_mul(y, x, p, v, i)
+            },
+        );
+    }
+    fn adjoint_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
+        if let Some(coloring) = self.eqn.rhs_adjoint_coloring.as_ref() {
+            coloring.adjoint_inplace(self, x, t, y);
+        } else {
+            self._default_adjoint_inplace(x, t, y);
+        }
+    }
+    fn adjoint_sparsity(&self) -> Option<M::Sparsity> {
+        self.eqn.rhs_adjoint_sparsity.clone()
+    }
+}
+
+impl<M: Matrix> NonLinearOpSens for RobertsonOdeElemRhs<'_, M> {
+    fn sens_mul_inplace(&self, x: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
+        y.for_each_elem(
+            [x, v],
+            |y: &mut M::T, [x, v]: [&[M::T]; 2], _lane: usize, i: usize| {
+                robertson_elem_sens_mul(y, x, v, i)
+            },
+        );
+    }
+}
+
+impl<M: Matrix> NonLinearOpSensAdjoint for RobertsonOdeElemRhs<'_, M> {
+    fn sens_transpose_mul_inplace(&self, x: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
+        y.for_each_elem(
+            [x, v],
+            |y: &mut M::T, [x, v]: [&[M::T]; 2], _lane: usize, i: usize| {
+                robertson_elem_sens_transpose_mul(y, x, v, i)
+            },
+        );
+    }
+}
+
 impl<M: Matrix> ConstantOp for RobertsonOdeElemInit<'_, M> {
     fn call_inplace(&self, _t: M::T, y: &mut M::V) {
         y.for_each_elem(
@@ -380,6 +476,19 @@ impl<M: Matrix> ConstantOp for RobertsonOdeElemInit<'_, M> {
                 *y = if i == 0 { M::T::one() } else { M::T::zero() };
             },
         );
+    }
+}
+
+/// The initial state does not depend on the parameters.
+impl<M: Matrix> ConstantOpSens for RobertsonOdeElemInit<'_, M> {
+    fn sens_mul_inplace(&self, _t: M::T, _v: &M::V, y: &mut M::V) {
+        y.fill(M::T::zero());
+    }
+}
+
+impl<M: Matrix> ConstantOpSensAdjoint for RobertsonOdeElemInit<'_, M> {
+    fn sens_transpose_mul_inplace(&self, _t: M::T, _v: &M::V, y: &mut M::V) {
+        y.fill(M::T::zero());
     }
 }
 
@@ -445,7 +554,10 @@ impl<M: Matrix> OdeEquations for RobertsonOdeElem<M> {
 pub fn robertson_ode_elem_problem<M: Matrix + 'static>(
     nbatch: usize,
 ) -> (
-    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
+    OdeSolverProblem<
+        impl OdeEquationsImplicitAdjoint<M = M, V = M::V, T = M::T, C = M::C>
+            + OdeEquationsImplicitSens<M = M, V = M::V, T = M::T, C = M::C>,
+    >,
     OdeSolverSolution<M::V>,
 ) {
     let ctx = M::C::default().clone_with_nbatch(nbatch).unwrap();
@@ -521,5 +633,50 @@ mod tests {
             .rhs()
             .jac_mul(&x, 0.0, &v)
             .assert_eq_st(&groups.eqn.rhs().jac_mul(&x, 0.0, &v), 1e-10);
+    }
+
+    /// The adjoint kernels are the negated transposes of the forward ones:
+    /// `<w, -J^T v> = -<J w, v>` and `<w, -f_p^T v> = -<f_p w, v>`, for each of two lanes.
+    #[test]
+    fn test_elem_adjoint_is_transpose() {
+        type M = NalgebraMat<f64>;
+        type V = NalgebraVec<f64>;
+        use crate::VectorView;
+        let ctx = crate::NalgebraContext::default()
+            .clone_with_nbatch(2)
+            .unwrap();
+        let p = V::from_vec(vec![0.04, 1.0e4, 3.0e7, 0.05, 2.0e4, 1.0e7], ctx);
+        let elem = RobertsonOdeElem::<M>::new(p, 0.0);
+        let x = V::from_vec(vec![0.7, 1e-5, 0.3, 0.4, 2e-5, 0.6], ctx);
+        let v = V::from_vec(vec![0.1, 0.2, 0.3, -0.5, 0.7, 0.2], ctx);
+        let w = V::from_vec(vec![-0.4, 0.9, 0.6, 0.3, -0.1, 0.8], ctx);
+        let rhs = elem.rhs();
+        let lane_dot = |a: &V, b: &V, k: usize| {
+            let (a, b) = (a.get_batch(k).into_owned(), b.get_batch(k).into_owned());
+            a.dot(&b)
+        };
+        let mut jt_v = V::zeros(3, ctx);
+        rhs.jac_transpose_mul_inplace(&x, 0.0, &v, &mut jt_v);
+        let j_w = rhs.jac_mul(&x, 0.0, &w);
+        let mut ft_v = V::zeros(3, ctx);
+        rhs.sens_transpose_mul_inplace(&x, 0.0, &v, &mut ft_v);
+        let f_w = rhs.sens_mul(&x, 0.0, &w);
+        for k in 0..2 {
+            let (a, b) = (lane_dot(&w, &jt_v, k), -lane_dot(&j_w, &v, k));
+            assert!(
+                (a - b).abs() <= 1e-10 * (1.0 + b.abs()),
+                "J lane {k}: {a} != {b}"
+            );
+            let (a, b) = (lane_dot(&w, &ft_v, k), -lane_dot(&f_w, &v, k));
+            assert!(
+                (a - b).abs() <= 1e-10 * (1.0 + b.abs()),
+                "f_p lane {k}: {a} != {b}"
+            );
+        }
+        // the coloured adjoint matrix is the same operator
+        let adj = rhs.adjoint(&x, 0.0);
+        let mut adj_v = V::zeros(3, ctx);
+        adj.gemv(1.0, &v, 0.0, &mut adj_v);
+        adj_v.assert_eq_st(&jt_v, 1e-10);
     }
 }

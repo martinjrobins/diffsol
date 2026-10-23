@@ -60,28 +60,25 @@ pub trait NonLinearSolver<M: Matrix>: Default {
     /// The input `b` is provided in `x`, and the solution is returned in `x`.
     fn solve_linearised_in_place(&self, x: &mut M::V) -> Result<(), NlError>;
 
-    /// Solve `J(x_lin) * x = b` with the operator's own Jacobian at `x_lin`, applied matrix-free.
-    ///
-    /// This is [Self::solve_in_place] for the linear problem `F(x) = J(x_lin) x - b`: the
-    /// Jacobian set by [Self::reset_jacobian], which may be stale, is the Newton matrix, so each
-    /// iteration is a step of preconditioned Richardson iteration. `x` holds the initial guess
-    /// and returns the solution; `error_y` and `convergence` control the iteration as for
-    /// [Self::solve_in_place]. If the stored Jacobian is too far from `J(x_lin)` the iteration
-    /// fails to converge, and the caller can [Self::reset_jacobian] and retry.
-    #[allow(clippy::too_many_arguments)]
+    /// Solve `J(x_lin) * x = b` with the operator's own Jacobian at `x_lin`, applied
+    /// matrix-free, by Richardson iteration preconditioned by the Jacobian set by
+    /// [Self::reset_jacobian], which may be stale (see [crate::newton::richardson]). The
+    /// iteration starts from `x = 0`, so the first update is the preconditioned right-hand side,
+    /// and measures the error of every later update relative to it; `x` returns the solution,
+    /// and `convergence` decides, from the second update on, when to stop. If the stored
+    /// Jacobian is too far from `J(x_lin)` the iteration fails to converge, and the caller can
+    /// [Self::reset_jacobian] and retry.
     fn solve_jacobian_in_place<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M, C = M::C>>(
         &mut self,
         op: &C,
         x_lin: &M::V,
         b: &M::V,
         x: &mut M::V,
-        error_y: &M::V,
         convergence: &mut Convergence<'_, M::V>,
     ) -> Result<(), NlError>;
 
     /// As [Self::solve_jacobian_in_place], for the transposed problem `J(x_lin)^T * x = b`,
     /// preconditioned by the transpose of the stored Jacobian.
-    #[allow(clippy::too_many_arguments)]
     fn solve_jacobian_transpose_in_place<
         C: NonLinearOpAdjoint<V = M::V, T = M::T, M = M, C = M::C>,
     >(
@@ -90,7 +87,6 @@ pub trait NonLinearSolver<M: Matrix>: Default {
         x_lin: &M::V,
         b: &M::V,
         x: &mut M::V,
-        error_y: &M::V,
         convergence: &mut Convergence<'_, M::V>,
     ) -> Result<(), NlError>;
 }
@@ -248,16 +244,9 @@ pub mod tests {
                 let mut x = V::zeros(2, Default::default());
                 convergence.reset_eta();
                 let result = if transpose {
-                    s.solve_jacobian_transpose_in_place(
-                        &op,
-                        &x_lin,
-                        &b,
-                        &mut x,
-                        &expected,
-                        &mut convergence,
-                    )
+                    s.solve_jacobian_transpose_in_place(&op, &x_lin, &b, &mut x, &mut convergence)
                 } else {
-                    s.solve_jacobian_in_place(&op, &x_lin, &b, &mut x, &expected, &mut convergence)
+                    s.solve_jacobian_in_place(&op, &x_lin, &b, &mut x, &mut convergence)
                 };
                 assert_eq!(
                     result.is_ok(),
