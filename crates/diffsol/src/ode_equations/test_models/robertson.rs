@@ -1,6 +1,6 @@
 use crate::{
     matrix::Matrix, ode_solver::problem::OdeSolverSolution, OdeBuilder, OdeEquationsImplicit,
-    OdeEquationsImplicitSens, OdeSolverProblem, Op, Vector,
+    OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeSolverProblem, Op, Vector,
 };
 use num_traits::{FromPrimitive, One, Zero};
 
@@ -76,6 +76,33 @@ fn robertson_sens_mul<M: Matrix>(x: &[M::T], _p: &[M::T], _t: M::T, v: &[M::T], 
     y[2] = M::T::zero();
 }
 
+/// `y = -J^T v`
+fn robertson_jac_adjoint_mul<M: Matrix>(
+    x: &[M::T],
+    p: &[M::T],
+    _t: M::T,
+    v: &[M::T],
+    y: &mut [M::T],
+) {
+    let two = M::T::from_f64(2.0).unwrap();
+    y[0] = p[0] * v[0] - p[0] * v[1] - v[2];
+    y[1] = -p[1] * x[2] * v[0] + (p[1] * x[2] + two * p[2] * x[1]) * v[1] - v[2];
+    y[2] = -p[1] * x[1] * v[0] + p[1] * x[1] * v[1] - v[2];
+}
+
+/// `y = -f_p^T v`
+fn robertson_sens_adjoint_mul<M: Matrix>(
+    x: &[M::T],
+    _p: &[M::T],
+    _t: M::T,
+    v: &[M::T],
+    y: &mut [M::T],
+) {
+    y[0] = x[0] * v[0] - x[0] * v[1];
+    y[1] = -x[1] * x[2] * v[0] + x[1] * x[2] * v[1];
+    y[2] = x[1] * x[1] * v[1];
+}
+
 fn robertson_mass<M: Matrix>(x: &[M::T], _p: &[M::T], _t: M::T, beta: M::T, y: &mut [M::T]) {
     y[0] = x[0] + beta * y[0];
     y[1] = x[1] + beta * y[1];
@@ -90,6 +117,32 @@ fn robertson_init<M: Matrix>(_p: &[M::T], _t: M::T, y: &mut [M::T]) {
 
 fn robertson_init_sens<M: Matrix>(_p: &[M::T], _t: M::T, _v: &[M::T], y: &mut [M::T]) {
     y.fill(M::T::zero());
+}
+
+/// [robertson] with the adjoint callbacks, for continuous adjoint and step-derivative gradients.
+#[allow(clippy::type_complexity)]
+pub fn robertson_adjoint<M: Matrix>() -> (
+    OdeSolverProblem<impl OdeEquationsImplicitAdjoint<M = M, V = M::V, T = M::T, C = M::C>>,
+    OdeSolverSolution<M::V>,
+) {
+    let problem = OdeBuilder::<M>::new()
+        .p([0.04, 1.0e4, 3.0e7])
+        .rtol(1e-4)
+        .atol([1.0e-8, 1.0e-6, 1.0e-6])
+        .rhs_adjoint_implicit(
+            robertson_rhs::<M>,
+            robertson_jac_mul::<M>,
+            robertson_jac_adjoint_mul::<M>,
+            robertson_sens_adjoint_mul::<M>,
+        )
+        // the mass matrix diag(1, 1, 0) is symmetric
+        .mass_adjoint(robertson_mass::<M>, robertson_mass::<M>)
+        .init_adjoint(robertson_init::<M>, robertson_init_sens::<M>, 3)
+        .build()
+        .unwrap();
+
+    let ctx = problem.context().clone();
+    (problem, soln(ctx))
 }
 
 #[allow(clippy::type_complexity)]
@@ -292,3 +345,30 @@ pub fn robertson_sens<M: Matrix + 'static>() -> (
 //Jac evals per NLS iter       = 0.111731843575419
 //Prec evals per NLS iter      = 0
 //Root fn evals                = 404
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::NalgebraMat;
+
+    /// The adjoint callbacks of [robertson_adjoint] are the negated transposes of the forward
+    /// ones: `<w, -J^T v> = -<J w, v>` and `<w, -f_p^T v> = -<f_p w, v>`.
+    #[test]
+    fn adjoint_is_transpose() {
+        type M = NalgebraMat<f64>;
+        let p = [0.04, 1.0e4, 3.0e7];
+        let x = [0.7, 1e-5, 0.3];
+        let v = [0.1, 0.2, 0.3];
+        let w = [-0.4, 0.9, 0.6];
+        let dot = |a: &[f64; 3], b: &[f64; 3]| a.iter().zip(b).map(|(a, b)| a * b).sum::<f64>();
+        let (mut fwd, mut adj) = ([0.0; 3], [0.0; 3]);
+        robertson_jac_mul::<M>(&x, &p, 0.0, &w, &mut fwd);
+        robertson_jac_adjoint_mul::<M>(&x, &p, 0.0, &v, &mut adj);
+        let j = dot(&w, &adj) + dot(&fwd, &v);
+        assert!(j.abs() < 1e-8, "J: {j}");
+        robertson_sens_mul::<M>(&x, &p, 0.0, &w, &mut fwd);
+        robertson_sens_adjoint_mul::<M>(&x, &p, 0.0, &v, &mut adj);
+        let f = dot(&w, &adj) + dot(&fwd, &v);
+        assert!(f.abs() < 1e-10, "f_p: {f}");
+    }
+}
