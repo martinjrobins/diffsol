@@ -320,7 +320,7 @@ where
         derivative_convergence.set_max_iter(options.derivative_solve_max_iter);
         let s_convergence = derivative_convergence.clone();
 
-        // The first update of a transposed solve in StepVjp::step_vjp often 
+        // The first update of a transposed solve in StepVjp::step_vjp often
         // has an initial transient, so mark this
         let mut vjp_convergence = derivative_convergence;
         vjp_convergence.set_transient_updates(1);
