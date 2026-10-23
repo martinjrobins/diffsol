@@ -295,28 +295,12 @@ where
         state: SolverState,
         at: Option<(&Eqn::V, Eqn::T)>,
     ) -> bool {
-        // a state, not a stage increment: the rhs Jacobian is evaluated there directly, and the
-        // Newton matrix combined from it, whatever stage the op is set up for
-        let (y, t) = at.unwrap_or((&self.rk.state().y, self.rk.state().t));
-        let did_update = if self.jacobian_update.check_rhs_jacobian_update(h, &state) {
-            let did_reset = if let Some(op) = self.op.as_ref() {
-                op.refresh_rhs_jacobian(y, t);
-                self.nonlinear_solver.reset_jacobian(op, y, t);
-                true
-            } else if let Some(s_op) = self.s_op.as_mut() {
-                s_op.set_jacobian_is_stale();
-                self.nonlinear_solver
-                    .reset_jacobian(s_op, &self.rk.state().s, self.rk.state().t);
-                true
-            } else {
-                false
-            };
-            self.jacobian_update.update_rhs_jacobian(h);
-            self.jacobian_update.update_jacobian(h);
-            self.reset_etas();
-            did_reset
-        } else if self.jacobian_update.check_jacobian_update(h, &state) {
+        if self.jacobian_update.check_rhs_jacobian_update(h, &state) {
+            return self.refresh_jacobian_at(h, state, at);
+        }
+        let did_update = if self.jacobian_update.check_jacobian_update(h, &state) {
             // the rhs Jacobian is kept, so only h has changed and the point is not used
+            let (y, t) = at.unwrap_or((&self.rk.state().y, self.rk.state().t));
             let did_reset = if let Some(op) = self.op.as_ref() {
                 self.nonlinear_solver.reset_jacobian(op, y, t);
                 true
@@ -340,22 +324,37 @@ where
         did_update
     }
 
-    /// Evaluate the rhs Jacobian at the value of the stage the op is set up for (its `phi`,
-    /// with a zero increment), at time `t`, and rebuild the Newton matrix from it for step size
-    /// `h`: the exact matrix of that stage's transposed solve in [StepVjp::step_vjp]. Recorded
-    /// as an update after a second convergence failure. Returns whether the matrix was updated.
-    fn refresh_jacobian_at_stage(&mut self, h: Eqn::T, t: Eqn::T) -> bool {
-        let Some(op) = self.op.as_ref() else {
-            return false;
+    /// Evaluate the rhs Jacobian at `at` (a state and time), or at the solver's state if `None`,
+    /// and rebuild the Newton matrix from it for step size `h`, recorded as an update for
+    /// `state`. Returns whether the matrix was updated.
+    fn refresh_jacobian_at(
+        &mut self,
+        h: Eqn::T,
+        state: SolverState,
+        at: Option<(&Eqn::V, Eqn::T)>,
+    ) -> bool {
+        // a state, not a stage increment: the rhs Jacobian is evaluated there directly, and the
+        // Newton matrix combined from it, whatever stage the op is set up for
+        let (y, t) = at.unwrap_or((&self.rk.state().y, self.rk.state().t));
+        let did_update = if let Some(op) = self.op.as_ref() {
+            op.refresh_rhs_jacobian(y, t);
+            self.nonlinear_solver.reset_jacobian(op, y, t);
+            true
+        } else if let Some(s_op) = self.s_op.as_mut() {
+            s_op.set_jacobian_is_stale();
+            self.nonlinear_solver
+                .reset_jacobian(s_op, &self.rk.state().s, self.rk.state().t);
+            true
+        } else {
+            false
         };
-        op.set_jacobian_is_stale();
-        self.nonlinear_solver.reset_jacobian(op, &self.vjp_zero, t);
         self.jacobian_update.update_rhs_jacobian(h);
+        self.jacobian_update.update_jacobian(h);
         self.reset_etas();
-        self.rk
-            .statistics_mut()
-            .record_linear_solver_setup(SolverState::SecondConvergenceFail);
-        true
+        if did_update {
+            self.rk.statistics_mut().record_linear_solver_setup(state);
+        }
+        did_update
     }
 
     /// The Newton matrix has changed, so forget the convergence rates measured with the old one.
@@ -726,12 +725,18 @@ where
 
         let result = 'stages: {
             self.rk.vjp_start(step, end, cotangent, p_bar);
-            if !self.nonlinear_solver.is_jacobian_set() {
+            // whether the rhs Jacobian was last evaluated at the end of this step, when an update
+            // at the end, after a first failure, would rebuild the same matrix
+            let mut rhs_jacobian_at_end = !self.nonlinear_solver.is_jacobian_set();
+            if rhs_jacobian_at_end {
                 self.jacobian_updates_at(h, SolverState::Checkpoint, Some((&end.y, end.t)));
             }
             // the schedule's update at the end of a forward step, in reverse: at the start of the
             // step's pull back, update the matrix if due, at the step's end, and advance the
             // schedule
+            rhs_jacobian_at_end |= self
+                .jacobian_update
+                .check_rhs_jacobian_update(h, &SolverState::StepSuccess);
             self.jacobian_updates_at(h, SolverState::StepSuccess, Some((&end.y, end.t)));
             self.jacobian_update.step();
             // the stages of step(), in reverse
@@ -742,18 +747,9 @@ where
                 // taken as phi with a zero increment
                 let y_i = self.rk.vjp_stage_value(i, end);
                 self.op.as_ref().unwrap().set_phi_direct(y_i);
+
                 // Each stage's transposed equation (M - gamma h J_i)^T w = k_bar is solved with
-                // the current Newton matrix as a preconditioner, whose update schedule is similar
-                // to the forward pass's: after a first failure it is updated as a step would be.
-                // A replayed step cannot shrink h, so after a second failure the rhs Jacobian is
-                // evaluated at this stage's value instead, making the preconditioner exact, and
-                // only this stage is retried. The iteration starts from zero and measures its
-                // errors relative to its first update, w1 = P^-T k_bar, an estimate of the
-                // solution that depends only on this stage. Starting from k_bar itself, the first
-                // update would have to cancel its large stiff components (k_bar carries h J^T w
-                // terms from the other stages), which the convergence rate measured over the first
-                // updates mistakes for slow convergence, and errors relative to k_bar are loose
-                // where the solution is much smaller than it.
+                // the current Newton matrix as a preconditioner
                 let result = solve_with_jacobian_updates(
                     self,
                     &[
@@ -774,8 +770,17 @@ where
                         )
                     },
                     |s, state| match state {
-                        SolverState::SecondConvergenceFail => s.refresh_jacobian_at_stage(h, t_i),
-                        _ => s.jacobian_updates_at(h, state, Some((&end.y, end.t))),
+                        SolverState::SecondConvergenceFail => {
+                            rhs_jacobian_at_end = false;
+                            let y_i = s.rk.vjp_stage_value(i, end).clone();
+                            s.refresh_jacobian_at(h, state, Some((&y_i, t_i)))
+                        }
+                        _ if rhs_jacobian_at_end => false,
+                        _ => {
+                            rhs_jacobian_at_end =
+                                s.jacobian_update.check_rhs_jacobian_update(h, &state);
+                            s.jacobian_updates_at(h, state, Some((&end.y, end.t)))
+                        }
                     },
                 );
                 if let Err(e) = result {

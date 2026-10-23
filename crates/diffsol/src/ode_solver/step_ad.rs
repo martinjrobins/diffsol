@@ -28,9 +28,7 @@
 //! For the forward mode, use the forward sensitivities of
 //! [crate::SensitivitiesOdeSolverMethod]. They differentiate the same steps the same way: for
 //! [crate::Bdf] and [crate::Sdirk] both are solved to the same `derivative_solve_tolerance` (see
-//! [crate::OdeSolverOptions]), so the two agree as closely as that tolerance allows. The
-//! transposed solves of [StepVjp::step_vjp] are held to it more strictly: they converge only once
-//! an update is below it, not on an error estimated from their convergence rate. For
+//! [crate::OdeSolverOptions]), so the two agree as closely as that tolerance allows. For
 //! [crate::ExplicitRk] neither needs a solve, so they agree to rounding. Leave the
 //! sensitivities out of error control (the default, see [crate::OdeBuilder::sens_rtol]) for the
 //! steps to be those of a run without them, as long as no sensitivity solve fails.

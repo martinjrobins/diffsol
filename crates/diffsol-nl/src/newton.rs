@@ -37,14 +37,10 @@ pub fn newton_iteration<V: Vector>(
     Err(non_linear_solver_error!(NewtonMaxIterations))
 }
 
-/// Preconditioned Richardson iteration for the linear problem `A x = b`, from `x = 0`: each
-/// update is `x <- x - P^-1 (A x - b)`, where `mul(x, y)` sets `y = A x`, or `y = -A x` if
-/// `mul_is_negative`, and `precondition` applies `P^-1` in place. The first update is
-/// `x_1 = P^-1 b`, needing no product with `A`, and the error of every later update is measured
-/// relative to it, an estimate of the solution. `convergence` decides, after each later update, whether to stop:
-/// the first update is the whole of `x_1` rather than a correction to it, so it is neither
-/// checked nor counted, and the convergence rate is measured from the second. `x` returns the
-/// solution, and `delta` and `scale` are work vectors of its size.
+/// Preconditioned Richardson iteration for the linear problem `A x = b`, from `x = 0`
+///
+/// The first update is `x_1 = P^-1 b`, the error of every later update is measured
+/// relative to it
 #[allow(clippy::too_many_arguments)]
 pub fn richardson<V: Vector>(
     b: &V,
@@ -61,14 +57,14 @@ pub fn richardson<V: Vector>(
     precondition(x)?;
     scale.copy_from(x);
     convergence.reset();
+    let sign = if mul_is_negative {
+        -V::T::one()
+    } else {
+        V::T::one()
+    };
     for _ in 0..convergence.max_iter() {
         // delta = P^-1 (A x - b), the update with its sign reversed
         mul(x, delta);
-        let sign = if mul_is_negative {
-            -V::T::one()
-        } else {
-            V::T::one()
-        };
         delta.axpy(-V::T::one(), b, sign);
         precondition(delta)?;
         x.sub_assign(&*delta);

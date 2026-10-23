@@ -13,7 +13,6 @@ pub struct Convergence<'a, V: Vector> {
     old_norm: Option<V::T>,
     eta: V::T,
     /// The number of updates at the start of each iteration left out of its measured rate
-    /// (see [Convergence::set_transient_updates])
     transient_updates: IndexType,
 }
 
@@ -49,12 +48,6 @@ impl<'a, V: Vector> Convergence<'a, V> {
     pub fn set_tolerance(&mut self, value: V::T) {
         self.tol = value;
     }
-    /// The number of updates at the start of each iteration left out of its measured
-    /// convergence rate (default 0). The rate is then measured relative to the first update
-    /// after them, so an iteration whose first updates are a transient, removing error
-    /// components that the iteration damps almost at once, is not judged by a rate far faster
-    /// than the one the rest of its error contracts at. Until a rate is measured, `eta` is the
-    /// one carried over from earlier iterations.
     pub fn set_transient_updates(&mut self, value: IndexType) {
         self.transient_updates = value;
     }

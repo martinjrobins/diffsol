@@ -314,15 +314,14 @@ where
         );
         let options = &problem.ode_options;
         convergence.set_max_iter(options.max_nonlinear_solver_iterations);
-        // the derivative solves (the sensitivities alongside the main equations, and step_vjp)
-        // have settings of their own
+
         let mut derivative_convergence = convergence.clone();
         derivative_convergence.set_tolerance(options.derivative_solve_tolerance);
         derivative_convergence.set_max_iter(options.derivative_solve_max_iter);
         let s_convergence = derivative_convergence.clone();
-        // The first update of a transposed solve in StepVjp::step_vjp, w1 = P^-T b, can be
-        // dominated by error components the preconditioner removes almost at once, so a rate
-        // measured from it can be far faster than the one the rest of the error contracts at.
+
+        // The first update of a transposed solve in StepVjp::step_vjp often 
+        // has an initial transient, so mark this
         let mut vjp_convergence = derivative_convergence;
         vjp_convergence.set_transient_updates(1);
 
@@ -1776,20 +1775,24 @@ where
         // corrector's right-hand side d_bar and its solution w
         // update of the history, then the corrector: (M - c J)ᵀ w = d_bar
         c.diff.update_backward_diff_transpose(order, &mut c.y);
+
         // The solve uses the current Newton matrix as a preconditioner.
         // The matrix updates mirror the forward pass, except that the
-        // backwards vjp steps cannot change the step size h.
-        if !self.nonlinear_solver.is_jacobian_set() {
+        // backwards vjp steps cannot change the step size h. Once the rhs Jacobian has been
+        // evaluated at the end of this step, the matrix is the solve's exact one, which no
+        // update can change, so the retries after a failure are skipped.
+        let mut rhs_jacobian_at_end = !self.nonlinear_solver.is_jacobian_set();
+        if rhs_jacobian_at_end {
             self._jacobian_updates_at(step_c, SolverState::Checkpoint, Some((&end.y, end.t)));
         }
         // the schedule's update at the end of a forward step, in reverse: at the start of the
         // step's pull back, update the matrix if due, and advance the schedule
+        rhs_jacobian_at_end |= self
+            .jacobian_update
+            .check_rhs_jacobian_update(step_c, &SolverState::StepSuccess);
         self._jacobian_updates_at(step_c, SolverState::StepSuccess, Some((&end.y, end.t)));
         self.jacobian_update.step();
-        // The iteration starts from zero and measures its errors relative to its first update,
-        // w1 = P^-T d_bar, an estimate of the solution. d_bar itself is close to w except in its
-        // stiff components, where it can be orders of magnitude smaller than w, so errors
-        // relative to it would be far tighter than the tolerance asks.
+
         solve_with_jacobian_updates(
             self,
             &[
@@ -1806,7 +1809,13 @@ where
                     &mut s.vjp_convergence,
                 )
             },
-            |s, state| s._jacobian_updates_at(step_c, state, Some((&end.y, end.t))),
+            |s, state| {
+                if rhs_jacobian_at_end {
+                    return false;
+                }
+                rhs_jacobian_at_end = s.jacobian_update.check_rhs_jacobian_update(step_c, &state);
+                s._jacobian_updates_at(step_c, state, Some((&end.y, end.t)))
+            },
         )?;
 
         // the operator's inputs: the history (through psi), the prediction and the parameters;
