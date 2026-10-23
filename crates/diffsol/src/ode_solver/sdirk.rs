@@ -109,10 +109,6 @@ pub struct Sdirk<
     /// Convergence of the sensitivity solves alongside the main equations
     s_convergence: Convergence<'a, Eqn::V>,
     vjp_convergence: Convergence<'a, Eqn::V>,
-    /// The step size of the last [StepVjp::step_vjp] solve, whose preconditioner quality
-    /// `vjp_convergence` has measured: a replay at another step size must not trust that
-    /// estimate.
-    vjp_h: Option<Eqn::T>,
     /// Zero, the stage increment a [StepVjp::step_vjp] stage solve is linearised at: it sets the
     /// stage's known part to the whole stage value.
     vjp_zero: Eqn::V,
@@ -154,7 +150,6 @@ where
             convergence,
             s_convergence,
             vjp_convergence,
-            vjp_h: None,
             vjp_zero: self.vjp_zero.clone(),
             nonlinear_solver,
             op,
@@ -225,7 +220,11 @@ where
         derivative_convergence.set_tolerance(problem.ode_options.derivative_solve_tolerance);
         derivative_convergence.set_max_iter(problem.ode_options.derivative_solve_max_iter);
         let s_convergence = derivative_convergence.clone();
-        let vjp_convergence = derivative_convergence;
+        // The first update of a transposed solve in StepVjp::step_vjp, w1 = P^-T b, can be
+        // dominated by error components the preconditioner removes almost at once, so a rate
+        // measured from it can be far faster than the one the rest of the error contracts at.
+        let mut vjp_convergence = derivative_convergence;
+        vjp_convergence.set_transient_updates(1);
         let vjp_zero =
             <Eqn::V as Vector>::zeros(problem.eqn.rhs().nstates(), problem.context().clone());
 
@@ -243,7 +242,6 @@ where
             convergence,
             s_convergence,
             vjp_convergence,
-            vjp_h: None,
             vjp_zero,
             nonlinear_solver,
             op,
@@ -340,6 +338,24 @@ where
             self.rk.statistics_mut().record_linear_solver_setup(state);
         }
         did_update
+    }
+
+    /// Evaluate the rhs Jacobian at the value of the stage the op is set up for (its `phi`,
+    /// with a zero increment), at time `t`, and rebuild the Newton matrix from it for step size
+    /// `h`: the exact matrix of that stage's transposed solve in [StepVjp::step_vjp]. Recorded
+    /// as an update after a second convergence failure. Returns whether the matrix was updated.
+    fn refresh_jacobian_at_stage(&mut self, h: Eqn::T, t: Eqn::T) -> bool {
+        let Some(op) = self.op.as_ref() else {
+            return false;
+        };
+        op.set_jacobian_is_stale();
+        self.nonlinear_solver.reset_jacobian(op, &self.vjp_zero, t);
+        self.jacobian_update.update_rhs_jacobian(h);
+        self.reset_etas();
+        self.rk
+            .statistics_mut()
+            .record_linear_solver_setup(SolverState::SecondConvergenceFail);
+        true
     }
 
     /// The Newton matrix has changed, so forget the convergence rates measured with the old one.
@@ -707,19 +723,17 @@ where
         let h = step.h;
         // differentiate with the step's own h, which is put back afterwards
         op.set_h(h);
-        // as the forward solve does when its step size changes: the convergence rate measured
-        // at another h says nothing about how well the Newton matrix preconditions this one
-        if self.vjp_h != Some(h) {
-            self.vjp_convergence.reset_eta_timestep_change();
-            self.vjp_h = Some(h);
-        }
 
         let result = 'stages: {
             self.rk.vjp_start(step, end, cotangent, p_bar);
-
             if !self.nonlinear_solver.is_jacobian_set() {
                 self.jacobian_updates_at(h, SolverState::Checkpoint, Some((&end.y, end.t)));
             }
+            // the schedule's update at the end of a forward step, in reverse: at the start of the
+            // step's pull back, update the matrix if due, at the step's end, and advance the
+            // schedule
+            self.jacobian_updates_at(h, SolverState::StepSuccess, Some((&end.y, end.t)));
+            self.jacobian_update.step();
             // the stages of step(), in reverse
             let start = if self.rk.skip_first_stage() { 1 } else { 0 };
             for i in (start..self.rk.tableau().s()).rev() {
@@ -730,9 +744,16 @@ where
                 self.op.as_ref().unwrap().set_phi_direct(y_i);
                 // Each stage's transposed equation (M - gamma h J_i)^T w = k_bar is solved with
                 // the current Newton matrix as a preconditioner, whose update schedule is similar
-                // to the forward pass's. The solve needs its right-hand side alongside its
-                // iterate w, which starts from it (for small h, w is close to M^-T k_bar) and
-                // measures its errors relative to it.
+                // to the forward pass's: after a first failure it is updated as a step would be.
+                // A replayed step cannot shrink h, so after a second failure the rhs Jacobian is
+                // evaluated at this stage's value instead, making the preconditioner exact, and
+                // only this stage is retried. The iteration starts from zero and measures its
+                // errors relative to its first update, w1 = P^-T k_bar, an estimate of the
+                // solution that depends only on this stage. Starting from k_bar itself, the first
+                // update would have to cancel its large stiff components (k_bar carries h J^T w
+                // terms from the other stages), which the convergence rate measured over the first
+                // updates mistakes for slow convergence, and errors relative to k_bar are loose
+                // where the solution is much smaller than it.
                 let result = solve_with_jacobian_updates(
                     self,
                     &[
@@ -740,6 +761,7 @@ where
                         SolverState::SecondConvergenceFail,
                     ],
                     |s| {
+                        // the solve overwrites w, so keep its right-hand side in k_bar
                         let (w, k_bar) = s.rk.vjp_stage_rhs(i, cotangent);
                         k_bar.copy_from(w);
                         s.nonlinear_solver.solve_jacobian_transpose_in_place(
@@ -748,11 +770,13 @@ where
                             t_i,
                             k_bar,
                             w,
-                            k_bar,
                             &mut s.vjp_convergence,
                         )
                     },
-                    |s, state| s.jacobian_updates_at(h, state, Some((&end.y, end.t))),
+                    |s, state| match state {
+                        SolverState::SecondConvergenceFail => s.refresh_jacobian_at_stage(h, t_i),
+                        _ => s.jacobian_updates_at(h, state, Some((&end.y, end.t))),
+                    },
                 );
                 if let Err(e) = result {
                     break 'stages Err(e);
@@ -760,11 +784,6 @@ where
                 self.rk.vjp_stage_inputs(i, step, end, cotangent, p_bar);
             }
             self.rk.vjp_finish(step, end, cotangent);
-
-            // as a forward step ends: update the matrix if due, at the step's end, and advance
-            // the Jacobian schedule
-            self.jacobian_updates_at(h, SolverState::StepSuccess, Some((&end.y, end.t)));
-            self.jacobian_update.step();
             Ok(())
         };
         // the derivative used the replayed step's h: put back the one of the solver's own state,

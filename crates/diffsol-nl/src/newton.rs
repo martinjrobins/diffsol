@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::{
     convergence::{Convergence, ConvergenceStatus},
     error::{NlError, NonLinearSolverError},
-    line_search::{LineSearch, NoLineSearch},
+    line_search::LineSearch,
     non_linear_solver_error,
     nonlinear_op::{NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian},
     nonlinear_solver::NonLinearSolver,
@@ -29,6 +29,51 @@ pub fn newton_iteration<V: Vector>(
         // xn = xn + alpha * delta_n, where alpha is determined by line search, return status
 
         match res {
+            ConvergenceStatus::Continue => continue,
+            ConvergenceStatus::Converged => return Ok(()),
+            ConvergenceStatus::Diverged => return Err(non_linear_solver_error!(NewtonDiverged)),
+        }
+    }
+    Err(non_linear_solver_error!(NewtonMaxIterations))
+}
+
+/// Preconditioned Richardson iteration for the linear problem `A x = b`, from `x = 0`: each
+/// update is `x <- x - P^-1 (A x - b)`, where `mul(x, y)` sets `y = A x`, or `y = -A x` if
+/// `mul_is_negative`, and `precondition` applies `P^-1` in place. The first update is
+/// `x_1 = P^-1 b`, needing no product with `A`, and the error of every later update is measured
+/// relative to it, an estimate of the solution. `convergence` decides, after each later update, whether to stop:
+/// the first update is the whole of `x_1` rather than a correction to it, so it is neither
+/// checked nor counted, and the convergence rate is measured from the second. `x` returns the
+/// solution, and `delta` and `scale` are work vectors of its size.
+#[allow(clippy::too_many_arguments)]
+pub fn richardson<V: Vector>(
+    b: &V,
+    x: &mut V,
+    delta: &mut V,
+    scale: &mut V,
+    mul: impl Fn(&V, &mut V),
+    mul_is_negative: bool,
+    precondition: impl Fn(&mut V) -> Result<(), NlError>,
+    convergence: &mut Convergence<V>,
+) -> Result<(), NlError> {
+    // x_1 = P^-1 b, the update from x_0 = 0
+    x.copy_from(b);
+    precondition(x)?;
+    scale.copy_from(x);
+    convergence.reset();
+    for _ in 0..convergence.max_iter() {
+        // delta = P^-1 (A x - b), the update with its sign reversed
+        mul(x, delta);
+        let sign = if mul_is_negative {
+            -V::T::one()
+        } else {
+            V::T::one()
+        };
+        delta.axpy(-V::T::one(), b, sign);
+        precondition(delta)?;
+        x.sub_assign(&*delta);
+        let norm = convergence.norm(delta, scale);
+        match convergence.check_new_iteration(norm) {
             ConvergenceStatus::Continue => continue,
             ConvergenceStatus::Converged => return Ok(()),
             ConvergenceStatus::Diverged => return Err(non_linear_solver_error!(NewtonDiverged)),
@@ -99,6 +144,8 @@ pub struct NewtonNonlinearSolver<M: Matrix, Ls: LinearSolver<M>, Lsearch: LineSe
     is_jacobian_set: bool,
     /// Work vectors, one per lane count the solver has been asked for.
     tmps: HashMap<usize, M::V>,
+    /// Second work vectors, for the error scale of [richardson].
+    scales: HashMap<usize, M::V>,
 }
 
 impl<M: Matrix, Ls: LinearSolver<M>, Lsearch: LineSearch<M::V>>
@@ -110,6 +157,7 @@ impl<M: Matrix, Ls: LinearSolver<M>, Lsearch: LineSearch<M::V>>
             line_search,
             is_jacobian_set: false,
             tmps: HashMap::new(),
+            scales: HashMap::new(),
         }
     }
     pub fn linear_solver(&self) -> &Ls {
@@ -141,6 +189,7 @@ impl<M: Matrix, Ls: LinearSolver<M>, Lsearch: LineSearch<M::V>> NonLinearSolver<
             .set_sparsity(&JacobianRef::sparsity_only(op));
         self.is_jacobian_set = false;
         self.tmps.clear();
+        self.scales.clear();
     }
 
     fn reset_jacobian<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M, C = M::C>>(
@@ -163,28 +212,16 @@ impl<M: Matrix, Ls: LinearSolver<M>, Lsearch: LineSearch<M::V>> NonLinearSolver<
         x_lin: &M::V,
         b: &M::V,
         x: &mut M::V,
-        error_y: &M::V,
         convergence: &mut Convergence<M::V>,
     ) -> Result<(), NlError> {
         if !self.is_jacobian_set {
             return Err(non_linear_solver_error!(JacobianNotReset));
         }
-        let tmp = work_vector(&mut self.tmps, x);
-        // F(x) = J x - b
-        let fun = |x: &M::V, y: &mut M::V| {
-            op.jac_mul_inplace(x_lin, x, y);
-            y.axpy(-M::T::one(), b, M::T::one());
-        };
-        let linear_solver = |x: &mut M::V| self.linear_solver.solve_in_place(x).map_err(Into::into);
-        newton_iteration(
-            x,
-            tmp,
-            error_y,
-            fun,
-            linear_solver,
-            convergence,
-            &mut NoLineSearch,
-        )
+        let delta = work_vector(&mut self.tmps, x);
+        let scale = work_vector(&mut self.scales, x);
+        let mul = |x: &M::V, y: &mut M::V| op.jac_mul_inplace(x_lin, x, y);
+        let precondition = |x: &mut M::V| self.linear_solver.solve_in_place(x).map_err(Into::into);
+        richardson(b, x, delta, scale, mul, false, precondition, convergence)
     }
 
     fn solve_jacobian_transpose_in_place<
@@ -195,32 +232,21 @@ impl<M: Matrix, Ls: LinearSolver<M>, Lsearch: LineSearch<M::V>> NonLinearSolver<
         x_lin: &M::V,
         b: &M::V,
         x: &mut M::V,
-        error_y: &M::V,
         convergence: &mut Convergence<M::V>,
     ) -> Result<(), NlError> {
         if !self.is_jacobian_set {
             return Err(non_linear_solver_error!(JacobianNotReset));
         }
-        let tmp = work_vector(&mut self.tmps, x);
-        // F(x) = J^T x - b, where the op gives -J^T x
-        let fun = |x: &M::V, y: &mut M::V| {
-            op.jac_transpose_mul_inplace(x_lin, x, y);
-            y.axpy(-M::T::one(), b, -M::T::one());
-        };
-        let linear_solver = |x: &mut M::V| {
+        let delta = work_vector(&mut self.tmps, x);
+        let scale = work_vector(&mut self.scales, x);
+        // the op gives -J^T x
+        let mul = |x: &M::V, y: &mut M::V| op.jac_transpose_mul_inplace(x_lin, x, y);
+        let precondition = |x: &mut M::V| {
             self.linear_solver
                 .solve_transpose_in_place(x)
                 .map_err(Into::into)
         };
-        newton_iteration(
-            x,
-            tmp,
-            error_y,
-            fun,
-            linear_solver,
-            convergence,
-            &mut NoLineSearch,
-        )
+        richardson(b, x, delta, scale, mul, true, precondition, convergence)
     }
 
     fn solve_in_place<C: NonLinearOp<V = M::V, T = M::T, M = M>>(

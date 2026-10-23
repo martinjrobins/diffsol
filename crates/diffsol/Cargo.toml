@@ -83,5 +83,9 @@ harness = false
 name = "ode_solvers_ci"
 harness = false
 
+[[bench]]
+name = "ode_gradients"
+harness = false
+
 [package.metadata.docs.rs]
 features = ["diffsl-cranelift", "diffsl-external-dynamic"]

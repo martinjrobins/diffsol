@@ -136,10 +136,10 @@ pub trait NonLinearSolver<M: Matrix>: Default {
     /// The input `b` is provided in `x`, and the solution is returned in `x`.
     fn solve_linearised_in_place(&self, x: &mut M::V) -> Result<(), DiffsolError>;
 
-    /// Solve `J(x_lin, t) * x = b` with the operator's own Jacobian, using the one set by
-    /// [Self::reset_jacobian] as the Newton matrix. `x` holds the initial guess. See
-    /// [`diffsol_nl::NonLinearSolver::solve_jacobian_in_place`].
-    #[allow(clippy::too_many_arguments)]
+    /// Solve `J(x_lin, t) * x = b` by Richardson iteration from `x = 0`, preconditioned by the
+    /// Jacobian set by [Self::reset_jacobian], measuring the error of every later update
+    /// relative to the first, the preconditioned `b` (see
+    /// [diffsol_nl::NonLinearSolver::solve_jacobian_in_place]). `x` returns the solution.
     fn solve_jacobian_in_place<
         C: TimeAwareNonLinearOpJacobian<V = M::V, T = M::T, M = M, C = M::C>,
     >(
@@ -149,11 +149,12 @@ pub trait NonLinearSolver<M: Matrix>: Default {
         t: M::T,
         b: &M::V,
         x: &mut M::V,
-        error_y: &M::V,
         convergence: &mut Convergence<'_, M::V>,
     ) -> Result<(), DiffsolError>;
 
-    /// As [Self::solve_jacobian_in_place], for the transposed problem `J(x_lin, t)^T * x = b`.
+    /// As [Self::solve_jacobian_in_place], for the transposed problem `J(x_lin, t)^T * x = b`,
+    /// preconditioned by the transpose of the stored Jacobian (see
+    /// [diffsol_nl::NonLinearSolver::solve_jacobian_transpose_in_place]).
     #[allow(clippy::too_many_arguments)]
     fn solve_jacobian_transpose_in_place<
         C: TimeAwareNonLinearOpAdjoint<V = M::V, T = M::T, M = M, C = M::C>,
@@ -164,7 +165,6 @@ pub trait NonLinearSolver<M: Matrix>: Default {
         t: M::T,
         b: &M::V,
         x: &mut M::V,
-        error_y: &M::V,
         convergence: &mut Convergence<'_, M::V>,
     ) -> Result<(), DiffsolError>;
 }
@@ -228,7 +228,6 @@ impl<M: Matrix, S: NlNonLinearSolver<M>> NonLinearSolver<M> for S {
         t: M::T,
         b: &M::V,
         x: &mut M::V,
-        error_y: &M::V,
         convergence: &mut Convergence<'_, M::V>,
     ) -> Result<(), DiffsolError> {
         NlNonLinearSolver::solve_jacobian_in_place(
@@ -237,7 +236,6 @@ impl<M: Matrix, S: NlNonLinearSolver<M>> NonLinearSolver<M> for S {
             x_lin,
             b,
             x,
-            error_y,
             convergence,
         )
         .map_err(Into::into)
@@ -253,7 +251,6 @@ impl<M: Matrix, S: NlNonLinearSolver<M>> NonLinearSolver<M> for S {
         t: M::T,
         b: &M::V,
         x: &mut M::V,
-        error_y: &M::V,
         convergence: &mut Convergence<'_, M::V>,
     ) -> Result<(), DiffsolError> {
         NlNonLinearSolver::solve_jacobian_transpose_in_place(
@@ -262,7 +259,6 @@ impl<M: Matrix, S: NlNonLinearSolver<M>> NonLinearSolver<M> for S {
             x_lin,
             b,
             x,
-            error_y,
             convergence,
         )
         .map_err(Into::into)
