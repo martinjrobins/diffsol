@@ -8,7 +8,55 @@ use crate::{scalar::Scale, Context, FaerContext, FaerScalar, IndexType, Vector};
 
 use crate::{FaerMat, VectorCommon, VectorIndex, VectorView, VectorViewMut};
 
-use super::DefaultDenseMatrix;
+use super::{DefaultDenseMatrix, SHORT_FILL_LEN};
+
+/// Set every entry of an owned faer `Mat` to `value`, as one contiguous write over its storage.
+///
+/// faer pads each column of an owned `Mat` to a 64-byte boundary, so the entries are not one
+/// contiguous slice and `Mat::fill` walks them through its generic zip. Filling the whole
+/// buffer, the padding between columns included, is one contiguous `fill` instead: 2.3-4x
+/// faster across every `lin_alg_ops mat_fill/faer` cell, tall lanes and short alike.
+///
+/// Dev Note: I'm a bit worried about this function as it relies heavily on faer internals
+/// not changing. Keeping for now as it is a good speed-up, but reevaluate if this causes
+/// problems in the future.
+pub(crate) fn fill_mat<T: FaerScalar>(data: &mut Mat<T>, value: T) {
+    let (nr, nc) = (data.nrows(), data.ncols());
+    if nr == 0 || nc == 0 {
+        return;
+    }
+    // a short single column (an unbatched few-state vector) is cheapest as faer's own column
+    // fill; with more than one column the padding already makes the buffer long
+    if nc == 1 && nr < SHORT_FILL_LEN {
+        data.col_mut(0).fill(value);
+        return;
+    }
+    let cs = data.col_stride();
+    // the parts of the layout the public API shows: each column is contiguous, and columns
+    // run forwards without overlapping
+    assert_eq!(data.row_stride(), 1, "fill_mat: unexpected faer row stride");
+    assert!(
+        cs >= 0 && cs as usize >= nr,
+        "fill_mat: unexpected faer column stride"
+    );
+    let len = cs as usize * (nc - 1) + nr;
+    // SAFETY:
+    // - In bounds: an owned `Mat` holds its contiguous columns `col_stride` (its row
+    //   capacity) apart in one allocation of at least `col_stride * ncols` elements, so
+    //   `0..len` lies inside it. `&mut` makes the access exclusive.
+    // - Overwriting the padding rows (`nrows..col_stride` of each column) is unobservable:
+    //   faer keeps no data there and never reads it. `Mat`'s metadata lives in the struct,
+    //   not the buffer; reallocation (`do_reserve_with`) copies only the `nrows` live rows
+    //   per column; growing rows (`resize_with`) writes the new rows before they come into
+    //   bounds; `set_dims` makes the caller initialise them. Views only see `nrows` rows, so
+    //   no kernel can use the padding as scratch.
+    // - The padding may be uninitialised, hence `MaybeUninit`; `T` is `Copy`, so
+    //   overwriting drops nothing.
+    let buf = unsafe {
+        std::slice::from_raw_parts_mut(data.as_ptr_mut() as *mut std::mem::MaybeUninit<T>, len)
+    };
+    buf.fill(std::mem::MaybeUninit::new(value));
+}
 
 /// A batched vector, stored as one column per batch.
 ///
@@ -663,11 +711,7 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
         copy_from_body!(self, o, "copy_from");
     }
     fn fill(&mut self, v: T) {
-        if self.data.ncols() == 1 {
-            self.data.rb_mut().col_mut(0).fill(v);
-            return;
-        }
-        self.data.rb_mut().fill(v)
+        fill_mat(&mut self.data, v)
     }
     fn copy_from_view(&mut self, o: &Self::View<'_>) {
         copy_from_body!(self, o, "copy_from_view");
@@ -901,6 +945,65 @@ impl<'a, T: FaerScalar> VectorViewMut<'a> for FaerVecMut<'a, T> {
 mod tests {
     use super::*;
     use crate::scalar::scale;
+
+    /// `n` rounded up to a whole number of 64-byte blocks of `T`.
+    fn padded_rows<T>(n: usize) -> usize {
+        n.next_multiple_of(64 / std::mem::size_of::<T>())
+    }
+
+    /// A tripwire for `fill_mat`'s use of faer's private owned-`Mat` layout, on every way
+    /// this crate builds one.
+    ///
+    /// `fill_mat` does not need the 64-byte rounding checked here: it reads the stride at
+    /// runtime. What it needs is the SAFETY argument in its body: the allocation spans
+    /// `col_stride * ncols` elements, and faer neither stores data in the padding nor reads
+    /// it back. faer's public API cannot show either, so this pins the exact stride instead.
+    /// Any change to faer's padding rule fails here, even a harmless one, as a sign its
+    /// owned-storage code (`mat/matown.rs`) has changed. When this fails, recheck that
+    /// argument against the new faer source before updating the expected strides.
+    fn check_faer_mat_layout<T: FaerScalar>() {
+        for nr in 1..=17 {
+            for nc in 1..=5 {
+                let zeros = Mat::<T>::zeros(nr, nc);
+                let from_fn = Mat::<T>::from_fn(nr, nc, |_, _| T::zero());
+                let owned = zeros.as_ref().to_owned();
+                let cloned = from_fn.clone();
+                for (how, m) in [
+                    ("zeros", &zeros),
+                    ("from_fn", &from_fn),
+                    ("to_owned", &owned),
+                    ("clone", &cloned),
+                ] {
+                    assert_eq!(
+                        m.col_stride() as usize,
+                        padded_rows::<T>(nr),
+                        "faer layout changed: {how} {nr}x{nc} Mat<{}>",
+                        std::any::type_name::<T>()
+                    );
+                    assert_eq!(m.row_stride(), 1, "faer layout changed: {how} {nr}x{nc}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_faer_mat_layout() {
+        check_faer_mat_layout::<f64>();
+        check_faer_mat_layout::<f32>();
+    }
+
+    /// `fill_mat` sets every entry, on shapes with and without padding between columns, and
+    /// leaves a matrix faer still reads correctly.
+    #[test]
+    fn test_fill_mat() {
+        for nr in [0, 1, 3, 8, 9, 20] {
+            for nc in [0, 1, 2, 5] {
+                let mut m = Mat::<f64>::from_fn(nr, nc, |i, j| (i + 10 * j) as f64);
+                fill_mat(&mut m, 2.5);
+                assert_eq!(m, Mat::<f64>::from_fn(nr, nc, |_, _| 2.5), "{nr}x{nc}");
+            }
+        }
+    }
 
     #[test]
     fn test_mult() {

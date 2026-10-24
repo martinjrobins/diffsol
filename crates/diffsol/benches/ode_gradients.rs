@@ -14,7 +14,7 @@ use diffsol::{
     error::DiffsolError,
     ode_equations::test_models::{
         exponential_decay::exponential_decay_problem_adjoint, robertson::robertson_adjoint,
-        robertson_ode::robertson_ode_elem_problem,
+        robertson_ode::robertson_ode,
     },
     AdjointOdeSolverMethod, CheckpointingPath, DenseMatrix, MatrixCommon, NalgebraLU, NalgebraMat,
     NalgebraVec, OdeEquationsImplicitAdjoint, OdeSolverMethod, OdeSolverState, StepVjp, Vector,
@@ -136,7 +136,7 @@ fn robertson_ode_sizes(g: &mut BenchmarkGroup<'_, WallTime>) {
         bench_gradients!(
             g,
             format!("bdf_{nbatch}"),
-            robertson_ode_elem_problem::<M>(nbatch),
+            robertson_ode::<M>(nbatch),
             ROBERTSON_T_MAX,
             new = { bdf::<LS> },
             adjoint = { bdf_solver_adjoint::<LS, _> }
@@ -144,7 +144,7 @@ fn robertson_ode_sizes(g: &mut BenchmarkGroup<'_, WallTime>) {
         bench_gradients!(
             g,
             format!("esdirk34_{nbatch}"),
-            robertson_ode_elem_problem::<M>(nbatch),
+            robertson_ode::<M>(nbatch),
             ROBERTSON_T_MAX,
             new = { esdirk34::<LS> },
             adjoint = { esdirk34_solver_adjoint::<LS, _> }

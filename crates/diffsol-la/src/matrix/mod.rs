@@ -453,7 +453,8 @@ pub trait DenseMatrix:
     ///
     /// As for [`Self::gemv_cols`], `x` is a host slice of at least `end - start` coefficients,
     /// shared by every batch, and only the columns in the range are touched. `y` has this
-    /// matrix's rows and lanes.
+    /// matrix's rows, and either this matrix's lanes or a number of lanes that broadcasts into
+    /// them. Panics if `end - start` exceeds [`MAX_SMALL_COLS`].
     fn ger_cols(
         &mut self,
         start: IndexType,
@@ -462,9 +463,14 @@ pub trait DenseMatrix:
         x: &[Self::T],
         y: &Self::V,
     ) {
+        assert!(start <= end, "ger_cols: column range start > end");
         assert!(
-            x.len() >= end.saturating_sub(start),
-            "ger_cols needs a coefficient per column in the range"
+            end - start <= MAX_SMALL_COLS,
+            "ger_cols: column range exceeds MAX_SMALL_COLS"
+        );
+        assert!(
+            x.len() >= end - start,
+            "ger_cols: x must hold at least end - start values"
         );
         for j in start..end {
             self.column_mut(j)
@@ -1188,6 +1194,26 @@ pub(crate) mod tests {
         assert_eq!(y.clone_as_vec(), vec![total, f::<M>(10.0) * total]);
     }
 
+    /// The widest column range `ger_cols` accepts, which is also the size of the by-value
+    /// coefficient array the CUDA kernel takes.
+    pub fn test_ger_cols_many_columns<M: DenseMatrix>() {
+        let ncols = MAX_SMALL_COLS;
+        let mut a = M::zeros(2, ncols, Default::default());
+        let x: Vec<M::T> = (1..=ncols).map(|j| f::<M>(j as f64)).collect();
+        let y = M::V::from_vec(vec![f::<M>(1.0), f::<M>(-2.0)], Default::default());
+        a.ger_cols(0, ncols, f::<M>(3.0), &x, &y);
+        // column j - 1 is 3 * j * [1, -2]
+        let expected = M::from_vec(
+            2,
+            ncols,
+            (1..=ncols)
+                .flat_map(|j| [f::<M>(3.0 * j as f64), f::<M>(-6.0 * j as f64)])
+                .collect(),
+            Default::default(),
+        );
+        assert_mat_eq(&a, &expected);
+    }
+
     /// [`DenseMatrix::ger_cols`] on 2 batches: the coefficients are shared, `y` is per batch.
     pub fn test_batched_ger_cols<M: DenseMatrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
@@ -1264,6 +1290,21 @@ pub(crate) mod tests {
         assert_eq!(
             y.clone_as_vec(),
             vec![f::<M>(2.0), f::<M>(20.0), f::<M>(4.0), f::<M>(40.0)]
+        );
+
+        // a general alpha and beta, over both columns
+        let neg_half = f::<M>(-0.5);
+        a.gemv_cols(0, 2, f::<M>(2.0), &ones, neg_half, &mut y);
+        assert_eq!(
+            y.clone_as_vec(),
+            vec![f::<M>(5.0), f::<M>(50.0), f::<M>(12.0), f::<M>(120.0)]
+        );
+
+        // an empty column range leaves y = beta * y in each batch
+        a.gemv_cols(1, 1, f::<M>(1.0), &[], f::<M>(2.0), &mut y);
+        assert_eq!(
+            y.clone_as_vec(),
+            vec![f::<M>(10.0), f::<M>(100.0), f::<M>(24.0), f::<M>(240.0)]
         );
     }
 
@@ -2789,6 +2830,162 @@ pub(crate) mod tests {
         );
     }
 
+    /// Row counts for the batched tests checked against a host reference: a backend may switch
+    /// strategy on the length of a lane, so test one short lane and one tall one.
+    const LANE_ROWS: [IndexType; 2] = [3, 20];
+
+    /// Lane `b`, row `i`, column `j` of the matrices those tests build: different in every lane,
+    /// row and column, and small integers so every product and sum in the tests is exact.
+    fn lane_matrix_entry(b: usize, i: IndexType, j: IndexType) -> f64 {
+        (10 * b + i) as f64 - 2.0 * j as f64
+    }
+
+    /// Lane `b`, row `i` of the vectors those tests build.
+    fn lane_vector_entry(offset: f64, b: usize, i: IndexType) -> f64 {
+        offset + (3 * b + i) as f64
+    }
+
+    /// An `nrows x ncols` matrix with `nbatch` lanes of [`lane_matrix_entry`].
+    fn lane_matrix<M: DenseMatrix>(nrows: IndexType, ncols: IndexType, ctx: M::C) -> M {
+        let data = (0..ctx.nbatch())
+            .flat_map(|b| {
+                (0..ncols)
+                    .flat_map(move |j| (0..nrows).map(move |i| f::<M>(lane_matrix_entry(b, i, j))))
+            })
+            .collect();
+        M::from_vec(nrows, ncols, data, ctx)
+    }
+
+    /// A length-`nrows` vector with `nbatch` lanes of [`lane_vector_entry`].
+    fn lane_vector<M: DenseMatrix>(nrows: IndexType, offset: f64, ctx: M::C) -> M::V {
+        let data = (0..ctx.nbatch())
+            .flat_map(|b| (0..nrows).map(move |i| f::<M>(lane_vector_entry(offset, b, i))))
+            .collect();
+        M::V::from_vec(data, ctx)
+    }
+
+    /// Batched `gemv_cols` against a host reference: short and tall lanes, every kind of `beta`,
+    /// an empty column range, and a matrix broadcast over twice as many lanes of `y`.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_batched_gemv_cols_reference<M: DenseMatrix>(ctx2: M::C) {
+        assert_eq!(ctx2.nbatch(), 2);
+        let ncols = 6;
+        let w = [1.0, -1.0, 2.0, 0.5];
+        for nrows in LANE_ROWS {
+            for (start, end) in [(0, 4), (2, 5), (3, 3)] {
+                for (alpha, beta) in [(1.0, 0.0), (1.0, 1.0), (2.0, -0.5)] {
+                    for y_ctx in [ctx2.clone(), ctx4::<M>(&ctx2)] {
+                        let y_lanes = y_ctx.nbatch();
+                        let a = lane_matrix::<M>(nrows, ncols, ctx2.clone());
+                        let mut y = lane_vector::<M>(nrows, 1.0, y_ctx);
+                        let x: Vec<M::T> = w[..end - start].iter().map(|v| f::<M>(*v)).collect();
+                        a.gemv_cols(start, end, f::<M>(alpha), &x, f::<M>(beta), &mut y);
+
+                        let mut expect = Vec::new();
+                        for b in 0..y_lanes {
+                            // the matrix broadcasts over contiguous groups of `y`'s lanes
+                            let src = b * 2 / y_lanes;
+                            for i in 0..nrows {
+                                let sum: f64 = (start..end)
+                                    .map(|j| w[j - start] * lane_matrix_entry(src, i, j))
+                                    .sum();
+                                let y0 = lane_vector_entry(1.0, b, i);
+                                expect.push(f::<M>(alpha * sum + beta * y0));
+                            }
+                        }
+                        assert_eq!(
+                            y.clone_as_vec(),
+                            expect,
+                            "nrows {nrows}, columns {start}..{end}, alpha {alpha}, beta {beta}, \
+                             {y_lanes} lanes of y"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// `ger_cols` against a host reference, for short and tall lanes, an empty range, one or two
+    /// lanes of matrix, and a `y` that either matches the matrix's lanes or broadcasts into them.
+    pub fn test_batched_ger_cols_reference<M: DenseMatrix>(ctx2: M::C) {
+        assert_eq!(ctx2.nbatch(), 2);
+        let ncols = 6;
+        let w = [1.0, -1.0, 2.0, 0.5];
+        let ctx1 = ctx2.clone_with_nbatch(1).unwrap();
+        for nrows in LANE_ROWS {
+            for (start, end) in [(0, 4), (2, 5), (3, 3)] {
+                for alpha in [1.0, -0.5, 2.0] {
+                    for (a_ctx, y_ctx) in [
+                        (ctx1.clone(), ctx1.clone()),
+                        (ctx2.clone(), ctx2.clone()),
+                        (ctx2.clone(), ctx1.clone()),
+                    ] {
+                        let (a_lanes, y_lanes) = (a_ctx.nbatch(), y_ctx.nbatch());
+                        let mut a = lane_matrix::<M>(nrows, ncols, a_ctx);
+                        let y = lane_vector::<M>(nrows, 1.0, y_ctx);
+                        let x: Vec<M::T> = w[..end - start].iter().map(|v| f::<M>(*v)).collect();
+                        a.ger_cols(start, end, f::<M>(alpha), &x, &y);
+
+                        let mut expect = Vec::new();
+                        for b in 0..a_lanes {
+                            // y broadcasts over contiguous groups of the matrix's lanes
+                            let src = b * y_lanes / a_lanes;
+                            for j in 0..ncols {
+                                for i in 0..nrows {
+                                    let mut v = lane_matrix_entry(b, i, j);
+                                    if (start..end).contains(&j) {
+                                        v += alpha * w[j - start] * lane_vector_entry(1.0, src, i);
+                                    }
+                                    expect.push(f::<M>(v));
+                                }
+                            }
+                        }
+                        let expect = M::from_vec(nrows, ncols, expect, a.context().clone());
+                        assert_mat_eq(&a, &expect);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Batched `update_backward_diff` against a host reference, for short and tall lanes and
+    /// several orders.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_batched_update_backward_diff_reference<M: DenseMatrix>(ctx2: M::C) {
+        assert_eq!(ctx2.nbatch(), 2);
+        let ncols = 6;
+        for nrows in LANE_ROWS {
+            for order in [0, 2, 3] {
+                let mut a = lane_matrix::<M>(nrows, ncols, ctx2.clone());
+                let d = lane_vector::<M>(nrows, 50.0, ctx2.clone());
+                a.update_backward_diff(order, &d);
+
+                // expect[j] is column j of every lane, end to end, as `column(j)` returns it
+                let mut expect = vec![Vec::new(); ncols];
+                for b in 0..2 {
+                    for i in 0..nrows {
+                        let mut c: Vec<f64> =
+                            (0..ncols).map(|j| lane_matrix_entry(b, i, j)).collect();
+                        c[order + 2] = lane_vector_entry(50.0, b, i) - c[order + 1];
+                        for k in (0..=order + 1).rev() {
+                            c[k] += c[k + 1];
+                        }
+                        for (col, cj) in expect.iter_mut().zip(c) {
+                            col.push(f::<M>(cj));
+                        }
+                    }
+                }
+                for (j, col) in expect.into_iter().enumerate() {
+                    assert_eq!(
+                        a.column(j).into_owned().clone_as_vec(),
+                        col,
+                        "nrows {nrows}, order {order}, column {j}"
+                    );
+                }
+            }
+        }
+    }
+
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub fn test_batched_from_diagonal_dense<M: DenseMatrix>(ctx: M::C) {
         assert_eq!(ctx.nbatch(), 2);
@@ -3071,6 +3268,10 @@ macro_rules! generate_dense_matrix_tests_nonbatched {
             fn [<test_ger_cols_transpose_ $suffix>]() {
                 $crate::matrix::tests::test_ger_cols_transpose::<$M>();
             }
+            #[test]
+            fn [<test_ger_cols_many_columns_ $suffix>]() {
+                $crate::matrix::tests::test_ger_cols_many_columns::<$M>();
+            }
 
             #[test]
             fn [<test_gemv_cols_many_columns_ $suffix>]() {
@@ -3135,12 +3336,26 @@ macro_rules! generate_dense_matrix_tests_batched {
                 $crate::matrix::tests::test_batched_update_backward_diff::<$M>($ctx2);
             }
             #[test]
+            fn [<test_batched_update_backward_diff_reference_ $suffix>]() {
+                $crate::matrix::tests::test_batched_update_backward_diff_reference::<$M>(
+                    $ctx2,
+                );
+            }
+            #[test]
             fn [<test_batched_gemv_cols_ $suffix>]() {
                 $crate::matrix::tests::test_batched_gemv_cols_m::<$M>($ctx2);
             }
             #[test]
+            fn [<test_batched_gemv_cols_reference_ $suffix>]() {
+                $crate::matrix::tests::test_batched_gemv_cols_reference::<$M>($ctx2);
+            }
+            #[test]
             fn [<test_batched_ger_cols_ $suffix>]() {
                 $crate::matrix::tests::test_batched_ger_cols::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_ger_cols_reference_ $suffix>]() {
+                $crate::matrix::tests::test_batched_ger_cols_reference::<$M>($ctx2);
             }
 
             #[test]

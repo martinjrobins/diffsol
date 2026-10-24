@@ -4,7 +4,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use diffsol::{
     ode_equations::test_models::{
         exponential_decay::exponential_decay_problem, foodweb::foodweb_problem,
-        heat2d::head2d_problem, robertson::robertson, robertson_ode::robertson_ode,
+        heat2d::heat2d_problem, robertson::robertson, robertson_ode::robertson_ode,
     },
     FaerLU, FaerMat, FaerSparseLU, FaerSparseMat, NalgebraLU, NalgebraMat,
 };
@@ -121,37 +121,37 @@ fn criterion_benchmark(c: &mut Criterion) {
     }
 
     // -------------------------------------------------------------------------
-    // Robertson ODE (sparse, reduced sizes for CI)
+    // Robertson ODE (dense, one small system per batch lane, reduced sizes for CI)
     // -------------------------------------------------------------------------
     {
         let mut g = c.benchmark_group("robertson_ode_ci");
         bench_implicit_rt!(
             g,
-            faer_sparse_bdf,
+            nalgebra_bdf,
             bdf,
-            FaerSparseLU,
+            NalgebraLU,
             robertson_ode,
-            FaerSparseMat<f64>,
+            NalgebraMat<f64>,
             25,
             100
         );
         bench_implicit_rt!(
             g,
-            faer_sparse_tr_bdf2,
+            nalgebra_tr_bdf2,
             tr_bdf2,
-            FaerSparseLU,
+            NalgebraLU,
             robertson_ode,
-            FaerSparseMat<f64>,
+            NalgebraMat<f64>,
             25,
             100
         );
         bench_implicit_rt!(
             g,
-            faer_sparse_esdirk,
+            nalgebra_esdirk,
             esdirk34,
-            FaerSparseLU,
+            NalgebraLU,
             robertson_ode,
-            FaerSparseMat<f64>,
+            NalgebraMat<f64>,
             25,
             100
         );
@@ -168,7 +168,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             faer_sparse_bdf,
             bdf,
             FaerSparseLU,
-            head2d_problem,
+            heat2d_problem,
             FaerSparseMat<f64>,
             5,
             10
@@ -178,7 +178,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             faer_sparse_tr_bdf2,
             tr_bdf2,
             FaerSparseLU,
-            head2d_problem,
+            heat2d_problem,
             FaerSparseMat<f64>,
             5,
             10
@@ -188,7 +188,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             faer_sparse_esdirk,
             esdirk34,
             FaerSparseLU,
-            head2d_problem,
+            heat2d_problem,
             FaerSparseMat<f64>,
             5,
             10

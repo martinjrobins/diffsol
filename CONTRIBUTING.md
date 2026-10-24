@@ -297,7 +297,7 @@ pub fn add(a: i32, b: i32) -> i32 {
 
 ### Code Coverage
 
-The project uses code coverage with [tarpaulin](https://github.com/xd009642/tarpaulin) to ensure tests adequately cover the codebase. CI runs coverage checks automatically on pull requests.
+The project uses code coverage with [tarpaulin](https://github.com/xd009642/tarpaulin) to ensure tests adequately cover the codebase. CI runs coverage checks automatically on pull requests. Shared settings (engine, output format, packages and excluded files such as benchmarks) live in `tarpaulin.toml` at the repository root.
 
 To run coverage locally (requires `cargo-tarpaulin`) with a feature enabled:
 

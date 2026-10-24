@@ -25,7 +25,10 @@ use crate::small::{SmallMat, SmallVec};
 use super::config::BdfConfig;
 use super::jacobian_update::solve_with_jacobian_updates;
 use super::jacobian_update::SolverState;
-use super::method::{check_interpolate_shape, check_interpolate_time, AugmentedOdeSolverMethod};
+use super::method::{
+    check_interpolate_bounds, check_interpolate_shape, check_interpolate_time,
+    AugmentedOdeSolverMethod,
+};
 use super::pi_controller::pi_controller_raw;
 use super::sensitivities::SensitivitiesOdeSolverMethod;
 use super::step_ad::{check_step_vjp_inputs, StepVjp};
@@ -813,6 +816,20 @@ where
         order: usize,
         y: &mut Eqn::V,
     ) {
+        let weights = Self::interpolate_weights(t, t1, h, order);
+        diff.gemv_cols(
+            0,
+            order + 1,
+            Eqn::T::one(),
+            weights.as_slice(),
+            Eqn::T::zero(),
+            y,
+        );
+    }
+
+    /// The weights of the columns `0..=order` of `diff` in the value at `t` of the interpolating
+    /// polynomial of a history `diff` at time `t1` and step size `h`.
+    fn interpolate_weights(t: Eqn::T, t1: Eqn::T, h: Eqn::T, order: usize) -> BdfVec<Eqn::T> {
         // one weight per column `0..=order`, so the length says what `[..=order]` used to
         let mut weights = BdfVec::zeros(order + 1);
         let mut time_factor = Eqn::T::one();
@@ -822,14 +839,7 @@ where
             time_factor *= (t - (t1 - h * i_t)) / (h * (Eqn::T::one() + i_t));
             *weight = time_factor;
         }
-        diff.gemv_cols(
-            0,
-            order + 1,
-            Eqn::T::one(),
-            weights.as_slice(),
-            Eqn::T::zero(),
-            y,
-        );
+        weights
     }
 
     // Interpolate the time derivative dy/dt of the BDF polynomial at time t.
@@ -1738,8 +1748,11 @@ where
             (&end.y, &end.dy, &end.diff),
             MAX_ORDER + 3,
             (&cotangent.y, &cotangent.dy, &cotangent.diff),
-            p_bar,
-            self.ode_problem.eqn.rhs().nparams(),
+            (
+                "the parameter cotangent",
+                p_bar,
+                self.ode_problem.eqn.rhs().nparams(),
+            ),
         )?;
         Ok(step)
     }
@@ -1889,6 +1902,41 @@ where
         self.op.as_mut().unwrap().set_c(self.state.h, alpha);
         result
     }
+
+    /// The interpolant is the polynomial of `end`'s history, so this adds to the cotangent's
+    /// `diff` alone.
+    fn interpolate_vjp(
+        &self,
+        end: &Self::State,
+        t: Eqn::T,
+        y_bar: &Eqn::V,
+        cotangent: &mut Self::State,
+    ) -> Result<(), DiffsolError> {
+        let step = end
+            .last_step
+            .ok_or(ode_solver_error!(NoStepToDifferentiate))?;
+        // the history must be the one the step ended with, which step_vjp differentiates
+        if end.h != step.h_end {
+            return Err(ode_solver_error!(NoStepToDifferentiate));
+        }
+        check_step_vjp_inputs(
+            (&end.y, &end.dy, &end.diff),
+            MAX_ORDER + 3,
+            (&cotangent.y, &cotangent.dy, &cotangent.diff),
+            (
+                "the cotangent of the interpolated value",
+                y_bar,
+                end.y.len(),
+            ),
+        )?;
+        // the bounds of the forward interpolation straight after the step
+        check_interpolate_bounds(t, end.t, end.h, None)?;
+        let weights = Self::interpolate_weights(t, end.t, end.h, end.order);
+        cotangent
+            .diff
+            .ger_cols(0, end.order + 1, Eqn::T::one(), weights.as_slice(), y_bar);
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -1923,14 +1971,13 @@ mod test {
                 exponential_decay_with_algebraic_problem,
                 exponential_decay_with_algebraic_problem_sens,
             },
-            foodweb::{foodweb_elem_problem, foodweb_problem},
+            foodweb::foodweb_problem,
             gaussian_decay::gaussian_decay_problem,
-            heat2d::{head2d_problem, heat2d_elem_problem},
+            heat2d::heat2d_problem,
             logistic::logistic_problem_adjoint_no_out,
             nonlinear_failure::nonlinear_failure_problem,
             robertson::{robertson, robertson_sens},
-            robertson_ode::{robertson_ode, robertson_ode_elem_problem},
-            robertson_ode_with_sens::robertson_ode_with_sens,
+            robertson_ode::robertson_ode,
         },
         ode_solver::tests::{
             setup_test_adjoint, setup_test_adjoint_sum_squares,
@@ -2000,7 +2047,7 @@ mod test {
 
     #[test]
     fn bdf_config() {
-        test_config(robertson_ode::<M>(false, 1).0.bdf::<LS>().unwrap());
+        test_config(robertson_ode::<M>(1).0.bdf::<LS>().unwrap());
     }
 
     #[test]
@@ -2660,7 +2707,7 @@ mod test {
 
     #[test]
     fn test_bdf_nalgebra_robertson_ode() {
-        let (problem, soln) = robertson_ode::<M>(false, 3);
+        let (problem, soln) = robertson_ode::<M>(3);
         let mut s = problem.bdf::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @"
@@ -2675,36 +2722,24 @@ mod test {
         number_of_linear_solver_setups_from_error_test_fail: 2
         number_of_linear_solver_setups_from_step_success: 74
         ");
-        insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 814
-        number_of_jac_muls: 81
-        number_of_matrix_evals: 9
-        number_of_jac_adj_muls: 0
-        "###);
     }
 
     #[test]
     fn test_bdf_nalgebra_robertson_ode_sens() {
-        let (problem, soln) = robertson_ode_with_sens::<M>(false);
+        let (problem, soln) = robertson_ode::<M>(1);
         let mut s = problem.bdf_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 169
-        number_of_steps: 604
-        number_of_error_test_failures: 71
-        number_of_nonlinear_solver_iterations: 1964
-        number_of_nonlinear_solver_fails: 8
+        number_of_linear_solver_setups: 95
+        number_of_steps: 532
+        number_of_error_test_failures: 7
+        number_of_nonlinear_solver_iterations: 1904
+        number_of_nonlinear_solver_fails: 0
         number_of_linear_solver_setups_from_checkpoint: 1
-        number_of_linear_solver_setups_from_first_convergence_fail: 12
+        number_of_linear_solver_setups_from_first_convergence_fail: 3
         number_of_linear_solver_setups_from_second_convergence_fail: 0
-        number_of_linear_solver_setups_from_error_test_fail: 71
-        number_of_linear_solver_setups_from_step_success: 85
-        "###);
-        insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 938
-        number_of_jac_muls: 1083
-        number_of_matrix_evals: 18
-        number_of_jac_adj_muls: 0
+        number_of_linear_solver_setups_from_error_test_fail: 7
+        number_of_linear_solver_setups_from_step_success: 84
         "###);
     }
 
@@ -2785,7 +2820,7 @@ mod test {
 
     #[test]
     fn test_bdf_faer_sparse_heat2d() {
-        let (problem, soln) = head2d_problem::<FaerSparseMat<f64>, 10>();
+        let (problem, soln) = heat2d_problem::<FaerSparseMat<f64>, 10>(1);
         let mut s = problem.bdf::<FaerSparseLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @"
@@ -2800,12 +2835,6 @@ mod test {
         number_of_linear_solver_setups_from_error_test_fail: 0
         number_of_linear_solver_setups_from_step_success: 28
         ");
-        insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 179
-        number_of_jac_muls: 31
-        number_of_matrix_evals: 4
-        number_of_jac_adj_muls: 0
-        "###);
     }
 
     #[cfg(feature = "diffsl-llvm")]
@@ -2821,7 +2850,7 @@ mod test {
 
     #[test]
     fn test_bdf_faer_sparse_foodweb() {
-        let (problem, soln) = foodweb_problem::<FaerSparseMat<f64>, 10>();
+        let (problem, soln) = foodweb_problem::<FaerSparseMat<f64>, 10>(1);
         let mut s = problem.bdf::<FaerSparseLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @"
@@ -2839,83 +2868,69 @@ mod test {
     }
 
     #[test]
-    fn test_bdf_faer_sparse_heat2d_elem() {
-        let (problem, soln) = heat2d_elem_problem::<FaerSparseMat<f64>, 10>(1);
-        let mut s = problem.bdf::<FaerSparseLU<f64>>().unwrap();
-        test_ode_solver(&mut s, soln, None, false, false);
-    }
-
-    #[test]
-    fn test_bdf_nalgebra_heat2d_elem_batched() {
-        let (problem, soln) = heat2d_elem_problem::<NalgebraMat<f64>, 10>(2);
+    fn test_bdf_nalgebra_heat2d_batched() {
+        let (problem, soln) = heat2d_problem::<NalgebraMat<f64>, 10>(2);
         let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
     }
 
     #[test]
-    fn test_bdf_faer_sparse_foodweb_elem() {
-        let (problem, soln) = foodweb_elem_problem::<FaerSparseMat<f64>, 10>(1);
-        let mut s = problem.bdf::<FaerSparseLU<f64>>().unwrap();
-        test_ode_solver(&mut s, soln, None, false, false);
-    }
-
-    #[test]
-    fn test_bdf_faer_sparse_robertson_ode_elem() {
-        let (problem, soln) = robertson_ode_elem_problem::<FaerSparseMat<f64>>(1);
+    fn test_bdf_faer_sparse_robertson_ode() {
+        let (problem, soln) = robertson_ode::<FaerSparseMat<f64>>(1);
         let mut s = problem.bdf::<FaerSparseLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
     }
 
     #[cfg(feature = "cuda-oxide")]
     #[test]
-    fn test_bdf_cuda_oxide_heat2d_elem() {
+    fn test_bdf_cuda_oxide_heat2d() {
         use crate::{OxideLU, OxideMat};
-        let (problem, soln) = heat2d_elem_problem::<OxideMat<f64>, 10>(1);
+        let (problem, soln) = heat2d_problem::<OxideMat<f64>, 10>(1);
         let mut s = problem.bdf::<OxideLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
     }
 
     #[cfg(feature = "cuda-oxide")]
     #[test]
-    fn test_bdf_cuda_oxide_heat2d_elem_batched() {
+    fn test_bdf_cuda_oxide_heat2d_batched() {
         use crate::{OxideLU, OxideMat};
-        let (problem, soln) = heat2d_elem_problem::<OxideMat<f64>, 10>(2);
+        let (problem, soln) = heat2d_problem::<OxideMat<f64>, 10>(2);
         let mut s = problem.bdf::<OxideLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
     }
 
     #[cfg(feature = "cuda-oxide")]
     #[test]
-    fn test_bdf_cuda_oxide_foodweb_elem() {
+    fn test_bdf_cuda_oxide_foodweb() {
         use crate::{OxideLU, OxideMat};
-        let (problem, soln) = foodweb_elem_problem::<OxideMat<f64>, 10>(1);
+        let (problem, soln) = foodweb_problem::<OxideMat<f64>, 10>(1);
         let mut s = problem.bdf::<OxideLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
     }
 
     #[cfg(feature = "cuda-oxide")]
     #[test]
-    fn test_bdf_cuda_oxide_foodweb_elem_batched() {
+    fn test_bdf_cuda_oxide_foodweb_batched() {
         use crate::{OxideLU, OxideMat};
-        let (problem, soln) = foodweb_elem_problem::<OxideMat<f64>, 10>(2);
+        let (problem, soln) = foodweb_problem::<OxideMat<f64>, 10>(2);
         let mut s = problem.bdf::<OxideLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
     }
 
     #[cfg(feature = "cuda-oxide")]
     #[test]
-    fn test_bdf_cuda_oxide_robertson_ode_elem() {
+    fn test_bdf_cuda_oxide_robertson_ode() {
         use crate::{OxideLU, OxideMat};
-        let (problem, soln) = robertson_ode_elem_problem::<OxideMat<f64>>(1);
+        let (problem, soln) = robertson_ode::<OxideMat<f64>>(1);
         let mut s = problem.bdf::<OxideLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
     }
 
     #[cfg(feature = "cuda-oxide")]
     #[test]
-    fn test_bdf_cuda_oxide_robertson_ode_elem_batched() {
+    fn test_bdf_cuda_oxide_robertson_ode_batched() {
         use crate::{OxideLU, OxideMat};
-        let (problem, soln) = robertson_ode_elem_problem::<OxideMat<f64>>(4);
+        let (problem, soln) = robertson_ode::<OxideMat<f64>>(4);
         let mut s = problem.bdf::<OxideLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
     }

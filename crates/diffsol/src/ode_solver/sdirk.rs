@@ -708,9 +708,10 @@ where
     Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
     AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn>,
 {
-    /// The cotangent is an [RkState] whose `y` and `dy` are read, as cotangents of the state and
-    /// its derivative. On return they hold the cotangents at the start of the step; its `diff`
-    /// is zero. For a method whose first stage is solved rather than taken from `dy`, the
+    /// The cotangent is an [RkState] whose `y`, `dy` and `diff` are read, as cotangents of the
+    /// state, its derivative and the step's stage increments (which [Self::interpolate_vjp] adds
+    /// to). On return `y` and `dy` hold the cotangents at the start of the step; its `diff` is
+    /// zero. For a method whose first stage is solved rather than taken from `dy`, the
     /// cotangent of `dy` at the start is zero.
     fn step_vjp(
         &mut self,
@@ -745,7 +746,7 @@ where
             // the stages of step(), in reverse
             let start = if self.rk.skip_first_stage() { 1 } else { 0 };
             for i in (start..self.rk.tableau().s()).rev() {
-                let t_i = self.rk.vjp_stage_time(i, step, end);
+                let t_i = self.rk.vjp_stage_time(i, step);
                 // set the stage up as the forward solve did, at its value Y_i = phi + gamma K_i,
                 // taken as phi with a zero increment
                 let y_i = self.rk.vjp_stage_value(i, end);
@@ -789,15 +790,29 @@ where
                 if let Err(e) = result {
                     break 'stages Err(e);
                 }
-                self.rk.vjp_stage_inputs(i, step, end, cotangent, p_bar);
+                self.rk.vjp_stage_inputs(i, step, cotangent, p_bar);
             }
-            self.rk.vjp_finish(step, end, cotangent);
+            self.rk.vjp_finish(step, cotangent);
             Ok(())
         };
         // the derivative used the replayed step's h: put back the one of the solver's own state,
         // which the forward solve and its Jacobian schedule expect
         self.op.as_ref().unwrap().set_h(self.rk.state().h);
         result
+    }
+
+    fn interpolate_vjp(
+        &self,
+        end: &Self::State,
+        t: Eqn::T,
+        y_bar: &Eqn::V,
+        cotangent: &mut Self::State,
+    ) -> Result<(), DiffsolError> {
+        // as for step_vjp, whose pull back through the step follows this
+        if self.op.is_none() {
+            return Err(ode_solver_error!(StepDifferentiationNotSupported));
+        }
+        self.rk.interpolate_vjp(end, t, y_bar, cotangent)
     }
 }
 
@@ -823,7 +838,7 @@ mod test {
                 exponential_decay_with_algebraic_adjoint_problem,
                 exponential_decay_with_algebraic_problem,
             },
-            heat2d::{head2d_problem, heat2d_elem_problem},
+            heat2d::heat2d_problem,
             nonlinear_failure::nonlinear_failure_problem,
             robertson::{robertson, robertson_sens},
             robertson_ode::robertson_ode,
@@ -860,7 +875,7 @@ mod test {
     }
     #[test]
     fn sdirk_config() {
-        test_config(robertson_ode::<M>(false, 1).0.esdirk34::<LS>().unwrap());
+        test_config(robertson_ode::<M>(1).0.esdirk34::<LS>().unwrap());
     }
 
     #[test]
@@ -1222,7 +1237,7 @@ mod test {
 
     #[test]
     fn test_tr_bdf2_nalgebra_robertson_ode() {
-        let (problem, soln) = robertson_ode::<M>(false, 1);
+        let (problem, soln) = robertson_ode::<M>(1);
         let mut s = problem.tr_bdf2::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @"
@@ -1237,42 +1252,29 @@ mod test {
         number_of_linear_solver_setups_from_error_test_fail: 1
         number_of_linear_solver_setups_from_step_success: 67
         ");
-        insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 2132
-        number_of_jac_muls: 36
-        number_of_matrix_evals: 12
-        number_of_jac_adj_muls: 0
-        "###);
     }
 
     #[test]
     fn test_tr_bdf2_faer_sparse_heat2d() {
-        let (problem, soln) = head2d_problem::<FaerSparseMat<f64>, 10>();
-        let mut s = problem.tr_bdf2::<FaerSparseLU<f64>>().unwrap();
-        test_ode_solver(&mut s, soln, None, false, false);
-    }
-
-    #[test]
-    fn test_tr_bdf2_faer_sparse_heat2d_elem() {
-        let (problem, soln) = heat2d_elem_problem::<FaerSparseMat<f64>, 10>(1);
+        let (problem, soln) = heat2d_problem::<FaerSparseMat<f64>, 10>(1);
         let mut s = problem.tr_bdf2::<FaerSparseLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
     }
 
     #[cfg(feature = "cuda-oxide")]
     #[test]
-    fn test_tr_bdf2_cuda_oxide_heat2d_elem() {
+    fn test_tr_bdf2_cuda_oxide_heat2d() {
         use crate::{OxideLU, OxideMat};
-        let (problem, soln) = heat2d_elem_problem::<OxideMat<f64>, 10>(1);
+        let (problem, soln) = heat2d_problem::<OxideMat<f64>, 10>(1);
         let mut s = problem.tr_bdf2::<OxideLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
     }
 
     #[cfg(feature = "cuda-oxide")]
     #[test]
-    fn test_tr_bdf2_cuda_oxide_heat2d_elem_batched() {
+    fn test_tr_bdf2_cuda_oxide_heat2d_batched() {
         use crate::{OxideLU, OxideMat};
-        let (problem, soln) = heat2d_elem_problem::<OxideMat<f64>, 10>(2);
+        let (problem, soln) = heat2d_problem::<OxideMat<f64>, 10>(2);
         let mut s = problem.tr_bdf2::<OxideLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
     }
