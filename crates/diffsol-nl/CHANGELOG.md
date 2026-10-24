@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0](https://github.com/martinjrobins/diffsol/compare/diffsol-nl-v0.3.0...diffsol-nl-v0.4.0) - 2026-10-24
+
+### Added
+
+- *(diffsol)* [**breaking**] improve step_vjp accuracy, add benchmarks ([#422](https://github.com/martinjrobins/diffsol/pull/422))
+
 ## [0.3.0](https://github.com/martinjrobins/diffsol/compare/diffsol-nl-v0.2.0...diffsol-nl-v0.3.0) - 2026-10-20
 
 ### Added
