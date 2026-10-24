@@ -49,6 +49,20 @@ c_getter_simple!(
     diffsol_ode_options,
     OdeSolverOptions,
     usize,
+    max_nonlinear_solver_failures
+);
+
+c_setter_simple!(
+    diffsol_ode_options,
+    OdeSolverOptions,
+    usize,
+    max_nonlinear_solver_failures
+);
+
+c_getter_simple!(
+    diffsol_ode_options,
+    OdeSolverOptions,
+    usize,
     update_jacobian_after_steps
 );
 
