@@ -22,6 +22,8 @@
 //!     solver.step_vjp(end, &mut cotangent, &mut p_bar)?;
 //! }
 //! ```
+//! A cotangent of a value interpolated within a step is added to the cotangent at the step's
+//! end with [StepVjp::interpolate_vjp], before pulling it back through the step.
 //! [StepVjp::solve_dense_vjp] does all of this for a loss summed over a set of times: the
 //! forward solve, the checkpoints, the pull back and the derivative of the initial state.
 //!
@@ -77,6 +79,26 @@ pub trait StepVjp<'a, Eqn: OdeEquationsImplicitAdjoint + 'a>: OdeSolverMethod<'a
         p_bar: &mut Eqn::V,
     ) -> Result<(), DiffsolError>;
 
+    /// Add to `cotangent`, a cotangent state at `end`, the cotangent that `y_bar` (of length
+    /// `nstates`, with the lanes of `cotangent`) carries back to `end` from the value y(t)
+    /// interpolated within the step that ended there, as [OdeSolverMethod::interpolate] computed
+    /// it straight after that step. As in [Self::step_vjp], the step size is fixed, so the
+    /// interpolation is linear in `end` and its weights are constants: its derivative with
+    /// respect to `t` is not included. Call it before pulling `cotangent` back through the step
+    /// with [Self::step_vjp].
+    ///
+    /// It accepts the times [OdeSolverMethod::interpolate] accepted straight after the step, with
+    /// the same errors, and fails with `NoStepToDifferentiate` if `end` is not the end of a step
+    /// and with `StepDifferentiationSizeMismatch` or `StepDifferentiationBatchMismatch` if
+    /// `cotangent` or `y_bar` do not fit `end`, as for [Self::step_vjp].
+    fn interpolate_vjp(
+        &self,
+        end: &Self::State,
+        t: Eqn::T,
+        y_bar: &Eqn::V,
+        cotangent: &mut Self::State,
+    ) -> Result<(), DiffsolError>;
+
     /// Solve forwards to the times `t_eval` and return the loss `G` and its gradient with
     /// respect to the parameters, `dG/dp`, by pulling the loss back through every step with
     /// [Self::step_vjp].
@@ -99,17 +121,22 @@ pub trait StepVjp<'a, Eqn: OdeEquationsImplicitAdjoint + 'a>: OdeSolverMethod<'a
     /// loss `k` of batch `b` (see the [module docs](self)); `u_i` has the lanes of the state. The
     /// returned loss and gradient (of length `nparams`) have the lanes of `out`.
     ///
-    /// The solve starts from the solver's current state, at or before `t_eval[0]`, and stops at
-    /// each time in `t_eval` instead of interpolating to it, as there is no derivative of the
-    /// interpolation. The state after every step is kept for the backward pass. If the solve
+    /// The solve starts from the solver's current state, at or before `t_eval[0]`, and takes the
+    /// steps [OdeSolverMethod::solve_dense] takes: it stops only at the last time, and
+    /// interpolates to the others, so the loss is that of the dense solution. The state after
+    /// every step is kept for the backward pass, which pulls each `dg_i/du` back through the
+    /// interpolation with [Self::interpolate_vjp]. If the solve
     /// starts at the problem's initial time, the dependence of the initial state (and of its
     /// time derivative, through the consistent initialisation of the solver's constructor) on
     /// the parameters is included; otherwise the derivative with respect to the starting state
     /// is not added.
     ///
-    /// As for [Self::step_vjp], this is the derivative of the steps the solver took, with their
-    /// step sizes and orders fixed, and a mass matrix that depends on the parameters is not
-    /// differentiated. Roots are not supported: a step that finds one is an error.
+    /// As for [Self::step_vjp], this is the derivative of the steps the solver took, and of the
+    /// interpolation within them, with their step sizes and orders fixed, and a mass matrix that
+    /// depends on the parameters is not differentiated. Roots are not supported: a step that
+    /// finds one is an error. Nor is a problem that integrates its output
+    /// ([crate::OdeSolverProblem::integrate_out]), whose dense solution is the integral of the
+    /// output rather than the output itself.
     fn solve_dense_vjp<G, Dg>(
         &mut self,
         t_eval: &[Eqn::T],
@@ -142,6 +169,12 @@ pub trait StepVjp<'a, Eqn: OdeEquationsImplicitAdjoint + 'a>: OdeSolverMethod<'a
         }
 
         let problem = self.problem();
+        if problem.integrate_out {
+            return Err(ode_solver_error!(
+                Other,
+                "solve_dense_vjp does not support integrating the output"
+            ));
+        }
         let eqn = &problem.eqn;
         let (nstates, nparams) = (eqn.rhs().nstates(), eqn.rhs().nparams());
         let nout = eqn.out().map(|o| o.nout()).unwrap_or(nstates);
@@ -149,32 +182,15 @@ pub trait StepVjp<'a, Eqn: OdeEquationsImplicitAdjoint + 'a>: OdeSolverMethod<'a
         let lanes = state_ctx.nbatch() * ndirections;
         let ctx = state_ctx.clone_with_nbatch(lanes)?;
 
-        // forward: a checkpoint after every step, and the loss and its gradient at each time
+        // forward: a checkpoint after every step, and the loss and its gradient at each time,
+        // interpolated within the step that reached it
         let mut checkpoints = Vec::new();
-        // (number of checkpoints when t_i was reached, dg_i/du)
-        let mut dgdus = Vec::with_capacity(t_eval.len());
+        // (number of checkpoints when t_i was reached, t_i, y(t_i) if the model has an output
+        // function, dg_i/du)
+        let mut records = Vec::with_capacity(t_eval.len());
         let mut loss = Eqn::V::zeros(1, ctx.clone());
         let mut u = Eqn::V::zeros(nout, state_ctx.clone());
-        for (i, &t) in t_eval.iter().enumerate() {
-            match self.set_stop_time(t) {
-                Ok(_) => loop {
-                    let reason = self.step()?;
-                    checkpoints.push(self.state_clone());
-                    match reason {
-                        OdeSolverStopReason::TstopReached => break,
-                        OdeSolverStopReason::InternalTimestep => {}
-                        OdeSolverStopReason::RootFound(..) => {
-                            return Err(ode_solver_error!(
-                                Other,
-                                "solve_dense_vjp does not support roots"
-                            ))
-                        }
-                    }
-                },
-                Err(DiffsolError::OdeSolverError(OdeSolverError::StopTimeAtCurrentTime)) => {}
-                e => e?,
-            }
-            let y = self.state().y;
+        let mut eval = |i: usize, t: Eqn::T, y: &Eqn::V, n: usize| {
             match eqn.out() {
                 Some(out) => out.call_inplace(y, t, &mut u),
                 None => u.copy_from(y),
@@ -182,10 +198,42 @@ pub trait StepVjp<'a, Eqn: OdeEquationsImplicitAdjoint + 'a>: OdeSolverMethod<'a
             g(i, t, &u, &mut loss);
             let mut dgdu_i = Eqn::V::zeros(nout, ctx.clone());
             dgdu(i, t, &u, &mut dgdu_i);
-            dgdus.push((checkpoints.len(), dgdu_i));
+            records.push((n, t, eqn.out().map(|_| y.clone()), dgdu_i));
+        };
+        let mut col = 0;
+        while col < t_eval.len() && t_eval[col] <= start_t {
+            eval(col, t_eval[col], start.as_ref().y, 0);
+            col += 1;
+        }
+        if col < t_eval.len() {
+            // stop only at the last time, to take the steps of solve_dense
+            self.set_stop_time(t_eval[t_eval.len() - 1])?;
+            let mut y = Eqn::V::zeros(nstates, state_ctx.clone());
+            loop {
+                let reason = self.step()?;
+                if let OdeSolverStopReason::RootFound(..) = reason {
+                    return Err(ode_solver_error!(
+                        Other,
+                        "solve_dense_vjp does not support roots"
+                    ));
+                }
+                checkpoints.push(self.state_clone());
+                // the times this step reached, as solve_dense writes them out
+                while col < t_eval.len() && t_eval[col] <= self.state().t {
+                    let t = t_eval[col];
+                    self.interpolate_inplace(t, &mut y)?;
+                    eval(col, t, &y, checkpoints.len());
+                    col += 1;
+                }
+                if let OdeSolverStopReason::TstopReached = reason {
+                    assert!(col == t_eval.len(), "Solver reached stop time before consuming all t_eval points, this should not happen");
+                    break;
+                }
+            }
         }
 
-        // backward: add each dg_i/dy to the cotangent where t_i was reached, and pull it back
+        // backward: pull the cotangent back through the steps, adding dg_i/dy through the
+        // interpolation of y(t_i) to the step that reached t_i
         let mut cot = checkpoints
             .last()
             .unwrap_or(&start)
@@ -193,30 +241,33 @@ pub trait StepVjp<'a, Eqn: OdeEquationsImplicitAdjoint + 'a>: OdeSolverMethod<'a
         let mut p_bar = Eqn::V::zeros(nparams, ctx.clone());
         let mut tmp_nstates = Eqn::V::zeros(nstates, ctx.clone());
         let mut tmp_nparams = Eqn::V::zeros(nparams, ctx.clone());
-        let mut add_dgdy = |state: &Self::State, dgdu_i: &Eqn::V, cot: &mut Self::State| {
-            let (y, t) = (state.as_ref().y, state.as_ref().t);
-            let cot_y = cot.as_mut().y;
-            match eqn.out() {
+        let mut y_bar = Eqn::V::zeros(nstates, ctx.clone());
+        // y_bar, the cotangent of y(t_i)
+        let mut dgdy = |t: Eqn::T, y_i: &Option<Eqn::V>, dgdu_i: &Eqn::V, y_bar: &mut Eqn::V| {
+            match (eqn.out(), y_i) {
                 // the out operators give -g_y^T v and -g_p^T v
-                Some(out) => {
-                    out.jac_transpose_mul_inplace(y, t, dgdu_i, &mut tmp_nstates);
-                    cot_y.sub_assign(&tmp_nstates);
-                    out.sens_transpose_mul_inplace(y, t, dgdu_i, &mut tmp_nparams);
+                (Some(out), Some(y_i)) => {
+                    out.jac_transpose_mul_inplace(y_i, t, dgdu_i, &mut tmp_nstates);
+                    y_bar.fill(Eqn::T::zero());
+                    y_bar.sub_assign(&tmp_nstates);
+                    out.sens_transpose_mul_inplace(y_i, t, dgdu_i, &mut tmp_nparams);
                     p_bar.sub_assign(&tmp_nparams);
                 }
-                None => cot_y.add_assign(dgdu_i),
+                _ => y_bar.copy_from(dgdu_i),
             }
         };
-        let mut dgdus = dgdus.into_iter().rev().peekable();
+        let mut records = records.into_iter().rev().peekable();
         let mut p_bar_steps = Eqn::V::zeros(nparams, ctx.clone());
         for (k, checkpoint) in checkpoints.iter().enumerate().rev() {
-            while let Some((_, dgdu_i)) = dgdus.next_if(|(n, _)| *n == k + 1) {
-                add_dgdy(checkpoint, &dgdu_i, &mut cot);
+            while let Some((_, t, y_i, dgdu_i)) = records.next_if(|(n, ..)| *n == k + 1) {
+                dgdy(t, &y_i, &dgdu_i, &mut y_bar);
+                self.interpolate_vjp(checkpoint, t, &y_bar, &mut cot)?;
             }
             self.step_vjp(checkpoint, &mut cot, &mut p_bar_steps)?;
         }
-        for (_, dgdu_i) in dgdus {
-            add_dgdy(&start, &dgdu_i, &mut cot);
+        for (_, t, y_i, dgdu_i) in records {
+            dgdy(t, &y_i, &dgdu_i, &mut y_bar);
+            cot.as_mut().y.add_assign(&y_bar);
         }
         p_bar.add_assign(&p_bar_steps);
 
@@ -314,19 +365,20 @@ where
     Ok(())
 }
 
-/// Check the inputs of a [StepVjp::step_vjp], with the states given as their `(y, dy, diff)`:
-/// that `end`'s `diff` has `diff_cols` columns (a state of another tableau or order may not),
-/// that `cotangent` has the sizes of `end` and `p_bar` has `nparams` elements, and that their
-/// lanes fit (see the [module docs](self)).
+/// Check the inputs of a [StepVjp::step_vjp] or [StepVjp::interpolate_vjp], with the states
+/// given as their `(y, dy, diff)`: that `end`'s `diff` has `diff_cols` columns (a state of
+/// another tableau or order may not), that `cotangent` has the sizes of `end` and `extra`, given
+/// as `(what, vector, len)` (the parameter cotangent, or the cotangent of an interpolated value),
+/// has `len` elements, and that their lanes fit (see the [module docs](self)).
 pub(crate) fn check_step_vjp_inputs<M: Matrix>(
     end: (&M::V, &M::V, &M),
     diff_cols: usize,
     cotangent: (&M::V, &M::V, &M),
-    p_bar: &M::V,
-    nparams: usize,
+    extra: (&'static str, &M::V, usize),
 ) -> Result<(), DiffsolError> {
     let (end_y, end_dy, end_diff) = end;
     let (y, dy, diff) = cotangent;
+    let (extra_what, extra, extra_len) = extra;
     // sizes as (rows, columns of a matrix), formatted only on a mismatch
     let shape = |m: &M| (m.nrows(), Some(m.ncols()));
     let vector = |v: &M::V| (v.len(), None);
@@ -339,7 +391,7 @@ pub(crate) fn check_step_vjp_inputs<M: Matrix>(
         ("y", vector(y), vector(end_y)),
         ("dy", vector(dy), vector(end_dy)),
         ("diff", shape(diff), shape(end_diff)),
-        ("the parameter cotangent", vector(p_bar), (nparams, None)),
+        (extra_what, vector(extra), (extra_len, None)),
     ] {
         if found != expected {
             let size = |(rows, cols): (usize, Option<usize>)| match cols {
@@ -378,9 +430,9 @@ pub(crate) fn check_step_vjp_inputs<M: Matrix>(
             return mismatch(what, found, lanes.to_string());
         }
     }
-    let p_lanes = p_bar.context().nbatch();
-    if p_lanes != lanes {
-        return mismatch("the parameter cotangent", p_lanes, lanes.to_string());
+    let extra_lanes = extra.context().nbatch();
+    if extra_lanes != lanes {
+        return mismatch(extra_what, extra_lanes, lanes.to_string());
     }
     Ok(())
 }
@@ -498,6 +550,8 @@ mod tests {
 
                 /// The factor of the checks over whole trajectories.
                 const TRAJECTORY_FACTOR: f64 = $trajectory_factor;
+                /// The fraction of a step at which its interpolant is differentiated.
+                const INTERPOLATE_THETA: f64 = 0.37;
                 type Problem = OdeSolverProblem<AdTestEqn<M>>;
 
                 type E = AdTestEqn<M>;
@@ -578,8 +632,10 @@ mod tests {
 
                 /// One step, from the state after `after` steps with its history rebuilt from
                 /// `(y, dy)` (as after `state_mut`), and with a stop time at `tstop_fraction` of
-                /// the step if given. The step's Jacobian, from its outputs `(y, h dy)` to its
-                /// inputs `(y, dy, p)`, by `step_vjp` (a row for each output) is checked against
+                /// the step if given. The step's Jacobian, from its outputs `(y, h dy)` and the
+                /// value `y(t_mid)` it interpolates at [INTERPOLATE_THETA] of the way through it
+                /// to its inputs `(y, dy, p)`, by `step_vjp` (after `interpolate_vjp` for
+                /// `y(t_mid)`, a row for each output) is checked against
                 /// central finite differences of `step()` (a column for each input direction).
                 /// Each entry is a single partial derivative, so a single step solved to the
                 /// tolerances matches them in the solvers' norm. The output `h dy` is the step's
@@ -651,13 +707,17 @@ mod tests {
                         );
                     }
 
-                    // the outputs (y, dy) after a step perturbed along d
+                    // a time within the step, at which the step's interpolant is differentiated
+                    let t_mid = t0 + INTERPOLATE_THETA * (t_end - t0);
+                    // the outputs (y, dy) after a step perturbed along d, and its interpolated
+                    // y(t_mid)
                     let perturbed = |d: &(V, V, V), e: f64| {
                         let problem = problem_e(d, e);
                         let solver = step_from(&problem, restart_e(&start, d, e), tstop);
                         assert_eq!(solver.state().t, t_end, "the perturbed step changed size");
                         let (y, dy) = y_dy(&solver.state_clone());
-                        [y.clone_as_vec(), dy.clone_as_vec()].concat()
+                        let y_mid = solver.interpolate(t_mid).unwrap();
+                        [y.clone_as_vec(), dy.clone_as_vec(), y_mid.clone_as_vec()].concat()
                     };
                     // fd[k][j]: the derivative of output k along direction j
                     let fd_columns: Vec<Vec<f64>> = directions
@@ -668,9 +728,9 @@ mod tests {
                         })
                         .collect();
                     let n_out = fd_columns[0].len();
-                    // the rows of the outputs (y, h dy)
+                    // the rows of the outputs (y, h dy, y(t_mid))
                     let h = t_end - t0;
-                    let row_scale = move |k: usize| if k < 3 { 1.0 } else { h };
+                    let row_scale = move |k: usize| if (3..6).contains(&k) { h } else { 1.0 };
                     let fd: Vec<f64> = (0..n_out)
                         .flat_map(|k| fd_columns.iter().map(move |column| row_scale(k) * column[k]))
                         .collect();
@@ -685,12 +745,17 @@ mod tests {
                     let zero = V::zeros(3, Default::default());
                     let vjp: Vec<f64> = (0..n_out)
                         .flat_map(|k| {
-                            let (c_y, c_dy) = if k < 3 {
-                                (unit(k), zero.clone())
-                            } else {
-                                (zero.clone(), unit(k - 3))
+                            let mut cot = match k {
+                                0..3 => with_y_dy(&end.zeros_like(), &unit(k), &zero),
+                                3..6 => with_y_dy(&end.zeros_like(), &zero, &unit(k - 3)),
+                                _ => {
+                                    let mut cot = end.zeros_like();
+                                    solver
+                                        .interpolate_vjp(&end, t_mid, &unit(k - 6), &mut cot)
+                                        .unwrap();
+                                    cot
+                                }
                             };
-                            let mut cot = with_y_dy(&end.zeros_like(), &c_y, &c_dy);
                             let mut p_bar = V::zeros(3, Default::default());
                             solver.step_vjp(&end, &mut cot, &mut p_bar).unwrap();
                             directions
@@ -757,12 +822,15 @@ mod tests {
                 /// trajectory of a solver with forward sensitivities, against those
                 /// sensitivities: for each parameter `k`, the derivative of `<c, (y, dy)>` at the
                 /// end, `<c, (s_k, ds_k)>`, is the cotangent's at the start against
-                /// `(s_k, ds_k)` there, plus `p_bar[k]`.
+                /// `(s_k, ds_k)` there, plus `p_bar[k]`. With `interpolated`, `(t, s(t))` within
+                /// the last step, it is instead the derivative of `<c, y(t)>`, `<c, s_k(t)>`,
+                /// pulled back through the interpolation with `interpolate_vjp`.
                 fn assert_vjp_matches_sensitivities<'a, S>(
                     solver: &mut S,
                     start: &$State,
                     checkpoints: &[$State],
                     end: usize,
+                    interpolated: Option<&(f64, V)>,
                 ) where
                     S: StepVjp<'a, E, State = $State>,
                 {
@@ -771,7 +839,14 @@ mod tests {
                         V::rand(3, 2.1, Default::default()),
                     );
                     let last = &checkpoints[end - 1];
-                    let mut cot = with_y_dy(&last.zeros_like(), &c_y, &c_dy);
+                    let mut cot = match interpolated {
+                        Some((t, _)) => {
+                            let mut cot = last.zeros_like();
+                            solver.interpolate_vjp(last, *t, &c_y, &mut cot).unwrap();
+                            cot
+                        }
+                        None => with_y_dy(&last.zeros_like(), &c_y, &c_dy),
+                    };
                     let mut p_bar = V::zeros(3, Default::default());
                     for checkpoint in checkpoints[..end].iter().rev() {
                         solver.step_vjp(checkpoint, &mut cot, &mut p_bar).unwrap();
@@ -780,7 +855,10 @@ mod tests {
                     let (s0, ds0) = (start.as_ref().s, start.as_ref().ds);
                     let (forward, backward): (Vec<f64>, Vec<f64>) = (0..3)
                         .map(|k| {
-                            let forward = c_y.dot(&lane(s_end, k)) + c_dy.dot(&lane(ds_end, k));
+                            let forward = match interpolated {
+                                Some((_, s_t)) => c_y.dot(&lane(s_t, k)),
+                                None => c_y.dot(&lane(s_end, k)) + c_dy.dot(&lane(ds_end, k)),
+                            };
                             let backward = cot.as_ref().y.dot(&lane(s0, k))
                                 + cot.as_ref().dy.dot(&lane(ds0, k))
                                 + p_bar.get_index(k);
@@ -796,18 +874,41 @@ mod tests {
 
                 /// The cotangent pulled back through the checkpoints of a solver with forward
                 /// sensitivities matches them, for trajectories ending at many steps along the
-                /// way, so that the comparison includes steps whose step size changes at their end.
+                /// way, so that the comparison includes steps whose step size changes at their end,
+                /// and for values interpolated within those steps.
                 fn sensitivities(dae: bool) {
                     let problem = problem(dae);
                     let mut solver = new_sens_solver(&problem);
                     solver.set_stop_time(T_FINAL).unwrap();
                     let start = solver.state_clone();
-                    let checkpoints = solve_to_stop(&mut solver);
+                    // the state after each step, and (t, s(t)) interpolated within it
+                    let mut checkpoints = Vec::new();
+                    let mut interpolated = Vec::new();
+                    let mut t_start = start.as_ref().t;
+                    loop {
+                        let reason = solver.step().unwrap();
+                        checkpoints.push(solver.state_clone());
+                        let t_end = solver.state().t;
+                        let t = t_start + INTERPOLATE_THETA * (t_end - t_start);
+                        interpolated.push((t, solver.interpolate_sens(t).unwrap()));
+                        t_start = t_end;
+                        if let OdeSolverStopReason::TstopReached = reason {
+                            break;
+                        }
+                    }
                     let n = checkpoints.len();
                     // each pull back runs through every step before its end, so a few ends
                     // spread over the trajectory test all the steps, at a cost linear in n
                     for end in (1..n).step_by(n.div_ceil(10)).chain([n]) {
-                        assert_vjp_matches_sensitivities(&mut solver, &start, &checkpoints, end);
+                        for interpolated in [None, Some(&interpolated[end - 1])] {
+                            assert_vjp_matches_sensitivities(
+                                &mut solver,
+                                &start,
+                                &checkpoints,
+                                end,
+                                interpolated,
+                            );
+                        }
                     }
                 }
 
@@ -846,7 +947,7 @@ mod tests {
                         );
                         checkpoints.extend(solve_to_stop(&mut solver));
                         let n = checkpoints.len();
-                        assert_vjp_matches_sensitivities(&mut solver, &start, &checkpoints, n);
+                        assert_vjp_matches_sensitivities(&mut solver, &start, &checkpoints, n, None);
                     }
                 }
 
@@ -932,6 +1033,68 @@ mod tests {
                         "p_bar of 2 elements, 3 parameters"
                     );
                     solver.step_vjp(&end, &mut cot, &mut with_lanes(3)).unwrap();
+                }
+
+                /// `interpolate_vjp` accepts the times `interpolate` accepted straight after the
+                /// step, with the same errors, and rejects a state that is not the end of a step
+                /// and a `y_bar` that does not fit the cotangent.
+                #[test]
+                fn interpolate_vjp_bad_inputs() {
+                    let problem = problem(false);
+                    let mut solver = new_solver(&problem);
+                    let start = solver.state_clone();
+                    let t0 = start.as_ref().t;
+                    let y_bar = V::from_element(3, 1.0, Default::default());
+                    let r = solver.interpolate_vjp(&start, t0, &y_bar, &mut start.zeros_like());
+                    assert!(
+                        matches!(
+                            r,
+                            Err(DiffsolError::OdeSolverError(
+                                OdeSolverError::NoStepToDifferentiate
+                            ))
+                        ),
+                        "no step"
+                    );
+
+                    solver.step().unwrap();
+                    let end = solver.state_clone();
+                    let t1 = end.as_ref().t;
+                    let h = t1 - t0;
+                    for t in [t0 - 0.1 * h, t0, t0 + 0.5 * h, t1, t1 + 0.1 * h] {
+                        let forward = solver.interpolate(t).map(|_| ()).map_err(|e| e.to_string());
+                        let vjp = solver
+                            .interpolate_vjp(&end, t, &y_bar, &mut end.zeros_like())
+                            .map_err(|e| e.to_string());
+                        assert_eq!(vjp, forward, "t = {t} in the step from {t0} to {t1}");
+                    }
+
+                    let mut cot = end.zeros_like_with_directions(3).unwrap();
+                    let r = solver.interpolate_vjp(&end, t1, &y_bar, &mut cot);
+                    assert!(
+                        matches!(
+                            r,
+                            Err(DiffsolError::OdeSolverError(
+                                OdeSolverError::StepDifferentiationBatchMismatch { .. }
+                            ))
+                        ),
+                        "1-lane y_bar, 3-lane cotangent"
+                    );
+                    let short = V::zeros(2, Default::default());
+                    let r = solver.interpolate_vjp(&end, t1, &short, &mut end.zeros_like());
+                    assert!(
+                        matches!(
+                            r,
+                            Err(DiffsolError::OdeSolverError(
+                                OdeSolverError::StepDifferentiationSizeMismatch { .. }
+                            ))
+                        ),
+                        "y_bar of 2 elements, 3 states"
+                    );
+                    for t in [t0, t1] {
+                        solver
+                            .interpolate_vjp(&end, t, &y_bar, &mut end.zeros_like())
+                            .unwrap();
+                    }
                 }
 
                 /// `with_vjp` is `plain` with `n` Jacobian updates added, where `updates(n)`: those
@@ -1105,7 +1268,7 @@ mod tests {
         new_sens = { esdirk34_sens::<crate::NalgebraLU<f64>> },
         dae = true,
         refreshes = true,
-        trajectory_factor = 10.0,
+        trajectory_factor = 20.0,
     );
     step_ad_tests!(
         tsit45_dense,
@@ -1246,29 +1409,57 @@ mod tests {
             t_evals(soln.solution_points.iter().map(|p| p.t), 4e8)
         }
 
-        // The two differentiate different steps, as solve_dense_vjp stops at each output time
-        // and the sensitivity solve interpolates, so they agree to the solver tolerances.
+        // Both interpolate to the output times, so they differentiate the same outputs, with
+        // linear solves converged to the derivative solves' tolerance (see
+        // OdeSolverOptions::derivative_solve_tolerance), whose errors accumulate over
+        // Robertson's long horizon.
         sens_gradient_tests! {
             robertson_bdf: robertson_adjoint::<M>().0, robertson_sens::<M>().0,
-                robertson_t_eval(), bdf::<LS>, bdf_sens::<LS>, 3.0;
+                robertson_t_eval(), bdf::<LS>, bdf_sens::<LS>, 10.0;
             robertson_esdirk34: robertson_adjoint::<M>().0, robertson_sens::<M>().0,
                 robertson_t_eval(), esdirk34::<LS>, esdirk34_sens::<LS>, 10.0;
             robertson_ode_bdf: robertson_ode_elem_problem::<M>(2).0,
                 robertson_ode_elem_problem::<M>(2).0, robertson_t_eval(), bdf::<LS>, bdf_sens::<LS>, 200.0;
             robertson_ode_esdirk34: robertson_ode_elem_problem::<M>(2).0,
                 robertson_ode_elem_problem::<M>(2).0, robertson_t_eval(), esdirk34::<LS>, esdirk34_sens::<LS>,
-                30.0;
+                20.0;
             ad_test_dae_bdf: ad_test_problem::<M>(P, true, RTOL), ad_test_problem::<M>(P, true, RTOL),
                 vec![1.0, 2.0, 5.0], bdf::<LS>, bdf_sens::<LS>, 1.0;
             ad_test_dae_esdirk34: ad_test_problem::<M>(P, true, RTOL),
                 ad_test_problem::<M>(P, true, RTOL), vec![1.0, 2.0, 5.0], esdirk34::<LS>, esdirk34_sens::<LS>,
-                2.0;
+                1.0;
             ad_test_ode_tr_bdf2: ad_test_problem::<M>(P, false, RTOL),
                 ad_test_problem::<M>(P, false, RTOL), vec![0.0, 1.0, 5.0], tr_bdf2::<LS>, tr_bdf2_sens::<LS>,
-                10.0;
+                1.0;
             exponential_decay_tsit45: exponential_decay_problem_adjoint::<M>(false, false).0,
                 exponential_decay_problem_sens_with_out::<M>(false).0,
                 (1..10).map(f64::from).collect(), tsit45, tsit45_sens, 1.0;
+        }
+
+        /// `solve_dense_vjp` takes the steps of `solve_dense` and interpolates as it does, so
+        /// its loss is that of the dense solution, to rounding.
+        #[test]
+        fn loss_matches_solve_dense() {
+            use crate::OdeSolverMethod;
+            let t_eval: Vec<f64> = (1..10).map(f64::from).collect();
+            let problem = with_tolerances(exponential_decay_problem_adjoint::<M>(false, false).0);
+            let (loss, _) = problem
+                .tsit45()
+                .unwrap()
+                .solve_dense_vjp(&t_eval, 1, half_squares, identity)
+                .unwrap();
+            let (soln, _) = problem.tsit45().unwrap().solve_dense(&t_eval).unwrap();
+            loss.assert_eq_st(&dense_loss(&soln), 1e-14 * loss.get_index(0).abs());
+
+            let t_eval = robertson_t_eval();
+            let problem = with_tolerances(robertson_adjoint::<M>().0);
+            let (loss, _) = problem
+                .bdf::<LS>()
+                .unwrap()
+                .solve_dense_vjp(&t_eval, 1, half_squares, identity)
+                .unwrap();
+            let (soln, _) = problem.bdf::<LS>().unwrap().solve_dense(&t_eval).unwrap();
+            loss.assert_eq_st(&dense_loss(&soln), 1e-14 * loss.get_index(0).abs());
         }
 
         /// Two losses carried in the lanes of one solve, `G_0 = 1/2 sum |u|^2` and
@@ -1432,6 +1623,15 @@ mod tests {
             assert!(solver
                 .solve_dense_vjp(&[1.0], 0, half_squares, identity)
                 .is_err());
+
+            let (mut problem, _) = robertson_adjoint::<M>();
+            problem.integrate_out = true;
+            let err = problem
+                .bdf::<LS>()
+                .unwrap()
+                .solve_dense_vjp(&[1.0], 1, half_squares, identity)
+                .unwrap_err();
+            assert!(err.to_string().contains("integrating the output"), "{err}");
         }
     }
 }

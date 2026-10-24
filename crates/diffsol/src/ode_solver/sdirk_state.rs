@@ -10,6 +10,9 @@ use num_traits::Zero;
 /// [crate::StepVjp].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct RkStepRecord<T> {
+    /// Time at the start of the step, from which the forward step computed its stage times and
+    /// its interpolant: `t - h` from its end may differ from it by rounding.
+    pub(crate) t0: T,
     /// Step size of the accepted attempt. Unlike the state's `h`, the step size the next step
     /// starts with, a later `set_stop_time` does not change it.
     pub(crate) h: T,

@@ -22,7 +22,7 @@ use log::trace;
 use num_traits::{abs, FromPrimitive, One, ToPrimitive, Zero};
 
 use super::jacobian_update::SolverState;
-use super::method::{check_interpolate_shape, check_interpolate_time};
+use super::method::{check_interpolate_bounds, check_interpolate_shape, check_interpolate_time};
 use super::pi_controller::pi_controller_raw;
 use super::OdeSolverStatistics;
 use std::collections::HashMap;
@@ -996,7 +996,10 @@ where
         }
 
         // take the step
-        self.old_state.last_step = Some(RkStepRecord { h });
+        self.old_state.last_step = Some(RkStepRecord {
+            t0: self.state.t,
+            h,
+        });
         self.old_state.t = self.state.t + h;
         self.old_state.h = new_h;
         if rescale_dy {
@@ -1033,6 +1036,17 @@ where
 
         // just a normal step, no roots or tstop reached
         Ok(OdeSolverStopReason::InternalTimestep)
+    }
+
+    /// The fraction of the way through the step from `t0` to `t1` that `t` lies, at which the
+    /// interpolant is evaluated: one for a step of zero length.
+    fn interpolate_theta(t: M::T, t0: M::T, t1: M::T) -> M::T {
+        let dt = t1 - t0;
+        if dt == M::T::zero() {
+            M::T::one()
+        } else {
+            (t - t0) / dt
+        }
     }
 
     fn interpolate_from_diff(y0: &M::V, beta_f: &[M::T], diff: &M, ret: &mut M::V) {
@@ -1178,12 +1192,7 @@ where
             return Ok(());
         }
 
-        let dt = self.state.t - self.old_state.t;
-        let theta = if dt == M::T::zero() {
-            M::T::one()
-        } else {
-            (t - self.old_state.t) / dt
-        };
+        let theta = Self::interpolate_theta(t, self.old_state.t, self.state.t);
         let scale_diff = Eqn::T::one();
         if let Some(beta_t) = self.tableau.beta_t() {
             let beta_f = Self::interpolate_beta_weights(theta, beta_t, scale_diff);
@@ -1229,6 +1238,7 @@ where
             dy.copy_from(&self.state.dy);
             return Ok(());
         }
+        // dt is non-zero here, so this is Self::interpolate_theta without its zero check
         let theta = (t - self.old_state.t) / dt;
         let scale_diff = Eqn::T::one();
         if let Some(beta_t) = self.tableau.beta_t() {
@@ -1275,12 +1285,7 @@ where
             return Ok(());
         }
 
-        let dt = self.state.t - self.old_state.t;
-        let theta = if dt == M::T::zero() {
-            M::T::one()
-        } else {
-            (t - self.old_state.t) / dt
-        };
+        let theta = Self::interpolate_theta(t, self.old_state.t, self.state.t);
         let scale_diff = Eqn::T::one();
         if let Some(beta_t) = self.tableau.beta_t() {
             let beta_f = Self::interpolate_beta_weights(theta, beta_t, scale_diff);
@@ -1320,12 +1325,7 @@ where
             return Ok(());
         }
 
-        let dt = self.state.t - self.old_state.t;
-        let theta = if dt == M::T::zero() {
-            M::T::one()
-        } else {
-            (t - self.old_state.t) / dt
-        };
+        let theta = Self::interpolate_theta(t, self.old_state.t, self.state.t);
         let scale_diff = Eqn::T::one();
         if let Some(beta_t) = self.tableau.beta_t() {
             let beta_f = Self::interpolate_beta_weights(theta, beta_t, scale_diff);
@@ -1367,8 +1367,11 @@ where
             (&end.y, &end.dy, &end.diff),
             self.tableau.s(),
             (&cotangent.y, &cotangent.dy, &cotangent.diff),
-            p_bar,
-            self.problem.eqn.rhs().nparams(),
+            (
+                "the parameter cotangent",
+                p_bar,
+                self.problem.eqn.rhs().nparams(),
+            ),
         )?;
         Ok(step)
     }
@@ -1393,9 +1396,75 @@ where
     // `y = y0 + sum_j b_j K_j` and `dy = K_{s-1} / h`. A method whose first stage is explicit
     // takes `K_0 = h dy0` from the start of the step instead.
 
+    /// The weights `w_j - b_j` of the stage increments `K_j` in the value at `theta` of the
+    /// interpolant of a step, relative to the end of the step: `y(theta) = y + sum_j (w_j - b_j) K_j`,
+    /// where `y(theta) = y0 + sum_j w_j K_j` and `y = y0 + sum_j b_j K_j`, so that y0 is never
+    /// formed.
+    fn interpolate_weights_from_end(&self, theta: Eqn::T) -> TableauVec<Eqn::T> {
+        let one = Eqn::T::one();
+        let s = self.tableau.s();
+        let b = self.tableau.b().as_slice();
+        let mut w = match self.tableau.beta_t() {
+            Some(beta_t) => Self::interpolate_beta_weights(theta, beta_t, one),
+            None => {
+                // [Self::interpolate_hermite] is c_u0 y0 + c_u1 y + c_f0 K_0 + c_f1 K_{s-1},
+                // with c_u0 + c_u1 = 1, so its weight on the increments through y is c_u1 b_j
+                let two = Eqn::T::from_f64(2.0).unwrap();
+                let bubble = theta * (theta - one);
+                let c_u1 = theta + bubble * (one - two * theta);
+                let mut w = TableauVec::zeros(s);
+                for (w_j, b_j) in w.as_mut_slice().iter_mut().zip(b) {
+                    *w_j = c_u1 * *b_j;
+                }
+                w.as_mut_slice()[0] += bubble * (theta - one);
+                w.as_mut_slice()[s - 1] += bubble * theta;
+                w
+            }
+        };
+        for (w_j, b_j) in w.as_mut_slice().iter_mut().zip(b) {
+            *w_j -= *b_j;
+        }
+        w
+    }
+
+    /// [crate::StepVjp::interpolate_vjp] for the Runge-Kutta solvers. The interpolant is taken
+    /// relative to the end of the step (see [Self::interpolate_weights_from_end]), so the
+    /// cotangent is added to `c.y` and to `c.diff`, the cotangent of the stage increments.
+    pub(crate) fn interpolate_vjp(
+        &self,
+        end: &RkState<Eqn::V, M>,
+        t: Eqn::T,
+        y_bar: &Eqn::V,
+        c: &mut RkState<Eqn::V, M>,
+    ) -> Result<(), DiffsolError> {
+        let step = end
+            .last_step
+            .ok_or(ode_solver_error!(NoStepToDifferentiate))?;
+        check_step_vjp_inputs(
+            (&end.y, &end.dy, &end.diff),
+            self.tableau.s(),
+            (&c.y, &c.dy, &c.diff),
+            (
+                "the cotangent of the interpolated value",
+                y_bar,
+                end.y.len(),
+            ),
+        )?;
+        // the bounds and theta of the forward interpolation straight after the step
+        check_interpolate_bounds(t, end.t, step.h, Some(step.t0))?;
+        let theta = Self::interpolate_theta(t, step.t0, end.t);
+        let w = self.interpolate_weights_from_end(theta);
+        let one = Eqn::T::one();
+        c.y.axpy(one, y_bar, one);
+        c.diff
+            .ger_cols(0, self.tableau.s(), one, w.as_slice(), y_bar);
+        Ok(())
+    }
+
     /// Start pulling the cotangent `c` at `end` back through the step `step` that ended there:
-    /// fold the cotangents of the step's outputs into those of the stage increments, `c.diff`,
-    /// with `c.y` left as the cotangent of the start of the step.
+    /// fold the cotangents of the step's outputs into those of the stage increments, `c.diff`
+    /// (added to what it holds, the cotangent of the increments themselves, as from
+    /// [Self::interpolate_vjp]), with `c.y` left as the cotangent of the start of the step.
     pub(crate) fn vjp_start(
         &mut self,
         step: RkStepRecord<Eqn::T>,
@@ -1418,20 +1487,14 @@ where
         });
 
         // y_bar stays as the cotangent of y0, and the increments get b_j y_bar, and dy_bar / h
-        // for the last one
-        c.diff.fill(Eqn::T::zero());
+        // for the last one, added to any cotangent they already carry
         c.diff.ger_cols(0, s, one, b.as_slice(), &c.y);
         c.diff.column_mut(s - 1).axpy(one / step.h, &c.dy, one);
     }
 
-    /// The time of stage `i` of the step `step` that ended at `end`.
-    pub(crate) fn vjp_stage_time(
-        &self,
-        i: usize,
-        step: RkStepRecord<Eqn::T>,
-        end: &RkState<Eqn::V, M>,
-    ) -> Eqn::T {
-        end.t - step.h + self.tableau.c()[i] * step.h
+    /// The time of stage `i` of the step `step`, as the forward step computed it.
+    pub(crate) fn vjp_stage_time(&self, i: usize, step: RkStepRecord<Eqn::T>) -> Eqn::T {
+        step.t0 + self.tableau.c()[i] * step.h
     }
 
     /// The right-hand side `k_bar` of stage `i`'s transposed solve, written into `w`, the first
@@ -1473,13 +1536,12 @@ where
         &mut self,
         i: usize,
         step: RkStepRecord<Eqn::T>,
-        end: &RkState<Eqn::V, M>,
         c: &mut RkState<Eqn::V, M>,
         p_bar: &mut Eqn::V,
     ) {
         let one = Eqn::T::one();
         let h = step.h;
-        let t_i = self.vjp_stage_time(i, step, end);
+        let t_i = self.vjp_stage_time(i, step);
         let rhs = self.problem.eqn.rhs();
         let work = self.vjp_work.get_mut(&self.vjp_lanes).unwrap();
 
@@ -1496,12 +1558,7 @@ where
     /// Finish pulling the cotangent back: on return it is carried by `y` and `dy` (`diff` is
     /// zero), as the cotangents of the state and, for a first stage taken from it, its
     /// derivative at the start of the step.
-    pub(crate) fn vjp_finish(
-        &self,
-        step: RkStepRecord<Eqn::T>,
-        end: &RkState<Eqn::V, M>,
-        c: &mut RkState<Eqn::V, M>,
-    ) {
+    pub(crate) fn vjp_finish(&self, step: RkStepRecord<Eqn::T>, c: &mut RkState<Eqn::V, M>) {
         let zero = Eqn::T::zero();
         // a first stage taken from the start of the step, K_0 = h dy0
         if self.skip_first_stage() {
@@ -1513,7 +1570,7 @@ where
         c.diff.fill(zero);
 
         // the cotangent now sits at the start of the step
-        c.t = end.t - step.h;
+        c.t = step.t0;
         c.h = step.h;
         c.last_step = None;
     }
