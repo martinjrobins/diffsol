@@ -8,6 +8,8 @@ use crate::{error::DiffsolRtError, ode::Ode, solve::Solve};
 pub struct OdeSolverOptionsSnapshot {
     pub max_nonlinear_solver_iterations: usize,
     pub max_error_test_failures: usize,
+    #[serde(default = "default_max_nonlinear_solver_failures")]
+    pub max_nonlinear_solver_failures: usize,
     pub update_jacobian_after_steps: usize,
     pub update_rhs_jacobian_after_steps: usize,
     pub threshold_to_update_jacobian: f64,
@@ -17,6 +19,10 @@ pub struct OdeSolverOptionsSnapshot {
     pub derivative_solve_tolerance: f64,
     #[serde(default = "default_derivative_solve_max_iter")]
     pub derivative_solve_max_iter: usize,
+}
+
+fn default_max_nonlinear_solver_failures() -> usize {
+    diffsol::OdeSolverOptions::<f64>::default().max_nonlinear_solver_failures
 }
 
 fn default_derivative_solve_tolerance() -> f64 {
@@ -32,6 +38,7 @@ impl OdeSolverOptionsSnapshot {
         Self {
             max_nonlinear_solver_iterations: solve.ode_max_nonlinear_solver_iterations(),
             max_error_test_failures: solve.ode_max_error_test_failures(),
+            max_nonlinear_solver_failures: solve.ode_max_nonlinear_solver_failures(),
             update_jacobian_after_steps: solve.ode_update_jacobian_after_steps(),
             update_rhs_jacobian_after_steps: solve.ode_update_rhs_jacobian_after_steps(),
             threshold_to_update_jacobian: solve.ode_threshold_to_update_jacobian(),
@@ -45,6 +52,7 @@ impl OdeSolverOptionsSnapshot {
     pub(crate) fn apply_to_solve(&self, solve: &mut dyn Solve) {
         solve.set_ode_max_nonlinear_solver_iterations(self.max_nonlinear_solver_iterations);
         solve.set_ode_max_error_test_failures(self.max_error_test_failures);
+        solve.set_ode_max_nonlinear_solver_failures(self.max_nonlinear_solver_failures);
         solve.set_ode_update_jacobian_after_steps(self.update_jacobian_after_steps);
         solve.set_ode_update_rhs_jacobian_after_steps(self.update_rhs_jacobian_after_steps);
         solve.set_ode_threshold_to_update_jacobian(self.threshold_to_update_jacobian);
@@ -87,6 +95,15 @@ impl OdeSolverOptions {
     }
     pub fn set_max_error_test_failures(&self, value: usize) -> Result<(), DiffsolRtError> {
         self.guard()?.solve.set_ode_max_error_test_failures(value);
+        Ok(())
+    }
+    pub fn get_max_nonlinear_solver_failures(&self) -> Result<usize, DiffsolRtError> {
+        Ok(self.guard()?.solve.ode_max_nonlinear_solver_failures())
+    }
+    pub fn set_max_nonlinear_solver_failures(&self, value: usize) -> Result<(), DiffsolRtError> {
+        self.guard()?
+            .solve
+            .set_ode_max_nonlinear_solver_failures(value);
         Ok(())
     }
     pub fn get_update_jacobian_after_steps(&self) -> Result<usize, DiffsolRtError> {
@@ -195,6 +212,7 @@ mod tests {
             let options = make_options(jit_backend);
             options.set_max_nonlinear_solver_iterations(17).unwrap();
             options.set_max_error_test_failures(19).unwrap();
+            options.set_max_nonlinear_solver_failures(7).unwrap();
             options.set_update_jacobian_after_steps(23).unwrap();
             options.set_update_rhs_jacobian_after_steps(29).unwrap();
             options.set_threshold_to_update_jacobian(1e-3).unwrap();
@@ -208,6 +226,7 @@ mod tests {
 
             assert_eq!(options.get_max_nonlinear_solver_iterations().unwrap(), 17);
             assert_eq!(options.get_max_error_test_failures().unwrap(), 19);
+            assert_eq!(options.get_max_nonlinear_solver_failures().unwrap(), 7);
             assert_eq!(options.get_update_jacobian_after_steps().unwrap(), 23);
             assert_eq!(options.get_update_rhs_jacobian_after_steps().unwrap(), 29);
             assert_eq!(options.get_threshold_to_update_jacobian().unwrap(), 1e-3);
@@ -219,9 +238,10 @@ mod tests {
             assert_eq!(options.get_derivative_solve_tolerance().unwrap(), 1e-6);
             assert_eq!(options.get_derivative_solve_max_iter().unwrap(), 31);
 
-            let value = serde_json::to_value(&options).unwrap();
+            let mut value = serde_json::to_value(&options).unwrap();
             assert_eq!(value["max_nonlinear_solver_iterations"], 17);
             assert_eq!(value["max_error_test_failures"], 19);
+            assert_eq!(value["max_nonlinear_solver_failures"], 7);
             assert_eq!(value["update_jacobian_after_steps"], 23);
             assert_eq!(value["update_rhs_jacobian_after_steps"], 29);
             assert_eq!(value["threshold_to_update_jacobian"], 1e-3);
@@ -229,6 +249,23 @@ mod tests {
             assert_eq!(value["min_timestep"], 1e-4);
             assert_eq!(value["derivative_solve_tolerance"], 1e-6);
             assert_eq!(value["derivative_solve_max_iter"], 31);
+
+            let snapshot: super::OdeSolverOptionsSnapshot =
+                serde_json::from_value(value.clone()).unwrap();
+            let restored = make_options(jit_backend);
+            snapshot.apply_to_solve(restored.guard().unwrap().solve.as_mut());
+            assert_eq!(restored.get_max_nonlinear_solver_failures().unwrap(), 7);
+
+            // Snapshots written before this option was exposed retain the Rust default.
+            value
+                .as_object_mut()
+                .unwrap()
+                .remove("max_nonlinear_solver_failures");
+            let legacy: super::OdeSolverOptionsSnapshot = serde_json::from_value(value).unwrap();
+            assert_eq!(
+                legacy.max_nonlinear_solver_failures,
+                diffsol::OdeSolverOptions::<f64>::default().max_nonlinear_solver_failures
+            );
         }
     }
 }

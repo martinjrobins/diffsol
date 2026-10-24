@@ -1254,8 +1254,10 @@ mod tests {
     use crate::ode_options::OdeSolverOptions;
     #[cfg(feature = "diffsl-external-f64")]
     use crate::ode_options_c::{
-        diffsol_ode_options_free, diffsol_ode_options_get_max_nonlinear_solver_iterations,
+        diffsol_ode_options_free, diffsol_ode_options_get_max_nonlinear_solver_failures,
+        diffsol_ode_options_get_max_nonlinear_solver_iterations,
         diffsol_ode_options_get_min_timestep,
+        diffsol_ode_options_set_max_nonlinear_solver_failures,
         diffsol_ode_options_set_max_nonlinear_solver_iterations,
         diffsol_ode_options_set_min_timestep,
     };
@@ -1533,6 +1535,19 @@ mod tests {
                 DIFFSOL_OK
             );
             assert_eq!(max_nonlinear_iterations, 17);
+            let mut max_nonlinear_failures = 0usize;
+            assert_eq!(
+                diffsol_ode_options_set_max_nonlinear_solver_failures(ode_options, 7),
+                DIFFSOL_OK
+            );
+            assert_eq!(
+                diffsol_ode_options_get_max_nonlinear_solver_failures(
+                    ode_options,
+                    &mut max_nonlinear_failures
+                ),
+                DIFFSOL_OK
+            );
+            assert_eq!(max_nonlinear_failures, 7);
             assert_eq!(
                 diffsol_ode_options_set_min_timestep(ode_options, 1e-4),
                 DIFFSOL_OK

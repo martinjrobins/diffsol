@@ -156,6 +156,7 @@ pub(crate) trait Solve {
     generate_trait_ode_option_accessors! {
         max_nonlinear_solver_iterations: usize,
         max_error_test_failures: usize,
+        max_nonlinear_solver_failures: usize,
         min_timestep: f64,
         update_jacobian_after_steps: usize,
         update_rhs_jacobian_after_steps: usize,
@@ -697,6 +698,7 @@ where
     generate_ode_option_accessors! {
         max_nonlinear_solver_iterations: usize,
         max_error_test_failures: usize,
+        max_nonlinear_solver_failures: usize,
         min_timestep: f64,
         update_jacobian_after_steps: usize,
         update_rhs_jacobian_after_steps: usize,

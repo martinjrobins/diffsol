@@ -380,7 +380,8 @@ pub mod ode_c;
 /// [OdeWrapper::get_options](crate::ode::OdeWrapper::get_options). It provides getters and
 /// setters for tuning the nonlinear solver and time-stepping behaviour of the ODE integrator:
 /// - Nonlinear solver: [OdeSolverOptions::get_max_nonlinear_solver_iterations],
-///   [OdeSolverOptions::get_max_error_test_failures].
+///   [OdeSolverOptions::get_max_error_test_failures],
+///   [OdeSolverOptions::get_max_nonlinear_solver_failures].
 /// - Jacobian updates: [OdeSolverOptions::get_update_jacobian_after_steps],
 ///   [OdeSolverOptions::get_update_rhs_jacobian_after_steps],
 ///   [OdeSolverOptions::get_threshold_to_update_jacobian],
