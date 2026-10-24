@@ -9,8 +9,8 @@
 use crate::{
     find_jacobian_non_zeros, find_matrix_non_zeros, ode_solver::problem::OdeSolverSolution,
     scalar::Scalar, ConstantOp, Context, JacobianColoring, LinearOp, Matrix, MatrixSparsity,
-    NonLinearOp, NonLinearOpJacobian, OdeBuilder, OdeEquations, OdeEquationsImplicit,
-    OdeEquationsRef, OdeSolverProblem, Op, ParameterisedOp, UnitCallable, Vector,
+    NonLinearOp, NonLinearOpJacobian, OdeEquations, OdeEquationsImplicit, OdeEquationsRef,
+    OdeSolverProblem, Op, ParameterisedOp, UnitCallable, Vector,
 };
 use num_traits::{FromPrimitive, One, Zero};
 
@@ -24,7 +24,7 @@ pub fn heat2d_diffsl_problem<
     OdeSolverProblem<impl crate::OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
-    let (problem, _soln) = head2d_problem::<M, MGRID>();
+    let (problem, _soln) = heat2d_problem::<M, MGRID>(1);
     let u0 = problem.eqn.init().call(0.0);
     let jac = problem.eqn.rhs().jacobian(&u0, 0.0);
     let mass = problem.eqn.mass().unwrap().matrix(0.0);
@@ -88,128 +88,13 @@ pub fn heat2d_diffsl_problem<
         dx2 = (1.0 / (MGRID as f64 - 1.0)).powi(2),
     );
 
-    let problem = OdeBuilder::<M>::new()
+    let problem = crate::OdeBuilder::<M>::new()
         .rtol(1e-7)
         .atol([1e-7])
         .build_from_diffsl::<CG>(code.as_str())
         .unwrap();
     let soln = soln::<M>(problem.context().clone());
     (problem, soln)
-}
-
-fn heat2d_rhs<M: Matrix, const MGRID: usize>(x: &[M::T], _p: &[M::T], _t: M::T, y: &mut [M::T]) {
-    // Initialize y to x, to take care of boundary equations.
-    y.copy_from_slice(x);
-    let mm = M::T::from_f64(MGRID as f64).unwrap();
-    let four = M::T::from_f64(4.0).unwrap();
-
-    let dx = M::T::one() / (mm - M::T::one());
-    let coeff = M::T::one() / (dx * dx);
-
-    // Loop over interior points; set y = (central difference).
-    for j in 1..MGRID - 1 {
-        let offset = MGRID * j;
-        for i in 1..MGRID - 1 {
-            let loc = offset + i;
-            y[loc] =
-                coeff * (x[loc - 1] + x[loc + 1] + x[loc - MGRID] + x[loc + MGRID] - four * x[loc]);
-        }
-    }
-}
-
-fn heat2d_jac_mul<M: Matrix, const MGRID: usize>(
-    _x: &[M::T],
-    _p: &[M::T],
-    _t: M::T,
-    v: &[M::T],
-    y: &mut [M::T],
-) {
-    // Initialize y to v, to take care of boundary equations.
-    y.copy_from_slice(v);
-    let mm = M::T::from_f64(MGRID as f64).unwrap();
-    let four = M::T::from_f64(4.0).unwrap();
-
-    let dx = M::T::one() / (mm - M::T::one());
-    let coeff = M::T::one() / (dx * dx);
-
-    // Loop over interior points; set y = (central difference).
-    for j in 1..MGRID - 1 {
-        let offset = MGRID * j;
-        for i in 1..MGRID - 1 {
-            let loc = offset + i;
-            y[loc] =
-                coeff * (v[loc - 1] + v[loc + 1] + v[loc - MGRID] + v[loc + MGRID] - four * v[loc]);
-        }
-    }
-}
-
-fn heat2d_init<M: Matrix, const MGRID: usize>(_p: &[M::T], _t: M::T, uu: &mut [M::T]) {
-    let mm = M::T::from_f64(MGRID as f64).unwrap();
-    let bval = M::T::zero();
-    let one = M::T::one();
-    let dx = one / (mm - one);
-    let mm1 = MGRID - 1;
-    let sixteen = M::T::from_f64(16.0).unwrap();
-
-    /* Initialize uu on all grid points. */
-    for j in 0..MGRID {
-        let yfact = dx * M::T::from_f64(j as f64).unwrap();
-        let offset = MGRID * j;
-        for i in 0..MGRID {
-            let xfact = dx * M::T::from_f64(i as f64).unwrap();
-            let loc = offset + i;
-            uu[loc] = sixteen * xfact * (one - xfact) * yfact * (one - yfact);
-        }
-    }
-
-    /* Finally, set values of u at boundary points. */
-    for j in 0..MGRID {
-        let offset = MGRID * j;
-        for i in 0..MGRID {
-            let loc = offset + i;
-            if j == 0 || j == mm1 || i == 0 || i == mm1 {
-                uu[loc] = bval;
-            }
-        }
-    }
-}
-
-fn heat2d_mass<M: Matrix, const MGRID: usize>(
-    x: &[M::T],
-    _p: &[M::T],
-    _t: M::T,
-    beta: M::T,
-    y: &mut [M::T],
-) {
-    let mm = MGRID;
-    let mm1 = mm - 1;
-    for j in 0..mm {
-        let offset = mm * j;
-        for i in 0..mm {
-            let loc = offset + i;
-            if j == 0 || j == mm1 || i == 0 || i == mm1 {
-                y[loc] *= beta;
-            } else {
-                y[loc] = x[loc] + beta * y[loc];
-            }
-        }
-    }
-}
-
-fn heat2d_out<M: Matrix, const MGRID: usize>(x: &[M::T], _p: &[M::T], _t: M::T, y: &mut [M::T]) {
-    let dx = M::T::one() / (M::T::from_f64(MGRID as f64).unwrap() - M::T::one());
-    let squared_norm = x.iter().fold(M::T::zero(), |acc, xi| acc + *xi * *xi);
-    y[0] = squared_norm * dx * dx;
-}
-
-fn heat2d_out_jac_mul<M: Matrix, const MGRID: usize>(
-    _x: &[M::T],
-    _p: &[M::T],
-    _t: M::T,
-    _v: &[M::T],
-    _y: &mut [M::T],
-) {
-    unimplemented!()
 }
 
 fn _pde_solution<T: Scalar>(x: T, y: T, t: T, max_terms: usize) -> T {
@@ -242,26 +127,6 @@ fn _pde_solution<T: Scalar>(x: T, y: T, t: T, max_terms: usize) -> T {
     }
 
     u
-}
-
-#[allow(clippy::type_complexity)]
-pub fn head2d_problem<M: Matrix + 'static, const MGRID: usize>() -> (
-    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
-    OdeSolverSolution<M::V>,
-) {
-    let nstates = MGRID * MGRID;
-    let problem = OdeBuilder::<M>::new()
-        .rtol(1e-7)
-        .atol([1e-7])
-        .rhs_implicit(heat2d_rhs::<M, MGRID>, heat2d_jac_mul::<M, MGRID>)
-        .mass(heat2d_mass::<M, MGRID>)
-        .init(heat2d_init::<M, MGRID>, nstates)
-        .out_implicit(heat2d_out::<M, MGRID>, heat2d_out_jac_mul::<M, MGRID>, 1)
-        .build()
-        .unwrap();
-    let ctx = problem.context().clone();
-
-    (problem, soln::<M>(ctx))
 }
 
 fn soln<M: Matrix>(ctx: M::C) -> OdeSolverSolution<M::V> {
@@ -300,67 +165,6 @@ fn soln<M: Matrix>(ctx: M::C) -> OdeSolverSolution<M::V> {
     soln
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::{
-        matrix::dense_nalgebra_serial::NalgebraMat, ConstantOp, LinearOp, MatrixCommon,
-        NonLinearOpJacobian, OdeEquations,
-    };
-
-    use super::*;
-
-    #[test]
-    fn test_jacobian() {
-        //let jac = heat2d_jacobian::<nalgebra::DMatrix<f64>, 10>();
-        let (problem, _soln) = head2d_problem::<NalgebraMat<f64>, 10>();
-        let u0 = problem.eqn.init().call(0.0);
-        let jac = problem.eqn.rhs().jacobian(&u0, 0.0);
-        insta::assert_yaml_snapshot!(jac.inner().to_string());
-    }
-
-    #[test]
-    fn test_mass() {
-        let (problem, _soln) = head2d_problem::<NalgebraMat<f64>, 10>();
-        let mass = problem.eqn.mass().unwrap().matrix(0.0);
-        insta::assert_yaml_snapshot!(mass.inner().to_string());
-    }
-
-    #[cfg(feature = "diffsl-cranelift")]
-    #[test]
-    fn test_mass_diffsl() {
-        use crate::{FaerSparseMat, FaerVec};
-        use diffsl::CraneliftJitModule;
-
-        let (problem, _soln) = heat2d_diffsl_problem::<FaerSparseMat<f64>, CraneliftJitModule, 5>();
-        let u = FaerVec::from_vec(
-            vec![
-                1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0,
-                16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0, 25.0,
-            ],
-            *problem.context(),
-        );
-        let mut y = FaerVec::zeros(25, *problem.context());
-        problem.eqn.mass().unwrap().call_inplace(&u, 0.0, &mut y);
-        let expect = FaerVec::from_vec(
-            vec![
-                0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 7.0, 8.0, 9.0, 0.0, 0.0, 12.0, 13.0, 14.0, 0.0, 0.0,
-                17.0, 18.0, 19.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-            ],
-            *problem.context(),
-        );
-        y.assert_eq_st(&expect, 1.0e-10);
-    }
-
-    #[test]
-    fn test_soln() {
-        let (_problem, _soln) = head2d_problem::<NalgebraMat<f64>, 10>();
-    }
-}
-
-// ============================================================
-// Element-parallel implementation
-// ============================================================
-
 /// The constants of the discretisation, precomputed on the host.
 ///
 /// A device closure captures by value and cannot afford a panic path, so
@@ -396,9 +200,8 @@ fn heat2d_is_boundary(mgrid: usize, i: usize) -> bool {
 
 /// One element of the 5-point central difference, holding the boundary values fixed.
 ///
-/// The element form of [`heat2d_rhs`], and of [`heat2d_jac_mul`] too: the operator is linear, so
-/// the same body serves `f(x)` and `J v`.
-fn heat2d_elem_rhs<T: Scalar>(y: &mut T, x: &[T], c: Heat2dConsts<T>, mgrid: usize, i: usize) {
+/// The operator is linear, so the same body serves `f(x)` and `J v`.
+fn heat2d_rhs<T: Scalar>(y: &mut T, x: &[T], c: Heat2dConsts<T>, mgrid: usize, i: usize) {
     *y = if heat2d_is_boundary(mgrid, i) {
         // the boundary equations are algebraic: the residual is the value itself
         x[i]
@@ -407,8 +210,8 @@ fn heat2d_elem_rhs<T: Scalar>(y: &mut T, x: &[T], c: Heat2dConsts<T>, mgrid: usi
     };
 }
 
-/// One element of the mass action `y = M x + beta y`, the element form of [`heat2d_mass`].
-fn heat2d_elem_mass<T: Scalar>(y: &mut T, x: &[T], beta: T, mgrid: usize, i: usize) {
+/// One element of the mass action `y = M x + beta y`.
+fn heat2d_mass<T: Scalar>(y: &mut T, x: &[T], beta: T, mgrid: usize, i: usize) {
     // the boundary rows of the mass matrix are zero
     *y = if heat2d_is_boundary(mgrid, i) {
         beta * *y
@@ -417,8 +220,8 @@ fn heat2d_elem_mass<T: Scalar>(y: &mut T, x: &[T], beta: T, mgrid: usize, i: usi
     };
 }
 
-/// One element of the initial condition, the element form of [`heat2d_init`].
-fn heat2d_elem_init<T: Scalar>(y: &mut T, c: Heat2dConsts<T>, mgrid: usize, i: usize) {
+/// One element of the initial condition.
+fn heat2d_init<T: Scalar>(y: &mut T, c: Heat2dConsts<T>, mgrid: usize, i: usize) {
     *y = if heat2d_is_boundary(mgrid, i) {
         T::zero()
     } else {
@@ -432,7 +235,7 @@ fn heat2d_elem_init<T: Scalar>(y: &mut T, c: Heat2dConsts<T>, mgrid: usize, i: u
 /// The heat equation on an `MGRID x MGRID` grid, with every operator written one element at a
 /// time so [`Vector::for_each_elem`] can run it a thread per `(lane, element)` on a device
 /// backend.
-pub struct Heat2dElem<M: Matrix, const MGRID: usize> {
+pub struct Heat2d<M: Matrix, const MGRID: usize> {
     consts: Heat2dConsts<M::T>,
     rhs_sparsity: Option<M::Sparsity>,
     rhs_coloring: Option<JacobianColoring<M>>,
@@ -441,7 +244,7 @@ pub struct Heat2dElem<M: Matrix, const MGRID: usize> {
     ctx: M::C,
 }
 
-impl<M: Matrix, const MGRID: usize> Heat2dElem<M, MGRID> {
+impl<M: Matrix, const MGRID: usize> Heat2d<M, MGRID> {
     const NSTATES: usize = MGRID * MGRID;
 
     pub fn new(ctx: M::C, t0: M::T) -> Self {
@@ -453,9 +256,9 @@ impl<M: Matrix, const MGRID: usize> Heat2dElem<M, MGRID> {
             mass_coloring: None,
             ctx,
         };
-        let y0 = Heat2dElemInit { eqn: &ret }.call(t0);
+        let y0 = Heat2dInit { eqn: &ret }.call(t0);
 
-        let rhs = Heat2dElemRhs { eqn: &ret };
+        let rhs = Heat2dRhs { eqn: &ret };
         let non_zeros = find_jacobian_non_zeros(&rhs, &y0, t0);
         ret.rhs_sparsity = Some(
             MatrixSparsity::try_from_indices(rhs.nout(), rhs.nstates(), non_zeros.clone()).unwrap(),
@@ -466,7 +269,7 @@ impl<M: Matrix, const MGRID: usize> Heat2dElem<M, MGRID> {
             ret.ctx.clone(),
         ));
 
-        let mass = Heat2dElemMass { eqn: &ret };
+        let mass = Heat2dMass { eqn: &ret };
         let non_zeros = find_matrix_non_zeros(&mass, t0);
         ret.mass_sparsity = Some(
             MatrixSparsity::try_from_indices(mass.nout(), mass.nstates(), non_zeros.clone())
@@ -481,20 +284,20 @@ impl<M: Matrix, const MGRID: usize> Heat2dElem<M, MGRID> {
     }
 }
 
-pub struct Heat2dElemRhs<'a, M: Matrix, const MGRID: usize> {
-    eqn: &'a Heat2dElem<M, MGRID>,
+pub struct Heat2dRhs<'a, M: Matrix, const MGRID: usize> {
+    eqn: &'a Heat2d<M, MGRID>,
 }
-pub struct Heat2dElemMass<'a, M: Matrix, const MGRID: usize> {
-    eqn: &'a Heat2dElem<M, MGRID>,
+pub struct Heat2dMass<'a, M: Matrix, const MGRID: usize> {
+    eqn: &'a Heat2d<M, MGRID>,
 }
-pub struct Heat2dElemInit<'a, M: Matrix, const MGRID: usize> {
-    eqn: &'a Heat2dElem<M, MGRID>,
+pub struct Heat2dInit<'a, M: Matrix, const MGRID: usize> {
+    eqn: &'a Heat2d<M, MGRID>,
 }
-pub struct Heat2dElemOut<'a, M: Matrix, const MGRID: usize> {
-    eqn: &'a Heat2dElem<M, MGRID>,
+pub struct Heat2dOut<'a, M: Matrix, const MGRID: usize> {
+    eqn: &'a Heat2d<M, MGRID>,
 }
 
-macro_rules! impl_heat2d_elem_op {
+macro_rules! impl_heat2d_op {
     ($name:ident, $nout:expr) => {
         impl<M: Matrix, const MGRID: usize> Op for $name<'_, M, MGRID> {
             type M = M;
@@ -503,7 +306,7 @@ macro_rules! impl_heat2d_elem_op {
             type C = M::C;
 
             fn nstates(&self) -> usize {
-                Heat2dElem::<M, MGRID>::NSTATES
+                Heat2d::<M, MGRID>::NSTATES
             }
             fn nout(&self) -> usize {
                 $nout
@@ -518,31 +321,31 @@ macro_rules! impl_heat2d_elem_op {
     };
 }
 
-impl_heat2d_elem_op!(Heat2dElemRhs, Heat2dElem::<M, MGRID>::NSTATES);
-impl_heat2d_elem_op!(Heat2dElemMass, Heat2dElem::<M, MGRID>::NSTATES);
-impl_heat2d_elem_op!(Heat2dElemInit, Heat2dElem::<M, MGRID>::NSTATES);
-impl_heat2d_elem_op!(Heat2dElemOut, 1);
+impl_heat2d_op!(Heat2dRhs, Heat2d::<M, MGRID>::NSTATES);
+impl_heat2d_op!(Heat2dMass, Heat2d::<M, MGRID>::NSTATES);
+impl_heat2d_op!(Heat2dInit, Heat2d::<M, MGRID>::NSTATES);
+impl_heat2d_op!(Heat2dOut, 1);
 
-impl<M: Matrix, const MGRID: usize> NonLinearOp for Heat2dElemRhs<'_, M, MGRID> {
+impl<M: Matrix, const MGRID: usize> NonLinearOp for Heat2dRhs<'_, M, MGRID> {
     fn call_inplace(&self, x: &M::V, _t: M::T, y: &mut M::V) {
         let c = self.eqn.consts;
         y.for_each_elem(
             [x],
             move |y: &mut M::T, [x]: [&[M::T]; 1], _lane: usize, i: usize| {
-                heat2d_elem_rhs(y, x, c, MGRID, i)
+                heat2d_rhs(y, x, c, MGRID, i)
             },
         );
     }
 }
 
-impl<M: Matrix, const MGRID: usize> NonLinearOpJacobian for Heat2dElemRhs<'_, M, MGRID> {
+impl<M: Matrix, const MGRID: usize> NonLinearOpJacobian for Heat2dRhs<'_, M, MGRID> {
     fn jac_mul_inplace(&self, _x: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
         let c = self.eqn.consts;
         // the operator is linear, so the action of the jacobian is the operator itself
         y.for_each_elem(
             [v],
             move |y: &mut M::T, [v]: [&[M::T]; 1], _lane: usize, i: usize| {
-                heat2d_elem_rhs(y, v, c, MGRID, i)
+                heat2d_rhs(y, v, c, MGRID, i)
             },
         );
     }
@@ -558,12 +361,12 @@ impl<M: Matrix, const MGRID: usize> NonLinearOpJacobian for Heat2dElemRhs<'_, M,
     }
 }
 
-impl<M: Matrix, const MGRID: usize> LinearOp for Heat2dElemMass<'_, M, MGRID> {
+impl<M: Matrix, const MGRID: usize> LinearOp for Heat2dMass<'_, M, MGRID> {
     fn gemv_inplace(&self, x: &Self::V, _t: Self::T, beta: Self::T, y: &mut Self::V) {
         y.for_each_elem(
             [x],
             move |y: &mut M::T, [x]: [&[M::T]; 1], _lane: usize, i: usize| {
-                heat2d_elem_mass(y, x, beta, MGRID, i)
+                heat2d_mass(y, x, beta, MGRID, i)
             },
         );
     }
@@ -579,19 +382,19 @@ impl<M: Matrix, const MGRID: usize> LinearOp for Heat2dElemMass<'_, M, MGRID> {
     }
 }
 
-impl<M: Matrix, const MGRID: usize> ConstantOp for Heat2dElemInit<'_, M, MGRID> {
+impl<M: Matrix, const MGRID: usize> ConstantOp for Heat2dInit<'_, M, MGRID> {
     fn call_inplace(&self, _t: M::T, y: &mut M::V) {
         let c = self.eqn.consts;
         y.for_each_elem(
             [],
             move |y: &mut M::T, _: [&[M::T]; 0], _lane: usize, i: usize| {
-                heat2d_elem_init(y, c, MGRID, i)
+                heat2d_init(y, c, MGRID, i)
             },
         );
     }
 }
 
-impl<M: Matrix, const MGRID: usize> NonLinearOp for Heat2dElemOut<'_, M, MGRID> {
+impl<M: Matrix, const MGRID: usize> NonLinearOp for Heat2dOut<'_, M, MGRID> {
     fn call_inplace(&self, x: &M::V, _t: M::T, y: &mut M::V) {
         // `dx^2 * sum_i x_i^2`, one output per lane, so one thread per lane walks the lane
         let dx2 = self.eqn.consts.dx * self.eqn.consts.dx;
@@ -608,14 +411,14 @@ impl<M: Matrix, const MGRID: usize> NonLinearOp for Heat2dElemOut<'_, M, MGRID> 
     }
 }
 
-impl<M: Matrix, const MGRID: usize> NonLinearOpJacobian for Heat2dElemOut<'_, M, MGRID> {
+impl<M: Matrix, const MGRID: usize> NonLinearOpJacobian for Heat2dOut<'_, M, MGRID> {
     fn jac_mul_inplace(&self, _x: &M::V, _t: M::T, _v: &M::V, _y: &mut M::V) {
-        // as in the builder version, the output jacobian is not needed by any solve here
+        // the output jacobian is not needed by any solve here
         unimplemented!()
     }
 }
 
-impl<M: Matrix, const MGRID: usize> Op for Heat2dElem<M, MGRID> {
+impl<M: Matrix, const MGRID: usize> Op for Heat2d<M, MGRID> {
     type M = M;
     type V = M::V;
     type T = M::T;
@@ -635,27 +438,27 @@ impl<M: Matrix, const MGRID: usize> Op for Heat2dElem<M, MGRID> {
     }
 }
 
-impl<'a, M: Matrix, const MGRID: usize> OdeEquationsRef<'a> for Heat2dElem<M, MGRID> {
-    type Rhs = Heat2dElemRhs<'a, M, MGRID>;
-    type Mass = Heat2dElemMass<'a, M, MGRID>;
-    type Init = Heat2dElemInit<'a, M, MGRID>;
-    type Out = Heat2dElemOut<'a, M, MGRID>;
+impl<'a, M: Matrix, const MGRID: usize> OdeEquationsRef<'a> for Heat2d<M, MGRID> {
+    type Rhs = Heat2dRhs<'a, M, MGRID>;
+    type Mass = Heat2dMass<'a, M, MGRID>;
+    type Init = Heat2dInit<'a, M, MGRID>;
+    type Out = Heat2dOut<'a, M, MGRID>;
     type Root = ParameterisedOp<'a, UnitCallable<M>>;
     type Reset = ParameterisedOp<'a, UnitCallable<M>>;
 }
 
-impl<M: Matrix, const MGRID: usize> OdeEquations for Heat2dElem<M, MGRID> {
-    fn rhs(&self) -> Heat2dElemRhs<'_, M, MGRID> {
-        Heat2dElemRhs { eqn: self }
+impl<M: Matrix, const MGRID: usize> OdeEquations for Heat2d<M, MGRID> {
+    fn rhs(&self) -> Heat2dRhs<'_, M, MGRID> {
+        Heat2dRhs { eqn: self }
     }
-    fn mass(&self) -> Option<Heat2dElemMass<'_, M, MGRID>> {
-        Some(Heat2dElemMass { eqn: self })
+    fn mass(&self) -> Option<Heat2dMass<'_, M, MGRID>> {
+        Some(Heat2dMass { eqn: self })
     }
-    fn init(&self) -> Heat2dElemInit<'_, M, MGRID> {
-        Heat2dElemInit { eqn: self }
+    fn init(&self) -> Heat2dInit<'_, M, MGRID> {
+        Heat2dInit { eqn: self }
     }
-    fn out(&self) -> Option<Heat2dElemOut<'_, M, MGRID>> {
-        Some(Heat2dElemOut { eqn: self })
+    fn out(&self) -> Option<Heat2dOut<'_, M, MGRID>> {
+        Some(Heat2dOut { eqn: self })
     }
     fn root(&self) -> Option<<Self as OdeEquationsRef<'_>>::Root> {
         None
@@ -668,9 +471,9 @@ impl<M: Matrix, const MGRID: usize> OdeEquations for Heat2dElem<M, MGRID> {
     }
 }
 
-/// [`head2d_problem`] with every operator element-parallel, over `nbatch` lanes.
+/// The heat equation on an `MGRID x MGRID` grid, over `nbatch` identical lanes.
 #[allow(clippy::type_complexity)]
-pub fn heat2d_elem_problem<M: Matrix + 'static, const MGRID: usize>(
+pub fn heat2d_problem<M: Matrix + 'static, const MGRID: usize>(
     nbatch: usize,
 ) -> (
     OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
@@ -681,7 +484,7 @@ pub fn heat2d_elem_problem<M: Matrix + 'static, const MGRID: usize>(
     let atol = M::V::from_element(MGRID * MGRID, M::T::from_f64(1e-7).unwrap(), ctx.clone());
     let t0 = M::T::zero();
     let h0 = M::T::one();
-    let eqn = Heat2dElem::<M, MGRID>::new(ctx.clone(), t0);
+    let eqn = Heat2d::<M, MGRID>::new(ctx.clone(), t0);
     let problem = OdeSolverProblem::new(
         eqn,
         rtol,
@@ -704,52 +507,57 @@ pub fn heat2d_elem_problem<M: Matrix + 'static, const MGRID: usize>(
 }
 
 #[cfg(test)]
-mod elem_tests {
-    use super::*;
+mod tests {
     use crate::{
-        matrix::dense_nalgebra_serial::NalgebraMat, DenseMatrix, MatrixCommon, NalgebraVec,
+        matrix::dense_nalgebra_serial::NalgebraMat, ConstantOp, LinearOp, MatrixCommon,
+        NonLinearOpJacobian, OdeEquations,
     };
 
-    const MGRID: usize = 10;
+    use super::*;
 
-    /// The element operators and the whole-lane operators of [`head2d_problem`] are two copies of
-    /// the same maths, so check them against each other.
     #[test]
-    fn test_elem_matches_lane() {
-        type M = NalgebraMat<f64>;
-        let (elem, _) = heat2d_elem_problem::<M, MGRID>(1);
-        let (lane, _) = head2d_problem::<M, MGRID>();
+    fn test_jacobian() {
+        let (problem, _soln) = heat2d_problem::<NalgebraMat<f64>, 10>(1);
+        let u0 = problem.eqn.init().call(0.0);
+        let jac = problem.eqn.rhs().jacobian(&u0, 0.0);
+        insta::assert_yaml_snapshot!(jac.inner().to_string());
+    }
 
-        let y0 = elem.eqn.init().call(0.0);
-        y0.assert_eq_st(&lane.eqn.init().call(0.0), 1e-14);
+    #[test]
+    fn test_mass() {
+        let (problem, _soln) = heat2d_problem::<NalgebraMat<f64>, 10>(1);
+        let mass = problem.eqn.mass().unwrap().matrix(0.0);
+        insta::assert_yaml_snapshot!(mass.inner().to_string());
+    }
 
-        elem.eqn
-            .rhs()
-            .call(&y0, 0.0)
-            .assert_eq_st(&lane.eqn.rhs().call(&y0, 0.0), 1e-9);
+    #[cfg(feature = "diffsl-cranelift")]
+    #[test]
+    fn test_mass_diffsl() {
+        use crate::{FaerSparseMat, FaerVec};
+        use diffsl::CraneliftJitModule;
 
-        let v = NalgebraVec::from_element(MGRID * MGRID, 0.5, *elem.context());
-        elem.eqn
-            .rhs()
-            .jac_mul(&y0, 0.0, &v)
-            .assert_eq_st(&lane.eqn.rhs().jac_mul(&y0, 0.0, &v), 1e-9);
+        let (problem, _soln) = heat2d_diffsl_problem::<FaerSparseMat<f64>, CraneliftJitModule, 5>();
+        let u = FaerVec::from_vec(
+            vec![
+                1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0,
+                16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0, 25.0,
+            ],
+            *problem.context(),
+        );
+        let mut y = FaerVec::zeros(25, *problem.context());
+        problem.eqn.mass().unwrap().call_inplace(&u, 0.0, &mut y);
+        let expect = FaerVec::from_vec(
+            vec![
+                0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 7.0, 8.0, 9.0, 0.0, 0.0, 12.0, 13.0, 14.0, 0.0, 0.0,
+                17.0, 18.0, 19.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            ],
+            *problem.context(),
+        );
+        y.assert_eq_st(&expect, 1.0e-10);
+    }
 
-        let mass_elem = elem.eqn.mass().unwrap().matrix(0.0);
-        let mass_lane = lane.eqn.mass().unwrap().matrix(0.0);
-        for i in 0..mass_elem.nrows() {
-            for j in 0..mass_elem.ncols() {
-                assert_eq!(
-                    mass_elem.get_index(i, j),
-                    mass_lane.get_index(i, j),
-                    "mass[{i}, {j}]"
-                );
-            }
-        }
-
-        elem.eqn
-            .out()
-            .unwrap()
-            .call(&y0, 0.0)
-            .assert_eq_st(&lane.eqn.out().unwrap().call(&y0, 0.0), 1e-12);
+    #[test]
+    fn test_soln() {
+        let (_problem, _soln) = heat2d_problem::<NalgebraMat<f64>, 10>(1);
     }
 }

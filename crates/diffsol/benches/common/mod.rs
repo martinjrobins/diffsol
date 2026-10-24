@@ -41,7 +41,7 @@ macro_rules! bench_implicit_cg {
     ($g:ident, $name:ident, $solver:ident, $ls:ident, $problem:ident, $m:ty, $($N:expr),+ $(,)?) => {
         $(
             {
-                let (problem, t_evals) = $crate::common::setup_problem!($problem::<$m, $N>());
+                let (problem, t_evals) = $crate::common::setup_problem!($problem::<$m, $N>(1));
                 $g.bench_function(concat!(stringify!($name), "_", $N), |b| {
                     b.iter(|| {
                         $crate::common::$solver::<_, $ls<_>>(&problem, &t_evals);
@@ -57,7 +57,7 @@ macro_rules! bench_implicit_rt {
     ($g:ident, $name:ident, $solver:ident, $ls:ident, $problem:ident, $m:ty, $($N:expr),+ $(,)?) => {
         $(
             {
-                let (problem, t_evals) = $crate::common::setup_problem!($problem::<$m>(false, $N));
+                let (problem, t_evals) = $crate::common::setup_problem!($problem::<$m>($N));
                 $g.bench_function(concat!(stringify!($name), "_", $N), |b| {
                     b.iter(|| {
                         $crate::common::$solver::<_, $ls<_>>(&problem, &t_evals);

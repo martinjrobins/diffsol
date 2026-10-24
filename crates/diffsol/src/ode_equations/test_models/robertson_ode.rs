@@ -2,9 +2,8 @@ use crate::{
     find_adjoint_non_zeros, find_jacobian_non_zeros, ode_solver::problem::OdeSolverSolution,
     ConstantOp, ConstantOpSens, ConstantOpSensAdjoint, Context, JacobianColoring, Matrix,
     MatrixSparsity, NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens,
-    NonLinearOpSensAdjoint, OdeBuilder, OdeEquations, OdeEquationsImplicit,
-    OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeEquationsRef, OdeSolverProblem, Op,
-    ParameterisedOp, UnitCallable, Vector,
+    NonLinearOpSensAdjoint, OdeEquations, OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens,
+    OdeEquationsRef, OdeSolverProblem, Op, ParameterisedOp, UnitCallable, Vector,
 };
 use num_traits::{FromPrimitive, One, Zero};
 
@@ -50,7 +49,7 @@ pub fn robertson_ode_diffsl_problem<
             k3*y*y,
         }";
 
-    let problem = OdeBuilder::<M>::new()
+    let problem = crate::OdeBuilder::<M>::new()
         .p([0.04, 1.0e4, 3.0e7])
         .rtol(1e-4)
         .atol([1.0e-8, 1.0e-6, 1.0e-6])
@@ -60,101 +59,16 @@ pub fn robertson_ode_diffsl_problem<
         .param_atol([1e-6, 1e-6, 1e-6])
         .build_from_diffsl::<CG>(code)
         .unwrap();
-    let mut soln = soln::<M::V>(problem.context().clone());
+    let mut soln = OdeSolverSolution::default();
+    for (values, time) in robertson_soln_data() {
+        soln.push(
+            M::V::from_vec(values.to_vec(), problem.context().clone()),
+            time,
+        );
+    }
     soln.rtol = problem.rtol;
     soln.atol = problem.atol.clone();
     (problem, soln)
-}
-
-#[allow(clippy::type_complexity)]
-pub fn robertson_ode<M: Matrix + 'static>(
-    use_coloring: bool,
-    ngroups: usize,
-) -> (
-    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
-    OdeSolverSolution<M::V>,
-) {
-    const N: usize = 3;
-    let nstates = N * ngroups;
-    let problem = OdeBuilder::<M>::new()
-        .p([0.04, 1.0e4, 3.0e7])
-        .rtol(1e-4)
-        .atol(
-            [1.0e-8, 1.0e-14, 1.0e-6]
-                .iter()
-                .cycle()
-                .take(ngroups * N)
-                .cloned()
-                .collect::<Vec<f64>>(),
-        )
-        .use_coloring(use_coloring)
-        .rhs_implicit(
-            //     dy1/dt = -.04*y1 + 1.e4*y2*y3
-            //*    dy2/dt = .04*y1 - 1.e4*y2*y3 - 3.e7*(y2)^2
-            //*    dy3/dt = 3.e7*(y2)^2
-            move |x: &[M::T], p: &[M::T], _t: M::T, y: &mut [M::T]| {
-                for ig in 0..ngroups {
-                    let i = ig * N;
-                    y[i] = -p[0] * x[i] + p[1] * x[i + 1] * x[i + 2];
-                    y[i + 1] =
-                        p[0] * x[i] - p[1] * x[i + 1] * x[i + 2] - p[2] * x[i + 1] * x[i + 1];
-                    y[i + 2] = p[2] * x[i + 1] * x[i + 1];
-                }
-            },
-            move |x: &[M::T], p: &[M::T], _t: M::T, v: &[M::T], y: &mut [M::T]| {
-                for ig in 0..ngroups {
-                    let i = ig * N;
-                    y[i] = -p[0] * v[i] + p[1] * v[i + 1] * x[i + 2] + p[1] * x[i + 1] * v[i + 2];
-                    y[i + 1] = p[0] * v[i]
-                        - p[1] * v[i + 1] * x[i + 2]
-                        - p[1] * x[i + 1] * v[i + 2]
-                        - M::T::from_f64(2.0).unwrap() * p[2] * x[i + 1] * v[i + 1];
-                    y[i + 2] = M::T::from_f64(2.0).unwrap() * p[2] * x[i + 1] * v[i + 1];
-                }
-            },
-        )
-        .init(
-            move |_p: &[M::T], _t: M::T, y: &mut [M::T]| {
-                for ig in 0..ngroups {
-                    let i = ig * N;
-                    y[i] = M::T::one();
-                    y[i + 1] = M::T::zero();
-                    y[i + 2] = M::T::zero();
-                }
-            },
-            nstates,
-        )
-        .build()
-        .unwrap();
-
-    let mut soln = OdeSolverSolution::default();
-    for (values, time) in robertson_soln_data() {
-        // expand soln by number of groups
-        let mut newvalues = Vec::with_capacity(N * ngroups);
-        for _ in 0..ngroups {
-            newvalues.extend(values.iter().map(|v| M::T::from_f64(*v).unwrap()));
-        }
-        soln.push(
-            M::V::from_vec(newvalues, problem.context().clone()),
-            M::T::from_f64(time).unwrap(),
-        );
-    }
-    (problem, soln)
-}
-
-#[cfg(feature = "diffsl")]
-fn soln<V: Vector>(ctx: V::C) -> OdeSolverSolution<V> {
-    let mut soln = OdeSolverSolution::default();
-    for (values, time) in robertson_soln_data() {
-        soln.push(
-            V::from_vec(
-                values.iter().map(|v| V::T::from_f64(*v).unwrap()).collect(),
-                ctx.clone(),
-            ),
-            V::T::from_f64(time).unwrap(),
-        );
-    }
-    soln
 }
 
 /* -----------------------------------------------------------------
@@ -240,20 +154,16 @@ fn soln<V: Vector>(ctx: V::C) -> OdeSolverSolution<V> {
 // Prec evals per NLS iter      = 0
 // Root fn evals                = 570
 
-// ============================================================
-// Element-parallel implementation
-// ============================================================
-
 /// States in the Robertson system, and parameters (the three rate constants).
-const RE_NSTATES: usize = 3;
-const RE_NPARAMS: usize = 3;
+const NSTATES: usize = 3;
+const NPARAMS: usize = 3;
 
 /// `dy/dt` for one state of the Robertson system.
 ///
-/// The element form of the body in [`robertson_ode`]: `i` is the state being written, and the
-/// whole 3-state lane plus the parameter lane are readable. This is what lets
-/// [`Vector::for_each_elem`] run it a thread per `(lane, state)` on a device backend.
-fn robertson_elem_rhs<T: crate::Scalar>(y: &mut T, x: &[T], p: &[T], i: usize) {
+/// `i` is the state being written, and the whole 3-state lane plus the parameter lane are
+/// readable. This is what lets [`Vector::for_each_elem`] run it a thread per `(lane, state)` on a
+/// device backend.
+fn robertson_rhs<T: crate::Scalar>(y: &mut T, x: &[T], p: &[T], i: usize) {
     *y = match i {
         0 => -p[0] * x[0] + p[1] * x[1] * x[2],
         1 => p[0] * x[0] - p[1] * x[1] * x[2] - p[2] * x[1] * x[1],
@@ -261,8 +171,8 @@ fn robertson_elem_rhs<T: crate::Scalar>(y: &mut T, x: &[T], p: &[T], i: usize) {
     };
 }
 
-/// One state of `J v` for [`robertson_elem_rhs`].
-fn robertson_elem_jac_mul<T: crate::Scalar>(y: &mut T, x: &[T], p: &[T], v: &[T], i: usize) {
+/// One state of `J v` for [`robertson_rhs`].
+fn robertson_jac_mul<T: crate::Scalar>(y: &mut T, x: &[T], p: &[T], v: &[T], i: usize) {
     // `T::from_f64(2.0).unwrap()` would put a panic path in the kernel
     let two = T::one() + T::one();
     *y = match i {
@@ -272,14 +182,8 @@ fn robertson_elem_jac_mul<T: crate::Scalar>(y: &mut T, x: &[T], p: &[T], v: &[T]
     };
 }
 
-/// One state of `-J^T v` for [`robertson_elem_rhs`].
-fn robertson_elem_jac_transpose_mul<T: crate::Scalar>(
-    y: &mut T,
-    x: &[T],
-    p: &[T],
-    v: &[T],
-    i: usize,
-) {
+/// One state of `-J^T v` for [`robertson_rhs`].
+fn robertson_jac_transpose_mul<T: crate::Scalar>(y: &mut T, x: &[T], p: &[T], v: &[T], i: usize) {
     let two = T::one() + T::one();
     *y = match i {
         0 => p[0] * v[0] - p[0] * v[1],
@@ -291,8 +195,8 @@ fn robertson_elem_jac_transpose_mul<T: crate::Scalar>(
     };
 }
 
-/// One state of `f_p v` for [`robertson_elem_rhs`].
-fn robertson_elem_sens_mul<T: crate::Scalar>(y: &mut T, x: &[T], v: &[T], i: usize) {
+/// One state of `f_p v` for [`robertson_rhs`].
+fn robertson_sens_mul<T: crate::Scalar>(y: &mut T, x: &[T], v: &[T], i: usize) {
     *y = match i {
         0 => -x[0] * v[0] + x[1] * x[2] * v[1],
         1 => x[0] * v[0] - x[1] * x[2] * v[1] - x[1] * x[1] * v[2],
@@ -300,8 +204,8 @@ fn robertson_elem_sens_mul<T: crate::Scalar>(y: &mut T, x: &[T], v: &[T], i: usi
     };
 }
 
-/// One parameter of `-f_p^T v` for [`robertson_elem_rhs`].
-fn robertson_elem_sens_transpose_mul<T: crate::Scalar>(y: &mut T, x: &[T], v: &[T], i: usize) {
+/// One parameter of `-f_p^T v` for [`robertson_rhs`].
+fn robertson_sens_transpose_mul<T: crate::Scalar>(y: &mut T, x: &[T], v: &[T], i: usize) {
     *y = match i {
         0 => x[0] * v[0] - x[0] * v[1],
         1 => -x[1] * x[2] * v[0] + x[1] * x[2] * v[1],
@@ -311,9 +215,8 @@ fn robertson_elem_sens_transpose_mul<T: crate::Scalar>(y: &mut T, x: &[T], v: &[
 
 /// The Robertson kinetics with an element-parallel right-hand side.
 ///
-/// Batching takes the place of [`robertson_ode`]'s `ngroups`: every lane is an independent copy
-/// of the 3-state system, so the lane count is the group count.
-pub struct RobertsonOdeElem<M: Matrix> {
+/// Every batch lane is an independent copy of the 3-state system.
+pub struct RobertsonOde<M: Matrix> {
     p: M::V,
     rhs_sparsity: Option<M::Sparsity>,
     rhs_coloring: Option<JacobianColoring<M>>,
@@ -322,7 +225,7 @@ pub struct RobertsonOdeElem<M: Matrix> {
     ctx: M::C,
 }
 
-impl<M: Matrix> RobertsonOdeElem<M> {
+impl<M: Matrix> RobertsonOde<M> {
     pub fn new(p: M::V, t0: M::T) -> Self {
         let ctx = p.context().clone();
         let mut ret = Self {
@@ -333,8 +236,8 @@ impl<M: Matrix> RobertsonOdeElem<M> {
             rhs_adjoint_coloring: None,
             ctx,
         };
-        let y0 = RobertsonOdeElemInit { eqn: &ret }.call(t0);
-        let rhs = RobertsonOdeElemRhs { eqn: &ret };
+        let y0 = RobertsonOdeInit { eqn: &ret }.call(t0);
+        let rhs = RobertsonOdeRhs { eqn: &ret };
         let non_zeros = find_jacobian_non_zeros(&rhs, &y0, t0);
         ret.rhs_sparsity = Some(
             MatrixSparsity::try_from_indices(rhs.nout(), rhs.nstates(), non_zeros.clone()).unwrap(),
@@ -344,7 +247,7 @@ impl<M: Matrix> RobertsonOdeElem<M> {
             &non_zeros,
             ret.ctx.clone(),
         ));
-        let rhs = RobertsonOdeElemRhs { eqn: &ret };
+        let rhs = RobertsonOdeRhs { eqn: &ret };
         let non_zeros = find_adjoint_non_zeros(&rhs, &y0, t0);
         ret.rhs_adjoint_sparsity = Some(
             MatrixSparsity::try_from_indices(rhs.nstates(), rhs.nout(), non_zeros.clone()).unwrap(),
@@ -358,15 +261,15 @@ impl<M: Matrix> RobertsonOdeElem<M> {
     }
 }
 
-pub struct RobertsonOdeElemRhs<'a, M: Matrix> {
-    eqn: &'a RobertsonOdeElem<M>,
+pub struct RobertsonOdeRhs<'a, M: Matrix> {
+    eqn: &'a RobertsonOde<M>,
 }
 
-pub struct RobertsonOdeElemInit<'a, M: Matrix> {
-    eqn: &'a RobertsonOdeElem<M>,
+pub struct RobertsonOdeInit<'a, M: Matrix> {
+    eqn: &'a RobertsonOde<M>,
 }
 
-macro_rules! impl_robertson_elem_op {
+macro_rules! impl_robertson_op {
     ($name:ident) => {
         impl<M: Matrix> Op for $name<'_, M> {
             type M = M;
@@ -375,13 +278,13 @@ macro_rules! impl_robertson_elem_op {
             type C = M::C;
 
             fn nstates(&self) -> usize {
-                RE_NSTATES
+                NSTATES
             }
             fn nout(&self) -> usize {
-                RE_NSTATES
+                NSTATES
             }
             fn nparams(&self) -> usize {
-                RE_NPARAMS
+                NPARAMS
             }
             fn context(&self) -> &Self::C {
                 &self.eqn.ctx
@@ -390,26 +293,24 @@ macro_rules! impl_robertson_elem_op {
     };
 }
 
-impl_robertson_elem_op!(RobertsonOdeElemRhs);
-impl_robertson_elem_op!(RobertsonOdeElemInit);
+impl_robertson_op!(RobertsonOdeRhs);
+impl_robertson_op!(RobertsonOdeInit);
 
-impl<M: Matrix> NonLinearOp for RobertsonOdeElemRhs<'_, M> {
+impl<M: Matrix> NonLinearOp for RobertsonOdeRhs<'_, M> {
     fn call_inplace(&self, x: &M::V, _t: M::T, y: &mut M::V) {
         y.for_each_elem(
             [x, &self.eqn.p],
-            |y: &mut M::T, [x, p]: [&[M::T]; 2], _lane: usize, i: usize| {
-                robertson_elem_rhs(y, x, p, i)
-            },
+            |y: &mut M::T, [x, p]: [&[M::T]; 2], _lane: usize, i: usize| robertson_rhs(y, x, p, i),
         );
     }
 }
 
-impl<M: Matrix> NonLinearOpJacobian for RobertsonOdeElemRhs<'_, M> {
+impl<M: Matrix> NonLinearOpJacobian for RobertsonOdeRhs<'_, M> {
     fn jac_mul_inplace(&self, x: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
         y.for_each_elem(
             [x, &self.eqn.p, v],
             |y: &mut M::T, [x, p, v]: [&[M::T]; 3], _lane: usize, i: usize| {
-                robertson_elem_jac_mul(y, x, p, v, i)
+                robertson_jac_mul(y, x, p, v, i)
             },
         );
     }
@@ -425,12 +326,12 @@ impl<M: Matrix> NonLinearOpJacobian for RobertsonOdeElemRhs<'_, M> {
     }
 }
 
-impl<M: Matrix> NonLinearOpAdjoint for RobertsonOdeElemRhs<'_, M> {
+impl<M: Matrix> NonLinearOpAdjoint for RobertsonOdeRhs<'_, M> {
     fn jac_transpose_mul_inplace(&self, x: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
         y.for_each_elem(
             [x, &self.eqn.p, v],
             |y: &mut M::T, [x, p, v]: [&[M::T]; 3], _lane: usize, i: usize| {
-                robertson_elem_jac_transpose_mul(y, x, p, v, i)
+                robertson_jac_transpose_mul(y, x, p, v, i)
             },
         );
     }
@@ -446,29 +347,29 @@ impl<M: Matrix> NonLinearOpAdjoint for RobertsonOdeElemRhs<'_, M> {
     }
 }
 
-impl<M: Matrix> NonLinearOpSens for RobertsonOdeElemRhs<'_, M> {
+impl<M: Matrix> NonLinearOpSens for RobertsonOdeRhs<'_, M> {
     fn sens_mul_inplace(&self, x: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
         y.for_each_elem(
             [x, v],
             |y: &mut M::T, [x, v]: [&[M::T]; 2], _lane: usize, i: usize| {
-                robertson_elem_sens_mul(y, x, v, i)
+                robertson_sens_mul(y, x, v, i)
             },
         );
     }
 }
 
-impl<M: Matrix> NonLinearOpSensAdjoint for RobertsonOdeElemRhs<'_, M> {
+impl<M: Matrix> NonLinearOpSensAdjoint for RobertsonOdeRhs<'_, M> {
     fn sens_transpose_mul_inplace(&self, x: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
         y.for_each_elem(
             [x, v],
             |y: &mut M::T, [x, v]: [&[M::T]; 2], _lane: usize, i: usize| {
-                robertson_elem_sens_transpose_mul(y, x, v, i)
+                robertson_sens_transpose_mul(y, x, v, i)
             },
         );
     }
 }
 
-impl<M: Matrix> ConstantOp for RobertsonOdeElemInit<'_, M> {
+impl<M: Matrix> ConstantOp for RobertsonOdeInit<'_, M> {
     fn call_inplace(&self, _t: M::T, y: &mut M::V) {
         y.for_each_elem(
             [],
@@ -480,53 +381,53 @@ impl<M: Matrix> ConstantOp for RobertsonOdeElemInit<'_, M> {
 }
 
 /// The initial state does not depend on the parameters.
-impl<M: Matrix> ConstantOpSens for RobertsonOdeElemInit<'_, M> {
+impl<M: Matrix> ConstantOpSens for RobertsonOdeInit<'_, M> {
     fn sens_mul_inplace(&self, _t: M::T, _v: &M::V, y: &mut M::V) {
         y.fill(M::T::zero());
     }
 }
 
-impl<M: Matrix> ConstantOpSensAdjoint for RobertsonOdeElemInit<'_, M> {
+impl<M: Matrix> ConstantOpSensAdjoint for RobertsonOdeInit<'_, M> {
     fn sens_transpose_mul_inplace(&self, _t: M::T, _v: &M::V, y: &mut M::V) {
         y.fill(M::T::zero());
     }
 }
 
-impl<M: Matrix> Op for RobertsonOdeElem<M> {
+impl<M: Matrix> Op for RobertsonOde<M> {
     type M = M;
     type V = M::V;
     type T = M::T;
     type C = M::C;
 
     fn nstates(&self) -> usize {
-        RE_NSTATES
+        NSTATES
     }
     fn nout(&self) -> usize {
-        RE_NSTATES
+        NSTATES
     }
     fn nparams(&self) -> usize {
-        RE_NPARAMS
+        NPARAMS
     }
     fn context(&self) -> &Self::C {
         &self.ctx
     }
 }
 
-impl<'a, M: Matrix> OdeEquationsRef<'a> for RobertsonOdeElem<M> {
-    type Rhs = RobertsonOdeElemRhs<'a, M>;
-    type Init = RobertsonOdeElemInit<'a, M>;
+impl<'a, M: Matrix> OdeEquationsRef<'a> for RobertsonOde<M> {
+    type Rhs = RobertsonOdeRhs<'a, M>;
+    type Init = RobertsonOdeInit<'a, M>;
     type Mass = ParameterisedOp<'a, UnitCallable<M>>;
     type Root = ParameterisedOp<'a, UnitCallable<M>>;
     type Out = ParameterisedOp<'a, UnitCallable<M>>;
     type Reset = ParameterisedOp<'a, UnitCallable<M>>;
 }
 
-impl<M: Matrix> OdeEquations for RobertsonOdeElem<M> {
-    fn rhs(&self) -> RobertsonOdeElemRhs<'_, M> {
-        RobertsonOdeElemRhs { eqn: self }
+impl<M: Matrix> OdeEquations for RobertsonOde<M> {
+    fn rhs(&self) -> RobertsonOdeRhs<'_, M> {
+        RobertsonOdeRhs { eqn: self }
     }
-    fn init(&self) -> RobertsonOdeElemInit<'_, M> {
-        RobertsonOdeElemInit { eqn: self }
+    fn init(&self) -> RobertsonOdeInit<'_, M> {
+        RobertsonOdeInit { eqn: self }
     }
     fn mass(&self) -> Option<<Self as OdeEquationsRef<'_>>::Mass> {
         None
@@ -545,13 +446,12 @@ impl<M: Matrix> OdeEquations for RobertsonOdeElem<M> {
     }
 }
 
-/// [`robertson_ode`] with an element-parallel right-hand side, over `nbatch` lanes.
+/// The Robertson kinetics over `nbatch` identical lanes.
 ///
-/// The three rate constants stay parameters (`nparams == 3`), so forward sensitivities can be
-/// added later; they are held at the context's lane count and read out of the parameter lane by
-/// the kernel.
+/// The three rate constants are parameters (`nparams == 3`), held at the context's lane count and
+/// read out of the parameter lane by the kernel.
 #[allow(clippy::type_complexity)]
-pub fn robertson_ode_elem_problem<M: Matrix + 'static>(
+pub fn robertson_ode<M: Matrix + 'static>(
     nbatch: usize,
 ) -> (
     OdeSolverProblem<
@@ -573,13 +473,13 @@ pub fn robertson_ode_elem_problem<M: Matrix + 'static>(
     let rtol = M::T::from_f64(1e-4).unwrap();
     let t0 = M::T::zero();
     let h0 = M::T::one();
-    let eqn = RobertsonOdeElem::new(p, t0);
+    let eqn = RobertsonOde::new(p, t0);
     let problem = OdeSolverProblem::new(
         eqn,
         rtol,
         atol,
-        None,
-        None,
+        Some(M::T::from_f64(1e-6).unwrap()),
+        Some(per_lane([1e-6, 1e-6, 1e-6])),
         None,
         None,
         None,
@@ -610,35 +510,10 @@ mod tests {
     use super::*;
     use crate::{matrix::dense_nalgebra_serial::NalgebraMat, NalgebraVec};
 
-    /// The element right-hand side and the group right-hand side of [`robertson_ode`] are two
-    /// copies of the same maths, so check them against each other at `ngroups == 1`.
-    #[test]
-    fn test_elem_matches_groups() {
-        type M = NalgebraMat<f64>;
-        let (elem, _) = robertson_ode_elem_problem::<M>(1);
-        let (groups, _) = robertson_ode::<M>(false, 1);
-
-        let y0 = elem.eqn.init().call(0.0);
-        let y0_groups = groups.eqn.init().call(0.0);
-        y0.assert_eq_st(&y0_groups, 1e-14);
-
-        let x = NalgebraVec::from_vec(vec![0.7, 1e-5, 0.3], *elem.context());
-        elem.eqn
-            .rhs()
-            .call(&x, 0.0)
-            .assert_eq_st(&groups.eqn.rhs().call(&x, 0.0), 1e-10);
-
-        let v = NalgebraVec::from_vec(vec![0.1, 0.2, 0.3], *elem.context());
-        elem.eqn
-            .rhs()
-            .jac_mul(&x, 0.0, &v)
-            .assert_eq_st(&groups.eqn.rhs().jac_mul(&x, 0.0, &v), 1e-10);
-    }
-
     /// The adjoint kernels are the negated transposes of the forward ones:
     /// `<w, -J^T v> = -<J w, v>` and `<w, -f_p^T v> = -<f_p w, v>`, for each of two lanes.
     #[test]
-    fn test_elem_adjoint_is_transpose() {
+    fn test_adjoint_is_transpose() {
         type M = NalgebraMat<f64>;
         type V = NalgebraVec<f64>;
         use crate::VectorView;
@@ -646,11 +521,11 @@ mod tests {
             .clone_with_nbatch(2)
             .unwrap();
         let p = V::from_vec(vec![0.04, 1.0e4, 3.0e7, 0.05, 2.0e4, 1.0e7], ctx);
-        let elem = RobertsonOdeElem::<M>::new(p, 0.0);
+        let eqn = RobertsonOde::<M>::new(p, 0.0);
         let x = V::from_vec(vec![0.7, 1e-5, 0.3, 0.4, 2e-5, 0.6], ctx);
         let v = V::from_vec(vec![0.1, 0.2, 0.3, -0.5, 0.7, 0.2], ctx);
         let w = V::from_vec(vec![-0.4, 0.9, 0.6, 0.3, -0.1, 0.8], ctx);
-        let rhs = elem.rhs();
+        let rhs = eqn.rhs();
         let lane_dot = |a: &V, b: &V, k: usize| {
             let (a, b) = (a.get_batch(k).into_owned(), b.get_batch(k).into_owned());
             a.dot(&b)
