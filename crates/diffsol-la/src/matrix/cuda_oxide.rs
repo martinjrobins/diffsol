@@ -26,8 +26,8 @@ use cuda_core::DeviceBuffer;
 
 use crate::context::cuda_oxide::{copy_at, read_at, write_at};
 use crate::vector::cuda_oxide::{
-    launch_assign, launch_axpy, launch_mul_assign_scalar, launch_mul_scalar, AssignOp, Operand,
-    OperandMut,
+    launch_assign, launch_axpy, launch_fill, launch_mul_assign_scalar, launch_mul_scalar, AssignOp,
+    Operand, OperandMut,
 };
 use crate::{
     context::broadcast_batch, error::LaError, linear_solver::cuda_oxide::lu::OxideLU,
@@ -747,6 +747,71 @@ impl<T: ScalarCuda> DenseMatrix for OxideMat<T> {
             y_nbatch as u32,
         )
         .expect("launch gemv_cols");
+    }
+
+    fn ger_cols(
+        &mut self,
+        start: IndexType,
+        end: IndexType,
+        alpha: Self::T,
+        x: &[Self::T],
+        y: &Self::V,
+    ) {
+        assert!(start <= end, "ger_cols: column range start > end");
+        assert!(end <= self.ncols, "ger_cols: column range out of bounds");
+        let nc = end - start;
+        assert!(
+            nc <= MAX_SMALL_COLS,
+            "ger_cols: column range exceeds MAX_SMALL_COLS"
+        );
+        assert!(
+            x.len() >= nc,
+            "ger_cols: x must hold at least end - start values"
+        );
+        self.context
+            .assert_broadcastable_into(y.context.nbatch(), "ger_cols");
+        let nrows = self.nrows;
+        let nbatch = self.context.nbatch();
+        if nc == 0 || nrows == 0 {
+            // nothing to update, and a launch with a zero grid dimension is an error
+            return;
+        }
+        let ctx = self.context.clone();
+        let mut weights = [T::zero(); MAX_SMALL_COLS];
+        weights[..nc].copy_from_slice(&x[..nc]);
+        let src = y.operand();
+        // the column range's start rides in the window, so the kernel indexes
+        // from column zero
+        let mut dest = self.cols_operand_mut(start, nc);
+        let dest_stride = dest.stride;
+        let n = (nrows * nbatch) as u32;
+        let cfg = OxideContext::config_1d(n);
+        let m = &ctx.module;
+        let p = m.prepare_ger_cols::<T>(cfg).expect("prepare ger_cols");
+        m.ger_cols::<T>(
+            &ctx.stream,
+            &p,
+            &mut dest.window,
+            &src.window,
+            weights,
+            nc as u32,
+            alpha,
+            n,
+            nrows as u32,
+            dest_stride,
+            src.stride,
+            src.nbatch,
+            nbatch as u32,
+        )
+        .expect("launch ger_cols");
+    }
+
+    fn fill(&mut self, value: Self::T) {
+        // batches are contiguous, so the whole matrix is one fill over `nrows * ncols`
+        // elements per batch
+        let ctx = self.context.clone();
+        let nstates = self.batch_len();
+        launch_fill(&ctx, self.operand_mut(), nstates, value);
     }
 }
 

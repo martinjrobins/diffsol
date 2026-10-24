@@ -17,6 +17,13 @@ pub mod cuda;
 #[cfg(feature = "cuda-oxide")]
 pub mod cuda_oxide;
 
+/// Below this many contiguous elements the host backends' `fill`s write element by element
+/// rather than as one slice `fill`: LLVM turns a contiguous fill into a `memset_pattern16`
+/// call on macOS, which costs more than a few stores (`lin_alg_ops fill/<backend>/2` and
+/// `fill_batched/<backend>/3`).
+#[cfg(any(feature = "faer", feature = "nalgebra"))]
+pub(crate) const SHORT_FILL_LEN: usize = 8;
+
 /// A trait for types that represent a collection of indices into a vector.
 ///
 /// This is used to represent subsets of vector elements, typically for algebraic constraints

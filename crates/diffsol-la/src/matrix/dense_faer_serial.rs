@@ -50,6 +50,12 @@ impl<T: FaerScalar> FaerMat<T> {
 /// purely by the tall shapes.
 const MUL_COLS_TILE: usize = 1024;
 
+/// Lanes with at most this many rows take the short-lane path of `ger_cols`: a `matmul` over
+/// so few rows costs more to set up than its arithmetic.
+///
+/// Measured with the `lin_alg_ops ger_cols` bench
+const SHORT_LANE_ROWS: usize = 8;
+
 impl<T: FaerScalar> DefaultSolver for FaerMat<T> {
     type LS = FaerLU<T>;
 }
@@ -479,7 +485,7 @@ impl<T: FaerScalar> Matrix for FaerMat<T> {
 }
 impl<T: FaerScalar> DenseMatrix for FaerMat<T> {
     fn fill(&mut self, value: T) {
-        self.data.rb_mut().fill(value);
+        crate::vector::faer_serial::fill_mat(&mut self.data, value);
     }
     fn resize_cols(&mut self, nc: usize) {
         let old = self.ncols();
@@ -514,6 +520,58 @@ impl<T: FaerScalar> DenseMatrix for FaerMat<T> {
             "gemv_cols: x must hold at least end - start values"
         );
         gemv_cols_data!(self, start, end - start, alpha, x, beta, y, "gemv_cols")
+    }
+    fn ger_cols(&mut self, start: usize, end: usize, alpha: T, x: &[T], y: &FaerVec<T>) {
+        assert!(start <= end, "ger_cols: column range start > end");
+        assert!(
+            end - start <= crate::matrix::MAX_SMALL_COLS,
+            "ger_cols: column range exceeds MAX_SMALL_COLS"
+        );
+        assert!(
+            x.len() >= end - start,
+            "ger_cols: x must hold at least end - start values"
+        );
+        self.context
+            .assert_broadcastable_into(y.context.nbatch(), "ger_cols");
+        // only a debug assert, as in `gemv_cols`: an out-of-range column still panics in
+        // release, inside faer's `col_mut`
+        debug_assert!(end <= self.ncols(), "ger_cols: column range out of bounds");
+        let nc = end - start;
+        if nc == 0 {
+            return;
+        }
+        let nb = self.context.nbatch();
+        if self.data.nrows() <= SHORT_LANE_ROWS {
+            // Short lanes: faer's `matmul` costs more to set up than the arithmetic over so
+            // few rows, so add `s * y` into each column directly
+            for b in 0..nb {
+                let y = y.data.rb().col(y.batch(b, nb));
+                let y = y.try_as_col_major().unwrap().as_slice();
+                for (k, &xk) in x[..nc].iter().enumerate() {
+                    let s = alpha * xk;
+                    let c = self.col(b, start + k);
+                    let column = self.data.rb_mut().col_mut(c);
+                    let column = column.try_as_col_major_mut().unwrap().as_slice_mut();
+                    for (m, y) in column.iter_mut().zip(y) {
+                        *m += s * *y;
+                    }
+                }
+            }
+            return;
+        }
+        // Tall lanes: one rank-1 `matmul` per lane, which vectorises the tall columns
+        let x = faer::RowRef::from_slice(&x[..nc]);
+        for b in 0..nb {
+            let c = self.col(b, start);
+            matmul(
+                self.data.rb_mut().subcols_mut(c, nc),
+                Accum::Add,
+                y.data.rb().col(y.batch(b, nb)).as_mat(),
+                x.as_mat(),
+                alpha,
+                self.context.par,
+            );
+        }
     }
     fn from_vec(nr: usize, nc: usize, d: Vec<T>, ctx: Self::C) -> Self {
         assert_eq!(d.len(), nr * nc * ctx.nbatch());

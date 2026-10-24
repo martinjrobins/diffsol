@@ -524,6 +524,33 @@ where
     group.finish();
 }
 
+/// 🔴 ger_cols — diff[:, start..end] += alpha * y * xᵀ, the transpose of `gemv_cols`: the
+/// adjoint of every `gemv_cols` call in the BDF and RK step VJPs and backwards passes.
+fn bench_ger_cols<M: Matrix<T = f64> + DenseMatrix + 'static>(c: &mut Criterion, label: &str)
+where
+    M::C: Default + Clone,
+    M::V: Vector<T = f64, C = M::C> + Clone,
+{
+    let mut group = c.benchmark_group(label);
+    // a fifth-order BDF difference table: update columns 0..=5
+    let weights = [1.0, 0.5, 0.25, 0.125, 0.0625, 0.03125];
+    for &(ns, nb) in DIFF_CELLS {
+        group.bench_function(BenchmarkId::from_parameter(cell_id(ns, nb)), |b| {
+            let ctx = ctx_with_nbatch::<M::C>(nb);
+            let mut mat = M::zeros(ns, weights.len() + 3, ctx.clone());
+            fill_dense(&mut mat, ns);
+            // the columns grow by a fixed amount each iteration: linearly, so nothing overflows
+            let y = M::V::from_element(ns, 0.5, ctx.clone());
+            b.iter(|| {
+                mat.ger_cols(0, weights.len(), 1.0, &weights, &y);
+                black_box(&mat);
+                ctx.synchronize();
+            });
+        });
+    }
+    group.finish();
+}
+
 /// 🔴 update_backward_diff — the BDF difference-table update after every converged step:
 /// `diff[:, order+2] = d - diff[:, order+1]`, then each column `0..=order+1` accumulates the
 /// one after it.
@@ -665,6 +692,47 @@ where
     V::C: Default + Clone,
 {
     bench_vector_unary::<V>(c, label, VSIZES, |y| y.fill(7.0));
+}
+
+/// 🟡 fill_batched — `fill` on a batched vector: the predictor zeroing and VJP cotangent
+/// resets once the solve is batched. `fill` above is single-lane only.
+fn bench_fill_batched<V: Vector<T = f64> + 'static>(c: &mut Criterion, label: &str)
+where
+    V::C: Default + Clone,
+{
+    let mut group = c.benchmark_group(label);
+    for &(ns, nb) in DIFF_CELLS {
+        group.bench_function(BenchmarkId::from_parameter(cell_id(ns, nb)), |b| {
+            let ctx = ctx_with_nbatch::<V::C>(nb);
+            let mut v = V::zeros(ns, ctx.clone());
+            b.iter(|| {
+                v.fill(7.0);
+                black_box(&v);
+                ctx.synchronize();
+            });
+        });
+    }
+    group.finish();
+}
+
+/// 🟡 mat_fill — zeroing the dense cotangent tables (`DenseMatrix::fill`) in the step VJPs
+fn bench_mat_fill<M: Matrix<T = f64> + DenseMatrix + 'static>(c: &mut Criterion, label: &str)
+where
+    M::C: Default + Clone,
+{
+    let mut group = c.benchmark_group(label);
+    for &(ns, nb) in DIFF_CELLS {
+        group.bench_function(BenchmarkId::from_parameter(cell_id(ns, nb)), |b| {
+            let ctx = ctx_with_nbatch::<M::C>(nb);
+            let mut mat = M::zeros(ns, 8, ctx.clone());
+            b.iter(|| {
+                mat.fill(7.0);
+                black_box(&mat);
+                ctx.synchronize();
+            });
+        });
+    }
+    group.finish();
 }
 
 /// 🟡 scalar_mul_assign — Step-size rescaling dy *= 1/h
@@ -1377,6 +1445,7 @@ where
 macro_rules! bench_vector_backend {
     ($c:expr, $label:expr, $V:ty) => {
         bench_axpy::<$V>($c, concat!("axpy/", $label));
+        bench_fill_batched::<$V>($c, concat!("fill_batched/", $label));
         bench_copy_from::<$V>($c, concat!("copy_from/", $label));
         bench_sub_assign::<$V>($c, concat!("sub_assign/", $label));
         bench_add_assign::<$V>($c, concat!("add_assign/", $label));
@@ -1454,6 +1523,8 @@ macro_rules! bench_dense_matrix_backend {
     ($c:expr, $label:expr, $M:ty) => {
         bench_matrix_column::<$M>($c, concat!("matrix_column/", $label));
         bench_gemv_cols::<$M>($c, concat!("gemv_cols/", $label));
+        bench_ger_cols::<$M>($c, concat!("ger_cols/", $label));
+        bench_mat_fill::<$M>($c, concat!("mat_fill/", $label));
         bench_stage_accumulate::<$M>($c, concat!("stage_accumulate/", $label));
         bench_mul_cols_by::<$M>($c, concat!("mul_cols_by/", $label));
         bench_update_backward_diff::<$M>($c, concat!("update_backward_diff/", $label));
