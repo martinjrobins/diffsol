@@ -73,7 +73,7 @@ impl<T: Scalar> Default for InitialConditionSolverOptions<T> {
 /// The solver aborts with an error when:
 /// - The step size falls below `min_timestep`.
 /// - The number of consecutive error test failures exceeds `max_error_test_failures`.
-/// - The number of nonlinear solver failures exceeds `max_nonlinear_solver_failures`
+/// - The number of nonlinear solver failures within a step exceeds `max_nonlinear_solver_failures`
 ///   (implicit methods only).
 ///
 /// ## Nonlinear Solver (Implicit Methods)
@@ -108,9 +108,14 @@ impl<T: Scalar> Default for InitialConditionSolverOptions<T> {
 pub struct OdeSolverOptions<T: Scalar> {
     /// Maximum number of nonlinear solver iterations per solve (default: 10).
     pub max_nonlinear_solver_iterations: usize,
-    /// Maximum number of consecutive step rejections per solve before aborting (default: 40).
+    /// Maximum number of consecutive step rejections per step before aborting (default: 40).
     pub max_error_test_failures: usize,
-    /// Maximum number of nonlinear solver convergence failures per solve before aborting (default: 50).
+    /// Maximum number of nonlinear solver convergence failures allowed per step (default: 10).
+    ///
+    /// Failures are counted across all retries and stages within one call to `step()`.
+    /// Exceeding this limit aborts that step; zero aborts on the first failure.
+    /// The cumulative failure count in [`OdeSolverStatistics`](crate::ode_solver::OdeSolverStatistics)
+    /// is not reset.
     pub max_nonlinear_solver_failures: usize,
     /// Newton convergence test scaling factor (default: 0.2).
     pub nonlinear_solver_tolerance: T,
@@ -120,7 +125,9 @@ pub struct OdeSolverOptions<T: Scalar> {
     /// Maximum number of iterations per derivative solve, used for the forward sensitivities and
     /// [crate::StepVjp] (default: 10).
     pub derivative_solve_max_iter: usize,
-    /// Minimum allowed step size (absolute value, default: 1e-13).
+    /// Minimum allowed step size (absolute value, default: [`Scalar::EPSILON`] for `T`).
+    ///
+    /// Must be greater than or equal to `Scalar::EPSILON` so that each step advances `t`.
     pub min_timestep: T,
     /// Upper bound on step-size growth `h_new/h_old` (default: solver-specific when `None`).
     pub max_timestep_growth: Option<T>,
@@ -150,11 +157,11 @@ impl<T: Scalar> Default for OdeSolverOptions<T> {
         Self {
             max_nonlinear_solver_iterations: 10,
             max_error_test_failures: 40,
-            max_nonlinear_solver_failures: 50,
+            max_nonlinear_solver_failures: 10,
             nonlinear_solver_tolerance: T::from_f64(0.2).unwrap(),
             derivative_solve_tolerance: T::from_f64(0.2).unwrap(),
             derivative_solve_max_iter: 10,
-            min_timestep: T::from_f64(1e-13).unwrap(),
+            min_timestep: T::EPSILON,
             max_timestep_growth: None,
             min_timestep_growth: None,
             max_timestep_shrink: None,
@@ -1315,5 +1322,22 @@ impl<V: Vector> Default for OdeSolverSolution<V> {
             atol: V::from_element(1, V::T::from_f64(1e-6).unwrap(), V::C::default()),
             negative_time: false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::OdeSolverOptions;
+
+    #[test]
+    fn min_timestep_default_is_scalar_epsilon() {
+        assert_eq!(
+            OdeSolverOptions::<f64>::default().min_timestep,
+            f64::EPSILON
+        );
+        assert_eq!(
+            OdeSolverOptions::<f32>::default().min_timestep,
+            f32::EPSILON
+        );
     }
 }
