@@ -812,6 +812,7 @@ where
         let troundoff =
             Eqn::T::from_f64(100.0).unwrap() * Eqn::T::EPSILON * (abs(state.t) + abs(state.h));
         if abs(state.t - tstop) <= troundoff {
+            state.t = tstop;
             return Ok(Some(OdeSolverStopReason::TstopReached));
         } else if (state.h > Eqn::T::zero() && tstop < state.t - troundoff)
             || (state.h < Eqn::T::zero() && tstop > state.t + troundoff)
