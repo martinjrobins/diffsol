@@ -1184,6 +1184,57 @@ pub mod kernels {
         }
     }
 
+    /// `mat[b, row + k * nrows] += alpha * w[k] * y[.., row]` over `nc` columns of `mat`: the
+    /// rank-1 update that is the transpose of [`gemv_cols`].
+    ///
+    /// Each thread owns one `(row, batch)` of `mat`, reads its `y` element once and walks the
+    /// `nc` columns, so consecutive threads touch consecutive rows and every access is
+    /// coalesced. The `mat` window starts at the beginning of the column range, and `y`
+    /// broadcasts into `mat`'s `nbatch` batches.
+    #[kernel]
+    #[launch_bounds(256)]
+    #[launch_contract(domain = 1, block = (256, 1, 1))]
+    #[allow(clippy::needless_range_loop)]
+    pub fn ger_cols<T: ScalarCuda>(
+        mut mat: DisjointSlice<T>,
+        y: &[T],
+        w: [T; MAX_SMALL_COLS],
+        nc: u32,
+        alpha: T,
+        n: u32,
+        nrows: u32,
+        mat_stride: u32,
+        y_stride: u32,
+        y_nbatch: u32,
+        nbatch: u32,
+    ) {
+        let i = thread::index_1d().get();
+        if i >= n as usize {
+            return;
+        }
+        let nc = nc as usize;
+        if nc == 0 {
+            return;
+        }
+        let (b, row) = split(i, nrows);
+        let base = b * mat_stride as usize + row;
+        let stride = nrows as usize;
+        if base + (nc - 1) * stride >= mat.len() {
+            return;
+        }
+        let yv = y[broadcast_src(b, y_stride, y_nbatch, nbatch, row)];
+        let ptr = mat.as_mut_ptr();
+        // SAFETY: bounds checked above. Every access below is at `base + k * nrows` for
+        // `k < nc`, and `base` is unique to this thread's `(b, row)`, so the entries this
+        // thread updates are its own.
+        unsafe {
+            for k in 0..nc {
+                // `(alpha * w[k]) * y`, the order the host backends round in
+                *ptr.add(base + k * stride) += alpha * w[k] * yv;
+            }
+        }
+    }
+
     ///  in-place gemm `C = C * B` where B is small.
     /// `mat[b, 0..ncols] = mat[b, 0..ncols] * rhs[0..ncols, 0..ncols]`
     /// in place where ncols is small, `rhs` column-major.
