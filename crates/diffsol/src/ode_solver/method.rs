@@ -1,4 +1,3 @@
-use num_traits::Zero;
 use std::{cell::Ref, marker::PhantomData};
 
 use crate::{
@@ -67,9 +66,21 @@ pub(crate) fn check_interpolate_time<V: Vector>(
         }
         return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
     }
+    check_interpolate_bounds(t, state_t, state_h, old_t)?;
+    Ok(true)
+}
 
+/// Check that `t` is within the range a solver can interpolate over after a step that ended at
+/// `state_t`, integrating in the direction of `state_h`: up to `state_t`, and back to `old_t`,
+/// the start of the step, if given (see [check_interpolate_time]).
+pub(crate) fn check_interpolate_bounds<T: Scalar>(
+    t: T,
+    state_t: T,
+    state_h: T,
+    old_t: Option<T>,
+) -> Result<(), DiffsolError> {
     // check that t is within the interpolable range, which depends on the direction of integration
-    let is_forward = state_h > V::T::zero();
+    let is_forward = state_h > T::zero();
     if (is_forward && t > state_t) || (!is_forward && t < state_t) {
         return Err(match old_t {
             Some(_) => ode_solver_error!(InterpolationTimeOutsideCurrentStep),
@@ -81,7 +92,7 @@ pub(crate) fn check_interpolate_time<V: Vector>(
             return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
         }
     }
-    Ok(true)
+    Ok(())
 }
 
 /// Trait for ODE solver methods. This is the main user interface for the ODE solvers.

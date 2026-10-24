@@ -289,15 +289,52 @@ where
     AugmentedEqn: AugmentedOdeEquations<Eqn>,
     Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
 {
-    /// The cotangent is an [RkState] whose `y` and `dy` are read, as cotangents of the state and
-    /// its derivative. On return they hold the cotangents at the start of the step; its `diff`
-    /// is zero. The stages are explicit, so there are no linear solves.
+    /// The cotangent is an [RkState] whose `y`, `dy` and `diff` are read, as cotangents of the
+    /// state, its derivative and the step's stage increments (which [Self::interpolate_vjp] adds
+    /// to). On return `y` and `dy` hold the cotangents at the start of the step; its `diff` is
+    /// zero. The stages are explicit, so there are no linear solves.
     fn step_vjp(
         &mut self,
         end: &Self::State,
         cotangent: &mut Self::State,
         p_bar: &mut Eqn::V,
     ) -> Result<(), DiffsolError> {
+        self.check_step_differentiable()?;
+        let step = self.rk.vjp_check_inputs(end, cotangent, p_bar)?;
+        self.rk.vjp_start(step, end, cotangent, p_bar);
+        // the stages of step(), in reverse: each is explicit, so its transposed solve is
+        // w = k_bar, as vjp_stage_rhs gives it
+        for i in (1..self.rk.tableau().s()).rev() {
+            self.rk.vjp_stage_rhs(i, cotangent);
+            self.rk.vjp_stage_value(i, end);
+            self.rk.vjp_stage_inputs(i, step, cotangent, p_bar);
+        }
+        self.rk.vjp_finish(step, cotangent);
+        Ok(())
+    }
+
+    fn interpolate_vjp(
+        &self,
+        end: &Self::State,
+        t: Eqn::T,
+        y_bar: &Eqn::V,
+        cotangent: &mut Self::State,
+    ) -> Result<(), DiffsolError> {
+        self.check_step_differentiable()?;
+        self.rk.interpolate_vjp(end, t, y_bar, cotangent)
+    }
+}
+
+impl<'a, Eqn, M, AugmentedEqn> ExplicitRk<'a, Eqn, M, AugmentedEqn>
+where
+    Eqn: OdeEquationsImplicitAdjoint + 'a,
+    M: DenseMatrix<V = Eqn::V, T = Eqn::T, C = Eqn::C>,
+    AugmentedEqn: AugmentedOdeEquations<Eqn>,
+    Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
+{
+    /// Fail with `StepDifferentiationNotSupported` if the steps do not integrate the main
+    /// equations, which [StepVjp] differentiates.
+    fn check_step_differentiable(&self) -> Result<(), DiffsolError> {
         if !self
             .augmented_eqn
             .as_ref()
@@ -306,16 +343,6 @@ where
         {
             return Err(ode_solver_error!(StepDifferentiationNotSupported));
         }
-        let step = self.rk.vjp_check_inputs(end, cotangent, p_bar)?;
-        self.rk.vjp_start(step, end, cotangent, p_bar);
-        // the stages of step(), in reverse: each is explicit, so its transposed solve is
-        // w = k_bar, as vjp_stage_rhs gives it
-        for i in (1..self.rk.tableau().s()).rev() {
-            self.rk.vjp_stage_rhs(i, cotangent);
-            self.rk.vjp_stage_value(i, end);
-            self.rk.vjp_stage_inputs(i, step, end, cotangent, p_bar);
-        }
-        self.rk.vjp_finish(step, end, cotangent);
         Ok(())
     }
 }

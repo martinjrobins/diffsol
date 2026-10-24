@@ -25,7 +25,10 @@ use crate::small::{SmallMat, SmallVec};
 use super::config::BdfConfig;
 use super::jacobian_update::solve_with_jacobian_updates;
 use super::jacobian_update::SolverState;
-use super::method::{check_interpolate_shape, check_interpolate_time, AugmentedOdeSolverMethod};
+use super::method::{
+    check_interpolate_bounds, check_interpolate_shape, check_interpolate_time,
+    AugmentedOdeSolverMethod,
+};
 use super::pi_controller::pi_controller_raw;
 use super::sensitivities::SensitivitiesOdeSolverMethod;
 use super::step_ad::{check_step_vjp_inputs, StepVjp};
@@ -813,6 +816,20 @@ where
         order: usize,
         y: &mut Eqn::V,
     ) {
+        let weights = Self::interpolate_weights(t, t1, h, order);
+        diff.gemv_cols(
+            0,
+            order + 1,
+            Eqn::T::one(),
+            weights.as_slice(),
+            Eqn::T::zero(),
+            y,
+        );
+    }
+
+    /// The weights of the columns `0..=order` of `diff` in the value at `t` of the interpolating
+    /// polynomial of a history `diff` at time `t1` and step size `h`.
+    fn interpolate_weights(t: Eqn::T, t1: Eqn::T, h: Eqn::T, order: usize) -> BdfVec<Eqn::T> {
         // one weight per column `0..=order`, so the length says what `[..=order]` used to
         let mut weights = BdfVec::zeros(order + 1);
         let mut time_factor = Eqn::T::one();
@@ -822,14 +839,7 @@ where
             time_factor *= (t - (t1 - h * i_t)) / (h * (Eqn::T::one() + i_t));
             *weight = time_factor;
         }
-        diff.gemv_cols(
-            0,
-            order + 1,
-            Eqn::T::one(),
-            weights.as_slice(),
-            Eqn::T::zero(),
-            y,
-        );
+        weights
     }
 
     // Interpolate the time derivative dy/dt of the BDF polynomial at time t.
@@ -1738,8 +1748,11 @@ where
             (&end.y, &end.dy, &end.diff),
             MAX_ORDER + 3,
             (&cotangent.y, &cotangent.dy, &cotangent.diff),
-            p_bar,
-            self.ode_problem.eqn.rhs().nparams(),
+            (
+                "the parameter cotangent",
+                p_bar,
+                self.ode_problem.eqn.rhs().nparams(),
+            ),
         )?;
         Ok(step)
     }
@@ -1888,6 +1901,41 @@ where
         let alpha = self.alpha[self.state.order];
         self.op.as_mut().unwrap().set_c(self.state.h, alpha);
         result
+    }
+
+    /// The interpolant is the polynomial of `end`'s history, so this adds to the cotangent's
+    /// `diff` alone.
+    fn interpolate_vjp(
+        &self,
+        end: &Self::State,
+        t: Eqn::T,
+        y_bar: &Eqn::V,
+        cotangent: &mut Self::State,
+    ) -> Result<(), DiffsolError> {
+        let step = end
+            .last_step
+            .ok_or(ode_solver_error!(NoStepToDifferentiate))?;
+        // the history must be the one the step ended with, which step_vjp differentiates
+        if end.h != step.h_end {
+            return Err(ode_solver_error!(NoStepToDifferentiate));
+        }
+        check_step_vjp_inputs(
+            (&end.y, &end.dy, &end.diff),
+            MAX_ORDER + 3,
+            (&cotangent.y, &cotangent.dy, &cotangent.diff),
+            (
+                "the cotangent of the interpolated value",
+                y_bar,
+                end.y.len(),
+            ),
+        )?;
+        // the bounds of the forward interpolation straight after the step
+        check_interpolate_bounds(t, end.t, end.h, None)?;
+        let weights = Self::interpolate_weights(t, end.t, end.h, end.order);
+        cotangent
+            .diff
+            .ger_cols(0, end.order + 1, Eqn::T::one(), weights.as_slice(), y_bar);
+        Ok(())
     }
 }
 
