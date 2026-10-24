@@ -382,7 +382,7 @@ mod test {
     }
     #[test]
     fn explicit_rk_config() {
-        test_config(robertson_ode::<M>(false, 1).0.tsit45().unwrap());
+        test_config(robertson_ode::<M>(1).0.tsit45().unwrap());
     }
     #[test]
     fn explicit_rk_test_interpolate() {

@@ -17,7 +17,7 @@ problems = [
         "name": "robertson_ode",
         "reference_name": "klu",
         "arg": [25, 100, 400, 900],
-        "solvers": ["faer_sparse_bdf"],
+        "solvers": ["nalgebra_bdf"],
     },
     {
         "name": "heat2d",

@@ -1314,7 +1314,7 @@ mod tests {
                 exponential_decay_problem_adjoint, exponential_decay_problem_sens_with_out,
             },
             robertson::{robertson_adjoint, robertson_sens},
-            robertson_ode::robertson_ode_elem_problem,
+            robertson_ode::robertson_ode,
         };
         use crate::{
             Context, DenseMatrix, MatrixCommon, NalgebraLU, NalgebraMat, NalgebraVec, StepVjp,
@@ -1438,10 +1438,10 @@ mod tests {
                 robertson_t_eval(), bdf::<LS>, bdf_sens::<LS>, 10.0;
             robertson_esdirk34: robertson_adjoint::<M>().0, robertson_sens::<M>().0,
                 robertson_t_eval(), esdirk34::<LS>, esdirk34_sens::<LS>, 10.0;
-            robertson_ode_bdf: robertson_ode_elem_problem::<M>(2).0,
-                robertson_ode_elem_problem::<M>(2).0, robertson_t_eval(), bdf::<LS>, bdf_sens::<LS>, 200.0;
-            robertson_ode_esdirk34: robertson_ode_elem_problem::<M>(2).0,
-                robertson_ode_elem_problem::<M>(2).0, robertson_t_eval(), esdirk34::<LS>, esdirk34_sens::<LS>,
+            robertson_ode_bdf: robertson_ode::<M>(2).0,
+                robertson_ode::<M>(2).0, robertson_t_eval(), bdf::<LS>, bdf_sens::<LS>, 200.0;
+            robertson_ode_esdirk34: robertson_ode::<M>(2).0,
+                robertson_ode::<M>(2).0, robertson_t_eval(), esdirk34::<LS>, esdirk34_sens::<LS>,
                 20.0;
             ad_test_dae_bdf: ad_test_problem::<M>(P, true, RTOL), ad_test_problem::<M>(P, true, RTOL),
                 vec![1.0, 2.0, 5.0], bdf::<LS>, bdf_sens::<LS>, 1.0;

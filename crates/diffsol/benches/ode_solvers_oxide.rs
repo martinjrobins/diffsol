@@ -12,8 +12,7 @@ mod oxide {
     use super::*;
     use diffsol::{
         ode_equations::test_models::{
-            foodweb::foodweb_elem_problem, heat2d::heat2d_elem_problem,
-            robertson_ode::robertson_ode_elem_problem,
+            foodweb::foodweb_problem, heat2d::heat2d_problem, robertson_ode::robertson_ode,
         },
         OxideLU, OxideMat,
     };
@@ -44,13 +43,13 @@ mod oxide {
         {
             let mut g = c.benchmark_group("heat2d");
             g.sample_size(20);
-            bench_const_generic!(g, heat2d_elem_problem, 5, 10, 20, 30);
+            bench_const_generic!(g, heat2d_problem, 5, 10, 20, 30);
             g.finish();
         }
         {
             let mut g = c.benchmark_group("foodweb");
             g.sample_size(20);
-            bench_const_generic!(g, foodweb_elem_problem, 5, 10, 20, 30);
+            bench_const_generic!(g, foodweb_problem, 5, 10, 20, 30);
             g.finish();
         }
         {
@@ -59,7 +58,7 @@ mod oxide {
             g.sample_size(20);
             for &nbatch in &[1usize, 10, 100, 1000] {
                 let (problem, t_evals) =
-                    common::setup_problem!(robertson_ode_elem_problem::<OxideMat<f64>>(nbatch));
+                    common::setup_problem!(robertson_ode::<OxideMat<f64>>(nbatch));
                 g.bench_function(format!("oxide_bdf/nbatch{nbatch}"), |b| {
                     b.iter(|| {
                         common::bdf::<_, OxideLU<f64>>(&problem, &t_evals);

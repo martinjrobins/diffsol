@@ -465,6 +465,38 @@ where
     group.finish();
 }
 
+/// The id of a `(states, lanes)` bench cell: a single lane keeps the bare state count, so its
+/// history carries on from before the lane axis was added.
+fn cell_id(ns: usize, nb: usize) -> String {
+    if nb == 1 {
+        ns.to_string()
+    } else {
+        format!("{ns}_nbatch{nb}")
+    }
+}
+
+/// A context with `nb` lanes.
+fn ctx_with_nbatch<C: Context + Default>(nb: usize) -> C {
+    C::default()
+        .clone_with_nbatch(nb)
+        .expect("backend declined nbatch")
+}
+
+/// `(states, lanes)` cells for the BDF difference-table benches. Batching is for many small
+/// systems -- `robertson_ode` is 3 states per lane and is benchmarked at up to 900 lanes -- so
+/// the batched cells are where per-lane overhead shows, and the single-lane ones check the
+/// tall, unbatched case still holds.
+const DIFF_CELLS: &[(usize, usize)] = &[
+    (3, 1),
+    (10, 1),
+    (100, 1),
+    (500, 1),
+    (3, 100),
+    (3, 1000),
+    (10, 100),
+    (100, 100),
+];
+
 /// 🔴 gemv_cols — y = alpha * diff[:, start..end] * x + beta * y, a BDF order + 1 column sum
 /// and every RK stage combination. Called twice every BDF step (predictor and psi), once per
 /// RK stage, and once per interpolation.
@@ -476,15 +508,45 @@ where
     let mut group = c.benchmark_group(label);
     // a fifth-order BDF difference table: sum columns 0..=5
     let weights = [1.0, 0.5, 0.25, 0.125, 0.0625, 0.03125];
-    for &ns in MSIZES {
-        group.bench_with_input(BenchmarkId::from_parameter(ns), &ns, |b, &ns| {
-            let ctx = M::C::default();
+    for &(ns, nb) in DIFF_CELLS {
+        group.bench_function(BenchmarkId::from_parameter(cell_id(ns, nb)), |b| {
+            let ctx = ctx_with_nbatch::<M::C>(nb);
             let mut mat = M::zeros(ns, weights.len() + 3, ctx.clone());
             fill_dense(&mut mat, ns);
             let mut v = M::V::zeros(ns, ctx.clone());
             b.iter(|| {
                 mat.gemv_cols(0, weights.len(), 1.0, &weights, 0.0, &mut v);
                 black_box(&v);
+                ctx.synchronize();
+            });
+        });
+    }
+    group.finish();
+}
+
+/// 🔴 update_backward_diff — the BDF difference-table update after every converged step:
+/// `diff[:, order+2] = d - diff[:, order+1]`, then each column `0..=order+1` accumulates the
+/// one after it.
+fn bench_update_backward_diff<M: Matrix<T = f64> + DenseMatrix + 'static>(
+    c: &mut Criterion,
+    label: &str,
+) where
+    M::C: Default + Clone,
+    M::V: Vector<T = f64, C = M::C> + Clone,
+{
+    // a fifth-order table (MAX_ORDER + 3 columns), the widest update BDF makes
+    const ORDER: usize = 5;
+    let mut group = c.benchmark_group(label);
+    for &(ns, nb) in DIFF_CELLS {
+        group.bench_function(BenchmarkId::from_parameter(cell_id(ns, nb)), |b| {
+            let ctx = ctx_with_nbatch::<M::C>(nb);
+            let mut mat = M::zeros(ns, ORDER + 3, ctx.clone());
+            fill_dense(&mut mat, ns);
+            // the columns grow by `d` each iteration: linearly, so nothing overflows
+            let d = M::V::from_element(ns, 0.5, ctx.clone());
+            b.iter(|| {
+                mat.update_backward_diff(ORDER, &d);
+                black_box(&mat);
                 ctx.synchronize();
             });
         });
@@ -545,7 +607,18 @@ fn bench_stage_accumulate<M: Matrix<T = f64> + DenseMatrix + 'static>(
 
 /// Row counts `mul_cols_by` sees: the ODE benchmark problems are 2-3 states, the sparse ones
 /// run into the thousands, and the staging buffer is a fixed size at both ends.
-const MUL_COLS_SIZES: &[usize] = &[2, 3, 10, 100, 1000, 10000];
+/// The batched cells are the few-state systems batching is used for.
+const MUL_COLS_CELLS: &[(usize, usize)] = &[
+    (2, 1),
+    (3, 1),
+    (10, 1),
+    (100, 1),
+    (1000, 1),
+    (10000, 1),
+    (3, 100),
+    (3, 1000),
+    (100, 100),
+];
 
 /// 🟡 mul_cols_by — `D[:, 0..k] = D[:, 0..k] * (R * U)`, the BDF difference-table rescale on a
 /// step-size change (`Bdf::_update_diff_for_step_size`). `k` is `order + 1`, so 1..=6.
@@ -566,9 +639,9 @@ where
         for j in 0..k {
             rhs[j * k + j] = 1.0;
         }
-        for &ns in MUL_COLS_SIZES {
-            group.bench_with_input(BenchmarkId::new(format!("k{k}"), ns), &ns, |b, &ns| {
-                let ctx = M::C::default();
+        for &(ns, nb) in MUL_COLS_CELLS {
+            group.bench_function(BenchmarkId::new(format!("k{k}"), cell_id(ns, nb)), |b| {
+                let ctx = ctx_with_nbatch::<M::C>(nb);
                 let mut mat = M::zeros(ns, k + 3, ctx.clone());
                 fill_dense(&mut mat, ns);
                 b.iter(|| {
@@ -1383,6 +1456,7 @@ macro_rules! bench_dense_matrix_backend {
         bench_gemv_cols::<$M>($c, concat!("gemv_cols/", $label));
         bench_stage_accumulate::<$M>($c, concat!("stage_accumulate/", $label));
         bench_mul_cols_by::<$M>($c, concat!("mul_cols_by/", $label));
+        bench_update_backward_diff::<$M>($c, concat!("update_backward_diff/", $label));
     };
 }
 
