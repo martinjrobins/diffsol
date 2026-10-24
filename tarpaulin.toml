@@ -1,0 +1,5 @@
+[coverage]
+engine = "Llvm"
+out = ["Xml"]
+packages = ["diffsol", "diffsol-c", "diffsol-la", "diffsol-nl"]
+exclude-files = ["crates/*/benches/*"]
