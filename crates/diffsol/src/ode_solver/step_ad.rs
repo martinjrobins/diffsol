@@ -23,7 +23,9 @@
 //! }
 //! ```
 //! A cotangent of a value interpolated within a step is added to the cotangent at the step's
-//! end with [StepVjp::interpolate_vjp], before pulling it back through the step.
+//! end with [StepVjp::interpolate_vjp], before pulling it back through the step. If the pass
+//! started at the problem's initial time, [StepVjp::initial_state_vjp] then adds the
+//! derivative of the initial state with respect to the parameters to `p_bar`.
 //! [StepVjp::solve_dense_vjp] does all of this for a loss summed over a set of times: the
 //! forward solve, the checkpoints, the pull back and the derivative of the initial state.
 //!
@@ -272,97 +274,115 @@ pub trait StepVjp<'a, Eqn: OdeEquationsImplicitAdjoint + 'a>: OdeSolverMethod<'a
         p_bar.add_assign(&p_bar_steps);
 
         if start_t == problem.t0 {
-            initial_state_vjp(problem, &start, &mut cot, &mut p_bar)?;
+            self.initial_state_vjp(&start, &mut cot, &mut p_bar)?;
         }
         Ok((loss, p_bar))
     }
-}
 
-/// Add to `p_bar` the derivative of the problem's initial state `start`, whose cotangent is
-/// `cot`, with respect to the parameters, as the solvers' constructors compute it: `y` from
-/// the init operator and `dy = f(y)`, or, with algebraic states, the consistent `y` and `dy`
-/// of [crate::StateRefMut::set_consistent].
-fn initial_state_vjp<Eqn, S>(
-    problem: &crate::OdeSolverProblem<Eqn>,
-    start: &S,
-    cot: &mut S,
-    p_bar: &mut Eqn::V,
-) -> Result<(), DiffsolError>
-where
-    Eqn: OdeEquationsImplicitAdjoint,
-    Eqn::M: DefaultSolver,
-    S: OdeSolverState<Eqn::V>,
-{
-    let eqn = &problem.eqn;
-    let (y0, t0) = (start.as_ref().y, start.as_ref().t);
-    let ctx = cot.as_ref().y.context().clone();
-    let rhs = eqn.rhs();
-    let mut tmp_nstates = Eqn::V::zeros(rhs.nstates(), ctx.clone());
-    let mut tmp_nparams = Eqn::V::zeros(rhs.nparams(), ctx.clone());
-
-    let algebraic = eqn.mass().map(|mass| {
-        let mass = mass.matrix(t0);
-        let (algebraic, differential) = mass.partition_indices_by_zero_diagonal();
-        (mass, algebraic, differential)
-    });
-    // lambda, the cotangent of the residual f(y) - M dy of the initialisation
-    let lambda = match algebraic {
-        Some((mass, algebraic, differential)) if algebraic.len() > 0 => {
-            // the consistent initialisation solves for w = (dy_d, y_a) from
-            //   R(w) = (f_d(y) - M_dd dy_d, f_a(y)) = 0
-            // and sets dy_a = 0, so with J_w^T lambda = -w_bar, where
-            //   J_w^T = [-M_dd^T, 0; f_dv^T, f_av^T]:
-            //   lambda_d = M_dd^{-T} dy_bar_d
-            //   lambda_a = -f_av^{-T} (y_bar_a + f_dv^T lambda_d)
-            let mut lambda_d = Eqn::V::zeros(differential.len(), ctx.clone());
-            lambda_d.gather(cot.as_ref().dy, &differential);
-            let [(m_dd, _), _, _, _] = mass.split(&algebraic);
-            let m_dd = MatrixOp::new(m_dd);
-            let mut solver = <Eqn::M as DefaultSolver>::LS::default();
-            solver.set_problem(&m_dd);
-            LinearSolver::set_linearisation(&mut solver, &m_dd, &lambda_d, t0);
-            LaLinearSolver::solve_transpose_in_place(&solver, &mut lambda_d)?;
-
-            // -f_dv^T lambda_d, in the algebraic rows of -f_y^T (lambda_d, 0)
-            let mut lambda = Eqn::V::zeros(rhs.nstates(), ctx.clone());
-            lambda_d.scatter(&differential, &mut lambda);
-            rhs.jac_transpose_mul_inplace(y0, t0, &lambda, &mut tmp_nstates);
-            let mut lambda_a = Eqn::V::zeros(algebraic.len(), ctx.clone());
-            lambda_a.gather(&tmp_nstates, &algebraic);
-            let mut y_bar_a = Eqn::V::zeros(algebraic.len(), ctx.clone());
-            y_bar_a.gather(cot.as_ref().y, &algebraic);
-            lambda_a.sub_assign(&y_bar_a);
-            let [_, _, _, (f_av, _)] = rhs.jacobian(y0, t0).split(&algebraic);
-            let f_av = MatrixOp::new(f_av);
-            let mut solver = <Eqn::M as DefaultSolver>::LS::default();
-            solver.set_problem(&f_av);
-            LinearSolver::set_linearisation(&mut solver, &f_av, &lambda_a, t0);
-            LaLinearSolver::solve_transpose_in_place(&solver, &mut lambda_a)?;
-            lambda_a.scatter(&algebraic, &mut lambda);
-            // y_a is solved for, so its initial value does not matter
-            cot.as_mut().y.assign_at_indices(&algebraic, Eqn::T::zero());
-            lambda
-        }
-        // dy = f(y)
-        _ => cot.as_ref().dy.clone(),
-    };
-    // the rhs operators give -f_y^T lambda and -f_p^T lambda
-    rhs.jac_transpose_mul_inplace(y0, t0, &lambda, &mut tmp_nstates);
-    rhs.sens_transpose_mul_inplace(y0, t0, &lambda, &mut tmp_nparams);
-    p_bar.sub_assign(&tmp_nparams);
-    let cot_y = cot.as_mut().y;
-    cot_y.sub_assign(&tmp_nstates);
-    if let Some(algebraic) = eqn
-        .mass()
-        .map(|m| m.matrix(t0).partition_indices_by_zero_diagonal().0)
+    /// Pull `cotangent`, a cotangent state at the problem's initial state `start`, back to the
+    /// parameters, adding the result to `p_bar`: the derivative of the initial state with respect to
+    /// the parameters, as the solvers' constructors compute it. That is `y` from the init
+    /// operator and `dy = f(y)`, or, with algebraic states, the consistent `y` and `dy` of
+    /// [crate::StateRefMut::set_consistent].
+    ///
+    /// Use it to finish a reverse-mode pass that started at the problem's initial time: after
+    /// pulling the cotangent back through every step with [Self::step_vjp], which leaves it
+    /// carried by its `y` and `dy`, the two fields this reads. `start` is the state the solver
+    /// started from, as saved by [OdeSolverMethod::state_clone] before the first step.
+    /// [Self::solve_dense_vjp] calls it when its solve starts at the initial time. On return,
+    /// `cotangent` is partly transformed and must not be reused.
+    ///
+    /// Fails if `start` is not at the problem's initial time.
+    fn initial_state_vjp(
+        &self,
+        start: &Self::State,
+        cotangent: &mut Self::State,
+        p_bar: &mut Eqn::V,
+    ) -> Result<(), DiffsolError>
+    where
+        Eqn::M: DefaultSolver,
     {
-        cot_y.assign_at_indices(&algebraic, Eqn::T::zero());
+        let problem = self.problem();
+        if start.as_ref().t != problem.t0 {
+            return Err(ode_solver_error!(
+                Other,
+                "initial_state_vjp needs the state at the problem's initial time"
+            ));
+        }
+        let eqn = &problem.eqn;
+        let (y0, t0) = (start.as_ref().y, start.as_ref().t);
+        let ctx = cotangent.as_ref().y.context().clone();
+        let rhs = eqn.rhs();
+        let mut tmp_nstates = Eqn::V::zeros(rhs.nstates(), ctx.clone());
+        let mut tmp_nparams = Eqn::V::zeros(rhs.nparams(), ctx.clone());
+
+        let algebraic = eqn.mass().map(|mass| {
+            let mass = mass.matrix(t0);
+            let (algebraic, differential) = mass.partition_indices_by_zero_diagonal();
+            (mass, algebraic, differential)
+        });
+        // lambda, the cotangent of the residual f(y) - M dy of the initialisation
+        let lambda = match algebraic {
+            Some((mass, algebraic, differential)) if algebraic.len() > 0 => {
+                // the consistent initialisation solves for w = (dy_d, y_a) from
+                //   R(w) = (f_d(y) - M_dd dy_d, f_a(y)) = 0
+                // and sets dy_a = 0, so with J_w^T lambda = -w_bar, where
+                //   J_w^T = [-M_dd^T, 0; f_dv^T, f_av^T]:
+                //   lambda_d = M_dd^{-T} dy_bar_d
+                //   lambda_a = -f_av^{-T} (y_bar_a + f_dv^T lambda_d)
+                let mut lambda_d = Eqn::V::zeros(differential.len(), ctx.clone());
+                lambda_d.gather(cotangent.as_ref().dy, &differential);
+                let [(m_dd, _), _, _, _] = mass.split(&algebraic);
+                let m_dd = MatrixOp::new(m_dd);
+                let mut solver = <Eqn::M as DefaultSolver>::LS::default();
+                solver.set_problem(&m_dd);
+                LinearSolver::set_linearisation(&mut solver, &m_dd, &lambda_d, t0);
+                LaLinearSolver::solve_transpose_in_place(&solver, &mut lambda_d)?;
+
+                // -f_dv^T lambda_d, in the algebraic rows of -f_y^T (lambda_d, 0)
+                let mut lambda = Eqn::V::zeros(rhs.nstates(), ctx.clone());
+                lambda_d.scatter(&differential, &mut lambda);
+                rhs.jac_transpose_mul_inplace(y0, t0, &lambda, &mut tmp_nstates);
+                let mut lambda_a = Eqn::V::zeros(algebraic.len(), ctx.clone());
+                lambda_a.gather(&tmp_nstates, &algebraic);
+                let mut y_bar_a = Eqn::V::zeros(algebraic.len(), ctx.clone());
+                y_bar_a.gather(cotangent.as_ref().y, &algebraic);
+                lambda_a.sub_assign(&y_bar_a);
+                let [_, _, _, (f_av, _)] = rhs.jacobian(y0, t0).split(&algebraic);
+                let f_av = MatrixOp::new(f_av);
+                let mut solver = <Eqn::M as DefaultSolver>::LS::default();
+                solver.set_problem(&f_av);
+                LinearSolver::set_linearisation(&mut solver, &f_av, &lambda_a, t0);
+                LaLinearSolver::solve_transpose_in_place(&solver, &mut lambda_a)?;
+                lambda_a.scatter(&algebraic, &mut lambda);
+                // y_a is solved for, so its initial value does not matter
+                cotangent
+                    .as_mut()
+                    .y
+                    .assign_at_indices(&algebraic, Eqn::T::zero());
+                lambda
+            }
+            // dy = f(y)
+            _ => cotangent.as_ref().dy.clone(),
+        };
+        // the rhs operators give -f_y^T lambda and -f_p^T lambda
+        rhs.jac_transpose_mul_inplace(y0, t0, &lambda, &mut tmp_nstates);
+        rhs.sens_transpose_mul_inplace(y0, t0, &lambda, &mut tmp_nparams);
+        p_bar.sub_assign(&tmp_nparams);
+        let cot_y = cotangent.as_mut().y;
+        cot_y.sub_assign(&tmp_nstates);
+        if let Some(algebraic) = eqn
+            .mass()
+            .map(|m| m.matrix(t0).partition_indices_by_zero_diagonal().0)
+        {
+            cot_y.assign_at_indices(&algebraic, Eqn::T::zero());
+        }
+        // the init operator gives -y0_p^T v
+        eqn.init()
+            .sens_transpose_mul_inplace(t0, cot_y, &mut tmp_nparams);
+        p_bar.sub_assign(&tmp_nparams);
+        Ok(())
     }
-    // the init operator gives -y0_p^T v
-    eqn.init()
-        .sens_transpose_mul_inplace(t0, cot_y, &mut tmp_nparams);
-    p_bar.sub_assign(&tmp_nparams);
-    Ok(())
 }
 
 /// Check the inputs of a [StepVjp::step_vjp] or [StepVjp::interpolate_vjp], with the states
@@ -1526,7 +1546,7 @@ mod tests {
         /// `x' = -p0 x + z`, `0 = p1 x + p2 - z`, from `x = p0`.
         #[test]
         fn initial_state_derivative() {
-            use crate::{OdeBuilder, OdeSolverState};
+            use crate::{OdeBuilder, OdeSolverMethod, OdeSolverState};
             let problem_at = |p: [f64; 3]| {
                 let problem = OdeBuilder::<M>::new()
                     .p(p)
@@ -1590,7 +1610,8 @@ mod tests {
             };
 
             let problem = problem_at(p);
-            let start = problem.bdf_state::<LS>().unwrap();
+            let mut solver = problem.bdf::<LS>().unwrap();
+            let start = solver.state_clone();
             let mut cot = start.zeros_like();
             cot.as_mut()
                 .y
@@ -1599,7 +1620,15 @@ mod tests {
                 .dy
                 .copy_from(&V::from_vec(c_dy.to_vec(), Default::default()));
             let mut p_bar = V::zeros(3, Default::default());
-            super::super::initial_state_vjp(&problem, &start, &mut cot, &mut p_bar).unwrap();
+            solver
+                .initial_state_vjp(&start, &mut cot.clone(), &mut p_bar)
+                .unwrap();
+            // a state after a step is not the initial state
+            solver.step().unwrap();
+            let after = solver.state_clone();
+            assert!(solver
+                .initial_state_vjp(&after, &mut cot, &mut p_bar.clone())
+                .is_err());
 
             let eps = 1e-6;
             let fd: Vec<f64> = (0..3)
