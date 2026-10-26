@@ -26,7 +26,7 @@ use diffsol::{
     matrix::{Matrix, MatrixRef},
     CodegenModule, ConstantOp, Context, DefaultDenseMatrix, DefaultSolver, DenseMatrix, DiffSl,
     MatrixCommon, NonLinearOp, NonLinearOpJacobian, OdeEquations, OdeSolverProblem, Op, Vector,
-    VectorCommon, VectorRef,
+    VectorCommon, VectorRef, VectorView,
 };
 #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
 use diffsol::{CodegenModuleCompile, CodegenModuleJit};
@@ -632,7 +632,7 @@ where
         self.problem
             .sens_atol
             .as_ref()
-            .and_then(|value| (value.len() > 0).then(|| value.get_index(0).to_f64().unwrap()))
+            .and_then(|value| (value.len() > 0).then(|| value.get_batch(0).get_index(0).to_f64().unwrap()))
     }
 
     fn set_out_rtol(&mut self, out_rtol: Option<f64>) {
@@ -1002,7 +1002,7 @@ mod tests {
         scalar_type::ScalarType,
         test_support::{
             assert_close, hybrid_logistic_diffsl_code, hybrid_logistic_state, logistic_diffsl_code,
-            logistic_state, LOGISTIC_X0,
+            logistic_state, two_param_logistic_diffsl_code, LOGISTIC_X0,
         },
     };
 
@@ -1270,6 +1270,27 @@ mod tests {
         }
     }
 
+    fn assert_sens_atol_round_trips_with_multiple_params<CG>()
+    where
+        CG: diffsol::CodegenModule
+            + CodegenModuleJit
+            + CodegenModuleCompile
+            + SolveSerialization<diffsol::NalgebraMat<f64>>,
+    {
+        // two params make sens_atol batched (nbatch = 2), which get_index rejects
+        let problem = OdeBuilder::<diffsol::NalgebraMat<f64>>::new()
+            .build_from_diffsl::<CG>(two_param_logistic_diffsl_code())
+            .unwrap();
+        let mut solve = GenericSolve { problem };
+        assert_eq!(solve.nparams(), 2);
+
+        solve.set_sens_atol(Some(1e-4));
+        let sens_atol = solve.problem.sens_atol.as_ref().unwrap();
+        assert_eq!(sens_atol.context().nbatch(), 2);
+        assert_eq!(sens_atol.len(), solve.nstates());
+        assert_close(solve.sens_atol().unwrap(), 1e-4, 1e-12, "sens atol");
+    }
+
     #[cfg(feature = "diffsl-cranelift")]
     #[test]
     fn solve_factory_supports_all_jit_matrix_and_scalar_types_for_cranelift() {
@@ -1285,6 +1306,12 @@ mod tests {
         assert_solve_runtime_paths::<f32, diffsol::CraneliftJitModule>(5e-3);
     }
 
+    #[cfg(feature = "diffsl-cranelift")]
+    #[test]
+    fn sens_atol_round_trips_with_multiple_params_for_cranelift() {
+        assert_sens_atol_round_trips_with_multiple_params::<diffsol::CraneliftJitModule>();
+    }
+
     #[cfg(feature = "diffsl-llvm")]
     #[test]
     fn solve_factory_supports_all_jit_matrix_and_scalar_types_for_llvm() {
@@ -1298,6 +1325,12 @@ mod tests {
         assert_solve_runtime_paths::<f64, diffsol::LlvmModule>(5e-4);
         assert_solve_metadata_and_helpers::<f32, diffsol::LlvmModule>(5e-3);
         assert_solve_runtime_paths::<f32, diffsol::LlvmModule>(5e-3);
+    }
+
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn sens_atol_round_trips_with_multiple_params_for_llvm() {
+        assert_sens_atol_round_trips_with_multiple_params::<diffsol::LlvmModule>();
     }
 
     #[cfg(feature = "diffsl-llvm")]
