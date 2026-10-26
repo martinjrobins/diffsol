@@ -629,10 +629,9 @@ where
     fn sens_atol(&self) -> Option<f64> {
         // every lane holds the same value unless parameter scales were set, which this API
         // cannot express, so reporting the first is exact for anything it can have set
-        self.problem
-            .sens_atol
-            .as_ref()
-            .and_then(|value| (value.len() > 0).then(|| value.get_batch(0).get_index(0).to_f64().unwrap()))
+        self.problem.sens_atol.as_ref().and_then(|value| {
+            (value.len() > 0).then(|| value.get_batch(0).get_index(0).to_f64().unwrap())
+        })
     }
 
     fn set_out_rtol(&mut self, out_rtol: Option<f64>) {
