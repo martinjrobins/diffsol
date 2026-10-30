@@ -541,7 +541,14 @@ impl<T: NalgebraScalar> Matrix for NalgebraMat<T> {
 }
 impl<T: NalgebraScalar> DenseMatrix for NalgebraMat<T> {
     fn fill(&mut self, value: T) {
-        self.data.fill(value);
+        // the storage is one contiguous slice: `slice::fill` vectorises where nalgebra's
+        // element-wise `fill` does not (`lin_alg_ops mat_fill`). A short one keeps the
+        // element-wise fill: see `SHORT_FILL_LEN`
+        if self.data.len() < crate::vector::SHORT_FILL_LEN {
+            self.data.fill(value);
+        } else {
+            self.data.as_mut_slice().fill(value);
+        }
     }
     fn resize_cols(&mut self, nc: usize) {
         let old = self.ncols();
@@ -582,6 +589,57 @@ impl<T: NalgebraScalar> DenseMatrix for NalgebraMat<T> {
             "gemv_cols: x must hold at least end - start values"
         );
         gemv_cols_data!(self, start, end - start, alpha, x, beta, y, "gemv_cols")
+    }
+    fn ger_cols(&mut self, start: usize, end: usize, alpha: T, x: &[T], y: &NalgebraVec<T>) {
+        assert!(start <= end, "ger_cols: column range start > end");
+        assert!(
+            end - start <= crate::matrix::MAX_SMALL_COLS,
+            "ger_cols: column range exceeds MAX_SMALL_COLS"
+        );
+        assert!(
+            x.len() >= end - start,
+            "ger_cols: x must hold at least end - start values"
+        );
+        self.context
+            .assert_broadcastable_into(y.context.nbatch(), "ger_cols");
+        // only a debug assert, as in `gemv_cols`: an out-of-range range still panics in
+        // release, inside nalgebra's `columns_mut` or slicing the lane below
+        debug_assert!(end <= self.ncols(), "ger_cols: column range out of bounds");
+        let nc = end - start;
+        let nr = self.data.nrows();
+        // nothing to update, and the lane walk below cannot step through zero-length lanes
+        if nc == 0 || nr == 0 {
+            return;
+        }
+        let w = &x[..nc];
+        let nb = self.context.nbatch();
+        if nr <= SHORT_LANE_ROWS {
+            // Short lanes: nalgebra's `ger` runs an `axpy` per column, which over so few rows
+            // costs more than its arithmetic, so walk the raw storage instead
+            let lane_len = self.data.ncols() / nb * nr;
+            let range = start * nr..end * nr;
+            let ys = y.data.as_slice();
+            let lanes = self.data.as_mut_slice().chunks_exact_mut(lane_len);
+            for (b, lane) in lanes.enumerate() {
+                let yb = y.batch(b, nb) * nr;
+                let yb = &ys[yb..yb + nr];
+                for (column, &wk) in lane[range.clone()].chunks_exact_mut(nr).zip(w) {
+                    let s = alpha * wk;
+                    for (m, y) in column.iter_mut().zip(yb) {
+                        *m += s * *y;
+                    }
+                }
+            }
+            return;
+        }
+        // Tall lanes: nalgebra's rank-1 update per lane, which vectorises the tall columns
+        let x = DVectorView::from_slice(w, nc);
+        for b in 0..nb {
+            let c = self.col(b, start);
+            self.data
+                .columns_mut(c, nc)
+                .ger(alpha, &y.data.column(y.batch(b, nb)), &x, T::one());
+        }
     }
     fn from_vec(nr: usize, nc: usize, d: Vec<T>, ctx: Self::C) -> Self {
         assert_eq!(d.len(), nr * nc * ctx.nbatch());

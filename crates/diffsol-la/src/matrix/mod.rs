@@ -453,7 +453,8 @@ pub trait DenseMatrix:
     ///
     /// As for [`Self::gemv_cols`], `x` is a host slice of at least `end - start` coefficients,
     /// shared by every batch, and only the columns in the range are touched. `y` has this
-    /// matrix's rows and lanes.
+    /// matrix's rows, and either this matrix's lanes or a number of lanes that broadcasts into
+    /// them. Panics if `end - start` exceeds [`MAX_SMALL_COLS`].
     fn ger_cols(
         &mut self,
         start: IndexType,
@@ -462,9 +463,14 @@ pub trait DenseMatrix:
         x: &[Self::T],
         y: &Self::V,
     ) {
+        assert!(start <= end, "ger_cols: column range start > end");
         assert!(
-            x.len() >= end.saturating_sub(start),
-            "ger_cols needs a coefficient per column in the range"
+            end - start <= MAX_SMALL_COLS,
+            "ger_cols: column range exceeds MAX_SMALL_COLS"
+        );
+        assert!(
+            x.len() >= end - start,
+            "ger_cols: x must hold at least end - start values"
         );
         for j in start..end {
             self.column_mut(j)
@@ -1186,6 +1192,26 @@ pub(crate) mod tests {
         // sum_{j=1}^{ncols} j
         let total = f::<M>((ncols * (ncols + 1) / 2) as f64);
         assert_eq!(y.clone_as_vec(), vec![total, f::<M>(10.0) * total]);
+    }
+
+    /// The widest column range `ger_cols` accepts, which is also the size of the by-value
+    /// coefficient array the CUDA kernel takes.
+    pub fn test_ger_cols_many_columns<M: DenseMatrix>() {
+        let ncols = MAX_SMALL_COLS;
+        let mut a = M::zeros(2, ncols, Default::default());
+        let x: Vec<M::T> = (1..=ncols).map(|j| f::<M>(j as f64)).collect();
+        let y = M::V::from_vec(vec![f::<M>(1.0), f::<M>(-2.0)], Default::default());
+        a.ger_cols(0, ncols, f::<M>(3.0), &x, &y);
+        // column j - 1 is 3 * j * [1, -2]
+        let expected = M::from_vec(
+            2,
+            ncols,
+            (1..=ncols)
+                .flat_map(|j| [f::<M>(3.0 * j as f64), f::<M>(-6.0 * j as f64)])
+                .collect(),
+            Default::default(),
+        );
+        assert_mat_eq(&a, &expected);
     }
 
     /// [`DenseMatrix::ger_cols`] on 2 batches: the coefficients are shared, `y` is per batch.
@@ -2879,6 +2905,49 @@ pub(crate) mod tests {
         }
     }
 
+    /// `ger_cols` against a host reference, for short and tall lanes, an empty range, one or two
+    /// lanes of matrix, and a `y` that either matches the matrix's lanes or broadcasts into them.
+    pub fn test_batched_ger_cols_reference<M: DenseMatrix>(ctx2: M::C) {
+        assert_eq!(ctx2.nbatch(), 2);
+        let ncols = 6;
+        let w = [1.0, -1.0, 2.0, 0.5];
+        let ctx1 = ctx2.clone_with_nbatch(1).unwrap();
+        for nrows in LANE_ROWS {
+            for (start, end) in [(0, 4), (2, 5), (3, 3)] {
+                for alpha in [1.0, -0.5, 2.0] {
+                    for (a_ctx, y_ctx) in [
+                        (ctx1.clone(), ctx1.clone()),
+                        (ctx2.clone(), ctx2.clone()),
+                        (ctx2.clone(), ctx1.clone()),
+                    ] {
+                        let (a_lanes, y_lanes) = (a_ctx.nbatch(), y_ctx.nbatch());
+                        let mut a = lane_matrix::<M>(nrows, ncols, a_ctx);
+                        let y = lane_vector::<M>(nrows, 1.0, y_ctx);
+                        let x: Vec<M::T> = w[..end - start].iter().map(|v| f::<M>(*v)).collect();
+                        a.ger_cols(start, end, f::<M>(alpha), &x, &y);
+
+                        let mut expect = Vec::new();
+                        for b in 0..a_lanes {
+                            // y broadcasts over contiguous groups of the matrix's lanes
+                            let src = b * y_lanes / a_lanes;
+                            for j in 0..ncols {
+                                for i in 0..nrows {
+                                    let mut v = lane_matrix_entry(b, i, j);
+                                    if (start..end).contains(&j) {
+                                        v += alpha * w[j - start] * lane_vector_entry(1.0, src, i);
+                                    }
+                                    expect.push(f::<M>(v));
+                                }
+                            }
+                        }
+                        let expect = M::from_vec(nrows, ncols, expect, a.context().clone());
+                        assert_mat_eq(&a, &expect);
+                    }
+                }
+            }
+        }
+    }
+
     /// Batched `update_backward_diff` against a host reference, for short and tall lanes and
     /// several orders.
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
@@ -3199,6 +3268,10 @@ macro_rules! generate_dense_matrix_tests_nonbatched {
             fn [<test_ger_cols_transpose_ $suffix>]() {
                 $crate::matrix::tests::test_ger_cols_transpose::<$M>();
             }
+            #[test]
+            fn [<test_ger_cols_many_columns_ $suffix>]() {
+                $crate::matrix::tests::test_ger_cols_many_columns::<$M>();
+            }
 
             #[test]
             fn [<test_gemv_cols_many_columns_ $suffix>]() {
@@ -3279,6 +3352,10 @@ macro_rules! generate_dense_matrix_tests_batched {
             #[test]
             fn [<test_batched_ger_cols_ $suffix>]() {
                 $crate::matrix::tests::test_batched_ger_cols::<$M>($ctx2);
+            }
+            #[test]
+            fn [<test_batched_ger_cols_reference_ $suffix>]() {
+                $crate::matrix::tests::test_batched_ger_cols_reference::<$M>($ctx2);
             }
 
             #[test]
