@@ -143,6 +143,16 @@ pub(crate) fn hybrid_logistic_diffsl_code() -> &'static str {
 }
 
 #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
+pub(crate) fn two_param_logistic_diffsl_code() -> &'static str {
+    r#"
+        in_i { r = 1, k = 1 }
+        u_i { y = 0.1 }
+        F_i { r * y * (1 - y / k) }
+        out_i { y }
+    "#
+}
+
+#[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
 pub(crate) fn logistic_diffsl_code_cstring() -> CString {
     CString::new(logistic_diffsl_code()).unwrap()
 }
