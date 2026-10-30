@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1](https://github.com/martinjrobins/diffsol/compare/diffsol-la-v0.3.0...diffsol-la-v0.3.1) - 2026-10-30
+
+### Other
+
+- *(diffsol-la)* avoid copy when converting DVector to NalgebraVec ([#435](https://github.com/martinjrobins/diffsol/pull/435))
+- *(diffsol-la)* native impls of ger_cols, speed-ups on faer and nalgebra fill ([#429](https://github.com/martinjrobins/diffsol/pull/429))
+- *(diffsol)* consolidate batched/non-batched test_models ([#426](https://github.com/martinjrobins/diffsol/pull/426))
+
 ## [0.3.0](https://github.com/martinjrobins/diffsol/compare/diffsol-la-v0.2.0...diffsol-la-v0.3.0) - 2026-10-20
 
 ### Added

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0](https://github.com/martinjrobins/diffsol/compare/diffsol-v0.18.0...diffsol-v0.19.0) - 2026-10-30
+
+### Added
+
+- *(diffsol)* add interpolate_vjp ([#425](https://github.com/martinjrobins/diffsol/pull/425))
+- *(diffsol)* [**breaking**] improve step_vjp accuracy, add benchmarks ([#422](https://github.com/martinjrobins/diffsol/pull/422))
+
+### Fixed
+
+- default min_timestep to the scalar's epsilon ([#402](https://github.com/martinjrobins/diffsol/pull/402))
+- count nonlinear solver failures per step and lower the default limit to 10 ([#397](https://github.com/martinjrobins/diffsol/pull/397))
+
+### Other
+
+- *(diffsol-la)* native impls of ger_cols, speed-ups on faer and nalgebra fill ([#429](https://github.com/martinjrobins/diffsol/pull/429))
+- *(diffsol)* consolidate batched/non-batched test_models ([#426](https://github.com/martinjrobins/diffsol/pull/426))
+
 ## [0.18.0](https://github.com/martinjrobins/diffsol/compare/diffsol-v0.17.1...diffsol-v0.18.0) - 2026-10-20
 
 ### Added
