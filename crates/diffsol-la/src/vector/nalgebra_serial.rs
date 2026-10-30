@@ -50,8 +50,9 @@ impl<T: NalgebraScalar> NalgebraVecRef<'_, T> {
 
 impl<T: NalgebraScalar> From<DVector<T>> for NalgebraVec<T> {
     fn from(data: DVector<T>) -> Self {
+        let n = data.len();
         Self {
-            data: DMatrix::from_column_slice(data.len(), 1, data.as_slice()),
+            data: data.reshape_generic(Dyn(n), Dyn(1)),
             context: NalgebraContext::default(),
         }
     }
