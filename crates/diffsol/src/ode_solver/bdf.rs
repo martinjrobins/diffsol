@@ -742,6 +742,7 @@ where
             * Eqn::T::EPSILON
             * (abs(state.t) + abs(state.h));
         if abs(state.t - tstop) <= troundoff {
+            self.state.t = tstop;
             self.tstop = None;
             return Ok(Some(OdeSolverStopReason::TstopReached));
         } else if (state.h > M::T::zero() && tstop < state.t - troundoff)
@@ -756,15 +757,29 @@ where
             return Err(DiffsolError::from(error));
         }
 
-        // check if the next step will be beyond tstop, if so adjust the step size
-        if (state.h > M::T::zero() && state.t + state.h > tstop + troundoff)
-            || (state.h < M::T::zero() && state.t + state.h < tstop - troundoff)
-        {
+        // adjust the step size if the next step would overshoot tstop (next step adjusted to hit tstop),
+        // or stop short of it with less than a step to go (distance to tstep split into two equal steps).
+        let one = Eqn::T::one();
+        let two = one + one;
+        // the distance to tstop in steps, and the time roundoff in steps
+        let ratio = (tstop - state.t) / state.h;
+        let ratio_roundoff = troundoff / abs(state.h);
+        let factor = if ratio < one - ratio_roundoff {
             debug!(
                 "Adjusting step size to hit tstop at t = {}",
                 tstop.to_f64().unwrap()
             );
-            let factor = (tstop - state.t) / state.h;
+            Some(ratio)
+        } else if ratio > one + ratio_roundoff && ratio < two - ratio_roundoff {
+            debug!(
+                "Balancing the last two steps to hit tstop at t = {}",
+                tstop.to_f64().unwrap()
+            );
+            Some(ratio / two)
+        } else {
+            None
+        };
+        if let Some(factor) = factor {
             // update step size ignoring the possible "step size too small" error
             let _ = self._update_step_size(factor);
         }
@@ -2298,10 +2313,10 @@ mod test {
             .unwrap();
         test_adjoint(adjoint_solver, dgdu, 40.0);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 160
+        number_of_calls: 171
         number_of_jac_muls: 2
         number_of_matrix_evals: 1
-        number_of_jac_adj_muls: 121
+        number_of_jac_adj_muls: 130
         "###);
     }
 
@@ -2351,10 +2366,10 @@ mod test {
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 522
+        number_of_calls: 533
         number_of_jac_muls: 2
         number_of_matrix_evals: 1
-        number_of_jac_adj_muls: 637
+        number_of_jac_adj_muls: 638
         "###);
     }
 
@@ -2429,10 +2444,10 @@ mod test {
             .unwrap();
         test_adjoint(adjoint_solver, dgdu, 40.0);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 154
+        number_of_calls: 160
         number_of_jac_muls: 15
         number_of_matrix_evals: 5
-        number_of_jac_adj_muls: 107
+        number_of_jac_adj_muls: 106
         "###);
     }
 
@@ -2470,10 +2485,10 @@ mod test {
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 232
+        number_of_calls: 235
         number_of_jac_muls: 12
         number_of_matrix_evals: 4
-        number_of_jac_adj_muls: 288
+        number_of_jac_adj_muls: 295
         "###);
     }
 
@@ -3468,6 +3483,72 @@ mod test {
             assert_eq!(solver.get_statistics().number_of_nonlinear_solver_fails, 0);
             assert_eq!(times, plain_times);
             solver.state().y.assert_eq_st(plain.state().y, 0.0);
+        }
+    }
+
+    /// A final time just past the end of a step must not force a tiny rescale of the history,
+    /// which would ruin interpolation within the step before it (issue #421).
+    #[test]
+    fn bdf_solve_dense_final_time_just_past_a_step() {
+        let problem = OdeBuilder::<M>::new()
+            .rtol(1e-10)
+            .atol([1e-12])
+            .h0(1e-3)
+            .rhs_implicit(
+                |y, _, _, dy| dy[0] = -0.2 * y[0],
+                |_, _, _, v, jv| jv[0] = -0.2 * v[0],
+            )
+            .init(|_, _, y| y[0] = 1.0, 1)
+            .build()
+            .unwrap();
+
+        // find a step boundary without a stop time
+        let mut probe = problem.bdf::<LS>().unwrap();
+        let mut previous_t = 0.0;
+        while probe.state().t < 2.0 {
+            previous_t = probe.state().t;
+            probe.step().unwrap();
+        }
+        let midpoint = (previous_t + probe.state().t) / 2.0;
+
+        for gap in [1e-6, 1e-10] {
+            let end = probe.state().t + gap;
+            let mut solver = problem.bdf::<LS>().unwrap();
+            let (result, _) = solver.solve_dense(&[midpoint, end]).unwrap();
+            for (i, t) in [midpoint, end].into_iter().enumerate() {
+                let expected = (-0.2 * t).exp();
+                let actual = result.get_index(0, i);
+                assert!(
+                    ((actual - expected) / expected).abs() < 1e-8,
+                    "gap {gap:e}, t = {t}: expected {expected}, got {actual}"
+                );
+            }
+        }
+    }
+
+    /// A stop time within the next step shortens it to reach it, and one within the next two
+    /// steps, however close to the first, splits the distance into two equal steps.
+    #[test]
+    fn bdf_steps_to_a_stop_time_within_two_steps() {
+        let (problem, _soln) = exponential_decay_problem::<M>(false);
+        for (steps_to_stop, nsteps) in [(0.5, 1), (1.005, 2), (1.5, 2)] {
+            let mut solver = problem.bdf::<LS>().unwrap();
+            for _ in 0..10 {
+                solver.step().unwrap();
+            }
+            let (t, h) = (solver.state().t, solver.state().h);
+            let tstop = t + steps_to_stop * h;
+            solver.set_stop_time(tstop).unwrap();
+            let step = (tstop - t) / nsteps as f64;
+            assert!((solver.state().h - step).abs() <= 1e-14 * step);
+            for _ in 1..nsteps {
+                assert_eq!(
+                    solver.step().unwrap(),
+                    OdeSolverStopReason::InternalTimestep
+                );
+            }
+            assert_eq!(solver.step().unwrap(), OdeSolverStopReason::TstopReached);
+            assert_eq!(solver.state().t, tstop);
         }
     }
 

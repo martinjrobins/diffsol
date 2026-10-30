@@ -947,10 +947,11 @@ mod tests {
                 /// A `set_stop_time` between steps rescales the solver's history after the
                 /// checkpoint of the step before was taken: the next step's replay starts from the
                 /// history as that checkpoint has it. Before the first step, the stop time
-                /// shortens the first step, from the initial history.
+                /// shortens the first step, from the initial history. BDF splits the distance
+                /// to a stop time within the next two steps into two equal steps instead.
                 #[test]
                 fn set_stop_time_between_steps() {
-                    for steps_before in [0, 10] {
+                    for (steps_before, steps_to_stop) in [(0, 0.3), (10, 0.3), (10, 1.5)] {
                         let problem = problem(false);
                         let mut solver = new_sens_solver(&problem);
                         let start = solver.state_clone();
@@ -960,9 +961,10 @@ mod tests {
                             checkpoints.push(solver.state_clone());
                         }
                         let (t, h) = (solver.state().t, solver.state().h);
-                        solver.set_stop_time(t + 0.3 * h).unwrap();
+                        solver.set_stop_time(t + steps_to_stop * h).unwrap();
+                        // only BDF balances the steps to a stop time more than a step away
                         assert!(
-                            solver.state().h != h,
+                            solver.state().h != h || steps_to_stop > 1.0,
                             "the stop time did not rescale the state"
                         );
                         checkpoints.extend(solve_to_stop(&mut solver));
@@ -1444,7 +1446,7 @@ mod tests {
                 robertson_ode::<M>(2).0, robertson_t_eval(), esdirk34::<LS>, esdirk34_sens::<LS>,
                 20.0;
             ad_test_dae_bdf: ad_test_problem::<M>(P, true, RTOL), ad_test_problem::<M>(P, true, RTOL),
-                vec![1.0, 2.0, 5.0], bdf::<LS>, bdf_sens::<LS>, 1.0;
+                vec![1.0, 2.0, 5.0], bdf::<LS>, bdf_sens::<LS>, 2.0;
             ad_test_dae_esdirk34: ad_test_problem::<M>(P, true, RTOL),
                 ad_test_problem::<M>(P, true, RTOL), vec![1.0, 2.0, 5.0], esdirk34::<LS>, esdirk34_sens::<LS>,
                 1.0;
