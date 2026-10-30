@@ -87,6 +87,8 @@ pub enum OdeSolverError {
     TooManyNonlinearSolverFailures { time: f64, num_failures: usize },
     #[error("Exceeded maximum number of error test failures ({num_failures}) at time = {time}")]
     TooManyErrorTestFailures { time: f64, num_failures: usize },
+    #[error("Reached maximum number of timesteps ({num_steps}) at time = {time}")]
+    TooManyTimesteps { time: f64, num_steps: usize },
     #[error("Step size is too small at time = {time}")]
     StepSizeTooSmall { time: f64 },
     #[error("Sensitivity requested but equations do not support it")]

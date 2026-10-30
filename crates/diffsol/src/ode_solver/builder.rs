@@ -1742,6 +1742,7 @@ where
 
     fn build_ode_options<T: Scalar>(ode_options: OdeSolverOptions<f64>) -> OdeSolverOptions<T> {
         OdeSolverOptions {
+            max_number_timesteps: ode_options.max_number_timesteps,
             max_error_test_failures: ode_options.max_error_test_failures,
             max_nonlinear_solver_iterations: ode_options.max_nonlinear_solver_iterations,
             min_timestep: T::from_f64(ode_options.min_timestep).unwrap(),

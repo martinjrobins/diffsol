@@ -5,6 +5,7 @@ pub trait OdeSolverConfig<T> {
     fn as_base_mut(&mut self) -> OdeSolverConfigMut<'_, T>;
 }
 pub struct OdeSolverConfigRef<'a, T> {
+    pub maximum_number_timesteps: &'a usize,
     pub minimum_timestep: &'a T,
     pub maximum_error_test_failures: &'a usize,
     pub maximum_timestep_growth: &'a T,
@@ -12,6 +13,7 @@ pub struct OdeSolverConfigRef<'a, T> {
 }
 
 pub struct OdeSolverConfigMut<'a, T> {
+    pub maximum_number_timesteps: &'a mut usize,
     pub minimum_timestep: &'a mut T,
     pub maximum_error_test_failures: &'a mut usize,
     pub maximum_timestep_growth: &'a mut T,
@@ -20,6 +22,7 @@ pub struct OdeSolverConfigMut<'a, T> {
 
 #[derive(Debug, Clone)]
 pub struct BdfConfig<T> {
+    pub maximum_number_timesteps: usize,
     pub minimum_timestep: T,
     pub maximum_error_test_failures: usize,
     pub maximum_newton_fails: usize,
@@ -32,6 +35,7 @@ pub struct BdfConfig<T> {
 impl<T: Scalar> OdeSolverConfig<T> for BdfConfig<T> {
     fn as_base_ref(&self) -> OdeSolverConfigRef<'_, T> {
         OdeSolverConfigRef {
+            maximum_number_timesteps: &self.maximum_number_timesteps,
             minimum_timestep: &self.minimum_timestep,
             maximum_error_test_failures: &self.maximum_error_test_failures,
             maximum_timestep_growth: &self.maximum_timestep_growth,
@@ -41,6 +45,7 @@ impl<T: Scalar> OdeSolverConfig<T> for BdfConfig<T> {
 
     fn as_base_mut(&mut self) -> OdeSolverConfigMut<'_, T> {
         OdeSolverConfigMut {
+            maximum_number_timesteps: &mut self.maximum_number_timesteps,
             minimum_timestep: &mut self.minimum_timestep,
             maximum_error_test_failures: &mut self.maximum_error_test_failures,
             maximum_timestep_growth: &mut self.maximum_timestep_growth,
@@ -52,6 +57,7 @@ impl<T: Scalar> OdeSolverConfig<T> for BdfConfig<T> {
 impl<T: Scalar> BdfConfig<T> {
     pub fn new(ode_options: &OdeSolverOptions<T>) -> Self {
         Self {
+            maximum_number_timesteps: ode_options.max_number_timesteps,
             minimum_timestep: ode_options.min_timestep,
             maximum_error_test_failures: ode_options.max_error_test_failures,
             maximum_newton_fails: ode_options.max_nonlinear_solver_failures,
@@ -73,6 +79,7 @@ impl<T: Scalar> BdfConfig<T> {
 
 #[derive(Debug, Clone)]
 pub struct SdirkConfig<T> {
+    pub maximum_number_timesteps: usize,
     pub minimum_timestep: T,
     pub maximum_error_test_failures: usize,
     pub maximum_timestep_growth: T,
@@ -85,6 +92,7 @@ pub struct SdirkConfig<T> {
 impl<T: Scalar> SdirkConfig<T> {
     pub fn new(ode_options: &OdeSolverOptions<T>) -> Self {
         Self {
+            maximum_number_timesteps: ode_options.max_number_timesteps,
             minimum_timestep: ode_options.min_timestep,
             maximum_error_test_failures: ode_options.max_error_test_failures,
             maximum_timestep_growth: ode_options
@@ -107,6 +115,7 @@ impl<T: Scalar> SdirkConfig<T> {
 impl<T: Scalar> OdeSolverConfig<T> for SdirkConfig<T> {
     fn as_base_ref(&self) -> OdeSolverConfigRef<'_, T> {
         OdeSolverConfigRef {
+            maximum_number_timesteps: &self.maximum_number_timesteps,
             minimum_timestep: &self.minimum_timestep,
             maximum_error_test_failures: &self.maximum_error_test_failures,
             maximum_timestep_growth: &self.maximum_timestep_growth,
@@ -116,6 +125,7 @@ impl<T: Scalar> OdeSolverConfig<T> for SdirkConfig<T> {
 
     fn as_base_mut(&mut self) -> OdeSolverConfigMut<'_, T> {
         OdeSolverConfigMut {
+            maximum_number_timesteps: &mut self.maximum_number_timesteps,
             minimum_timestep: &mut self.minimum_timestep,
             maximum_error_test_failures: &mut self.maximum_error_test_failures,
             maximum_timestep_growth: &mut self.maximum_timestep_growth,
@@ -126,6 +136,7 @@ impl<T: Scalar> OdeSolverConfig<T> for SdirkConfig<T> {
 
 #[derive(Debug, Clone)]
 pub struct ExplicitRkConfig<T> {
+    pub maximum_number_timesteps: usize,
     pub minimum_timestep: T,
     pub maximum_error_test_failures: usize,
     pub maximum_timestep_growth: T,
@@ -137,6 +148,7 @@ pub struct ExplicitRkConfig<T> {
 impl<T: Scalar> ExplicitRkConfig<T> {
     pub fn new(ode_options: &OdeSolverOptions<T>) -> Self {
         Self {
+            maximum_number_timesteps: ode_options.max_number_timesteps,
             minimum_timestep: ode_options.min_timestep,
             maximum_error_test_failures: ode_options.max_error_test_failures,
             maximum_timestep_growth: ode_options
@@ -158,6 +170,7 @@ impl<T: Scalar> ExplicitRkConfig<T> {
 impl<T: Scalar> OdeSolverConfig<T> for ExplicitRkConfig<T> {
     fn as_base_ref(&self) -> OdeSolverConfigRef<'_, T> {
         OdeSolverConfigRef {
+            maximum_number_timesteps: &self.maximum_number_timesteps,
             minimum_timestep: &self.minimum_timestep,
             maximum_error_test_failures: &self.maximum_error_test_failures,
             maximum_timestep_growth: &self.maximum_timestep_growth,
@@ -167,6 +180,7 @@ impl<T: Scalar> OdeSolverConfig<T> for ExplicitRkConfig<T> {
 
     fn as_base_mut(&mut self) -> OdeSolverConfigMut<'_, T> {
         OdeSolverConfigMut {
+            maximum_number_timesteps: &mut self.maximum_number_timesteps,
             minimum_timestep: &mut self.minimum_timestep,
             maximum_error_test_failures: &mut self.maximum_error_test_failures,
             maximum_timestep_growth: &mut self.maximum_timestep_growth,

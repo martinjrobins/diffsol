@@ -3,7 +3,7 @@ use super::method::AugmentedOdeSolverMethod;
 use super::runge_kutta::Rk;
 use super::sensitivities::SensitivitiesOdeSolverMethod;
 use super::step_ad::StepVjp;
-use crate::error::DiffsolError;
+use crate::error::{DiffsolError, OdeSolverError};
 use crate::ode_solver::OdeSolverStatistics;
 use crate::vector::VectorRef;
 use crate::NoAug;
@@ -18,7 +18,7 @@ use crate::{
     OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, StateRef, StateRefMut,
 };
 use log::debug;
-use num_traits::One;
+use num_traits::{One, ToPrimitive};
 
 impl<'a, Eqn, M, AugEqn> AugmentedOdeSolverMethod<'a, Eqn, AugEqn>
     for ExplicitRk<'a, Eqn, M, AugEqn>
@@ -196,6 +196,13 @@ where
     }
 
     fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError> {
+        if self.rk.get_statistics().number_of_steps >= self.config.maximum_number_timesteps {
+            return Err(OdeSolverError::TooManyTimesteps {
+                time: self.rk.state().t.to_f64().unwrap(),
+                num_steps: self.rk.get_statistics().number_of_steps,
+            }
+            .into());
+        }
         let mut h = self.rk.start_step()?;
         debug!(
             "Starting Explicit RK step at t = {:?} with h = {:?}",
