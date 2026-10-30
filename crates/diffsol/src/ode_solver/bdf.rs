@@ -757,7 +757,7 @@ where
             return Err(DiffsolError::from(error));
         }
 
-        // adjust the step size if the next step would overshoot tstop (next step adjusted to hit tstop), 
+        // adjust the step size if the next step would overshoot tstop (next step adjusted to hit tstop),
         // or stop short of it with less than a step to go (distance to tstep split into two equal steps).
         let one = Eqn::T::one();
         let two = one + one;
