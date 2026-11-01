@@ -166,6 +166,29 @@ pub mod kernels {
         }
     }
 
+    /// `lhs[b * stride] = value`, one thread per lane
+    #[kernel]
+    #[launch_bounds(256)]
+    #[launch_contract(domain = 1, block = (256, 1, 1))]
+    pub fn vec_fill_strided<T: ScalarCuda>(
+        mut lhs: DisjointSlice<T>,
+        value: T,
+        nbatch: u32,
+        stride: u32,
+    ) {
+        let b = thread::index_1d().get();
+        if b >= nbatch as usize {
+            return;
+        }
+        let di = b * stride as usize;
+        if di < lhs.len() {
+            // SAFETY: each lane writes its own slot.
+            unsafe {
+                *lhs.as_mut_ptr().add(di) = value;
+            }
+        }
+    }
+
     /// `lhs[b, elem] = rhs[..] - lhs[b, elem]`
     ///
     /// The reversed form of [`vec_sub_assign`], for `&lhs - rhs` where `rhs` is
