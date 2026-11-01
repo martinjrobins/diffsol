@@ -906,7 +906,7 @@ pub mod kernels {
                 sum += partials[base + j];
             }
             // NaN must win so a failed lane fails the error test
-            if sum != sum || sum > local {
+            if sum.is_nan() || sum > local {
                 local = sum;
             }
             b += step;
@@ -1370,7 +1370,7 @@ pub mod kernels {
     /// above +inf's as a `u64`, so it wins the max and a failed lane fails the
     /// error test.
     fn atomic_max_into<T: ScalarCuda>(out: &[DeviceAtomicU64], value: T) {
-        if value > T::zero() || value != value {
+        if value > T::zero() || value.is_nan() {
             out[0].fetch_max(value.to_max_bits(), RELAXED);
         }
     }
@@ -1400,7 +1400,7 @@ pub mod kernels {
                 // rounds.
                 unsafe {
                     let other = *smax.add(tid + s);
-                    if other != other || *smax.add(tid) < other {
+                    if other.is_nan() || *smax.add(tid) < other {
                         *smax.add(tid) = other;
                     }
                 }
