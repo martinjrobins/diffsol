@@ -181,6 +181,8 @@ where
 
     /// Set a stop time for the solver. The solver will stop when the internal time reaches this time.
     /// Once it stops, the stop time is unset. If `tstop` is at or before the current internal time, an error is returned.
+    /// Note that a `tstop` much less than one step past the current time forces a very small step, which for multistep methods
+    /// (BDF) degrades the accuracy of interpolation. Set the stop time early to avoid this.
     fn set_stop_time(&mut self, tstop: Eqn::T) -> Result<(), DiffsolError>;
 
     /// Interpolate the solution at a given time. This time should be between the current time and the last solver time step
