@@ -484,6 +484,9 @@ macro_rules! squared_norm_body {
             nrows == $y.data.nrows() && nrows == $atol.data.nrows(),
             "squared_norm row mismatch"
         );
+        if nrows == 0 {
+            return T::zero();
+        }
         let nstates = T::from_f64(nrows as f64).unwrap();
         // rows of a column are contiguous whatever the batch stride, so each batch is a slice
         let batch_norm = |xb: usize, yb: usize, atolb: usize| {

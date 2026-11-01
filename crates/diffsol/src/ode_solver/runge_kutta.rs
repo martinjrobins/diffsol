@@ -525,6 +525,11 @@ where
         );
 
         let mut factor = safety * raw;
+        // a NaN error (e.g. a stage evaluated where the RHS is NaN) must shrink the step, not
+        // poison it, since no comparison below would catch it
+        if factor.is_nan() {
+            return min_reduce_factor;
+        }
         if factor > max_reduce_factor && factor < min_increase_factor {
             factor = Eqn::T::one();
         }
