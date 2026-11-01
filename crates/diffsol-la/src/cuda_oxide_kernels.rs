@@ -905,7 +905,8 @@ pub mod kernels {
             for j in 0..bpl {
                 sum += partials[base + j];
             }
-            if sum > local {
+            // NaN must win so a failed lane fails the error test
+            if sum != sum || sum > local {
                 local = sum;
             }
             b += step;
@@ -1365,10 +1366,11 @@ pub mod kernels {
     /// `swap`. Every value reaching here is a sum of squares or of `|x|^k`, so
     /// it is `>= 0` and never `-0.0`.
     ///
-    /// The `> 0` guard skips both the identity and NaN, which is what the
-    /// host's `if norm > max_norm` starting from zero used to do.
+    /// The guard skips the identity but keeps NaN: any NaN's bit pattern is
+    /// above +inf's as a `u64`, so it wins the max and a failed lane fails the
+    /// error test.
     fn atomic_max_into<T: ScalarCuda>(out: &[DeviceAtomicU64], value: T) {
-        if value > T::zero() {
+        if value > T::zero() || value != value {
             out[0].fetch_max(value.to_max_bits(), RELAXED);
         }
     }
@@ -1397,8 +1399,9 @@ pub mod kernels {
                 // which no other active thread holds -- and barriers between
                 // rounds.
                 unsafe {
-                    if *smax.add(tid) < *smax.add(tid + s) {
-                        *smax.add(tid) = *smax.add(tid + s);
+                    let other = *smax.add(tid + s);
+                    if other != other || *smax.add(tid) < other {
+                        *smax.add(tid) = other;
                     }
                 }
             }

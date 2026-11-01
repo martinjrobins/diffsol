@@ -60,7 +60,7 @@ pub trait Scalar:
     fn sin(self) -> Self;
     /// Cosine.
     fn cos(self) -> Self;
-    /// Maximum of two values.
+    /// Maximum of two values, NaN if either is NaN.
     fn max(self, other: Self) -> Self;
 
     /// Addition, potentially reassociated/relaxed for speed under the `algebraic-ops` feature.
@@ -126,7 +126,13 @@ impl Scalar for f64 {
         self.cos()
     }
     fn max(self, other: Self) -> Self {
-        self.max(other)
+        // NaN must win so a failed batch lane fails the error test rather than vanishing
+        // TODO: swap to f64::maximum once stabilized
+        if self.is_nan() || other.is_nan() {
+            Self::NAN
+        } else {
+            self.max(other)
+        }
     }
     #[cfg(feature = "algebraic-ops")]
     fn algebraic_add(self, other: Self) -> Self {
@@ -169,7 +175,13 @@ impl Scalar for f32 {
         self.cos()
     }
     fn max(self, other: Self) -> Self {
-        self.max(other)
+        // NaN must win so a failed batch lane fails the error test rather than vanishing
+        // TODO: swap to f32::maximum once stabilized
+        if self.is_nan() || other.is_nan() {
+            Self::NAN
+        } else {
+            self.max(other)
+        }
     }
     #[cfg(feature = "algebraic-ops")]
     fn algebraic_add(self, other: Self) -> Self {
