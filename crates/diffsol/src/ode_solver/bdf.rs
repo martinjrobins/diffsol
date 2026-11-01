@@ -173,6 +173,8 @@ pub struct Bdf<
     root_finder: Option<RootFinder<Eqn::V>>,
     is_state_modified: bool,
     jacobian_update: JacobianUpdate<Eqn::T>,
+    /// the step ended at a root or tstop, so the caller may still change h before the next step
+    jacobian_check_pending: bool,
     config: BdfConfig<Eqn::T>,
     prev_error_norm: Option<Eqn::T>,
 }
@@ -232,6 +234,7 @@ where
             root_finder: self.root_finder.clone(),
             is_state_modified: self.is_state_modified,
             jacobian_update: self.jacobian_update.clone(),
+            jacobian_check_pending: self.jacobian_check_pending,
             config: self.config.clone(),
             prev_error_norm: self.prev_error_norm,
         }
@@ -406,6 +409,7 @@ where
             root_finder,
             is_state_modified,
             jacobian_update: JacobianUpdate::new(&problem.ode_options),
+            jacobian_check_pending: false,
             config,
             prev_error_norm: None,
         })
@@ -780,8 +784,11 @@ where
             None
         };
         if let Some(factor) = factor {
+            let n_equal_steps = self.n_equal_steps;
             // update step size ignoring the possible "step size too small" error
             let _ = self._update_step_size(factor);
+            // landing on tstop is not a controller decision, so keep the equal-step count
+            self.n_equal_steps = n_equal_steps;
         }
         Ok(None)
     }
@@ -1358,6 +1365,13 @@ where
         let mut convergence_fail = false;
         let mut nonlinear_failures = 0;
 
+        // a root found on the previous step might have hidden a tstop, so check here
+        if let (true, Some(tstop)) = (self.jacobian_check_pending, self.tstop) {
+            if let Some(reason) = self.handle_tstop(tstop)? {
+                return Ok(reason);
+            }
+        }
+
         if self.is_state_modified {
             // reinitalise root finder if needed
             if let (Some(root_fn), Some(root_finder)) =
@@ -1386,6 +1400,13 @@ where
                 "State was modified, reinitialised to first order with h = {}",
                 self.state.h
             );
+        }
+
+        // if root or tstop occured in the last step, this check was skipped.
+        // do the check now that h is known
+        if std::mem::take(&mut self.jacobian_check_pending) {
+            let c = self.state.h * self.alpha[self.state.order];
+            self._jacobian_updates_at(c, SolverState::StepSuccess, None);
         }
 
         self._predict_forward();
@@ -1671,14 +1692,11 @@ where
                 );
             }
         }
-        // update the Jacobian for the next step if due, then advance the schedule
-        let c = self.state.h * self.alpha[self.state.order];
-        self._jacobian_updates_at(c, SolverState::StepSuccess, None);
-        self.jacobian_update.step();
 
         self.record_h_end();
 
         // check for root within accepted step
+        let mut reason = None;
         if let (Some(root_fn), Some(root_finder)) =
             (self.ode_problem.eqn.root(), self.root_finder.as_ref())
         {
@@ -1690,20 +1708,27 @@ where
             );
             if let Some((root, root_idx)) = ret {
                 debug!("Root found at time {}", root);
-                return Ok(OdeSolverStopReason::RootFound(root, root_idx));
+                reason = Some(OdeSolverStopReason::RootFound(root, root_idx));
             }
         }
 
-        if let Some(tstop) = self.tstop {
-            if let Some(reason) = self.handle_tstop(tstop).unwrap() {
-                return Ok(reason);
-            }
+        if let (None, Some(tstop)) = (&reason, self.tstop) {
+            reason = self.handle_tstop(tstop)?;
             // the step may have been shortened to hit tstop next time
             self.record_h_end();
         }
 
-        // just a normal step, no roots or tstop reached
-        Ok(OdeSolverStopReason::InternalTimestep)
+        // update the Jacobian for the next step if due, on the h it will use, then advance the
+        // schedule. At a root or tstop the caller may still change h, so check at the next step
+        if reason.is_some() {
+            self.jacobian_check_pending = true;
+        } else {
+            let c = self.state.h * self.alpha[self.state.order];
+            self._jacobian_updates_at(c, SolverState::StepSuccess, None);
+        }
+        self.jacobian_update.step();
+
+        Ok(reason.unwrap_or(OdeSolverStopReason::InternalTimestep))
     }
 
     fn set_stop_time(&mut self, tstop: <Eqn as Op>::T) -> Result<(), DiffsolError> {
@@ -2313,10 +2338,10 @@ mod test {
             .unwrap();
         test_adjoint(adjoint_solver, dgdu, 40.0);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 171
+        number_of_calls: 170
         number_of_jac_muls: 2
         number_of_matrix_evals: 1
-        number_of_jac_adj_muls: 130
+        number_of_jac_adj_muls: 129
         "###);
     }
 
@@ -2366,10 +2391,10 @@ mod test {
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 533
+        number_of_calls: 531
         number_of_jac_muls: 2
         number_of_matrix_evals: 1
-        number_of_jac_adj_muls: 638
+        number_of_jac_adj_muls: 641
         "###);
     }
 
@@ -2444,10 +2469,10 @@ mod test {
             .unwrap();
         test_adjoint(adjoint_solver, dgdu, 40.0);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 160
+        number_of_calls: 159
         number_of_jac_muls: 15
         number_of_matrix_evals: 5
-        number_of_jac_adj_muls: 106
+        number_of_jac_adj_muls: 105
         "###);
     }
 
@@ -2485,7 +2510,7 @@ mod test {
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 235
+        number_of_calls: 236
         number_of_jac_muls: 12
         number_of_matrix_evals: 4
         number_of_jac_adj_muls: 295
@@ -3549,6 +3574,70 @@ mod test {
             }
             assert_eq!(solver.step().unwrap(), OdeSolverStopReason::TstopReached);
             assert_eq!(solver.state().t, tstop);
+        }
+    }
+
+    /// A root found on the step that also reaches the stop time is reported first, and the stop
+    /// time on the next call to step, without stepping past it.
+    #[test]
+    fn bdf_root_found_on_the_step_reaching_a_stop_time() {
+        let problem = OdeBuilder::<M>::new()
+            .rhs_implicit(
+                |y, _, _, dy| dy[0] = -0.1 * y[0],
+                |_, _, _, v, jv| jv[0] = -0.1 * v[0],
+            )
+            .init(|_, _, y| y[0] = 1.0, 1)
+            .root(|_, _, t, g| g[0] = t - 0.999, 1)
+            .build()
+            .unwrap();
+        let mut solver = problem.bdf::<LS>().unwrap();
+        solver.set_stop_time(1.0).unwrap();
+        let reason = loop {
+            match solver.step().unwrap() {
+                OdeSolverStopReason::InternalTimestep => continue,
+                reason => break reason,
+            }
+        };
+        assert!(matches!(reason, OdeSolverStopReason::RootFound(..)));
+        assert_eq!(solver.state().t, 1.0);
+        assert_eq!(solver.step().unwrap(), OdeSolverStopReason::TstopReached);
+        assert_eq!(solver.state().t, 1.0);
+        solver.set_stop_time(2.0).unwrap();
+        while solver.step().unwrap() != OdeSolverStopReason::TstopReached {}
+        assert_eq!(solver.state().t, 2.0);
+    }
+
+    /// Frequent stop times must not lock the step size and order (the clamp keeps the
+    /// equal-step count) or refresh the Newton matrix every step (the refresh is decided on the
+    /// clamped step size).
+    #[test]
+    fn bdf_frequent_stop_times_stay_efficient() {
+        let problem = OdeBuilder::<M>::new()
+            .rtol(1e-5)
+            .atol([1e-7])
+            .rhs_implicit(
+                |y, _, _, dy| dy[0] = -0.01 * y[0],
+                |_, _, _, v, jv| jv[0] = -0.01 * v[0],
+            )
+            .init(|_, _, y| y[0] = 1.0, 1)
+            .build()
+            .unwrap();
+        // (interval, max steps, max linear solver setups) over t in [0, 100]
+        for (interval, max_steps, max_setups) in [(1.0, 200, 60), (0.1, 1100, 200)] {
+            let mut solver = problem.bdf::<LS>().unwrap();
+            let nstops = (100.0 / interval) as usize;
+            for i in 1..=nstops {
+                solver.set_stop_time(i as f64 * interval).unwrap();
+                while solver.step().unwrap() != OdeSolverStopReason::TstopReached {}
+            }
+            let stats = solver.get_statistics();
+            assert!(
+                stats.number_of_steps <= max_steps
+                    && stats.number_of_linear_solver_setups <= max_setups,
+                "interval {interval}: {} steps, {} setups",
+                stats.number_of_steps,
+                stats.number_of_linear_solver_setups
+            );
         }
     }
 
