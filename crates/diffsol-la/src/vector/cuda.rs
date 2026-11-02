@@ -109,9 +109,7 @@ impl CudaContext {
             } else {
                 batch_sum.pow(T::one() / T::from_f64(k as f64).unwrap())
             };
-            if norm > max_norm {
-                max_norm = norm;
-            }
+            max_norm = max_norm.max(norm);
         }
         max_norm
     }
@@ -1454,9 +1452,7 @@ impl<T: ScalarCuda> VectorView<'_> for CudaVecRef<'_, T> {
                 .iter()
                 .fold(T::zero(), |acc, x| acc.algebraic_add(*x));
             let norm = sum / nstates_t;
-            if norm > max_norm {
-                max_norm = norm;
-            }
+            max_norm = max_norm.max(norm);
         }
         max_norm
     }

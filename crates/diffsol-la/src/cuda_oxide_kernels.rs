@@ -166,6 +166,29 @@ pub mod kernels {
         }
     }
 
+    /// `lhs[b * stride] = value`, one thread per lane
+    #[kernel]
+    #[launch_bounds(256)]
+    #[launch_contract(domain = 1, block = (256, 1, 1))]
+    pub fn vec_fill_strided<T: ScalarCuda>(
+        mut lhs: DisjointSlice<T>,
+        value: T,
+        nbatch: u32,
+        stride: u32,
+    ) {
+        let b = thread::index_1d().get();
+        if b >= nbatch as usize {
+            return;
+        }
+        let di = b * stride as usize;
+        if di < lhs.len() {
+            // SAFETY: each lane writes its own slot.
+            unsafe {
+                *lhs.as_mut_ptr().add(di) = value;
+            }
+        }
+    }
+
     /// `lhs[b, elem] = rhs[..] - lhs[b, elem]`
     ///
     /// The reversed form of [`vec_sub_assign`], for `&lhs - rhs` where `rhs` is
@@ -905,7 +928,8 @@ pub mod kernels {
             for j in 0..bpl {
                 sum += partials[base + j];
             }
-            if sum > local {
+            // NaN must win so a failed lane fails the error test
+            if sum.is_nan() || sum > local {
                 local = sum;
             }
             b += step;
@@ -1365,10 +1389,11 @@ pub mod kernels {
     /// `swap`. Every value reaching here is a sum of squares or of `|x|^k`, so
     /// it is `>= 0` and never `-0.0`.
     ///
-    /// The `> 0` guard skips both the identity and NaN, which is what the
-    /// host's `if norm > max_norm` starting from zero used to do.
+    /// The guard skips the identity but keeps NaN: any NaN's bit pattern is
+    /// above +inf's as a `u64`, so it wins the max and a failed lane fails the
+    /// error test.
     fn atomic_max_into<T: ScalarCuda>(out: &[DeviceAtomicU64], value: T) {
-        if value > T::zero() {
+        if value > T::zero() || value.is_nan() {
             out[0].fetch_max(value.to_max_bits(), RELAXED);
         }
     }
@@ -1397,8 +1422,9 @@ pub mod kernels {
                 // which no other active thread holds -- and barriers between
                 // rounds.
                 unsafe {
-                    if *smax.add(tid) < *smax.add(tid + s) {
-                        *smax.add(tid) = *smax.add(tid + s);
+                    let other = *smax.add(tid + s);
+                    if other.is_nan() || *smax.add(tid) < other {
+                        *smax.add(tid) = other;
                     }
                 }
             }

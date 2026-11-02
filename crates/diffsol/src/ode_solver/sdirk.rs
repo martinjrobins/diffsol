@@ -1092,7 +1092,7 @@ mod test {
             .unwrap();
         test_adjoint(adjoint_solver, dgdu, 40.0);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 426
+        number_of_calls: 430
         number_of_jac_muls: 10
         number_of_matrix_evals: 5
         number_of_jac_adj_muls: 138
@@ -1134,7 +1134,7 @@ mod test {
             .unwrap();
         test_adjoint(adjoint_solver, dgdu, 40.0);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 373
+        number_of_calls: 375
         number_of_jac_muls: 30
         number_of_matrix_evals: 10
         number_of_jac_adj_muls: 117

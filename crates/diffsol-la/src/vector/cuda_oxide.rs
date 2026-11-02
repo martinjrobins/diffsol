@@ -21,7 +21,7 @@ use cuda_host::RowWidth;
 
 use super::{VectorIndex, VectorView, VectorViewMut};
 use crate::context::broadcast_batch;
-use crate::context::cuda_oxide::{copy_at, read_at, write_at};
+use crate::context::cuda_oxide::{copy_at, read_at};
 use crate::cuda_oxide_kernels::{
     LaneArgs, LaneArgsMut, BLOCK_SIZE, REDUCE_BATCH_SMALL_NSTATES, REDUCE_ELEM_SMALL_NSTATES,
     SMALL_NSTATES, WARPS_PER_BLOCK,
@@ -821,6 +821,24 @@ pub(crate) fn launch_fill<T: ScalarCuda>(
         .expect("launch vec_fill");
 }
 
+/// `dest[b * stride] = value` for every lane `b`
+fn launch_fill_strided<T: ScalarCuda>(ctx: &OxideContext, mut dest: OperandMut<'_, T>, value: T) {
+    let cfg = OxideContext::config_1d(dest.nbatch);
+    let m = &ctx.module;
+    let p = m
+        .prepare_vec_fill_strided::<T>(cfg)
+        .expect("prepare vec_fill_strided");
+    m.vec_fill_strided::<T>(
+        &ctx.stream,
+        &p,
+        &mut dest.window,
+        value,
+        dest.nbatch,
+        dest.stride,
+    )
+    .expect("launch vec_fill_strided");
+}
+
 /// Where one of the reduction kernels writes, and the geometry it runs at.
 ///
 /// Which arm a reduction gets is decided by `nstates` against
@@ -1332,15 +1350,9 @@ impl<T: ScalarCuda> Vector for OxideVec<T> {
         let nbatch = self.context.nbatch();
         let nstates = self.len();
         assert!(index < nstates, "Index out of bounds");
-        for b in 0..nbatch {
-            write_at(
-                &self.context.stream,
-                &self.data,
-                b * nstates + index,
-                &[value],
-            )
-            .expect("Failed to copy data from host to device");
-        }
+        let ctx = self.context.clone();
+        let dest = OperandMut::new(&mut self.data, index, nstates, 1, nbatch);
+        launch_fill_strided(&ctx, dest, value);
     }
     fn norm(&self, k: i32) -> Self::T {
         let nbatch = self.context.nbatch();
@@ -2083,11 +2095,10 @@ impl<'a, T: ScalarCuda> VectorViewMut<'a> for OxideVecMut<'a, T> {
     fn fill_index(&mut self, index: IndexType, value: Self::T) {
         let nbatch = self.context.nbatch();
         assert!(index < self.nstates, "Index out of bounds");
-        for b in 0..nbatch {
-            let offset = b * self.stride + self.col_offset + index;
-            write_at(&self.context.stream, self.data, offset, &[value])
-                .expect("Failed to copy data from host to device");
-        }
+        let ctx = self.context.clone();
+        let offset = self.col_offset + index;
+        let dest = OperandMut::new(&mut *self.data, offset, self.stride, 1, nbatch);
+        launch_fill_strided(&ctx, dest, value);
     }
     fn axpy(&mut self, alpha: Self::T, x: &Self::Owned, beta: Self::T) {
         let ctx = self.context.clone();
