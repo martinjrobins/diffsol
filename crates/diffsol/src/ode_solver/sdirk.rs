@@ -510,6 +510,13 @@ where
     }
 
     fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError> {
+        if self.rk.get_statistics().number_of_steps >= self.config.maximum_number_timesteps {
+            return Err(OdeSolverError::TooManyTimesteps {
+                time: self.rk.state().t.to_f64().unwrap(),
+                num_steps: self.rk.get_statistics().number_of_steps,
+            }
+            .into());
+        }
         debug!(
             "Taking SDIRK step at time {}, step size {}",
             self.rk.state().t,
