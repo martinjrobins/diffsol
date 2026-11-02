@@ -313,11 +313,17 @@ where
 
         state.check_consistent_with_problem(problem)?;
 
-        let mut convergence = Convergence::with_tolerance(
-            problem.rtol,
-            &problem.atol,
-            problem.ode_options.nonlinear_solver_tolerance,
-        );
+        // without the main equations this is an adjoint solve, whose state has tolerances of its own
+        let (rtol, atol) = if integrate_main_eqn {
+            (problem.rtol, &problem.atol)
+        } else {
+            (
+                problem.adjoint_rtol.unwrap_or(problem.rtol),
+                problem.adjoint_atol.as_ref().unwrap_or(&problem.atol),
+            )
+        };
+        let mut convergence =
+            Convergence::with_tolerance(rtol, atol, problem.ode_options.nonlinear_solver_tolerance);
         let options = &problem.ode_options;
         convergence.set_max_iter(options.max_nonlinear_solver_iterations);
 
@@ -2037,9 +2043,10 @@ mod test {
             test_solve_soln_adjoint_with_single_reset_root, test_state_mut,
             test_state_mut_on_problem,
         },
-        scale, ConstantOp, Context, DenseMatrix, FaerLU, FaerMat, FaerSparseLU, FaerSparseMat,
-        MatrixCommon, NalgebraLU, OdeBuilder, OdeEquations, OdeSolverMethod, OdeSolverStopReason,
-        Op, Vector, VectorView,
+        scale, AdjointOdeSolverMethod, ConstantOp, Context, DenseMatrix, FaerLU, FaerMat,
+        FaerSparseLU, FaerSparseMat, Matrix, MatrixCommon, NalgebraLU, OdeBuilder, OdeEquations,
+        OdeSolverConfig, OdeSolverMethod, OdeSolverState, OdeSolverStopReason, Op, Vector,
+        VectorView,
     };
 
     type M = NalgebraMat<f64>;
@@ -2047,8 +2054,6 @@ mod test {
 
     #[test]
     fn bdf_replay_timestep_budget() {
-        use crate::{AdjointOdeSolverMethod, OdeSolverConfig};
-
         let (problem, _) = exponential_decay_problem_adjoint::<M>(true, true);
         let mut solver = problem.bdf::<LS>().unwrap();
         let (checkpoints, _, _, _) = solver.solve_with_checkpointing(10.0, Some(2)).unwrap();
@@ -2413,11 +2418,59 @@ mod test {
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 531
+        number_of_calls: 522
         number_of_jac_muls: 2
         number_of_matrix_evals: 1
-        number_of_jac_adj_muls: 641
+        number_of_jac_adj_muls: 637
         "###);
+    }
+
+    /// The adjoint equations are linear in the cost gradients, which the backward pass
+    /// normalises, so it succeeds whatever the scale of the loss, and the gradient scales with
+    /// it (#408).
+    #[test]
+    fn bdf_test_robertson_adjoint_invariant_to_loss_scale() {
+        let t: Vec<f64> = (0..20)
+            .map(|i| 10f64.powf(-1.0 + 6.0 * i as f64 / 19.0))
+            .collect();
+        for (rtol, atol) in [(1e-6, 1e-8), (1e-5, 1e-7)] {
+            let (mut problem, _soln) = robertson_ode::<M>(1);
+            let ctx = *problem.context();
+            problem.rtol = rtol;
+            problem.atol = <M as MatrixCommon>::V::from_element(3, atol, ctx);
+            let grad_at_scale = |scale: f64| {
+                let mut solver = problem.bdf::<LS>().unwrap();
+                let (checkpointer, ys, _) =
+                    solver.solve_dense_with_checkpointing(&t, None).unwrap();
+                let mut dgdu = M::zeros(ys.nrows(), ys.ncols(), ctx);
+                for j in 0..t.len() {
+                    dgdu.set_index(1, j, scale);
+                }
+                let adjoint = problem
+                    .bdf_solver_adjoint::<LS, _>(checkpointer, Some(solver), Some(1))
+                    .unwrap();
+                let (state, _) = adjoint
+                    .solve_adjoint_backwards_pass(&t, &[&dgdu])
+                    .unwrap_or_else(|e| panic!("rtol {rtol:e} scale {scale:e}: {e}"));
+                state
+                    .into_common()
+                    .sg
+                    .clone_as_vec()
+                    .into_iter()
+                    .map(|g| g / scale)
+                    .collect::<Vec<_>>()
+            };
+            let reference = grad_at_scale(1.0);
+            for scale in [1e-6, 1e4, 1e8] {
+                let grad = grad_at_scale(scale);
+                for (g, r) in grad.iter().zip(&reference) {
+                    assert!(
+                        (g - r).abs() <= 1e-10 * r.abs(),
+                        "rtol {rtol:e} scale {scale:e}: {grad:?} != {reference:?}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -2532,10 +2585,10 @@ mod test {
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 236
+        number_of_calls: 383
         number_of_jac_muls: 12
         number_of_matrix_evals: 4
-        number_of_jac_adj_muls: 295
+        number_of_jac_adj_muls: 486
         "###);
     }
 
