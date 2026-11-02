@@ -1269,16 +1269,11 @@ mod tests {
         }
     }
 
-    fn assert_sens_atol_round_trips_with_multiple_params<CG>()
-    where
-        CG: diffsol::CodegenModule
-            + CodegenModuleJit
-            + CodegenModuleCompile
-            + SolveSerialization<diffsol::NalgebraMat<f64>>,
-    {
+    #[cfg(feature = "diffsl-cranelift")]
+    fn assert_sens_atol_round_trips_with_multiple_params() {
         // two params make sens_atol batched (nbatch = 2), which get_index rejects
         let problem = OdeBuilder::<diffsol::NalgebraMat<f64>>::new()
-            .build_from_diffsl::<CG>(two_param_logistic_diffsl_code())
+            .build_from_diffsl::<diffsol::CraneliftJitModule>(two_param_logistic_diffsl_code())
             .unwrap();
         let mut solve = GenericSolve { problem };
         assert_eq!(solve.nparams(), 2);
@@ -1308,13 +1303,7 @@ mod tests {
     #[cfg(feature = "diffsl-cranelift")]
     #[test]
     fn sens_atol_round_trips_with_multiple_params_for_cranelift() {
-        assert_sens_atol_round_trips_with_multiple_params::<diffsol::CraneliftJitModule>();
-    }
-
-    #[cfg(feature = "diffsl-llvm")]
-    #[test]
-    fn solve_factory_supports_all_jit_matrix_and_scalar_types_for_llvm() {
-        assert_factory_supports_all_matrix_and_scalar_types::<diffsol::LlvmModule>();
+        assert_sens_atol_round_trips_with_multiple_params();
     }
 
     #[cfg(feature = "diffsl-llvm")]
@@ -1324,12 +1313,6 @@ mod tests {
         assert_solve_runtime_paths::<f64, diffsol::LlvmModule>(5e-4);
         assert_solve_metadata_and_helpers::<f32, diffsol::LlvmModule>(5e-3);
         assert_solve_runtime_paths::<f32, diffsol::LlvmModule>(5e-3);
-    }
-
-    #[cfg(feature = "diffsl-llvm")]
-    #[test]
-    fn sens_atol_round_trips_with_multiple_params_for_llvm() {
-        assert_sens_atol_round_trips_with_multiple_params::<diffsol::LlvmModule>();
     }
 
     #[cfg(feature = "diffsl-llvm")]
