@@ -931,6 +931,10 @@ macro_rules! generate_vector_tests_batched {
                 $crate::vector::tests::test_batched_squared_norm::<$V>($ctx2);
             }
             #[test]
+            fn [<test_batched_norm_nan_ $suffix>]() {
+                $crate::vector::tests::test_batched_norm_nan::<$V>($ctx2);
+            }
+            #[test]
             fn [<test_batched_fill_index_ $suffix>]() {
                 $crate::vector::tests::test_batched_fill_index::<$V>($ctx3);
             }
@@ -1850,6 +1854,22 @@ pub(crate) mod tests {
         let batch1 = (err3 * err3 + err4 * err4) / f::<V>(2.0);
         let diff = norm - batch1;
         assert!(num_traits::abs(diff) < eps::<V>(100.0));
+    }
+
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
+    pub fn test_batched_norm_nan<V: Vector>(ctx: V::C) {
+        assert_eq!(ctx.nbatch(), 2);
+        let nan = f64::NAN;
+        let y = V::from_vec(fv::<V>(&[1.0, 1.0, 1.0, 1.0]), ctx.clone());
+        let atol = V::from_vec(fv::<V>(&[1e-3, 1e-3]), V::C::default());
+        let rtol = f::<V>(1e-2);
+        // a NaN lane must not be hidden by a finite one, whichever lane it is in
+        for xs in [[nan, 0.0, 1.0, 2.0], [1.0, 2.0, 0.0, nan]] {
+            let x = V::from_vec(fv::<V>(&xs), ctx.clone());
+            assert!(x.norm(2).is_nan());
+            assert!(x.norm(1).is_nan());
+            assert!(x.squared_norm(&y, &atol, rtol).is_nan());
+        }
     }
 
     #[cfg_attr(not(feature = "cuda"), allow(dead_code))]

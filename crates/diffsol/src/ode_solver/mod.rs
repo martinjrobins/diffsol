@@ -78,12 +78,14 @@ impl Display for OdeSolverStatistics {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use std::assert_matches;
     use std::rc::Rc;
 
     use self::problem::OdeSolverSolution;
 
     use super::*;
     use crate::error::{DiffsolError, OdeSolverError};
+    use crate::matrix::dense_nalgebra_serial::NalgebraMat;
     use crate::matrix::Matrix;
     use crate::ode_solver::sensitivities::SensitivitiesOdeSolverMethod;
     use crate::ode_solver::solution::Solution;
@@ -99,7 +101,7 @@ pub(crate) mod tests {
     };
     use crate::{
         ConstantOp, ConstantOpSens, DefaultDenseMatrix, DefaultSolver, LinearSolver,
-        NonLinearOpSens, Op, Vector,
+        NalgebraContext, NalgebraLU, NalgebraVec, NonLinearOpSens, OdeBuilder, Op, Vector,
     };
     use num_traits::{FromPrimitive, One, Signed, ToPrimitive, Zero};
 
@@ -980,6 +982,40 @@ pub(crate) mod tests {
             s.problem().rtol,
             M::T::from_f64(1e3).unwrap(),
         );
+    }
+
+    #[test]
+    fn max_number_timesteps() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_problem;
+        use crate::{NalgebraLU, NalgebraMat};
+
+        fn check<'a, Eqn: OdeEquations + 'a, Method: OdeSolverMethod<'a, Eqn>>(mut solver: Method)
+        where
+            Eqn::V: DefaultDenseMatrix,
+        {
+            let result = solver.solve(Eqn::T::from_f64(10.0).unwrap());
+            assert_matches!(
+                result,
+                Err(DiffsolError::OdeSolverError(
+                    OdeSolverError::TooManyTimesteps { num_steps: 2, .. }
+                ))
+            );
+            let time = solver.state().t;
+            let result = solver.step();
+            assert_matches!(
+                result,
+                Err(DiffsolError::OdeSolverError(
+                    OdeSolverError::TooManyTimesteps { num_steps: 2, .. }
+                ))
+            );
+            assert_eq!(solver.state().t, time);
+        }
+
+        let (mut problem, _) = exponential_decay_problem::<NalgebraMat<f64>>(false);
+        problem.ode_options.max_number_timesteps = 2;
+        check(problem.bdf::<NalgebraLU<f64>>().unwrap());
+        check(problem.tr_bdf2::<NalgebraLU<f64>>().unwrap());
+        check(problem.tsit45().unwrap());
     }
 
     pub fn test_config<'a, Eqn: OdeEquations + 'a, Method: OdeSolverMethod<'a, Eqn>>(
@@ -1983,6 +2019,59 @@ pub(crate) mod tests {
                 Eqn::T::from_f64(1e-6).unwrap(),
                 Eqn::T::from_f64(260.0).unwrap(),
             );
+        }
+    }
+
+    #[test]
+    fn nan_lane_fails_step() {
+        // returns the time reached, or the error time if `step` failed
+        fn advance<'a, Eqn, S>(mut solver: S) -> Result<f64, f64>
+        where
+            Eqn: OdeEquations<V = NalgebraVec<f64>, T = f64> + 'a,
+            S: OdeSolverMethod<'a, Eqn>,
+        {
+            solver.set_stop_time(2.0).unwrap();
+            loop {
+                match solver.step() {
+                    Ok(OdeSolverStopReason::TstopReached) => return Ok(solver.state().t),
+                    Ok(_) => {}
+                    Err(_) => return Err(solver.state().t),
+                }
+            }
+        }
+
+        for nbatch in [1, 2] {
+            // the last lane's RHS is NaN for t > 1
+            let p: Vec<f64> = (0..nbatch)
+                .map(|l| if l == nbatch - 1 { 1.0 } else { 0.0 })
+                .collect();
+            let problem = OdeBuilder::<NalgebraMat<f64>>::new()
+                .context(NalgebraContext::with_nbatch(nbatch))
+                .p(p)
+                .rhs_implicit(
+                    |y, p, t, dy| {
+                        dy[0] = if p[0] == 1.0 && t > 1.0 {
+                            f64::NAN
+                        } else {
+                            -y[0]
+                        }
+                    },
+                    |_y, _p, _t, v, jv| jv[0] = -v[0],
+                )
+                .init(|_p, _t, y| y[0] = 1.0, 1)
+                .build()
+                .unwrap();
+            for (name, r) in [
+                ("bdf", advance(problem.bdf::<NalgebraLU<f64>>().unwrap())),
+                ("tsit45", advance(problem.tsit45().unwrap())),
+            ] {
+                // the nan should have caused an error close to t=1.0
+                let t = r.expect_err(&format!("{name} nbatch={nbatch} accepted NaN"));
+                assert!(
+                    (t - 1.0).abs() < 1e-6,
+                    "{name} nbatch={nbatch} failed at t={t}"
+                );
+            }
         }
     }
 }
