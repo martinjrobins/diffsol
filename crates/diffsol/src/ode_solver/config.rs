@@ -213,3 +213,15 @@ impl<T: Scalar> OdeSolverConfig<T> for ExplicitRkConfig<T> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::limit_timestep;
+
+    #[test]
+    fn invalid_max_timestep() {
+        for maximum in [0.0, -1.0, f64::NAN] {
+            assert!(limit_timestep(1.0, maximum).is_err());
+        }
+    }
+}
