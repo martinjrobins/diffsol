@@ -150,6 +150,10 @@ pub struct OdeSolverOptions<T: Scalar> {
     ///
     /// Must be greater than or equal to `Scalar::EPSILON` so that each step advances `t`.
     pub min_timestep: T,
+    /// Maximum allowed step size (absolute value, default: infinity, meaning no limit).
+    ///
+    /// Must be positive. The solver may take smaller steps to satisfy error control.
+    pub max_timestep: T,
     /// Upper bound on step-size growth `h_new/h_old` (default: solver-specific when `None`).
     pub max_timestep_growth: Option<T>,
     /// Lower bound for step-size growth dead-zone (default: solver-specific when `None`).
@@ -194,6 +198,7 @@ impl<T: Scalar> Default for OdeSolverOptions<T> {
             derivative_solve_tolerance: T::from_f64(0.2).unwrap(),
             derivative_solve_max_iter: 10,
             min_timestep: T::EPSILON,
+            max_timestep: T::INFINITY,
             max_timestep_growth: None,
             min_timestep_growth: None,
             max_timestep_shrink: None,
@@ -1368,7 +1373,7 @@ mod tests {
     use super::OdeSolverOptions;
 
     #[test]
-    fn min_timestep_default_is_scalar_epsilon() {
+    fn timestep_defaults() {
         assert_eq!(
             OdeSolverOptions::<f64>::default().min_timestep,
             f64::EPSILON
@@ -1376,6 +1381,14 @@ mod tests {
         assert_eq!(
             OdeSolverOptions::<f32>::default().min_timestep,
             f32::EPSILON
+        );
+        assert_eq!(
+            OdeSolverOptions::<f64>::default().max_timestep,
+            f64::INFINITY
+        );
+        assert_eq!(
+            OdeSolverOptions::<f32>::default().max_timestep,
+            f32::INFINITY
         );
     }
 }

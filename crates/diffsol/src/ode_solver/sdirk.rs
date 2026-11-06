@@ -533,7 +533,7 @@ where
             self.rk.state().t,
             self.rk.state().h
         );
-        let mut h = self.rk.start_step()?;
+        let mut h = self.rk.start_step(self.config.maximum_timestep)?;
         let fixed_step = self.problem().ode_options.fixed_step;
         // a fixed step size is never too small, as it is never reduced
         let min_timestep = if fixed_step {
@@ -679,7 +679,7 @@ where
         };
 
         // accept the step
-        let new_h = h * factor;
+        let new_h = super::config::limit_timestep(h * factor, self.config.maximum_timestep)?;
         if factor != Eqn::T::one() {
             self.reset_etas_timestep_change();
         }
