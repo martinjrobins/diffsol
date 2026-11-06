@@ -21,6 +21,7 @@ use log::info;
 use log::trace;
 use num_traits::{abs, FromPrimitive, One, ToPrimitive, Zero};
 
+use super::config::OdeSolverConfigRef;
 use super::jacobian_update::SolverState;
 use super::method::{check_interpolate_bounds, check_interpolate_shape, check_interpolate_time};
 use super::pi_controller::pi_controller_raw;
@@ -486,7 +487,10 @@ where
         Ok(())
     }
 
-    pub(crate) fn start_step(&mut self) -> Result<Eqn::T, DiffsolError> {
+    pub(crate) fn start_step(
+        &mut self,
+        config: OdeSolverConfigRef<'_, Eqn::T>,
+    ) -> Result<Eqn::T, DiffsolError> {
         if self.is_state_mutated {
             // reinitalise root finder if needed
             if let (Some(root_fn), Some(root_finder)) =
@@ -503,7 +507,22 @@ where
             self.is_state_mutated = false;
         }
 
+        self.state.h = self.update_step_size(self.state.h, Eqn::T::one(), config)?;
         Ok(self.state.h)
+    }
+
+    pub(crate) fn update_step_size(
+        &self,
+        current_h: Eqn::T,
+        factor: Eqn::T,
+        config: OdeSolverConfigRef<'_, Eqn::T>,
+    ) -> Result<Eqn::T, DiffsolError> {
+        super::config::limit_timestep(
+            current_h * factor,
+            *config.minimum_timestep,
+            *config.maximum_timestep,
+            self.state.t,
+        )
     }
 
     pub(crate) fn factor(
@@ -920,10 +939,8 @@ where
 
     pub(crate) fn error_test_fail(
         &mut self,
-        h: Eqn::T,
         nattempts: usize,
         max_error_test_fails: usize,
-        min_timestep: Eqn::T,
     ) -> Result<(), DiffsolError> {
         self.statistics.number_of_error_test_failures += 1;
         // if too many error test failures, then fail
@@ -935,20 +952,12 @@ where
                 },
             ));
         }
-        // if step size too small, then fail
-        if abs(h) < min_timestep {
-            return Err(DiffsolError::from(OdeSolverError::StepSizeTooSmall {
-                time: self.state.t.to_f64().unwrap(),
-            }));
-        }
         Ok(())
     }
 
     pub(crate) fn solve_fail(
         &mut self,
-        h: Eqn::T,
         nonlinear_failures: usize,
-        min_timestep: Eqn::T,
         max_nonlinear_solver_fails: usize,
     ) -> Result<(), DiffsolError> {
         self.statistics.number_of_nonlinear_solver_fails += 1;
@@ -960,12 +969,6 @@ where
                     num_failures: nonlinear_failures,
                 },
             ));
-        }
-        // if step size too small, then fail
-        if abs(h) < min_timestep {
-            return Err(DiffsolError::from(OdeSolverError::StepSizeTooSmall {
-                time: self.state.t.to_f64().unwrap(),
-            }));
         }
         Ok(())
     }
