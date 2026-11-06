@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0](https://github.com/martinjrobins/diffsol/compare/diffsol-v0.18.0...diffsol-v0.19.0) - 2026-11-06
+
+### Added
+
+- *(diffsol)* [**breaking**] add max_number_timesteps option ([#434](https://github.com/martinjrobins/diffsol/pull/434))
+- *(diffsol)* add interpolate_vjp ([#425](https://github.com/martinjrobins/diffsol/pull/425))
+- *(diffsol)* [**breaking**] improve step_vjp accuracy, add benchmarks ([#422](https://github.com/martinjrobins/diffsol/pull/422))
+
+### Fixed
+
+- *(diffsol)* scale adjoint atol by the magnitude of the loss function ([#439](https://github.com/martinjrobins/diffsol/pull/439))
+- *(diffsol)* on tstop or root, do jacobian checks on next step instead ([#438](https://github.com/martinjrobins/diffsol/pull/438))
+- *(diffsol)* propogate nans across batches so solver fails ([#436](https://github.com/martinjrobins/diffsol/pull/436))
+- *(diffsol, bdf)* if tstop within 2h, split into two balanced steps ([#430](https://github.com/martinjrobins/diffsol/pull/430))
+- default min_timestep to the scalar's epsilon ([#402](https://github.com/martinjrobins/diffsol/pull/402))
+- count nonlinear solver failures per step and lower the default limit to 10 ([#397](https://github.com/martinjrobins/diffsol/pull/397))
+
+### Other
+
+- *(diffsol-la)* native impls of ger_cols, speed-ups on faer and nalgebra fill ([#429](https://github.com/martinjrobins/diffsol/pull/429))
+- *(diffsol)* consolidate batched/non-batched test_models ([#426](https://github.com/martinjrobins/diffsol/pull/426))
+
 ## [0.18.0](https://github.com/martinjrobins/diffsol/compare/diffsol-v0.17.1...diffsol-v0.18.0) - 2026-10-20
 
 ### Added
