@@ -522,7 +522,7 @@ where
             self.rk.state().t,
             self.rk.state().h
         );
-        let mut h = self.rk.start_step()?;
+        let mut h = self.rk.start_step(self.config.maximum_timestep)?;
 
         if h.abs() < self.config.minimum_timestep {
             return Err(DiffsolError::from(OdeSolverError::StepSizeTooSmall {
@@ -654,7 +654,7 @@ where
         };
 
         // accept the step
-        let new_h = h * factor;
+        let new_h = super::config::limit_timestep(h * factor, self.config.maximum_timestep)?;
         if factor != Eqn::T::one() {
             self.reset_etas_timestep_change();
         }

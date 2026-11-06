@@ -486,7 +486,7 @@ where
         Ok(())
     }
 
-    pub(crate) fn start_step(&mut self) -> Result<Eqn::T, DiffsolError> {
+    pub(crate) fn start_step(&mut self, maximum_timestep: Eqn::T) -> Result<Eqn::T, DiffsolError> {
         if self.is_state_mutated {
             // reinitalise root finder if needed
             if let (Some(root_fn), Some(root_finder)) =
@@ -503,6 +503,7 @@ where
             self.is_state_mutated = false;
         }
 
+        self.state.h = super::config::limit_timestep(self.state.h, maximum_timestep)?;
         Ok(self.state.h)
     }
 

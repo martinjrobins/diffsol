@@ -573,7 +573,13 @@ where
         //- constant c = h / (1-kappa) gamma_k term
         //- lu factorisation of (M - c * J) used in newton iteration (same equation)
 
-        let new_h = factor * self.state.h;
+        let proposed_h = factor * self.state.h;
+        let new_h = super::config::limit_timestep(proposed_h, self.config.maximum_timestep)?;
+        let factor = if new_h == proposed_h {
+            factor
+        } else {
+            new_h / self.state.h
+        };
         self.n_equal_steps = 0;
 
         // update D using equations in section 3.2 of [1]
@@ -1407,6 +1413,13 @@ where
                 "State was modified, reinitialised to first order with h = {}",
                 self.state.h
             );
+        }
+
+        let h = super::config::limit_timestep(self.state.h, self.config.maximum_timestep)?;
+        if h != self.state.h {
+            self._update_step_size(h / self.state.h)?;
+            let c = self.state.h * self.alpha[self.state.order];
+            self._jacobian_updates_at(c, SolverState::StepSuccess, None);
         }
 
         // if root or tstop occured in the last step, this check was skipped.

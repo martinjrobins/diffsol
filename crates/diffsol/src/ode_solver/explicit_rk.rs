@@ -203,12 +203,19 @@ where
             }
             .into());
         }
-        let mut h = self.rk.start_step()?;
+        let mut h = self.rk.start_step(self.config.maximum_timestep)?;
         debug!(
             "Starting Explicit RK step at t = {:?} with h = {:?}",
             self.state().t,
             h
         );
+
+        if self.config.maximum_timestep < self.config.minimum_timestep {
+            return Err(OdeSolverError::StepSizeTooSmall {
+                time: self.rk.state().t.to_f64().unwrap(),
+            }
+            .into());
+        }
 
         // loop until step is accepted
         let mut nattempts = 0;
@@ -248,7 +255,8 @@ where
             )?;
         };
         self.rk.set_prev_error(error_norm);
-        self.rk.step_accepted(h, h * factor, false)
+        let new_h = super::config::limit_timestep(h * factor, self.config.maximum_timestep)?;
+        self.rk.step_accepted(h, new_h, false)
     }
 
     fn set_stop_time(&mut self, tstop: <Eqn as Op>::T) -> Result<(), DiffsolError> {

@@ -1018,6 +1018,65 @@ pub(crate) mod tests {
         check(problem.tsit45().unwrap());
     }
 
+    #[test]
+    fn max_timestep() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_problem;
+        use crate::NalgebraMat;
+
+        fn check<'a, Eqn, Method>(mut solver: Method)
+        where
+            Eqn: OdeEquations<T = f64> + 'a,
+            Method: OdeSolverMethod<'a, Eqn>,
+        {
+            let direction = solver.state().h.signum();
+            let y0 = solver.state().y.get_index(0);
+            assert_eq!(*solver.config().as_base_ref().maximum_timestep, 0.01);
+            for cap in [0.01, 0.002] {
+                *solver.config_mut().as_base_mut().maximum_timestep = cap;
+                let tstop = solver.state().t + direction * 0.505;
+                solver.set_stop_time(tstop).unwrap();
+                let mut reached_cap = false;
+                loop {
+                    let t = solver.state().t;
+                    let reason = solver.step().unwrap();
+                    let dt = direction * (solver.state().t - t);
+                    assert!(dt > 0.0 && dt <= cap * (1.0 + 1e-10));
+                    assert!(solver.state().h.abs() <= cap);
+                    reached_cap |= (dt - cap).abs() < 1e-10;
+                    if matches!(reason, OdeSolverStopReason::TstopReached) {
+                        break;
+                    }
+                }
+                assert!(reached_cap);
+                assert_eq!(solver.state().t, tstop);
+                let expected = y0 * (-0.1 * tstop).exp();
+                assert!((solver.state().y.get_index(0) - expected).abs() < 1e-4);
+            }
+            *solver.config_mut().as_base_mut().maximum_timestep = f64::EPSILON / 2.0;
+            let result = solver.step();
+            assert_matches!(
+                result,
+                Err(DiffsolError::OdeSolverError(
+                    OdeSolverError::StepSizeTooSmall { .. }
+                ))
+            );
+            for invalid in [0.0, -1.0, f64::NAN] {
+                *solver.config_mut().as_base_mut().maximum_timestep = invalid;
+                let result = solver.step();
+                assert_matches!(result, Err(DiffsolError::Other(_)));
+            }
+        }
+
+        for direction in [1.0, -1.0] {
+            let (mut problem, _) = exponential_decay_problem::<NalgebraMat<f64>>(false);
+            problem.h0 = direction;
+            problem.ode_options.max_timestep = 0.01;
+            check(problem.bdf::<NalgebraLU<f64>>().unwrap());
+            check(problem.tr_bdf2::<NalgebraLU<f64>>().unwrap());
+            check(problem.tsit45().unwrap());
+        }
+    }
+
     pub fn test_config<'a, Eqn: OdeEquations + 'a, Method: OdeSolverMethod<'a, Eqn>>(
         mut s: Method,
     ) {

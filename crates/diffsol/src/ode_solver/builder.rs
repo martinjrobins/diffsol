@@ -1746,6 +1746,7 @@ where
             max_error_test_failures: ode_options.max_error_test_failures,
             max_nonlinear_solver_iterations: ode_options.max_nonlinear_solver_iterations,
             min_timestep: T::from_f64(ode_options.min_timestep).unwrap(),
+            max_timestep: T::from_f64(ode_options.max_timestep).unwrap(),
             max_timestep_growth: ode_options
                 .max_timestep_growth
                 .map(|value| T::from_f64(value).unwrap()),
