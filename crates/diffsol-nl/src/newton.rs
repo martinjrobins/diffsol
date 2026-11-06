@@ -1,5 +1,7 @@
-use diffsol_la::{Context, IndexType, LinearOp as LaLinearOp, LinearSolver, Matrix, Vector};
-use num_traits::One;
+use diffsol_la::{
+    Context, IndexType, LinearOp as LaLinearOp, LinearSolver, Matrix, Scalar, Vector,
+};
+use num_traits::{One, Zero};
 use std::collections::HashMap;
 
 use crate::{
@@ -41,19 +43,46 @@ pub fn newton_iteration<V: Vector>(
 ///
 /// The first update is `x_1 = P^-1 b`, the error of every later update is measured
 /// relative to it
+///
+/// With `rhs_scale` (a batched scalar, one value per lane), each lane is solved for `b`
+/// divided by its largest magnitude, and the solution multiplied back by it at the end. The
+/// problem is linear, so this changes only the convergence test, which then no longer depends
+/// on the scale of `b`. This is for right-hand sides, such as cotangents, whose units are not
+/// those of the tolerances in `convergence`.
 #[allow(clippy::too_many_arguments)]
 pub fn richardson<V: Vector>(
     b: &V,
     x: &mut V,
     delta: &mut V,
     scale: &mut V,
+    mut rhs_scale: Option<&mut V>,
     mul: impl Fn(&V, &mut V),
     mul_is_negative: bool,
     precondition: impl Fn(&mut V) -> Result<(), NlError>,
     convergence: &mut Convergence<V>,
 ) -> Result<(), NlError> {
-    // x_1 = P^-1 b, the update from x_0 = 0
     x.copy_from(b);
+    // if rhs_scale is passed, normalise b by its largest magnitude
+    if let Some(rhs_scale) = rhs_scale.as_deref_mut() {
+        V::reduce_elem(
+            rhs_scale,
+            [b],
+            V::T::zero(),
+            |[b], _lane, i| num_traits::abs(b[i]),
+            |a, c| a.max(c),
+        );
+        // hold -1/max|b|, the multiplier of b in the update below. A zero b needs no scaling,
+        // and a NaN or infinite one must reach the solution unscaled, so the solve fails
+        rhs_scale.for_each_elem([], |s, [], _lane, _i| {
+            *s = if *s > V::T::zero() && *s < V::T::INFINITY {
+                -V::T::one() / *s
+            } else {
+                -V::T::one()
+            };
+        });
+        x.for_each_elem([rhs_scale], |x, [s], _lane, _i| *x = -*x * s[0]);
+    }
+    // x_1 = P^-1 b, the update from x_0 = 0
     precondition(x)?;
     scale.copy_from(x);
     convergence.reset();
@@ -65,13 +94,21 @@ pub fn richardson<V: Vector>(
     for _ in 0..convergence.max_iter() {
         // delta = P^-1 (A x - b), the update with its sign reversed
         mul(x, delta);
-        delta.axpy(-V::T::one(), b, sign);
+        match rhs_scale.as_deref() {
+            Some(rhs_scale) => delta.batched_axpy(rhs_scale, b, sign),
+            None => delta.axpy(-V::T::one(), b, sign),
+        }
         precondition(delta)?;
         x.sub_assign(&*delta);
         let norm = convergence.norm(delta, scale);
         match convergence.check_new_iteration(norm) {
             ConvergenceStatus::Continue => continue,
-            ConvergenceStatus::Converged => return Ok(()),
+            ConvergenceStatus::Converged => {
+                if let Some(rhs_scale) = rhs_scale {
+                    x.for_each_elem([rhs_scale], |x, [s], _lane, _i| *x = -*x / s[0]);
+                }
+                return Ok(());
+            }
             ConvergenceStatus::Diverged => return Err(non_linear_solver_error!(NewtonDiverged)),
         }
     }
@@ -142,6 +179,8 @@ pub struct NewtonNonlinearSolver<M: Matrix, Ls: LinearSolver<M>, Lsearch: LineSe
     tmps: HashMap<usize, M::V>,
     /// Second work vectors, for the error scale of [richardson].
     scales: HashMap<usize, M::V>,
+    /// Per-lane scales of the right-hand side of [richardson], one batched scalar per lane count.
+    rhs_scales: HashMap<usize, M::V>,
 }
 
 impl<M: Matrix, Ls: LinearSolver<M>, Lsearch: LineSearch<M::V>>
@@ -154,6 +193,7 @@ impl<M: Matrix, Ls: LinearSolver<M>, Lsearch: LineSearch<M::V>>
             is_jacobian_set: false,
             tmps: HashMap::new(),
             scales: HashMap::new(),
+            rhs_scales: HashMap::new(),
         }
     }
     pub fn linear_solver(&self) -> &Ls {
@@ -217,7 +257,17 @@ impl<M: Matrix, Ls: LinearSolver<M>, Lsearch: LineSearch<M::V>> NonLinearSolver<
         let scale = work_vector(&mut self.scales, x);
         let mul = |x: &M::V, y: &mut M::V| op.jac_mul_inplace(x_lin, x, y);
         let precondition = |x: &mut M::V| self.linear_solver.solve_in_place(x).map_err(Into::into);
-        richardson(b, x, delta, scale, mul, false, precondition, convergence)
+        richardson(
+            b,
+            x,
+            delta,
+            scale,
+            None,
+            mul,
+            false,
+            precondition,
+            convergence,
+        )
     }
 
     fn solve_jacobian_transpose_in_place<
@@ -235,6 +285,10 @@ impl<M: Matrix, Ls: LinearSolver<M>, Lsearch: LineSearch<M::V>> NonLinearSolver<
         }
         let delta = work_vector(&mut self.tmps, x);
         let scale = work_vector(&mut self.scales, x);
+        let rhs_scale = self
+            .rhs_scales
+            .entry(x.context().nbatch())
+            .or_insert_with(|| M::V::zeros(1, x.context().clone()));
         // the op gives -J^T x
         let mul = |x: &M::V, y: &mut M::V| op.jac_transpose_mul_inplace(x_lin, x, y);
         let precondition = |x: &mut M::V| {
@@ -242,7 +296,19 @@ impl<M: Matrix, Ls: LinearSolver<M>, Lsearch: LineSearch<M::V>> NonLinearSolver<
                 .solve_transpose_in_place(x)
                 .map_err(Into::into)
         };
-        richardson(b, x, delta, scale, mul, true, precondition, convergence)
+        // the right-hand side is a cotangent, whose units are not those of the state the
+        // tolerances are for, so the solve is normalised by its scale
+        richardson(
+            b,
+            x,
+            delta,
+            scale,
+            Some(rhs_scale),
+            mul,
+            true,
+            precondition,
+            convergence,
+        )
     }
 
     fn solve_in_place<C: NonLinearOp<V = M::V, T = M::T, M = M>>(

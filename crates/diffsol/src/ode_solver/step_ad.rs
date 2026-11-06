@@ -64,14 +64,6 @@ pub trait StepVjp<'a, Eqn: OdeEquationsImplicitAdjoint + 'a>: OdeSolverMethod<'a
     /// those of `end` (see the [module docs](self)). On any other error, `cotangent` and `p_bar`
     /// are left partly transformed and must not be reused.
     ///
-    /// Its linear solves use the solver's own Newton matrix as a preconditioner, kept up to date
-    /// as a step would: on the solver's Jacobian update schedule, checked at the start of each
-    /// replayed step (a step checks it at its end) and advanced by it, and, if a solve fails, with the Jacobian updates a step makes after a failed Newton solve,
-    /// as long as they change the matrix, without the smaller step size a replayed step cannot
-    /// take. As h is fixed, a Runge-Kutta stage whose solve fails again evaluates the Jacobian at
-    /// that stage's value instead, making the preconditioner exact for that stage, and retries
-    /// only that stage.
-    ///
     /// The mass matrix is taken to be independent of the parameters, as for the forward
     /// sensitivities: for a model whose mass matrix depends on them, `p_bar` misses that term.
     fn step_vjp(
@@ -1437,7 +1429,7 @@ mod tests {
         // Robertson's long horizon.
         sens_gradient_tests! {
             robertson_bdf: robertson_adjoint::<M>().0, robertson_sens::<M>().0,
-                robertson_t_eval(), bdf::<LS>, bdf_sens::<LS>, 10.0;
+                robertson_t_eval(), bdf::<LS>, bdf_sens::<LS>, 15.0;
             robertson_esdirk34: robertson_adjoint::<M>().0, robertson_sens::<M>().0,
                 robertson_t_eval(), esdirk34::<LS>, esdirk34_sens::<LS>, 10.0;
             robertson_ode_bdf: robertson_ode::<M>(2).0,
@@ -1456,6 +1448,52 @@ mod tests {
             exponential_decay_tsit45: exponential_decay_problem_adjoint::<M>(false, false).0,
                 exponential_decay_problem_sens_with_out::<M>(false).0,
                 (1..10).map(f64::from).collect(), tsit45, tsit45_sens, 1.0;
+        }
+
+        /// The transposed solves are normalised by the scale of their right-hand side, so
+        /// scaling the loss gradient scales the parameter gradient by the same factor, to
+        /// rounding, and the solves converge whatever the scale of the loss.
+        #[test]
+        fn gradient_invariant_to_loss_scale() {
+            let t_eval = robertson_t_eval();
+            let problem = with_tolerances(robertson_ode::<M>(1).0);
+            let grad_at_scale = |scale: f64, esdirk: bool| {
+                let dgdu = move |_i: usize, _t: f64, u: &V, dgdu: &mut V| {
+                    dgdu.for_each_batch_host([u], |d, [u], _| {
+                        d.iter_mut().zip(u).for_each(|(d, u)| *d = scale * u)
+                    });
+                };
+                let (_, grad) = if esdirk {
+                    problem.esdirk34::<LS>().unwrap().solve_dense_vjp(
+                        &t_eval,
+                        1,
+                        half_squares,
+                        dgdu,
+                    )
+                } else {
+                    problem
+                        .bdf::<LS>()
+                        .unwrap()
+                        .solve_dense_vjp(&t_eval, 1, half_squares, dgdu)
+                }
+                .unwrap();
+                grad.clone_as_vec()
+                    .into_iter()
+                    .map(|g| g / scale)
+                    .collect::<Vec<_>>()
+            };
+            for esdirk in [false, true] {
+                let reference = grad_at_scale(1.0, esdirk);
+                for scale in [1e-6, 1e8] {
+                    let grad = grad_at_scale(scale, esdirk);
+                    for (g, r) in grad.iter().zip(&reference) {
+                        assert!(
+                            (g - r).abs() <= 1e-10 * r.abs(),
+                            "scale {scale:e}: {grad:?} != {reference:?}"
+                        );
+                    }
+                }
+            }
         }
 
         /// `solve_dense_vjp` takes the steps of `solve_dense` and interpolates as it does, so

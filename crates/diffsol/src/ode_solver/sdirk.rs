@@ -79,6 +79,11 @@ where
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
+    fn set_adjoint_atol(&mut self, atol: Eqn::V) {
+        // without a main equation, the nonlinear solves for the adjoint use `convergence`
+        self.convergence.set_atol(atol.clone());
+        self.augmented_eqn_mut().unwrap().set_atol(atol);
+    }
 }
 
 /// A singly diagonally implicit Runge-Kutta method. Can optionally have an explicit first stage for ESDIRK methods.
@@ -208,11 +213,17 @@ where
         let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver, NoLineSearch);
 
         // set max iterations for nonlinear solver
-        let mut convergence = Convergence::with_tolerance(
-            problem.rtol,
-            &problem.atol,
-            problem.ode_options.nonlinear_solver_tolerance,
-        );
+        // without the main equations this is an adjoint solve, whose state has tolerances of its own
+        let (rtol, atol) = if integrate_main_eqn {
+            (problem.rtol, &problem.atol)
+        } else {
+            (
+                problem.adjoint_rtol.unwrap_or(problem.rtol),
+                problem.adjoint_atol.as_ref().unwrap_or(&problem.atol),
+            )
+        };
+        let mut convergence =
+            Convergence::with_tolerance(rtol, atol, problem.ode_options.nonlinear_solver_tolerance);
         convergence.set_max_iter(problem.ode_options.max_nonlinear_solver_iterations);
         // the derivative solves (the sensitivities alongside the main equations, and step_vjp)
         // have settings of their own
@@ -1114,10 +1125,10 @@ mod test {
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 412
+        number_of_calls: 511
         number_of_jac_muls: 12
         number_of_matrix_evals: 4
-        number_of_jac_adj_muls: 478
+        number_of_jac_adj_muls: 629
         "###);
     }
 

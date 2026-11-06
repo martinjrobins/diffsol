@@ -3,7 +3,7 @@ use crate::{
     ode_solver_error, AdjointEquations, AugmentedOdeEquations, AugmentedOdeSolverMethod,
     CheckpointingPath, Context, DefaultDenseMatrix, DefaultSolver, DenseMatrix, LinearSolver,
     Matrix, MatrixCommon, MatrixOp, NonLinearOpAdjoint, NonLinearOpSensAdjoint, OdeEquations,
-    OdeEquationsImplicitAdjoint, OdeSolverMethod, OdeSolverState, OdeSolverStopReason, Op,
+    OdeEquationsImplicitAdjoint, OdeSolverMethod, OdeSolverState, OdeSolverStopReason, Op, Scalar,
     StateRef, Vector, VectorIndex, VectorView, VectorViewMut,
 };
 
@@ -37,6 +37,12 @@ where
         )
     }
 
+    /// Set the absolute tolerance of the adjoint state, for its error control and nonlinear
+    /// solves, batched like the adjoint state (or narrower, broadcasting over the channels).
+    fn set_adjoint_atol(&mut self, atol: Eqn::V) {
+        self.augmented_eqn_mut().unwrap().set_atol(atol);
+    }
+
     /// Backwards pass for adjoint sensitivity analysis
     ///
     /// The overall goal is to compute the gradient of an output function `G` with respect to the model parameters `p`
@@ -68,6 +74,11 @@ where
     /// and `n` is the number of timepoints. The i-th column of `dgdu_eval` is the gradient of `g_i` with respect to `u_i`.
     /// The input `t_eval` is a vector of length `n`, where the i-th element is the timepoint `t_i`.
     ///
+    /// The adjoint state has the units of the cost over those of the state, so unless the problem
+    /// sets [crate::OdeSolverProblem::adjoint_atol], its absolute tolerance for this pass is the
+    /// state's `atol` multiplied by the largest magnitude of each channel's `dgdu_eval`. Its error
+    /// control is then independent of the scale of the cost.
+    ///
     #[allow(clippy::type_complexity)]
     fn solve_adjoint_backwards_pass(
         mut self,
@@ -82,6 +93,11 @@ where
 
         let mut integrate_delta_g = if have_neqn > 0 && !dgdu_eval.is_empty() {
             let aug_ctx = self.augmented_eqn().unwrap().aug_context().clone();
+            let problem = self.problem();
+            if problem.adjoint_atol.is_none() {
+                let scale = cost_gradient_scale(&aug_ctx, dgdu_eval);
+                self.set_adjoint_atol(scale_atol(&problem.atol, &scale));
+            }
             let integrate_delta_g =
                 IntegrateDeltaG::<_, <Eqn::M as DefaultSolver>::LS>::new(&self, aug_ctx)?;
             Some(integrate_delta_g)
@@ -158,6 +174,61 @@ where
 
         Ok((state, aug_eqn.into_checkpointing()))
     }
+}
+
+/// The largest magnitude of each lane's cost gradients in `dgdus` (one matrix per channel), as a
+/// batched scalar on the adjoint context `aug_ctx`, or 1 where that is zero or not finite.
+fn cost_gradient_scale<V>(aug_ctx: &V::C, dgdus: &[&<V as DefaultDenseMatrix>::M]) -> V
+where
+    V: Vector + DefaultDenseMatrix,
+{
+    let nchannels = dgdus.len();
+    let mut scale = V::zeros(1, aug_ctx.clone());
+    for (i, dgdu) in dgdus.iter().enumerate() {
+        let ctx = dgdu.context().clone();
+        let mut channel_max = V::zeros(1, ctx.clone());
+        let mut column_max = V::zeros(1, ctx);
+        for j in 0..dgdu.ncols() {
+            let column = dgdu.column(j).into_owned();
+            V::reduce_elem(
+                &mut column_max,
+                [&column],
+                V::T::zero(),
+                |[x], _lane, k| num_traits::abs(x[k]),
+                |a, b| a.max(b),
+            );
+            channel_max.for_each_elem([&column_max], |m, [c], _lane, _i| *m = m.max(c[0]));
+        }
+        for b in 0..channel_max.context().nbatch() {
+            scale
+                .get_batch_mut(b * nchannels + i)
+                .copy_from_view(&channel_max.get_batch(b));
+        }
+    }
+    // a zero gradient gives no scale, and a NaN or infinite one must not loosen the tolerance
+    // before the solve fails on it
+    scale.for_each_elem([], |s, [], _lane, _i| {
+        if !(*s > V::T::zero() && *s < V::T::INFINITY) {
+            *s = V::T::one();
+        }
+    });
+    scale
+}
+
+/// The tolerance `atol`, broadcast over the lanes of the batched scalar `scale` and multiplied in
+/// each by its value.
+fn scale_atol<V: Vector>(atol: &V, scale: &V) -> V {
+    let aug_ctx = scale.context();
+    let nlanes = aug_ctx.nbatch();
+    let lanes_per_atol_batch = nlanes / atol.context().nbatch();
+    let mut scaled = V::zeros(atol.len(), aug_ctx.clone());
+    for lane in 0..nlanes {
+        scaled
+            .get_batch_mut(lane)
+            .copy_from_view(&atol.get_batch(lane / lanes_per_atol_batch));
+    }
+    scaled.for_each_elem([scale], |x, [s], _lane, _i| *x *= s[0]);
+    scaled
 }
 
 fn validate_adjoint_backwards_inputs<'a, Eqn, Solver, AdjointSolver>(

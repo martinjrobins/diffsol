@@ -44,8 +44,18 @@ each `sens_atol` for that parameter will be divided by the absolute value of the
 
 Calculating the adjoint sensitivities requires both a forward pass, where only the base ODE equations are being solver, and a backwards
 pass where the adjoint equations are being solved and, if its a continuous loss function, a set of parameter gradient functions of length `n_p` are also being integrated.
-During the forward pass the base error norm and output error control are active, as described above. During the backwards pass
-the standard `atol` and `rtol` are used for the adjoint equations, but a separate set of tolerances, [`OdeBuilder::param_rtol`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html#method.param_rtol)
+During the forward pass the base error norm and output error control are active, as described above.
+
+The adjoint state has the units of the loss divided by those of the state, so its natural scale depends on the scale of the loss.
+The adjoint equations are error-controlled using [`OdeBuilder::adjoint_rtol`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html#method.adjoint_rtol)
+and [`OdeBuilder::adjoint_atol`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html#method.adjoint_atol).
+If `adjoint_rtol` is not set, the standard `rtol` is used. If `adjoint_atol` is not set and the backwards pass is given the loss gradients `dgdu`,
+the standard `atol` is multiplied by the largest magnitude of `dgdu` (for each loss function), which makes the error control of the backwards pass
+independent of the scale of the loss. Otherwise (for a continuous loss function) the standard `atol` is used.
+The linear solves in the reverse-mode step derivatives (`StepVjp::step_vjp`), whose right-hand sides are cotangents, are similarly
+normalised by the largest magnitude of their right-hand side.
+
+During the backwards pass, a separate set of tolerances, [`OdeBuilder::param_rtol`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html#method.param_rtol)
 and [`OdeBuilder::param_atol`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html#method.param_atol) are used for the parameter gradients.
 As with the other types of error control, if `param_rtol` and `param_atol` are not set, then the parameter gradient equations do not
 contribute to the error control.

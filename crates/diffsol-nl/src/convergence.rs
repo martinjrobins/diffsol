@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use log::trace;
 use num_traits::{FromPrimitive, One, Pow, ToPrimitive};
 
@@ -6,7 +8,14 @@ use diffsol_la::{IndexType, Scalar, Vector};
 #[derive(Clone)]
 pub struct Convergence<'a, V: Vector> {
     pub rtol: V::T,
-    pub atol: &'a V,
+    // atol needs to be set by adjoint (scaled by loss function)
+    // so we use Cow for this case.
+    // TODO: could pass in atol+rtol to norm?
+    // adv: we are duplicating the atol here with AdjointEquations, so
+    // this duplication would dissapear
+    // cons: need to pass in the rtol/atol via the NonlinearSolver api,
+    // lots of api churn...
+    pub atol: Cow<'a, V>,
     tol: V::T,
     max_iter: IndexType,
     niter: IndexType,
@@ -48,6 +57,10 @@ impl<'a, V: Vector> Convergence<'a, V> {
     pub fn set_tolerance(&mut self, value: V::T) {
         self.tol = value;
     }
+    /// Replace the absolute tolerance, with one held by the convergence test itself.
+    pub fn set_atol(&mut self, atol: V) {
+        self.atol = Cow::Owned(atol);
+    }
     pub fn set_transient_updates(&mut self, value: IndexType) {
         self.transient_updates = value;
     }
@@ -72,7 +85,7 @@ impl<'a, V: Vector> Convergence<'a, V> {
     pub fn with_tolerance(rtol: V::T, atol: &'a V, tol: V::T) -> Self {
         Self {
             rtol,
-            atol,
+            atol: Cow::Borrowed(atol),
             tol,
             max_iter: 10,
             old_norm: None,
@@ -87,7 +100,7 @@ impl<'a, V: Vector> Convergence<'a, V> {
     }
 
     pub fn norm(&self, dy: &V, y: &V) -> V::T {
-        dy.squared_norm(y, self.atol, self.rtol).sqrt()
+        dy.squared_norm(y, &self.atol, self.rtol).sqrt()
     }
 
     pub fn check_norm(&mut self, norm: V::T) -> ConvergenceStatus {

@@ -40,6 +40,8 @@ pub struct OdeBuilder<
     out_atol: Option<Vec<M::T>>,
     param_rtol: Option<M::T>,
     param_atol: Option<Vec<M::T>>,
+    adjoint_rtol: Option<M::T>,
+    adjoint_atol: Option<Vec<M::T>>,
     p: Vec<M::T>,
     use_coloring: bool,
     integrate_out: bool,
@@ -131,6 +133,8 @@ where
             out_atol: None,
             param_rtol: None,
             param_atol: None,
+            adjoint_rtol: None,
+            adjoint_atol: None,
             sens_atol: None,
             param_scales: None,
             sens_rtol: None,
@@ -175,6 +179,8 @@ where
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
             param_atol: self.param_atol,
+            adjoint_rtol: self.adjoint_rtol,
+            adjoint_atol: self.adjoint_atol,
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
@@ -226,6 +232,8 @@ where
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
             param_atol: self.param_atol,
+            adjoint_rtol: self.adjoint_rtol,
+            adjoint_atol: self.adjoint_atol,
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
@@ -281,6 +289,8 @@ where
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
             param_atol: self.param_atol,
+            adjoint_rtol: self.adjoint_rtol,
+            adjoint_atol: self.adjoint_atol,
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
@@ -343,6 +353,8 @@ where
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
             param_atol: self.param_atol,
+            adjoint_rtol: self.adjoint_rtol,
+            adjoint_atol: self.adjoint_atol,
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
@@ -407,6 +419,8 @@ where
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
             param_atol: self.param_atol,
+            adjoint_rtol: self.adjoint_rtol,
+            adjoint_atol: self.adjoint_atol,
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
@@ -453,6 +467,8 @@ where
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
             param_atol: self.param_atol,
+            adjoint_rtol: self.adjoint_rtol,
+            adjoint_atol: self.adjoint_atol,
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
@@ -493,6 +509,8 @@ where
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
             param_atol: self.param_atol,
+            adjoint_rtol: self.adjoint_rtol,
+            adjoint_atol: self.adjoint_atol,
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
@@ -542,6 +560,8 @@ where
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
             param_atol: self.param_atol,
+            adjoint_rtol: self.adjoint_rtol,
+            adjoint_atol: self.adjoint_atol,
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
@@ -592,6 +612,8 @@ where
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
             param_atol: self.param_atol,
+            adjoint_rtol: self.adjoint_rtol,
+            adjoint_atol: self.adjoint_atol,
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
@@ -635,6 +657,8 @@ where
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
             param_atol: self.param_atol,
+            adjoint_rtol: self.adjoint_rtol,
+            adjoint_atol: self.adjoint_atol,
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
@@ -682,6 +706,8 @@ where
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
             param_atol: self.param_atol,
+            adjoint_rtol: self.adjoint_rtol,
+            adjoint_atol: self.adjoint_atol,
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
@@ -735,6 +761,8 @@ where
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
             param_atol: self.param_atol,
+            adjoint_rtol: self.adjoint_rtol,
+            adjoint_atol: self.adjoint_atol,
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
@@ -783,6 +811,8 @@ where
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
             param_atol: self.param_atol,
+            adjoint_rtol: self.adjoint_rtol,
+            adjoint_atol: self.adjoint_atol,
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
@@ -831,6 +861,8 @@ where
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
             param_atol: self.param_atol,
+            adjoint_rtol: self.adjoint_rtol,
+            adjoint_atol: self.adjoint_atol,
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
@@ -888,6 +920,8 @@ where
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
             param_atol: self.param_atol,
+            adjoint_rtol: self.adjoint_rtol,
+            adjoint_atol: self.adjoint_atol,
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
@@ -949,6 +983,8 @@ where
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
             param_atol: self.param_atol,
+            adjoint_rtol: self.adjoint_rtol,
+            adjoint_atol: self.adjoint_atol,
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
@@ -995,6 +1031,8 @@ where
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
             param_atol: self.param_atol,
+            adjoint_rtol: self.adjoint_rtol,
+            adjoint_atol: self.adjoint_atol,
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
@@ -1042,6 +1080,8 @@ where
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
             param_atol: self.param_atol,
+            adjoint_rtol: self.adjoint_rtol,
+            adjoint_atol: self.adjoint_atol,
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
@@ -1095,6 +1135,8 @@ where
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
             param_atol: self.param_atol,
+            adjoint_rtol: self.adjoint_rtol,
+            adjoint_atol: self.adjoint_atol,
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
@@ -1149,6 +1191,8 @@ where
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
             param_atol: self.param_atol,
+            adjoint_rtol: self.adjoint_rtol,
+            adjoint_atol: self.adjoint_atol,
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
@@ -1207,6 +1251,8 @@ where
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
             param_atol: self.param_atol,
+            adjoint_rtol: self.adjoint_rtol,
+            adjoint_atol: self.adjoint_atol,
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
@@ -1255,6 +1301,8 @@ where
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
             param_atol: self.param_atol,
+            adjoint_rtol: self.adjoint_rtol,
+            adjoint_atol: self.adjoint_atol,
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
@@ -1309,6 +1357,8 @@ where
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
             param_atol: self.param_atol,
+            adjoint_rtol: self.adjoint_rtol,
+            adjoint_atol: self.adjoint_atol,
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
@@ -1368,6 +1418,8 @@ where
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
             param_atol: self.param_atol,
+            adjoint_rtol: self.adjoint_rtol,
+            adjoint_atol: self.adjoint_atol,
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
@@ -1431,6 +1483,8 @@ where
             out_atol: self.out_atol,
             param_rtol: self.param_rtol,
             param_atol: self.param_atol,
+            adjoint_rtol: self.adjoint_rtol,
+            adjoint_atol: self.adjoint_atol,
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
@@ -1576,6 +1630,36 @@ where
         self
     }
 
+    /// Set the relative tolerance for the adjoint equations during adjoint backward passes.
+    ///
+    /// If not set, the state [`rtol`](Self::rtol) is used. See
+    /// [`adjoint_atol`](Self::adjoint_atol) for the adjoint's absolute tolerance.
+    pub fn adjoint_rtol(mut self, adjoint_rtol: f64) -> Self {
+        self.adjoint_rtol = Some(M::T::from_f64(adjoint_rtol).unwrap());
+        self
+    }
+
+    /// Set the absolute tolerance for the adjoint equations during adjoint backward passes.
+    ///
+    /// Can be a single value (used for all states) or a vector (one per state). The adjoint state
+    /// has the units of the loss divided by those of the state, so the state tolerances are not
+    /// in general appropriate for it. If not set, a backward pass given cost gradients `dgdu` uses
+    /// the state [`atol`](Self::atol) multiplied by the largest magnitude of each loss's `dgdu`,
+    /// which makes its error control independent of the scale of the loss, and one without
+    /// (integrating the outputs) uses the state `atol`.
+    pub fn adjoint_atol<V>(mut self, adjoint_atol: V) -> Self
+    where
+        V: IntoIterator<Item = f64>,
+    {
+        self.adjoint_atol = Some(
+            adjoint_atol
+                .into_iter()
+                .map(|x| M::T::from_f64(x).unwrap())
+                .collect(),
+        );
+        self
+    }
+
     /// Set whether to integrate the output.
     /// If true, the output will be integrated using the same method as the ODE.
     pub fn integrate_out(mut self, integrate_out: bool) -> Self {
@@ -1655,12 +1739,22 @@ where
         param_scales: Option<Vec<M::T>>,
         out_atol: Option<Vec<M::T>>,
         param_atol: Option<Vec<M::T>>,
+        adjoint_atol: Option<Vec<M::T>>,
         nstates: usize,
         nout: Option<usize>,
         nparam: usize,
         ctx: M::C,
-    ) -> Result<(M::V, Option<M::V>, Option<M::V>, Option<M::V>), DiffsolError> {
+    ) -> Result<(M::V, Option<M::V>, Option<M::V>, Option<M::V>, Option<M::V>), DiffsolError> {
         let atol = Self::build_atol(atol, nstates, "states", ctx.clone())?;
+        let adjoint_atol = match adjoint_atol {
+            Some(adjoint_atol) => Some(Self::build_atol(
+                adjoint_atol,
+                nstates,
+                "adjoint",
+                ctx.clone(),
+            )?),
+            None => None,
+        };
         let out_atol = match out_atol {
             Some(out_atol) => Some(Self::build_atol(
                 out_atol,
@@ -1720,7 +1814,7 @@ where
             }
             _ => None,
         };
-        Ok((atol, sens_atol, out_atol, param_atol))
+        Ok((atol, sens_atol, out_atol, param_atol, adjoint_atol))
     }
 
     fn build_p(p: Vec<M::T>, ctx: M::C) -> M::V {
@@ -1881,18 +1975,19 @@ where
         let ic_options = Self::build_ic_options::<M::T>(self.ic_options);
         let ode_options = Self::build_ode_options::<M::T>(self.ode_options);
 
-        let (atol, sens_atol, out_atol, param_atol) = Self::build_atols(
+        let (atol, sens_atol, out_atol, param_atol, adjoint_atol) = Self::build_atols(
             self.atol,
             self.sens_atol,
             self.param_scales,
             self.out_atol,
             self.param_atol,
+            self.adjoint_atol,
             nstates,
             nout,
             nparams,
             self.ctx,
         )?;
-        OdeSolverProblem::new(
+        let mut problem = OdeSolverProblem::new(
             eqn,
             self.rtol,
             atol,
@@ -1907,7 +2002,10 @@ where
             self.integrate_out,
             ic_options,
             ode_options,
-        )
+        )?;
+        problem.adjoint_rtol = self.adjoint_rtol;
+        problem.adjoint_atol = adjoint_atol;
+        Ok(problem)
     }
 
     /// Build an ODE problem from a DiffSL model string.
@@ -1958,12 +2056,13 @@ where
         let nparams = eqn.rhs().nparams();
         let nstates = eqn.rhs().nstates();
         let nout = eqn.out().map(|out| out.nout());
-        let (atol, sens_atol, out_atol, param_atol) = Self::build_atols(
+        let (atol, sens_atol, out_atol, param_atol, adjoint_atol) = Self::build_atols(
             self.atol,
             self.sens_atol,
             self.param_scales,
             self.out_atol,
             self.param_atol,
+            self.adjoint_atol,
             nstates,
             nout,
             nparams,
@@ -1989,7 +2088,7 @@ where
         let ode_options = Self::build_ode_options::<M::T>(self.ode_options);
         let p = Self::build_p(self.p, self.ctx);
         eqn.set_params(&p);
-        OdeSolverProblem::new(
+        let mut problem = OdeSolverProblem::new(
             eqn,
             self.rtol,
             atol,
@@ -2004,7 +2103,10 @@ where
             self.integrate_out,
             ic_options,
             ode_options,
-        )
+        )?;
+        problem.adjoint_rtol = self.adjoint_rtol;
+        problem.adjoint_atol = adjoint_atol;
+        Ok(problem)
     }
 }
 
@@ -2130,13 +2232,37 @@ mod tests {
     }
 
     #[test]
+    fn build_adjoint_tolerances() {
+        type M = NalgebraMat<f64>;
+        let builder = || {
+            OdeBuilder::<M>::new()
+                .p([1.0])
+                .rhs(|x, p, _t, y| y[0] = -p[0] * x[0])
+                .init(|_p, _t, y| y[0] = 1.0, 1)
+        };
+        let problem = builder().build().unwrap();
+        assert!(problem.adjoint_rtol.is_none() && problem.adjoint_atol.is_none());
+
+        let problem = builder()
+            .adjoint_rtol(1e-3)
+            .adjoint_atol([1e-5])
+            .build()
+            .unwrap();
+        assert_eq!(problem.adjoint_rtol, Some(1e-3));
+        assert_eq!(problem.adjoint_atol.unwrap().get_index(0), 1e-5);
+
+        assert!(builder().adjoint_atol([1e-5, 1e-5]).build().is_err());
+    }
+
+    #[test]
     fn build_sensitivity_atols_uses_parameter_scales() {
         type M = NalgebraMat<f64>;
         let ctx = Default::default();
-        let (_, sens_atol, _, _) = OdeBuilder::<M>::build_atols(
+        let (_, sens_atol, _, _, _) = OdeBuilder::<M>::build_atols(
             vec![1e-6],
             Some(vec![8.0]),
             Some(vec![2.0, -4.0]),
+            None,
             None,
             None,
             1,
@@ -2155,9 +2281,10 @@ mod tests {
     #[test]
     fn build_sensitivity_atols_defaults_parameter_scales_to_one() {
         type M = NalgebraMat<f64>;
-        let (_, sens_atol, _, _) = OdeBuilder::<M>::build_atols(
+        let (_, sens_atol, _, _, _) = OdeBuilder::<M>::build_atols(
             vec![1e-6],
             Some(vec![8.0]),
+            None,
             None,
             None,
             None,
@@ -2181,6 +2308,7 @@ mod tests {
                 vec![1e-6],
                 Some(vec![8.0]),
                 Some(scales),
+                None,
                 None,
                 None,
                 1,
