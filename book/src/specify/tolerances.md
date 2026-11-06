@@ -47,11 +47,13 @@ pass where the adjoint equations are being solved and, if its a continuous loss 
 During the forward pass the base error norm and output error control are active, as described above.
 
 The adjoint state has the units of the loss divided by those of the state, so its natural scale depends on the scale of the loss.
-To make the backwards pass independent of this scale, the adjoint equations (which are linear in the gradient of the loss) are solved for the
-loss gradients `dgdu` divided by their largest magnitude (for each loss function), and the result is multiplied back by this factor at the end.
-The adjoint equations are then error-controlled using [`OdeBuilder::adjoint_rtol`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html#method.adjoint_rtol)
-and [`OdeBuilder::adjoint_atol`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html#method.adjoint_atol), which default to the standard `rtol` and `atol` if not set.
-The same normalisation is applied to the linear solves in the reverse-mode step derivatives (`StepVjp::step_vjp`), whose right-hand sides are cotangents.
+The adjoint equations are error-controlled using [`OdeBuilder::adjoint_rtol`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html#method.adjoint_rtol)
+and [`OdeBuilder::adjoint_atol`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html#method.adjoint_atol).
+If `adjoint_rtol` is not set, the standard `rtol` is used. If `adjoint_atol` is not set and the backwards pass is given the loss gradients `dgdu`,
+the standard `atol` is multiplied by the largest magnitude of `dgdu` (for each loss function), which makes the error control of the backwards pass
+independent of the scale of the loss. Otherwise (for a continuous loss function) the standard `atol` is used.
+The linear solves in the reverse-mode step derivatives (`StepVjp::step_vjp`), whose right-hand sides are cotangents, are similarly
+normalised by the largest magnitude of their right-hand side.
 
 During the backwards pass, a separate set of tolerances, [`OdeBuilder::param_rtol`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html#method.param_rtol)
 and [`OdeBuilder::param_atol`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html#method.param_atol) are used for the parameter gradients.

@@ -103,6 +103,11 @@ where
     LS: LinearSolver<Eqn::M>,
     Eqn::V: DefaultDenseMatrix<T = Eqn::T>,
 {
+    fn set_adjoint_atol(&mut self, atol: Eqn::V) {
+        // without a main equation, the nonlinear solves for the adjoint use `convergence`
+        self.convergence.set_atol(atol.clone());
+        self.augmented_eqn_mut().unwrap().set_atol(atol);
+    }
 }
 
 // notes quadrature.
@@ -2418,16 +2423,16 @@ mod test {
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 522
+        number_of_calls: 531
         number_of_jac_muls: 2
         number_of_matrix_evals: 1
-        number_of_jac_adj_muls: 637
+        number_of_jac_adj_muls: 639
         "###);
     }
 
-    /// The adjoint equations are linear in the cost gradients, which the backward pass
-    /// normalises, so it succeeds whatever the scale of the loss, and the gradient scales with
-    /// it (#408).
+    /// The adjoint equations are linear in the cost gradients, and the backward pass scales the
+    /// adjoint's absolute tolerance with them, so it succeeds whatever the scale of the loss, and
+    /// the gradient scales with it (#408).
     #[test]
     fn bdf_test_robertson_adjoint_invariant_to_loss_scale() {
         let t: Vec<f64> = (0..20)
@@ -2463,13 +2468,98 @@ mod test {
             let reference = grad_at_scale(1.0);
             for scale in [1e-6, 1e4, 1e8] {
                 let grad = grad_at_scale(scale);
+                // the error control is the same at every scale, but rounding can still change a
+                // step or iteration
                 for (g, r) in grad.iter().zip(&reference) {
                     assert!(
-                        (g - r).abs() <= 1e-10 * r.abs(),
+                        (g - r).abs() <= 1e-8 * r.abs(),
                         "rtol {rtol:e} scale {scale:e}: {grad:?} != {reference:?}"
                     );
                 }
             }
+        }
+    }
+
+    /// A backward pass started from a nonzero adjoint state, as when each segment between
+    /// resets is its own pass, is linear in that state and the cost gradients together, however
+    /// the cost gradients are scaled.
+    #[test]
+    fn bdf_test_robertson_adjoint_from_nonzero_state() {
+        let t: Vec<f64> = (0..20)
+            .map(|i| 10f64.powf(-1.0 + 6.0 * i as f64 / 19.0))
+            .collect();
+        let (mut problem, _soln) = robertson_ode::<M>(1);
+        let ctx = *problem.context();
+        problem.rtol = 1e-6;
+        problem.atol = <M as MatrixCommon>::V::from_element(3, 1e-8, ctx);
+        let grad = |lambda0: f64, scale: f64| {
+            let mut solver = problem.bdf::<LS>().unwrap();
+            let (checkpointer, ys, _) = solver.solve_dense_with_checkpointing(&t, None).unwrap();
+            let mut dgdu = M::zeros(ys.nrows(), ys.ncols(), ctx);
+            for j in 0..t.len() {
+                dgdu.set_index(1, j, scale);
+            }
+            let mut adjoint_eqn = problem
+                .adjoint_equations(checkpointer, Some(solver), Some(1))
+                .unwrap();
+            let mut state = problem
+                .bdf_state_adjoint::<LS, _>(&mut adjoint_eqn)
+                .unwrap();
+            // [1, 1, 1] is a constant solution of the adjoint, as the states sum to a constant
+            state.as_mut().s.set_index(1, lambda0);
+            state.as_mut().sg.fill(lambda0);
+            let adjoint = problem
+                .bdf_solver_adjoint_from_state::<LS, _>(state, adjoint_eqn)
+                .unwrap();
+            let (state, _) = adjoint.solve_adjoint_backwards_pass(&t, &[&dgdu]).unwrap();
+            state.into_common().sg.clone_as_vec()
+        };
+        let (lambda0, scale) = (1e3, 1e6);
+        let both = grad(lambda0, scale);
+        let from_state = grad(lambda0, 0.0);
+        let from_dgdu = grad(0.0, scale);
+        for i in 0..both.len() {
+            let sum = from_state[i] + from_dgdu[i];
+            assert!(
+                (both[i] - sum).abs() <= 1e-4 * sum.abs(),
+                "{both:?} != {from_state:?} + {from_dgdu:?}"
+            );
+        }
+    }
+
+    /// With integrated outputs as well as cost gradients, the gradient is the sum of their
+    /// contributions, so it is affine in the scale of the cost gradients.
+    #[test]
+    fn bdf_test_adjoint_integrate_out_with_dgdu() {
+        let t: Vec<f64> = (1..10).map(f64::from).collect();
+        let (problem, _soln) = exponential_decay_problem_adjoint::<M>(true, true);
+        let ctx = *problem.context();
+        let grad = |scale: f64| {
+            let mut solver = problem.bdf::<LS>().unwrap();
+            let (checkpointer, ys, _) = solver.solve_dense_with_checkpointing(&t, None).unwrap();
+            let mut dgdu0 = M::zeros(ys.nrows(), ys.ncols(), ctx);
+            let mut dgdu1 = M::zeros(ys.nrows(), ys.ncols(), ctx);
+            for j in 0..t.len() {
+                dgdu0.set_index(0, j, scale);
+                dgdu1.set_index(1, j, scale);
+            }
+            let adjoint = problem
+                .bdf_solver_adjoint::<LS, _>(checkpointer, Some(solver), Some(2))
+                .unwrap();
+            let (state, _) = adjoint
+                .solve_adjoint_backwards_pass(&t, &[&dgdu0, &dgdu1])
+                .unwrap();
+            state.into_common().sg.clone_as_vec()
+        };
+        let scale = 1e4;
+        let (out_only, unit) = (grad(0.0), grad(1.0));
+        let scaled = grad(scale);
+        for i in 0..scaled.len() {
+            let expected = out_only[i] + scale * (unit[i] - out_only[i]);
+            assert!(
+                (scaled[i] - expected).abs() <= 1e-4 * expected.abs(),
+                "{scaled:?} != {out_only:?} + {scale:e} * ({unit:?} - {out_only:?})"
+            );
         }
     }
 
@@ -2585,10 +2675,10 @@ mod test {
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 383
+        number_of_calls: 295
         number_of_jac_muls: 12
         number_of_matrix_evals: 4
-        number_of_jac_adj_muls: 486
+        number_of_jac_adj_muls: 400
         "###);
     }
 

@@ -1,5 +1,6 @@
 use num_traits::{One, Signed, Zero};
 use std::{
+    borrow::Cow,
     cell::{Cell, RefCell},
     ops::SubAssign,
     rc::Rc,
@@ -543,7 +544,9 @@ where
     tmp2: RefCell<Eqn::V>,
     aug_ctx: Eqn::C,
     init: AdjointInit<'a, Eqn, Method>,
-    atol: Option<&'a Eqn::V>,
+    // this uses a Cow because adjoints scale atol by the scale of the loss function
+    // see atol setters below
+    atol: Cow<'a, Eqn::V>,
     rtol: Option<Eqn::T>,
     out_rtol: Option<Eqn::T>,
     out_atol: Option<&'a Eqn::V>,
@@ -572,7 +575,7 @@ where
         let out = AdjointOut::new(self.eqn, context.clone(), self.out.with_out);
         let tmp = self.tmp.clone();
         let tmp2 = self.tmp2.clone();
-        let atol = self.atol;
+        let atol = self.atol.clone();
         let rtol = self.rtol;
         let out_atol = self.out_atol;
         let out_rtol = self.out_rtol;
@@ -619,7 +622,7 @@ where
             eqn.rhs().nstates(),
             aug_ctx.clone(),
         ));
-        let atol = Some(problem.adjoint_atol.as_ref().unwrap_or(&problem.atol));
+        let atol = Cow::Borrowed(problem.adjoint_atol.as_ref().unwrap_or(&problem.atol));
         let rtol = Some(problem.adjoint_rtol.unwrap_or(problem.rtol));
         let out_atol = problem.param_atol.as_ref();
         let out_rtol = problem.param_rtol;
@@ -643,6 +646,11 @@ where
 
     pub fn eqn(&self) -> &'a Eqn {
         self.eqn
+    }
+
+    /// Replace the absolute tolerance of the adjoint state, batched like it (or narrower).
+    pub(crate) fn set_atol(&mut self, atol: Eqn::V) {
+        self.atol = Cow::Owned(atol);
     }
 
     pub fn last_t(&self) -> Eqn::T {
@@ -826,14 +834,14 @@ where
     Method: OdeSolverMethod<'a, Eqn>,
 {
     fn include_in_error_control(&self) -> bool {
-        self.atol.is_some() && self.rtol.is_some()
+        self.rtol.is_some()
     }
     fn include_out_in_error_control(&self) -> bool {
         self.out().is_some() && self.out_atol.is_some() && self.out_rtol.is_some()
     }
 
     fn atol(&self) -> Option<&Eqn::V> {
-        self.atol
+        Some(&self.atol)
     }
     fn out_atol(&self) -> Option<&Eqn::V> {
         self.out_atol

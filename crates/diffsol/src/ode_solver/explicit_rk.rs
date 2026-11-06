@@ -581,10 +581,10 @@ mod test {
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 1059
+        number_of_calls: 1094
         number_of_jac_muls: 0
         number_of_matrix_evals: 0
-        number_of_jac_adj_muls: 1200
+        number_of_jac_adj_muls: 1242
         "###);
     }
 

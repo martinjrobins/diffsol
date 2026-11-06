@@ -221,7 +221,8 @@ where
     pub param_atol: Option<Eqn::V>,
     /// Relative tolerance for the adjoint equations during adjoint backward passes. If `None`, [`Self::rtol`] is used.
     pub adjoint_rtol: Option<Eqn::T>,
-    /// Absolute tolerance for the adjoint equations during adjoint backward passes. If `None`, [`Self::atol`] is used.
+    /// Absolute tolerance for the adjoint equations during adjoint backward passes. If `None`, [`Self::atol`] is used,
+    /// multiplied by the largest magnitude of each loss's cost gradients when the pass is given them.
     pub adjoint_atol: Option<Eqn::V>,
     /// Options for the initial condition solver.
     pub ic_options: InitialConditionSolverOptions<Eqn::T>,

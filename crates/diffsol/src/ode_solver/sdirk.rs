@@ -79,6 +79,11 @@ where
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
+    fn set_adjoint_atol(&mut self, atol: Eqn::V) {
+        // without a main equation, the nonlinear solves for the adjoint use `convergence`
+        self.convergence.set_atol(atol.clone());
+        self.augmented_eqn_mut().unwrap().set_atol(atol);
+    }
 }
 
 /// A singly diagonally implicit Runge-Kutta method. Can optionally have an explicit first stage for ESDIRK methods.
@@ -1120,10 +1125,10 @@ mod test {
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 649
+        number_of_calls: 511
         number_of_jac_muls: 12
         number_of_matrix_evals: 4
-        number_of_jac_adj_muls: 797
+        number_of_jac_adj_muls: 629
         "###);
     }
 

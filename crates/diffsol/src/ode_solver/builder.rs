@@ -1632,11 +1632,8 @@ where
 
     /// Set the relative tolerance for the adjoint equations during adjoint backward passes.
     ///
-    /// The adjoint state has the units of the loss divided by those of the state, so the state
-    /// tolerances are not in general appropriate for it. The backward pass normalises the cost
-    /// gradients it is given to a maximum magnitude of one before solving, so these tolerances
-    /// apply to an adjoint state of that normalised loss. If not set, the state
-    /// [`rtol`](Self::rtol) is used.
+    /// If not set, the state [`rtol`](Self::rtol) is used. See
+    /// [`adjoint_atol`](Self::adjoint_atol) for the adjoint's absolute tolerance.
     pub fn adjoint_rtol(mut self, adjoint_rtol: f64) -> Self {
         self.adjoint_rtol = Some(M::T::from_f64(adjoint_rtol).unwrap());
         self
@@ -1644,9 +1641,12 @@ where
 
     /// Set the absolute tolerance for the adjoint equations during adjoint backward passes.
     ///
-    /// Can be a single value (used for all states) or a vector (one per state). See
-    /// [`adjoint_rtol`](Self::adjoint_rtol) for the scaling these apply to. If not set, the
-    /// state [`atol`](Self::atol) is used.
+    /// Can be a single value (used for all states) or a vector (one per state). The adjoint state
+    /// has the units of the loss divided by those of the state, so the state tolerances are not
+    /// in general appropriate for it. If not set, a backward pass given cost gradients `dgdu` uses
+    /// the state [`atol`](Self::atol) multiplied by the largest magnitude of each loss's `dgdu`,
+    /// which makes its error control independent of the scale of the loss, and one without
+    /// (integrating the outputs) uses the state `atol`.
     pub fn adjoint_atol<V>(mut self, adjoint_atol: V) -> Self
     where
         V: IntoIterator<Item = f64>,

@@ -4,7 +4,7 @@ use crate::{
     CheckpointingPath, Context, DefaultDenseMatrix, DefaultSolver, DenseMatrix, LinearSolver,
     Matrix, MatrixCommon, MatrixOp, NonLinearOpAdjoint, NonLinearOpSensAdjoint, OdeEquations,
     OdeEquationsImplicitAdjoint, OdeSolverMethod, OdeSolverState, OdeSolverStopReason, Op, Scalar,
-    StateRef, StateRefMut, Vector, VectorIndex, VectorView, VectorViewMut,
+    StateRef, Vector, VectorIndex, VectorView, VectorViewMut,
 };
 
 use num_traits::{One, Zero};
@@ -35,6 +35,12 @@ where
             fwd_state_plus,
             integrate_out,
         )
+    }
+
+    /// Set the absolute tolerance of the adjoint state, for its error control and nonlinear
+    /// solves, batched like the adjoint state (or narrower, broadcasting over the channels).
+    fn set_adjoint_atol(&mut self, atol: Eqn::V) {
+        self.augmented_eqn_mut().unwrap().set_atol(atol);
     }
 
     /// Backwards pass for adjoint sensitivity analysis
@@ -68,6 +74,11 @@ where
     /// and `n` is the number of timepoints. The i-th column of `dgdu_eval` is the gradient of `g_i` with respect to `u_i`.
     /// The input `t_eval` is a vector of length `n`, where the i-th element is the timepoint `t_i`.
     ///
+    /// The adjoint state has the units of the cost over those of the state, so unless the problem
+    /// sets [crate::OdeSolverProblem::adjoint_atol], its absolute tolerance for this pass is the
+    /// state's `atol` multiplied by the largest magnitude of each channel's `dgdu_eval`. Its error
+    /// control is then independent of the scale of the cost.
+    ///
     #[allow(clippy::type_complexity)]
     fn solve_adjoint_backwards_pass(
         mut self,
@@ -82,9 +93,13 @@ where
 
         let mut integrate_delta_g = if have_neqn > 0 && !dgdu_eval.is_empty() {
             let aug_ctx = self.augmented_eqn().unwrap().aug_context().clone();
-            let mut integrate_delta_g =
+            let problem = self.problem();
+            if problem.adjoint_atol.is_none() {
+                let scale = cost_gradient_scale(&aug_ctx, dgdu_eval);
+                self.set_adjoint_atol(scale_atol(&problem.atol, &scale));
+            }
+            let integrate_delta_g =
                 IntegrateDeltaG::<_, <Eqn::M as DefaultSolver>::LS>::new(&self, aug_ctx)?;
-            integrate_delta_g.set_forcing_scale(dgdu_eval);
             Some(integrate_delta_g)
         } else {
             None
@@ -152,9 +167,6 @@ where
 
         let (mut state, aug_eqn) = self.into_state_and_eqn();
         let aug_eqn = aug_eqn.unwrap();
-        if let Some(integrate_delta_g) = integrate_delta_g.as_ref() {
-            integrate_delta_g.unscale_adjoint_state(state.as_mut());
-        }
         if path_starts_at_problem_t0 {
             let state_mut = state.as_mut();
             aug_eqn.correct_sg_for_init(problem_t0, state_mut.s, state_mut.sg);
@@ -162,6 +174,61 @@ where
 
         Ok((state, aug_eqn.into_checkpointing()))
     }
+}
+
+/// The largest magnitude of each lane's cost gradients in `dgdus` (one matrix per channel), as a
+/// batched scalar on the adjoint context `aug_ctx`, or 1 where that is zero or not finite.
+fn cost_gradient_scale<V>(aug_ctx: &V::C, dgdus: &[&<V as DefaultDenseMatrix>::M]) -> V
+where
+    V: Vector + DefaultDenseMatrix,
+{
+    let nchannels = dgdus.len();
+    let mut scale = V::zeros(1, aug_ctx.clone());
+    for (i, dgdu) in dgdus.iter().enumerate() {
+        let ctx = dgdu.context().clone();
+        let mut channel_max = V::zeros(1, ctx.clone());
+        let mut column_max = V::zeros(1, ctx);
+        for j in 0..dgdu.ncols() {
+            let column = dgdu.column(j).into_owned();
+            V::reduce_elem(
+                &mut column_max,
+                [&column],
+                V::T::zero(),
+                |[x], _lane, k| num_traits::abs(x[k]),
+                |a, b| a.max(b),
+            );
+            channel_max.for_each_elem([&column_max], |m, [c], _lane, _i| *m = m.max(c[0]));
+        }
+        for b in 0..channel_max.context().nbatch() {
+            scale
+                .get_batch_mut(b * nchannels + i)
+                .copy_from_view(&channel_max.get_batch(b));
+        }
+    }
+    // a zero gradient gives no scale, and a NaN or infinite one must not loosen the tolerance
+    // before the solve fails on it
+    scale.for_each_elem([], |s, [], _lane, _i| {
+        if !(*s > V::T::zero() && *s < V::T::INFINITY) {
+            *s = V::T::one();
+        }
+    });
+    scale
+}
+
+/// The tolerance `atol`, broadcast over the lanes of the batched scalar `scale` and multiplied in
+/// each by its value.
+fn scale_atol<V: Vector>(atol: &V, scale: &V) -> V {
+    let aug_ctx = scale.context();
+    let nlanes = aug_ctx.nbatch();
+    let lanes_per_atol_batch = nlanes / atol.context().nbatch();
+    let mut scaled = V::zeros(atol.len(), aug_ctx.clone());
+    for lane in 0..nlanes {
+        scaled
+            .get_batch_mut(lane)
+            .copy_from_view(&atol.get_batch(lane / lanes_per_atol_batch));
+    }
+    scaled.for_each_elem([scale], |x, [s], _lane, _i| *x *= s[0]);
+    scaled
 }
 
 fn validate_adjoint_backwards_inputs<'a, Eqn, Solver, AdjointSolver>(
@@ -513,8 +580,6 @@ struct IntegrateDeltaG<M: Matrix, LS: LinearSolver<M>> {
     pub tmp_nstates: M::V,
     pub tmp_nstates2: M::V,
     pub tmp_nout: M::V,
-    /// The largest magnitude of each channel's cost gradients dgdu
-    pub forcing_scale: M::V,
 }
 
 impl<M, LS> IntegrateDeltaG<M, LS>
@@ -589,8 +654,7 @@ where
         let ndifferential = nstates - nalgebraic;
         let tmp_algebraic = M::V::zeros(nalgebraic, aug_ctx.clone());
         let tmp_differential = M::V::zeros(ndifferential, aug_ctx.clone());
-        let tmp_differential2 = M::V::zeros(ndifferential, aug_ctx.clone());
-        let forcing_scale = M::V::from_element(1, M::T::one(), aug_ctx);
+        let tmp_differential2 = M::V::zeros(ndifferential, aug_ctx);
         Ok(Self {
             rhs_jac_aa,
             rhs_jac_ad,
@@ -603,56 +667,8 @@ where
             tmp_differential,
             tmp_differential2,
             tmp_nstates2,
-            forcing_scale,
         })
     }
-
-    /// Set [`Self::forcing_scale`] from the cost gradients of every channel at every time.
-    fn set_forcing_scale(&mut self, dgdus: &[&<M::V as DefaultDenseMatrix>::M])
-    where
-        M::V: DefaultDenseMatrix,
-    {
-        let nchannels = dgdus.len();
-        for (i, dgdu) in dgdus.iter().enumerate() {
-            let ctx = dgdu.context().clone();
-            let mut channel_max = M::V::zeros(1, ctx.clone());
-            let mut column_max = M::V::zeros(1, ctx);
-            for j in 0..dgdu.ncols() {
-                let column = dgdu.column(j).into_owned();
-                M::V::reduce_elem(
-                    &mut column_max,
-                    [&column],
-                    M::T::zero(),
-                    |[x], _lane, k| num_traits::abs(x[k]),
-                    |a, b| a.max(b),
-                );
-                channel_max.for_each_elem([&column_max], |m, [c], _lane, _i| *m = m.max(c[0]));
-            }
-            let nbatch = channel_max.context().nbatch();
-            for b in 0..nbatch {
-                self.forcing_scale
-                    .get_batch_mut(b * nchannels + i)
-                    .copy_from_view(&channel_max.get_batch(b));
-            }
-        }
-        // a zero gradient needs no scaling, and a NaN or infinite one must reach the solution
-        // unscaled, so that the solve fails as it would without the scaling
-        self.forcing_scale.for_each_elem([], |s, [], _lane, _i| {
-            if !(*s > M::T::zero() && *s < M::T::INFINITY) {
-                *s = M::T::one();
-            }
-        });
-    }
-
-    /// Multiply the adjoint state, solved for the cost gradients divided by
-    /// [`Self::forcing_scale`], back by it.
-    fn unscale_adjoint_state(&self, state: StateRefMut<'_, M::V>) {
-        let scale = &self.forcing_scale;
-        for v in [state.s, state.ds, state.sg, state.dsg] {
-            v.for_each_elem([scale], |x, [s], _lane, _i| *x *= s[0]);
-        }
-    }
-
     fn integrate_delta_g<'a, 'b, Eqn, S1, Solver>(
         &mut self,
         solver: &mut Solver,
@@ -725,8 +741,6 @@ where
                     .copy_from_view(&dgdu.get_batch(b));
             }
         }
-        self.tmp_nout
-            .for_each_elem([&self.forcing_scale], |x, [s], _lane, _i| *x /= s[0]);
         {
             let s_i = &mut *state_mut.s;
             let sg_i = &mut *state_mut.sg;
