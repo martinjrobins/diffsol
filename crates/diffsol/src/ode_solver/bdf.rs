@@ -7,7 +7,7 @@ use crate::{
     NewtonNonlinearSolver, NoAug, NoLineSearch, StateRef, StateRefMut,
 };
 
-use num_traits::{abs, FromPrimitive, One, Signed, ToPrimitive, Zero};
+use num_traits::{abs, FromPrimitive, One, ToPrimitive, Zero};
 
 use crate::ode_solver_error;
 use crate::{
@@ -574,7 +574,12 @@ where
         //- lu factorisation of (M - c * J) used in newton iteration (same equation)
 
         let proposed_h = factor * self.state.h;
-        let new_h = super::config::limit_timestep(proposed_h, self.config.maximum_timestep)?;
+        let new_h = super::config::limit_timestep(
+            proposed_h,
+            self.config.minimum_timestep,
+            self.config.maximum_timestep,
+            self.state.t,
+        )?;
         let factor = if new_h == proposed_h {
             factor
         } else {
@@ -611,13 +616,6 @@ where
         self.state.h = new_h;
         self.convergence.reset_eta_timestep_change();
         self.s_convergence.reset_eta_timestep_change();
-
-        // if step size too small, then fail
-        if self.state.h.abs() < self.config.minimum_timestep {
-            return Err(DiffsolError::from(OdeSolverError::StepSizeTooSmall {
-                time: self.state.t.to_f64().unwrap(),
-            }));
-        }
 
         Ok(new_h)
     }
@@ -791,8 +789,7 @@ where
         };
         if let Some(factor) = factor {
             let n_equal_steps = self.n_equal_steps;
-            // update step size ignoring the possible "step size too small" error
-            let _ = self._update_step_size(factor);
+            self._update_step_size(factor)?;
             // landing on tstop is not a controller decision, so keep the equal-step count
             self.n_equal_steps = n_equal_steps;
         }
@@ -1415,7 +1412,13 @@ where
             );
         }
 
-        let h = super::config::limit_timestep(self.state.h, self.config.maximum_timestep)?;
+        // The initial step estimate may be below the minimum; resizing enforces the floor.
+        let h = super::config::limit_timestep(
+            self.state.h,
+            Eqn::T::zero(),
+            self.config.maximum_timestep,
+            self.state.t,
+        )?;
         if h != self.state.h {
             self._update_step_size(h / self.state.h)?;
             let c = self.state.h * self.alpha[self.state.order];
@@ -1700,8 +1703,7 @@ where
                 || max_index == 0
                 || max_index == 2
             {
-                // the rescale is done even if the new step size is too small, so the step record
-                // must still end with it
+                // Keep the accepted step record consistent if the next step size is too small.
                 let new_h = self
                     ._update_step_size(factor)
                     .inspect_err(|_| self.record_h_end())?;
@@ -2123,6 +2125,20 @@ mod test {
     #[test]
     fn bdf_config() {
         test_config(robertson_ode::<M>(1).0.bdf::<LS>().unwrap());
+    }
+
+    #[test]
+    fn bdf_tstop_respects_min_timestep() {
+        let (mut problem, _) = exponential_decay_problem::<M>(false);
+        problem.ode_options.min_timestep = 1e-3;
+        let mut solver = problem.bdf::<LS>().unwrap();
+        let result = solver.set_stop_time(1e-4);
+        assert_matches!(
+            result,
+            Err(crate::DiffsolError::OdeSolverError(
+                crate::error::OdeSolverError::StepSizeTooSmall { .. }
+            ))
+        );
     }
 
     #[test]

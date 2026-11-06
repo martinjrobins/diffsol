@@ -1,4 +1,5 @@
 use super::adjoint::AdjointOdeSolverMethod;
+use super::config::OdeSolverConfig;
 use super::method::AugmentedOdeSolverMethod;
 use super::runge_kutta::Rk;
 use super::sensitivities::SensitivitiesOdeSolverMethod;
@@ -203,19 +204,12 @@ where
             }
             .into());
         }
-        let mut h = self.rk.start_step(self.config.maximum_timestep)?;
+        let mut h = self.rk.start_step(self.config.as_base_ref())?;
         debug!(
             "Starting Explicit RK step at t = {:?} with h = {:?}",
             self.state().t,
             h
         );
-
-        if self.config.maximum_timestep < self.config.minimum_timestep {
-            return Err(OdeSolverError::StepSizeTooSmall {
-                time: self.rk.state().t.to_f64().unwrap(),
-            }
-            .into());
-        }
 
         // loop until step is accepted
         let mut nattempts = 0;
@@ -240,22 +234,22 @@ where
                 debug!("Step accepted with error norm = {:?}", error_norm);
                 break (factor, error_norm);
             }
-            h *= factor;
             nattempts += 1;
+            self.rk.reset_prev_error();
+            self.rk
+                .error_test_fail(nattempts, self.config.maximum_error_test_failures)?;
+            h = self
+                .rk
+                .update_step_size(h, factor, self.config.as_base_ref())?;
             debug!(
                 "Step rejected with error norm = {:?}, reducing h to {:?}",
                 error_norm, h
             );
-            self.rk.reset_prev_error();
-            self.rk.error_test_fail(
-                h,
-                nattempts,
-                self.config.maximum_error_test_failures,
-                self.config.minimum_timestep,
-            )?;
         };
+        let new_h = self
+            .rk
+            .update_step_size(h, factor, self.config.as_base_ref())?;
         self.rk.set_prev_error(error_norm);
-        let new_h = super::config::limit_timestep(h * factor, self.config.maximum_timestep)?;
         self.rk.step_accepted(h, new_h, false)
     }
 
