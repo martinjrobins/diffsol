@@ -91,12 +91,15 @@ fn feature_enabled(feature: &str) -> bool {
     env::var_os(format!("CARGO_FEATURE_{name}")).is_some()
 }
 
-/// `target/<profile>/include`. `OUT_DIR` is `target/<profile>/build/<package>-<hash>/out`.
+/// `target/<profile>/include`. `OUT_DIR` is `target/<profile>/build/<package>-<hash>/out`, or
+/// `target/<profile>/build/<package>/<hash>/out` with the new build-dir layout of Cargo. Thus use
+/// the parent of the nearest `build` directory.
 fn include_dir() -> PathBuf {
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     out_dir
         .ancestors()
-        .nth(3)
+        .find(|dir| dir.file_name().is_some_and(|name| name == "build"))
+        .and_then(|build| build.parent())
         .expect("unexpected OUT_DIR")
         .join("include")
 }
