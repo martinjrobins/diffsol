@@ -29,10 +29,6 @@ fn main() {
     println!("cargo:rerun-if-changed=src");
     println!("cargo:rerun-if-changed=cbindgen.toml");
     println!("cargo:rerun-if-changed=build.rs");
-    // the test that compiles the C examples finds the C compiler for these triples
-    for var in ["TARGET", "HOST"] {
-        println!("cargo:rustc-env=DIFFSOL_C_{var}={}", env::var(var).unwrap());
-    }
     set_soname();
 
     let mut config = cbindgen::Config::from_file(crate_dir.join("cbindgen.toml"))
@@ -58,17 +54,12 @@ fn main() {
     let header = String::from_utf8(header).expect("the C header is not UTF-8");
     let header = insert_option_accessors(header, &crate_dir);
 
-    // `OUT_DIR` belongs to this build (one set of features), so its copy of the header always
-    // agrees with the library. The test that compiles the C examples uses it. The copy in
-    // `target/<profile>/include` is for C programs; the last build writes it.
-    let own_include = PathBuf::from(env::var("OUT_DIR").unwrap()).join("include");
-    println!(
-        "cargo:rustc-env=DIFFSOL_C_INCLUDE_DIR={}",
-        own_include.display()
-    );
-    for dir in [own_include, include_dir()] {
-        write_if_changed(&dir.join("diffsol.h"), &header);
-    }
+    let path = include_dir().join("diffsol.h");
+    write_if_changed(&path, &header);
+    // Builds with different features write the same file. If a build with other features
+    // changes it, run this script again in the next build with these features, so that the
+    // header agrees with the library that this build makes.
+    println!("cargo:rerun-if-changed={}", path.display());
 }
 
 /// Write `contents` to `path`, but only if it changes the file, so that C builds that depend on

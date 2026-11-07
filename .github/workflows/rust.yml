@@ -195,6 +195,21 @@ jobs:
     - name: Run tests - all features
       if: matrix.tests == true && matrix.os != 'macos-15-intel'
       run: cargo test --verbose ${{ env.ADDITIONAL_FEATURES_FLAGS || '' }} ${{ env.ADDITIONAL_TEST_FLAGS || '' }} --workspace
+    - name: Set up MSVC for the C examples (Windows)
+      if: matrix.tests == true && matrix.toolchain != 'nightly' && matrix.os == 'windows-latest'
+      uses: ilammy/msvc-dev-cmd@v1
+    - name: C examples
+      if: matrix.tests == true && matrix.toolchain != 'nightly'
+      shell: bash
+      run: |
+        # build diffsol-c as a C user does, then compile and run the C examples against the
+        # library and the header in target/debug
+        features=diffsl-cranelift
+        case "${ADDITIONAL_FEATURES_FLAGS:-}" in
+          *diffsl-llvm17*) features="$features,diffsl-llvm17" ;;
+        esac
+        cargo build -p diffsol-c --features "$features"
+        crates/diffsol-c/examples/c/run_examples.sh target/debug
     - name: Clippy - all features
       if: matrix.clippy == true
       run: cargo clippy --verbose ${{ env.ADDITIONAL_FEATURES_FLAGS || ''}} --workspace

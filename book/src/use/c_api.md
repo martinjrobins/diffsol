@@ -224,9 +224,15 @@ cc crates/diffsol-c/examples/c/logistic_diffsl_jit.c -I target/debug/include \
 ./logistic_diffsl_jit
 ```
 
-The test `crates/diffsol-c/tests/c_examples.rs` compiles and runs both examples on each
-platform. Run it with:
+The script `crates/diffsol-c/examples/c/run_examples.sh` compiles and runs the examples against
+a Cargo build. It runs the JIT example only if the library has a JIT backend, and also runs it
+with LLVM if the library has LLVM. The CI runs it on Linux, macOS and Windows (in Git Bash, with
+MSVC).
 
 ```sh
-cargo test -p diffsol-c --features diffsl-cranelift --test c_examples
+cargo build -p diffsol-c --features diffsl-cranelift
+crates/diffsol-c/examples/c/run_examples.sh target/debug
 ```
+
+The JIT example uses Cranelift if the library has it. To select the backend, set the environment
+variable `DIFFSOL_JIT_BACKEND` to `cranelift` or `llvm`.

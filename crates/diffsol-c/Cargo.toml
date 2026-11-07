@@ -64,10 +64,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 paste = { workspace = true }
 
-[dev-dependencies]
-# finds the C compiler (also MSVC on Windows) for the test that compiles the C examples
-cc = "1"
-
 [build-dependencies]
 cbindgen = { version = "0.29", default-features = false }
 
