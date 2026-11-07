@@ -74,7 +74,8 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends build-essential debhelper devscripts \
             lintian pkg-config curl ca-certificates git cmake binutils \
-            llvm-${LLVM_VERSION}-dev libclang-${LLVM_VERSION}-dev
+            llvm-${LLVM_VERSION}-dev libclang-${LLVM_VERSION}-dev \
+            zlib1g-dev libzstd-dev libedit-dev libncurses-dev libffi-dev libxml2-dev
       - name: Install Rust
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \

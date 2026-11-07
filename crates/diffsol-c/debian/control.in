@@ -2,7 +2,10 @@ Source: diffsol
 Section: libs
 Priority: optional
 Maintainer: Martin Robinson <martinjrobins@gmail.com>
-Build-Depends: debhelper-compat (= 13), cmake, llvm-@LLVM@-dev, libclang-@LLVM@-dev
+# The CMake configuration of LLVM, which the Enzyme build of diffsl uses, needs the -dev
+# packages of the libraries that LLVM links (zlib, zstd, libedit, ncurses, libffi, libxml2).
+Build-Depends: debhelper-compat (= 13), cmake, llvm-@LLVM@-dev, libclang-@LLVM@-dev,
+ zlib1g-dev, libzstd-dev, libedit-dev, libncurses-dev, libffi-dev, libxml2-dev
 Standards-Version: 4.6.2
 Homepage: https://github.com/martinjrobins/diffsol
 Rules-Requires-Root: no
