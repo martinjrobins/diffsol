@@ -628,14 +628,14 @@ impl<V: Vector> StateRefMut<'_, V> {
             }
         }
 
+        // with no output function the integrated output is the identity on the state
         let (l_minus, l_plus) = if integrate_out {
-            if let Some(out_op) = eqn.out() {
-                (
+            match eqn.out() {
+                Some(out_op) => (
                     Some(out_op.call(y_minus, t_event)),
                     Some(out_op.call(y_plus, t_event)),
-                )
-            } else {
-                (None, None)
+                ),
+                None => (Some(y_minus.clone()), Some(y_plus.clone())),
             }
         } else {
             (None, None)
@@ -730,15 +730,15 @@ impl<V: Vector> StateRefMut<'_, V> {
             return Ok(());
         }
 
-        let Some(out_op) = eqn.out() else {
-            return Ok(());
-        };
         let Some(root_op) = eqn.root() else {
             return Ok(());
         };
         let forward = forward.as_ref();
 
-        let nout = out_op.nout();
+        // with no output function the integrated output is the identity on the state
+        let nout = eqn
+            .out()
+            .map_or(eqn.rhs().nstates(), |out_op| out_op.nout());
         let nbatch = eqn.context().nbatch();
         if self.s.context().nbatch() != nbatch * nout
             || self.sg.context().nbatch() != nbatch * nout
@@ -758,7 +758,10 @@ impl<V: Vector> StateRefMut<'_, V> {
         }
 
         let ctx = eqn.context().clone();
-        let out = out_op.call(forward.y, forward.t);
+        let out = match eqn.out() {
+            Some(out_op) => out_op.call(forward.y, forward.t),
+            None => forward.y.clone(),
+        };
         let root_t = root_op.time_derive(forward.y, forward.t);
         let mut root_flow = V::zeros(nroots, ctx.clone());
         root_op.jac_mul_inplace(forward.y, forward.t, forward.dy, &mut root_flow);
