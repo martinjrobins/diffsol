@@ -19,10 +19,10 @@ use crate::{
 };
 use log::debug;
 use log::trace;
-use num_traits::{FromPrimitive, One, Signed, ToPrimitive, Zero};
+use num_traits::{FromPrimitive, One, ToPrimitive, Zero};
 
 use super::adjoint::AdjointOdeSolverMethod;
-use super::config::SdirkConfig;
+use super::config::{OdeSolverConfig, SdirkConfig};
 use super::jacobian_update::{solve_with_jacobian_updates, SolverState};
 use super::method::AugmentedOdeSolverMethod;
 use super::sensitivities::SensitivitiesOdeSolverMethod;
@@ -533,13 +533,7 @@ where
             self.rk.state().t,
             self.rk.state().h
         );
-        let mut h = self.rk.start_step()?;
-
-        if h.abs() < self.config.minimum_timestep {
-            return Err(DiffsolError::from(OdeSolverError::StepSizeTooSmall {
-                time: self.rk.state().t.to_f64().unwrap(),
-            }));
-        }
+        let mut h = self.rk.start_step(self.config.as_base_ref())?;
 
         // setup the operators for the step
         self.update_op_step_size(h);
@@ -578,6 +572,10 @@ where
                     false
                 };
                 if failed {
+                    self.rk.reset_prev_error();
+                    nonlinear_failures += 1;
+                    self.rk
+                        .solve_fail(nonlinear_failures, self.config.maximum_newton_fails)?;
                     if !updated_jacobian {
                         // newton iteration did not converge, so update jacobian and try again
                         debug!("First convergence failure, updating Jacobian and trying again",);
@@ -585,7 +583,11 @@ where
                         self.jacobian_updates_at(h, SolverState::FirstConvergenceFail, None);
                     } else {
                         // newton iteration did not converge and jacobian has been updated, so we reduce step size and try again
-                        h *= Eqn::T::from_f64(0.3).unwrap();
+                        h = self.rk.update_step_size(
+                            h,
+                            Eqn::T::from_f64(0.3).unwrap(),
+                            self.config.as_base_ref(),
+                        )?;
                         debug!(
                             "Second convergence failure, reducing step size to {:.3e} and trying again",
                             h.to_f64().unwrap()
@@ -594,14 +596,6 @@ where
                         self.update_op_step_size(h);
                         self.jacobian_updates_at(h, SolverState::SecondConvergenceFail, None);
                     }
-                    self.rk.reset_prev_error();
-                    nonlinear_failures += 1;
-                    self.rk.solve_fail(
-                        h,
-                        nonlinear_failures,
-                        self.config.minimum_timestep,
-                        self.config.maximum_newton_fails,
-                    )?;
                     // try again....
                     continue 'step;
                 }
@@ -645,7 +639,13 @@ where
                 debug!("Step accepted with error norm {}", error_norm,);
                 break (factor, error_norm);
             }
-            h *= factor;
+            nattempts += 1;
+            self.rk.reset_prev_error();
+            self.rk
+                .error_test_fail(nattempts, self.config.maximum_error_test_failures)?;
+            h = self
+                .rk
+                .update_step_size(h, factor, self.config.as_base_ref())?;
             debug!(
                 "Step rejected with error norm {}, reducing step size to {} and trying again",
                 error_norm, h,
@@ -654,18 +654,12 @@ where
             self.reset_etas_timestep_change();
             self.update_op_step_size(h);
             self.jacobian_updates_at(h, SolverState::ErrorTestFail, None);
-            nattempts += 1;
-            self.rk.reset_prev_error();
-            self.rk.error_test_fail(
-                h,
-                nattempts,
-                self.config.maximum_error_test_failures,
-                self.config.minimum_timestep,
-            )?;
         };
 
         // accept the step
-        let new_h = h * factor;
+        let new_h = self
+            .rk
+            .update_step_size(h, factor, self.config.as_base_ref())?;
         if factor != Eqn::T::one() {
             self.reset_etas_timestep_change();
         }
