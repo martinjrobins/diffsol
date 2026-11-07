@@ -222,6 +222,13 @@ pub struct OdeCallbacksDesc<T> {
     pub reset_sens_adjoint: OdeCallbackMulFn<T>,
 }
 
+// SAFETY: `user_data` is the only field that is not `Send`. The caller of the C API agrees to
+// the thread contract in the module documentation: the callbacks and `free_user_data` can run
+// on any thread, but never at the same time. Thus it is safe to move the descriptor to a
+// different thread. The descriptor is not `Sync`, because two threads must not call the
+// callbacks at the same time.
+unsafe impl<T: Send> Send for OdeCallbacksDesc<T> {}
+
 /// [`OdeCallbacksDesc`] for `double` precision.
 pub type DiffsolOdeCallbacksF64 = OdeCallbacksDesc<f64>;
 /// [`OdeCallbacksDesc`] for `float` precision.

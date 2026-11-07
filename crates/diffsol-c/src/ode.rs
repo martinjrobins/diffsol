@@ -28,11 +28,14 @@ pub struct Ode {
     ode_solver: OdeSolverType,
 }
 
-unsafe impl Send for Ode {}
-unsafe impl Sync for Ode {}
-
 #[derive(Clone)]
 pub struct OdeWrapper(Arc<Mutex<Ode>>);
+
+// `OdeWrapper` must be `Send` and `Sync`
+const _: () = {
+    const fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<OdeWrapper>();
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct OdeWrapperSnapshot {

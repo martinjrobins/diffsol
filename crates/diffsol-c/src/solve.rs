@@ -36,7 +36,7 @@ use crate::{
 use crate::solution::Solution;
 pub(crate) type SolveResult = Result<Box<dyn Solution>, DiffsolRtError>;
 
-pub(crate) trait Solve {
+pub(crate) trait Solve: Send {
     fn matrix_type(&self) -> MatrixType;
     fn nstates(&self) -> usize;
     fn nparams(&self) -> usize;
@@ -267,6 +267,7 @@ where
     Eqn: OdeEquationsImplicitSens<M = M, T = M::T, V = M::V, C = M::C>
         + OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>
         + SolveEqn
+        + Send
         + 'static,
     for<'b> <<M::V as DefaultDenseMatrix>::M as MatrixCommon>::Inner: ToHostArray<M::T> + Clone,
     for<'b> <M::V as VectorCommon>::Inner: ToHostArray<M::T> + Clone,
