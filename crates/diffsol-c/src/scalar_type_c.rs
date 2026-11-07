@@ -7,18 +7,23 @@ use crate::scalar_type::ScalarType;
 const SCALAR_TYPE_F32: &[u8] = b"f32\0";
 const SCALAR_TYPE_F64: &[u8] = b"f64\0";
 
+/// The C value of `ScalarType::F32`.
+pub const DIFFSOL_SCALAR_TYPE_F32: i32 = 0;
+/// The C value of `ScalarType::F64`.
+pub const DIFFSOL_SCALAR_TYPE_F64: i32 = 1;
+
 pub(crate) fn scalar_type_from_i32(value: i32) -> Option<ScalarType> {
     match value {
-        0 => Some(ScalarType::F32),
-        1 => Some(ScalarType::F64),
+        DIFFSOL_SCALAR_TYPE_F32 => Some(ScalarType::F32),
+        DIFFSOL_SCALAR_TYPE_F64 => Some(ScalarType::F64),
         _ => None,
     }
 }
 
 pub(crate) fn scalar_type_to_i32(value: ScalarType) -> i32 {
     match value {
-        ScalarType::F32 => 0,
-        ScalarType::F64 => 1,
+        ScalarType::F32 => DIFFSOL_SCALAR_TYPE_F32,
+        ScalarType::F64 => DIFFSOL_SCALAR_TYPE_F64,
     }
 }
 

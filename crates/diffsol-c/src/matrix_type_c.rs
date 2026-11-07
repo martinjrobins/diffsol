@@ -8,20 +8,27 @@ const MATRIX_TYPE_NALGEBRA: &[u8] = b"nalgebra_dense\0";
 const MATRIX_TYPE_FAER: &[u8] = b"faer_dense\0";
 const MATRIX_TYPE_FAER_SPARSE: &[u8] = b"faer_sparse\0";
 
+/// The C value of `MatrixType::NalgebraDense`.
+pub const DIFFSOL_MATRIX_TYPE_NALGEBRA_DENSE: i32 = 0;
+/// The C value of `MatrixType::FaerDense`.
+pub const DIFFSOL_MATRIX_TYPE_FAER_DENSE: i32 = 1;
+/// The C value of `MatrixType::FaerSparse`.
+pub const DIFFSOL_MATRIX_TYPE_FAER_SPARSE: i32 = 2;
+
 pub(crate) fn matrix_type_from_i32(value: i32) -> Option<MatrixType> {
     match value {
-        0 => Some(MatrixType::NalgebraDense),
-        1 => Some(MatrixType::FaerDense),
-        2 => Some(MatrixType::FaerSparse),
+        DIFFSOL_MATRIX_TYPE_NALGEBRA_DENSE => Some(MatrixType::NalgebraDense),
+        DIFFSOL_MATRIX_TYPE_FAER_DENSE => Some(MatrixType::FaerDense),
+        DIFFSOL_MATRIX_TYPE_FAER_SPARSE => Some(MatrixType::FaerSparse),
         _ => None,
     }
 }
 
 pub(crate) fn matrix_type_to_i32(value: MatrixType) -> i32 {
     match value {
-        MatrixType::NalgebraDense => 0,
-        MatrixType::FaerDense => 1,
-        MatrixType::FaerSparse => 2,
+        MatrixType::NalgebraDense => DIFFSOL_MATRIX_TYPE_NALGEBRA_DENSE,
+        MatrixType::FaerDense => DIFFSOL_MATRIX_TYPE_FAER_DENSE,
+        MatrixType::FaerSparse => DIFFSOL_MATRIX_TYPE_FAER_SPARSE,
     }
 }
 

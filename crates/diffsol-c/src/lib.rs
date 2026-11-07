@@ -19,7 +19,8 @@
 //! generic parameters — `OdeWrapper` erases these type parameters behind trait objects so you
 //! can choose them at runtime.
 //!
-//! To create an `OdeWrapper`, use one of the feature-gated constructors:
+//! To create an `OdeWrapper`, use [OdeWrapper::new_callbacks] if you have the equations as
+//! C callbacks (see [ode_callbacks]), or one of the feature-gated DiffSL constructors:
 //! - `new_jit` if you have DiffSL code to JIT-compile (requires the
 //!   `diffsl-cranelift` or `diffsl-llvm` feature).
 //! - `new_external` if you have pre-compiled DiffSL symbols (requires the
@@ -77,6 +78,8 @@
 //! so that they can be called from C or any language with C interop. The public `_c` modules
 //! are:
 //! - [ode_c] — create, configure, solve, and destroy [OdeWrapper] handles.
+//! - [ode_callbacks_c] — create an [OdeWrapper] from equations given as C callbacks.
+//! - `ode_diffsl_c` — create an [OdeWrapper] from DiffSL equations (JIT or external symbols).
 //! - [solution_wrapper_c] — extract solution data and destroy [SolutionWrapper] handles.
 //! - [ode_options_c] — get/set solver convergence and performance options.
 //! - [initial_condition_options_c] — get/set initial condition solver options.
@@ -85,6 +88,13 @@
 //! - [host_array_c] — inspect and free [HostArray] data.
 //! - [error_c] — retrieve and clear thread-local error messages.
 //! - [string_c] — allocate and free Rust-owned strings from C.
+//!
+//! A build of this crate makes a dynamic library (`libdiffsol_c.so`, `.dylib` or `.dll`) and
+//! the C header `target/<profile>/include/diffsol.h`. A static library is made on request, with
+//! `cargo rustc -p diffsol-c --lib --crate-type staticlib`.
+//! The build script makes the header with cbindgen, and the header agrees with the features of
+//! the build. The README and the examples in `examples/c` show how to compile and link a C
+//! program.
 //!
 //! All C FFI functions follow a common pattern:
 //! - Return `i32` (0 = success, negative = error).
@@ -112,7 +122,6 @@
 //! The [utils] module provides a few standalone functions:
 //! - [utils::version] — returns the crate version.
 //! - [utils::is_klu_available] — checks whether KLU was compiled in.
-//! - [utils::is_sens_available] — checks whether sensitivity analysis is supported on this platform.
 
 // Configure dlmalloc as the global allocator for WASM targets
 // dlmalloc is a maintained alternative to the unmaintained wee_alloc
@@ -187,7 +196,7 @@ compile_error!("diffsol-c cannot enable more than one `diffsl-llvm*` feature.");
 /// types, allowing the checkpoint to be shared between the forward and backward solvers which
 /// may use different ODE solver methods (e.g. BDF forward, ESDIRK backward).
 ///
-/// The `AdjointCheckpointData<M, CG, Tag>` struct stores the concrete [CheckpointingPath](diffsol::CheckpointingPath)
+/// The `AdjointCheckpointData<M, Eqn, Tag>` struct stores the concrete [CheckpointingPath](diffsol::CheckpointingPath)
 /// plus the forward solver metadata (method, linear solver, parameters).
 pub mod adjoint_checkpoint;
 /// Macros and helper functions for the C FFI layer.
@@ -374,6 +383,33 @@ pub mod ode;
 /// - Serialization: `diffsol_ode_wrapper_serialize`, `diffsol_ode_wrapper_deserialize`.
 #[path = "ode_c.rs"]
 pub mod ode_c;
+/// ODE equations defined by C callbacks.
+///
+/// [OdeCallbacks] implements every flavour of [diffsol::OdeEquations] on top of a table of C
+/// function pointers, [OdeCallbacksDesc], one for each closure accepted by
+/// [diffsol::OdeBuilder] plus a `user_data` argument. See the module documentation for the
+/// callback conventions and the ownership of `user_data`.
+pub mod ode_callbacks;
+/// C FFI functions for creating an [OdeWrapper] from equations given as C callbacks.
+///
+/// - `diffsol_ode_new_callbacks_f64` / `diffsol_ode_new_callbacks_f32` — construct an [OdeWrapper]
+///   from a [DiffsolOdeCallbacksF64](ode_callbacks::DiffsolOdeCallbacksF64) /
+///   [DiffsolOdeCallbacksF32](ode_callbacks::DiffsolOdeCallbacksF32) descriptor.
+#[path = "ode_callbacks_c.rs"]
+pub mod ode_callbacks_c;
+/// DiffSL equations: the [OdeWrapper] constructors (`new_jit`, `new_external`,
+/// `new_external_dynamic`), the solver factories, and the `SolveEqn` impls for each code
+/// generation backend. All items are `pub(crate)`, apart from the [OdeWrapper] methods.
+mod ode_diffsl;
+/// C API constructors for DiffSL equations: JIT-compiled code, and external symbols.
+#[cfg(any(
+    feature = "external",
+    feature = "diffsl-external-dynamic",
+    feature = "diffsl-cranelift",
+    feature = "diffsl-llvm",
+))]
+#[path = "ode_diffsl_c.rs"]
+pub mod ode_diffsl_c;
 /// ODE solver convergence and performance options for the dynamic dispatch API.
 ///
 /// This module defines [OdeSolverOptions], a handle obtained via
@@ -471,18 +507,18 @@ pub mod solution_wrapper_c;
 ///
 /// All items in this module are `pub(crate)`; the public API is exposed through `OdeWrapper`.
 pub mod solve;
+/// The hooks for each equation type that the solver uses.
+///
+/// Defines the `SolveEqn` trait, and implements it for DiffSL equations with each code
+/// generation backend. The hooks give serialization, the requirement checks before a solve, and
+/// the errors that the equations recorded. All items are `pub(crate)`.
+mod solve_eqn;
 /// Internal macros for generating ODE solver option accessor methods.
 ///
 /// This module provides macros used by the `Solve` trait implementation
 /// to automatically generate getter/setter methods for initial condition and ODE solver options.
 /// The macros are `pub(crate)` and intended only for internal use within the `diffsol-c` crate.
 pub mod solve_macros;
-/// Internal serialization utilities for the dynamic dispatch solver types.
-///
-/// Defines the `SolveSerialization<M>` trait and implementations for various codegen backends
-/// (LLVM, Cranelift, external). Used by [OdeWrapper] during
-/// serialization/deserialization. All items are `pub(crate)`.
-mod solve_serialization;
 /// C FFI memory management helpers for string and byte buffer allocation.
 ///
 /// Provides `extern "C"` functions for allocating and freeing Rust-owned memory from C code:
@@ -498,7 +534,6 @@ pub mod string_c;
 /// Provides standalone functions useful for runtime capability checks:
 /// - [version] — returns the crate version string.
 /// - [is_klu_available] — returns `true` if the `suitesparse` feature (KLU sparse linear solver) was enabled at compile time.
-/// - [is_sens_available] — returns `true` if sensitivity analysis is supported on the current platform (not Windows).
 pub mod utils;
 /// Internal validation of linear solver compatibility with matrix types.
 ///
@@ -512,6 +547,9 @@ pub mod valid_linear_solver;
 #[cfg(test)]
 mod test_support;
 
+#[cfg(test)]
+mod ode_callbacks_requirements_test;
+
 pub use adjoint_checkpoint::AdjointCheckpointWrapper;
 pub use error::DiffsolRtError;
 pub use host_array::{FromHostArray, HostArray, ToHostArray};
@@ -522,8 +560,9 @@ pub use jit::{default_enabled_jit_backend, JitBackendType};
 pub use linear_solver_type::LinearSolverType;
 pub use matrix_type::MatrixType;
 pub use ode::OdeWrapper;
+pub use ode_callbacks::{CallbackScalar, OdeCallbackError, OdeCallbacks, OdeCallbacksDesc};
 pub use ode_options::{OdeSolverOptions, OdeSolverOptionsSnapshot};
 pub use ode_solver_type::OdeSolverType;
 pub use scalar_type::{Scalar, ScalarType, ToScalarType};
 pub use solution_wrapper::SolutionWrapper;
-pub use utils::{is_klu_available, is_sens_available, version};
+pub use utils::{is_klu_available, version};

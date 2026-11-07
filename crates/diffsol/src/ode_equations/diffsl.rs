@@ -1484,9 +1484,9 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> LinearOpTranspose for DiffSl
 
     fn transpose_inplace(&self, t: Self::T, y: &mut Self::M) {
         if let Some(coloring) = &self.0.mass_transpose_coloring {
-            coloring.matrix_inplace(self, t, y);
+            coloring.transpose_inplace(self, t, y);
         } else {
-            self._default_matrix_inplace(t, y);
+            self._default_transpose_inplace(t, y);
         }
     }
     fn transpose_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
@@ -1665,6 +1665,7 @@ mod tests {
         };
     }
 
+    generate_tests_llvm_only!(diffsl_mass_transpose_non_symmetric);
     generate_tests_llvm_only!(diffsl_reset_sens_and_adjoint_gradients);
     generate_tests_llvm_only!(diffsl_root_sens_gradients);
     generate_tests_llvm_only!(diffsl_out_adjoint_nonlinear);
@@ -2107,6 +2108,42 @@ mod tests {
 
     /// Tests adjoint gradient (jac_transpose_mul_inplace) for DiffSlOut with a non-linear
     /// output function.
+    /// The mass matrix and its transpose, built with their colorings for sparse matrices, are
+    /// correct when the mass matrix is not symmetric.
+    #[allow(dead_code)]
+    fn diffsl_mass_transpose_non_symmetric<
+        CG: CodegenModuleJit + CodegenModuleCompile,
+        M: Matrix<V: DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
+    >()
+    where
+        for<'b> &'b M::V: VectorRef<M::V>,
+        for<'b> &'b M: MatrixRef<M>,
+    {
+        let text = "
+            u_i { x = 1, v = 1 }
+            dudt_i { dxdt = 0, dvdt = 0 }
+            M_i { dxdt + 2 * dvdt, 3 * dvdt }
+            F_i { -x, -v }
+        ";
+        use crate::LinearOpTranspose;
+        let ctx = M::C::default();
+        let eqn = DiffSl::<M, CG>::compile(text, ctx.clone(), true).unwrap();
+        let mass = eqn.mass().expect("model must have a mass matrix");
+        let dense = |m: &M| {
+            let mut d = [[0.0; 2]; 2];
+            let (indices, values) = m.triplet_iter();
+            for ((i, j), v) in indices.zip(values) {
+                d[i][j] += v.to_f64().unwrap();
+            }
+            d
+        };
+        let m = mass.matrix(M::T::zero());
+        assert_eq!(dense(&m), [[1.0, 2.0], [0.0, 3.0]]);
+        let mut mt = M::new_from_sparsity(2, 2, mass.transpose_sparsity(), ctx);
+        mass.transpose_inplace(M::T::zero(), &mut mt);
+        assert_eq!(dense(&mt), [[1.0, 0.0], [2.0, 3.0]]);
+    }
+
     #[allow(dead_code)]
     fn diffsl_out_adjoint_nonlinear<
         CG: CodegenModuleJit + CodegenModuleCompile,

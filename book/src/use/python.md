@@ -2,8 +2,8 @@
 
 There is now a dedicated Python package for diffsol called
 [pydiffsol](https://pydiffsol.readthedocs.io/en/latest/). It wraps the
-`diffsol-c` dynamic dispatch API (described in the [C and other
-languages](./c.md) page) in a clean, Pythonic interface — no Rust knowledge
+`diffsol-c` dynamic dispatch API (described in the [dynamic dispatch
+API](./dynamic_dispatch_api.md) page) in a clean, Pythonic interface — no Rust knowledge
 required. You can install it with:
 
 ```bash

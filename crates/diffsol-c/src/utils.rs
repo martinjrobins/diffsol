@@ -8,9 +8,3 @@ pub fn version() -> String {
 pub fn is_klu_available() -> bool {
     cfg!(feature = "suitesparse")
 }
-
-/// Inidicate whether sensitivity analysis is available.
-/// Sensitivity analysis is currently limited to Linux and macos, and not supported for Windows.
-pub fn is_sens_available() -> bool {
-    cfg!(not(target_os = "windows"))
-}

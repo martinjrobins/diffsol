@@ -1,0 +1,826 @@
+//! The logistic model `dy/dt = r y (1 - y)`, `y(0) = 0.1`, `out = y`, defined with C callbacks
+//! (see `diffsol_c::ode_callbacks`) rather than DiffSL, solved through the runtime API.
+
+mod common;
+
+use std::ffi::c_void;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use common::{
+    all_ode_solvers, assert_close, assert_solution_tail, hybrid_logistic_state,
+    hybrid_logistic_state_dr, logistic_integral, logistic_integral_dr, logistic_state,
+    logistic_state_dr, matrix_host, vector_host, ASSERT_TOL, LOGISTIC_X0,
+};
+use diffsol_c::host_array::FromHostArray;
+use diffsol_c::ode_c::diffsol_ode_free;
+use diffsol_c::ode_callbacks::DiffsolOdeCallbacksF32;
+use diffsol_c::ode_callbacks_c::{diffsol_ode_new_callbacks_f32, diffsol_ode_new_callbacks_f64};
+use diffsol_c::{
+    LinearSolverType, MatrixType, OdeCallbacksDesc, OdeSolverType, OdeWrapper, ScalarType,
+};
+
+const ALL_MATRIX_TYPES: [MatrixType; 3] = [
+    MatrixType::NalgebraDense,
+    MatrixType::FaerDense,
+    MatrixType::FaerSparse,
+];
+
+/// What the callbacks see through `user_data`.
+struct UserData {
+    /// If non-zero, `rhs` returns this status instead of evaluating.
+    rhs_status: i32,
+    /// If non-zero, `rhs` fails (with status 1) on this call only, counting from 1.
+    rhs_fail_call: usize,
+    /// Counts the calls to `rhs`.
+    rhs_calls: AtomicUsize,
+    /// Counts the calls to `free_user_data`.
+    frees: &'static AtomicUsize,
+}
+
+fn user_data<'a>(ud: *mut c_void) -> &'a UserData {
+    unsafe { &*(ud as *const UserData) }
+}
+
+unsafe fn slice<'a, T>(ptr: *const T, len: usize) -> &'a [T] {
+    unsafe { std::slice::from_raw_parts(ptr, len) }
+}
+
+unsafe fn slice_mut<'a, T>(ptr: *mut T, len: usize) -> &'a mut [T] {
+    unsafe { std::slice::from_raw_parts_mut(ptr, len) }
+}
+
+/// Define the logistic callbacks for scalar type `$t` in a module `$m`.
+macro_rules! logistic_callbacks {
+    ($m:ident, $t:ty) => {
+        #[allow(dead_code)]
+        mod $m {
+            use super::*;
+            type T = $t;
+
+            pub unsafe extern "C" fn rhs(
+                x: *const T,
+                p: *const T,
+                _t: T,
+                y: *mut T,
+                ud: *mut c_void,
+            ) -> i32 {
+                let ud = user_data(ud);
+                if ud.rhs_status != 0 {
+                    return ud.rhs_status;
+                }
+                let call = ud.rhs_calls.fetch_add(1, Ordering::SeqCst) + 1;
+                if call == ud.rhs_fail_call {
+                    return 1;
+                }
+                let (x, p, y) = unsafe { (slice(x, 1), slice(p, 1), slice_mut(y, 1)) };
+                y[0] = p[0] * x[0] * (1.0 - x[0]);
+                0
+            }
+
+            pub unsafe extern "C" fn rhs_jac(
+                x: *const T,
+                p: *const T,
+                _t: T,
+                v: *const T,
+                y: *mut T,
+                _ud: *mut c_void,
+            ) -> i32 {
+                let (x, p, v, y) =
+                    unsafe { (slice(x, 1), slice(p, 1), slice(v, 1), slice_mut(y, 1)) };
+                y[0] = p[0] * (1.0 - 2.0 * x[0]) * v[0];
+                0
+            }
+
+            pub unsafe extern "C" fn rhs_sens(
+                x: *const T,
+                _p: *const T,
+                _t: T,
+                v: *const T,
+                y: *mut T,
+                _ud: *mut c_void,
+            ) -> i32 {
+                let (x, v, y) = unsafe { (slice(x, 1), slice(v, 1), slice_mut(y, 1)) };
+                y[0] = x[0] * (1.0 - x[0]) * v[0];
+                0
+            }
+
+            pub unsafe extern "C" fn rhs_adjoint(
+                x: *const T,
+                p: *const T,
+                t: T,
+                v: *const T,
+                y: *mut T,
+                ud: *mut c_void,
+            ) -> i32 {
+                // the Jacobian is 1x1, so it is its own transpose
+                let status = unsafe { rhs_jac(x, p, t, v, y, ud) };
+                unsafe { *y = -*y };
+                status
+            }
+
+            pub unsafe extern "C" fn rhs_sens_adjoint(
+                x: *const T,
+                p: *const T,
+                t: T,
+                v: *const T,
+                y: *mut T,
+                ud: *mut c_void,
+            ) -> i32 {
+                let status = unsafe { rhs_sens(x, p, t, v, y, ud) };
+                unsafe { *y = -*y };
+                status
+            }
+
+            pub unsafe extern "C" fn init(_p: *const T, _t: T, y: *mut T, _ud: *mut c_void) -> i32 {
+                unsafe { *y = LOGISTIC_X0 as T };
+                0
+            }
+
+            pub unsafe extern "C" fn init_zero_mul(
+                _p: *const T,
+                _t: T,
+                _v: *const T,
+                y: *mut T,
+                _ud: *mut c_void,
+            ) -> i32 {
+                unsafe { *y = 0.0 };
+                0
+            }
+
+            pub unsafe extern "C" fn identity(
+                x: *const T,
+                _p: *const T,
+                _t: T,
+                y: *mut T,
+                _ud: *mut c_void,
+            ) -> i32 {
+                unsafe { *y = *x };
+                0
+            }
+
+            pub unsafe extern "C" fn identity_mul(
+                _x: *const T,
+                _p: *const T,
+                _t: T,
+                v: *const T,
+                y: *mut T,
+                _ud: *mut c_void,
+            ) -> i32 {
+                unsafe { *y = *v };
+                0
+            }
+
+            pub unsafe extern "C" fn neg_identity_mul(
+                _x: *const T,
+                _p: *const T,
+                _t: T,
+                v: *const T,
+                y: *mut T,
+                _ud: *mut c_void,
+            ) -> i32 {
+                unsafe { *y = -*v };
+                0
+            }
+
+            pub unsafe extern "C" fn zero_mul(
+                _x: *const T,
+                _p: *const T,
+                _t: T,
+                _v: *const T,
+                y: *mut T,
+                _ud: *mut c_void,
+            ) -> i32 {
+                unsafe { *y = 0.0 };
+                0
+            }
+
+            /// root: `y - 0.9`
+            pub unsafe extern "C" fn root(
+                x: *const T,
+                _p: *const T,
+                _t: T,
+                y: *mut T,
+                _ud: *mut c_void,
+            ) -> i32 {
+                unsafe { *y = *x - 0.9 };
+                0
+            }
+
+            /// reset: `y = 0.1`
+            pub unsafe extern "C" fn reset(
+                _x: *const T,
+                _p: *const T,
+                _t: T,
+                y: *mut T,
+                _ud: *mut c_void,
+            ) -> i32 {
+                unsafe { *y = 0.1 };
+                0
+            }
+
+            /// The logistic model with every callback needed for forward sensitivities and
+            /// adjoints.
+            pub fn desc(ud: *mut UserData) -> OdeCallbacksDesc<T> {
+                let mut desc = OdeCallbacksDesc::new(1, 1, rhs, init);
+                desc.user_data = ud as *mut c_void;
+                desc.free_user_data = Some(free_user_data);
+                desc.rhs_jac = Some(rhs_jac);
+                desc.rhs_sens = Some(rhs_sens);
+                desc.rhs_adjoint = Some(rhs_adjoint);
+                desc.rhs_sens_adjoint = Some(rhs_sens_adjoint);
+                desc.init_sens = Some(init_zero_mul);
+                desc.init_sens_adjoint = Some(init_zero_mul);
+                desc.out = Some(identity);
+                desc.nout = 1;
+                desc.out_jac = Some(identity_mul);
+                desc.out_sens = Some(zero_mul);
+                desc.out_adjoint = Some(neg_identity_mul);
+                desc.out_sens_adjoint = Some(zero_mul);
+                desc
+            }
+
+            /// [`desc`] plus a root at `y = 0.9` that resets the state to `y = 0.1`.
+            pub fn hybrid_desc(ud: *mut UserData) -> OdeCallbacksDesc<T> {
+                let mut desc = desc(ud);
+                desc.root = Some(root);
+                desc.nroots = 1;
+                desc.root_jac = Some(identity_mul);
+                desc.root_sens = Some(zero_mul);
+                desc.reset = Some(reset);
+                desc.reset_jac = Some(zero_mul);
+                desc.reset_sens = Some(zero_mul);
+                desc
+            }
+        }
+    };
+}
+
+logistic_callbacks!(f64_callbacks, f64);
+logistic_callbacks!(f32_callbacks, f32);
+
+unsafe extern "C" fn free_user_data(ud: *mut c_void) {
+    let ud = unsafe { Box::from_raw(ud as *mut UserData) };
+    ud.frees.fetch_add(1, Ordering::SeqCst);
+}
+
+/// A fresh `user_data`, owned by whoever it is passed to, and its free counter.
+fn new_user_data(rhs_status: i32) -> (*mut UserData, &'static AtomicUsize) {
+    let frees: &'static AtomicUsize = Box::leak(Box::new(AtomicUsize::new(0)));
+    let ud = Box::into_raw(Box::new(UserData {
+        rhs_status,
+        rhs_fail_call: 0,
+        rhs_calls: AtomicUsize::new(0),
+        frees,
+    }));
+    (ud, frees)
+}
+
+fn configure(ode: &OdeWrapper) {
+    ode.set_rtol(1e-8).unwrap();
+    ode.set_atol(1e-8).unwrap();
+    ode.set_sens_rtol(Some(1e-6)).unwrap();
+    ode.set_sens_atol(Some(1e-6)).unwrap();
+    ode.set_param_rtol(Some(1e-6)).unwrap();
+    ode.set_param_atol(Some(1e-6)).unwrap();
+    ode.set_out_rtol(Some(1e-6)).unwrap();
+    ode.set_out_atol(Some(1e-6)).unwrap();
+}
+
+fn make_ode(matrix_type: MatrixType, ode_solver: OdeSolverType) -> OdeWrapper {
+    let (ud, _) = new_user_data(0);
+    let ode = new_callbacks(
+        f64_callbacks::desc(ud),
+        matrix_type,
+        LinearSolverType::Default,
+        ode_solver,
+    )
+    .unwrap();
+    configure(&ode);
+    ode
+}
+
+/// Construct a solver from the test callbacks.
+fn new_callbacks<T: diffsol_c::CallbackScalar>(
+    desc: OdeCallbacksDesc<T>,
+    matrix_type: MatrixType,
+    linear_solver: LinearSolverType,
+    ode_solver: OdeSolverType,
+) -> Result<OdeWrapper, diffsol_c::DiffsolRtError> {
+    // SAFETY: the test callbacks are valid, use the documented lengths, and each test gives
+    // its own `user_data` to one solver only
+    unsafe { OdeWrapper::new_callbacks(desc, matrix_type, linear_solver, ode_solver) }
+}
+
+fn err_string<T>(result: Result<T, diffsol_c::DiffsolRtError>) -> String {
+    match result {
+        Ok(_) => panic!("expected an error"),
+        Err(err) => err.to_string(),
+    }
+}
+
+#[test]
+fn runtime_dispatch_matches_requested_matrix_type() {
+    for matrix_type in ALL_MATRIX_TYPES {
+        let ode = make_ode(matrix_type, OdeSolverType::Bdf);
+        assert_eq!(ode.get_matrix_type().unwrap(), matrix_type);
+        assert_eq!(ode.get_scalar_type().unwrap(), ScalarType::F64);
+        assert_eq!(ode.get_code().unwrap(), "");
+        assert_eq!(ode.get_jit_backend().unwrap(), None);
+        assert_eq!(ode.get_nstates().unwrap(), 1);
+        assert_eq!(ode.get_nparams().unwrap(), 1);
+        assert_eq!(ode.get_nout().unwrap(), 1);
+        assert!(!ode.has_stop().unwrap());
+
+        let y0 = ode.y0(vector_host(&[2.0])).unwrap();
+        assert_eq!(Vec::<f64>::from_host_array(y0).unwrap(), vec![LOGISTIC_X0]);
+
+        let rhs = ode
+            .rhs(vector_host(&[2.0]), 0.0, vector_host(&[0.25]))
+            .unwrap();
+        assert_close(
+            Vec::<f64>::from_host_array(rhs).unwrap()[0],
+            0.375,
+            ASSERT_TOL,
+            "rhs(0.25)",
+        );
+
+        let rhs_jac_mul = ode
+            .rhs_jac_mul(
+                vector_host(&[2.0]),
+                0.0,
+                vector_host(&[0.25]),
+                vector_host(&[3.0]),
+            )
+            .unwrap();
+        assert_close(
+            Vec::<f64>::from_host_array(rhs_jac_mul).unwrap()[0],
+            3.0,
+            ASSERT_TOL,
+            "rhs_jac_mul(0.25, 3.0)",
+        );
+    }
+}
+
+#[test]
+fn dense_solution_matches_logistic_solution_for_every_solver_and_matrix_type() {
+    let t_eval = [0.25, 0.5, 1.0];
+    for matrix_type in ALL_MATRIX_TYPES {
+        for ode_solver in all_ode_solvers() {
+            let ode = make_ode(matrix_type, ode_solver);
+            let solution = ode
+                .solve_dense(vector_host(&[2.0]), vector_host(&t_eval))
+                .unwrap();
+            assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);
+        }
+    }
+}
+
+#[test]
+fn adaptive_solution_matches_logistic_solution() {
+    let r = 2.0;
+    let final_time = 1.0;
+    let ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
+    let solution = ode.solve(vector_host(&[r]), final_time).unwrap();
+    let ys = solution.get_ys().unwrap();
+    let ys = ys.as_array::<f64>().unwrap();
+    let ts = Vec::<f64>::from_host_array(solution.get_ts().unwrap()).unwrap();
+    assert_close(*ts.last().unwrap(), final_time, ASSERT_TOL, "final time");
+    for (i, &t) in ts.iter().enumerate() {
+        assert_close(
+            ys[(0, i)],
+            logistic_state(LOGISTIC_X0, r, t),
+            5e-4,
+            &format!("solve value[{i}]"),
+        );
+    }
+}
+
+#[test]
+fn forward_sensitivities_match_analytic_derivative() {
+    let t_eval = [0.25, 0.5, 1.0];
+    for matrix_type in ALL_MATRIX_TYPES {
+        for ode_solver in all_ode_solvers() {
+            let ode = make_ode(matrix_type, ode_solver);
+            let solution = ode
+                .solve_fwd_sens(vector_host(&[2.0]), vector_host(&t_eval))
+                .unwrap();
+            assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);
+            let sens = solution.get_sens().unwrap();
+            assert_eq!(sens.len(), 1);
+            let sens = sens[0].as_array::<f64>().unwrap();
+            for (i, &t) in t_eval.iter().enumerate() {
+                assert_close(
+                    sens[(0, i)],
+                    logistic_state_dr(LOGISTIC_X0, 2.0, t),
+                    1e-4,
+                    &format!("{matrix_type:?}/{ode_solver:?} sensitivity[{i}]"),
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn continuous_adjoint_matches_analytic_gradient() {
+    let r = 2.0;
+    let final_time = 1.0;
+    for matrix_type in ALL_MATRIX_TYPES {
+        for ode_solver in [OdeSolverType::Bdf, OdeSolverType::Esdirk34] {
+            let ode = make_ode(matrix_type, ode_solver);
+            let (integral, gradient) = ode
+                .solve_continuous_adjoint(vector_host(&[r]), final_time)
+                .unwrap();
+            let integral = Vec::<f64>::from_host_array(integral).unwrap();
+            let gradient = gradient.as_array::<f64>().unwrap();
+            assert_close(
+                integral[0],
+                logistic_integral(LOGISTIC_X0, r, final_time),
+                5e-5,
+                "integral",
+            );
+            assert_close(
+                gradient[(0, 0)],
+                logistic_integral_dr(LOGISTIC_X0, r, final_time),
+                5e-4,
+                &format!("{matrix_type:?}/{ode_solver:?} gradient"),
+            );
+        }
+    }
+}
+
+#[test]
+fn split_adjoint_matches_analytic_gradient() {
+    // g = sum_i (y(t_i) - data_i)^2, so dg/dr = sum_i 2 (y(t_i) - data_i) dy/dr(t_i)
+    let t_eval = [0.25, 0.5, 0.75, 1.0];
+    let data = [0.2, 0.3, 0.4, 0.5];
+    let r = 2.0;
+    let expected: f64 = t_eval
+        .iter()
+        .zip(data)
+        .map(|(&t, d)| {
+            2.0 * (logistic_state(LOGISTIC_X0, r, t) - d) * logistic_state_dr(LOGISTIC_X0, r, t)
+        })
+        .sum();
+    for matrix_type in ALL_MATRIX_TYPES {
+        let ode = make_ode(matrix_type, OdeSolverType::Bdf);
+        let (solution, checkpoint) = ode
+            .solve_adjoint_fwd(vector_host(&[r]), vector_host(&t_eval))
+            .unwrap();
+        let ys = solution.get_ys().unwrap();
+        let ys = ys.as_array::<f64>().unwrap();
+        let dgdu: Vec<f64> = (0..t_eval.len())
+            .map(|i| 2.0 * (ys[(0, i)] - data[i]))
+            .collect();
+        let gradient = ode
+            .solve_adjoint_bkwd(&solution, &checkpoint, matrix_host(1, t_eval.len(), &dgdu))
+            .unwrap();
+        let gradient = gradient.as_array::<f64>().unwrap();
+        assert_close(
+            gradient[(0, 0)],
+            expected,
+            1e-4,
+            &format!("{matrix_type:?} split adjoint gradient"),
+        );
+    }
+}
+
+#[test]
+fn root_and_reset_callbacks_drive_hybrid_solve_and_sensitivities() {
+    let r = 2.0;
+    // spans two resets: the period is ln(81) / r ~ 2.2
+    let t_eval = [0.5, 1.5, 2.5, 3.5, 4.75];
+    for matrix_type in ALL_MATRIX_TYPES {
+        let (ud, _) = new_user_data(0);
+        let ode = new_callbacks(
+            f64_callbacks::hybrid_desc(ud),
+            matrix_type,
+            LinearSolverType::Default,
+            OdeSolverType::Bdf,
+        )
+        .unwrap();
+        configure(&ode);
+        assert!(ode.has_stop().unwrap());
+
+        let solution = ode
+            .solve_dense(vector_host(&[r]), vector_host(&t_eval))
+            .unwrap();
+        let ys = solution.get_ys().unwrap();
+        let ys = ys.as_array::<f64>().unwrap();
+        for (i, &t) in t_eval.iter().enumerate() {
+            assert_close(
+                ys[(0, i)],
+                hybrid_logistic_state(r, t),
+                5e-4,
+                &format!("{matrix_type:?} hybrid value[{i}]"),
+            );
+        }
+
+        let solution = ode
+            .solve_fwd_sens(vector_host(&[r]), vector_host(&t_eval))
+            .unwrap();
+        let sens = solution.get_sens().unwrap();
+        let sens = sens[0].as_array::<f64>().unwrap();
+        for (i, &t) in t_eval.iter().enumerate() {
+            assert_close(
+                sens[(0, i)],
+                hybrid_logistic_state_dr(r, t),
+                1e-3,
+                &format!("{matrix_type:?} hybrid sensitivity[{i}]"),
+            );
+        }
+    }
+}
+
+#[test]
+fn single_precision_callbacks_solve_logistic_model() {
+    let (ud, frees) = new_user_data(0);
+    let ode = new_callbacks(
+        f32_callbacks::desc(ud),
+        MatrixType::NalgebraDense,
+        LinearSolverType::Default,
+        OdeSolverType::Bdf,
+    )
+    .unwrap();
+    assert_eq!(ode.get_scalar_type().unwrap(), ScalarType::F32);
+    ode.set_rtol(1e-5).unwrap();
+    ode.set_atol(1e-5).unwrap();
+    let t_eval = [0.25, 0.5, 1.0];
+    let solution = ode
+        .solve_dense(vector_host(&[2.0]), vector_host(&t_eval))
+        .unwrap();
+    assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 1e-3);
+    drop(solution);
+    drop(ode);
+    assert_eq!(frees.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn missing_callbacks_are_reported_before_solving() {
+    let t_eval = [0.5, 1.0];
+
+    // no rhs_jac: implicit methods are rejected, the explicit method is fine
+    let (ud, _) = new_user_data(0);
+    let mut desc = f64_callbacks::desc(ud);
+    desc.rhs_jac = None;
+    let ode = new_callbacks(
+        desc,
+        MatrixType::NalgebraDense,
+        LinearSolverType::Default,
+        OdeSolverType::Bdf,
+    )
+    .unwrap();
+    configure(&ode);
+    let err = err_string(ode.solve_dense(vector_host(&[2.0]), vector_host(&t_eval)));
+    assert!(err.contains("requires the 'rhs_jac' callback"), "{err}");
+    let err = err_string(ode.rhs_jac_mul(
+        vector_host(&[2.0]),
+        0.0,
+        vector_host(&[0.25]),
+        vector_host(&[1.0]),
+    ));
+    assert!(
+        err.contains("OdeCallbacks: evaluating the equations requires the 'rhs_jac' callback"),
+        "{err}"
+    );
+    ode.set_ode_solver(OdeSolverType::Tsit45).unwrap();
+    let solution = ode
+        .solve_dense(vector_host(&[2.0]), vector_host(&t_eval))
+        .unwrap();
+    assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);
+
+    // no rhs_sens: plain solves work, forward sensitivities are rejected
+    let (ud, _) = new_user_data(0);
+    let mut desc = f64_callbacks::desc(ud);
+    desc.rhs_sens = None;
+    let ode = new_callbacks(
+        desc,
+        MatrixType::NalgebraDense,
+        LinearSolverType::Default,
+        OdeSolverType::Bdf,
+    )
+    .unwrap();
+    configure(&ode);
+    ode.solve_dense(vector_host(&[2.0]), vector_host(&t_eval))
+        .unwrap();
+    let err = err_string(ode.solve_fwd_sens(vector_host(&[2.0]), vector_host(&t_eval)));
+    assert!(err.contains("requires the 'rhs_sens' callback"), "{err}");
+
+    // no out_adjoint: adjoint solves are rejected
+    let (ud, _) = new_user_data(0);
+    let mut desc = f64_callbacks::desc(ud);
+    desc.out_adjoint = None;
+    let ode = new_callbacks(
+        desc,
+        MatrixType::NalgebraDense,
+        LinearSolverType::Default,
+        OdeSolverType::Bdf,
+    )
+    .unwrap();
+    configure(&ode);
+    let err = err_string(ode.solve_continuous_adjoint(vector_host(&[2.0]), 1.0));
+    assert!(err.contains("requires the 'out_adjoint' callback"), "{err}");
+}
+
+/// With no output function, the output is the state, so the continuous adjoint gives the
+/// integral of `y` and its gradient, the same as with `out = y`.
+#[test]
+fn continuous_adjoint_without_out_integrates_the_state() {
+    let (r, final_time) = (2.0, 1.0);
+    for ode_solver in [OdeSolverType::Bdf, OdeSolverType::Tsit45] {
+        let (ud, _) = new_user_data(0);
+        let mut desc = f64_callbacks::desc(ud);
+        desc.nout = 0;
+        desc.out = None;
+        desc.out_jac = None;
+        desc.out_sens = None;
+        desc.out_adjoint = None;
+        desc.out_sens_adjoint = None;
+        let ode = new_callbacks(
+            desc,
+            MatrixType::NalgebraDense,
+            LinearSolverType::Default,
+            ode_solver,
+        )
+        .unwrap();
+        configure(&ode);
+        let (integral, gradient) = ode
+            .solve_continuous_adjoint(vector_host(&[r]), final_time)
+            .unwrap();
+        let integral = Vec::<f64>::from_host_array(integral).unwrap();
+        let gradient = gradient.as_array::<f64>().unwrap();
+        let label = format!("{ode_solver:?}");
+        let expect = logistic_integral(LOGISTIC_X0, r, final_time);
+        assert_close(integral[0], expect, 5e-5, &format!("{label} integral"));
+        let expect = logistic_integral_dr(LOGISTIC_X0, r, final_time);
+        assert_close(gradient[(0, 0)], expect, 5e-4, &format!("{label} gradient"));
+    }
+}
+
+/// With root and reset events, a continuous adjoint without an output function gives the same
+/// integral and gradient as the same model with `out = y`. At each reset this needs the jump of
+/// the integrated output, `y- - y+`.
+#[test]
+fn continuous_adjoint_without_out_matches_identity_out_with_resets() {
+    let (r, final_time) = (2.0, 5.0);
+    let solve = |with_out: bool| {
+        let (ud, _) = new_user_data(0);
+        let mut desc = f64_callbacks::hybrid_desc(ud);
+        desc.root_adjoint = Some(f64_callbacks::neg_identity_mul);
+        desc.root_sens_adjoint = Some(f64_callbacks::zero_mul);
+        desc.reset_adjoint = Some(f64_callbacks::zero_mul);
+        desc.reset_sens_adjoint = Some(f64_callbacks::zero_mul);
+        if !with_out {
+            desc.nout = 0;
+            desc.out = None;
+            desc.out_jac = None;
+            desc.out_sens = None;
+            desc.out_adjoint = None;
+            desc.out_sens_adjoint = None;
+        }
+        let ode = new_callbacks(
+            desc,
+            MatrixType::NalgebraDense,
+            LinearSolverType::Default,
+            OdeSolverType::Bdf,
+        )
+        .unwrap();
+        configure(&ode);
+        let (integral, gradient) = ode
+            .solve_continuous_adjoint(vector_host(&[r]), final_time)
+            .unwrap();
+        let integral = Vec::<f64>::from_host_array(integral).unwrap()[0];
+        let gradient = gradient.as_array::<f64>().unwrap()[(0, 0)];
+        (integral, gradient)
+    };
+    // with `out`, the output is in the error control, so the steps (and the small errors)
+    // are not the same. A missing reset jump changes the gradient by much more.
+    let (integral, gradient) = solve(false);
+    let (expect_integral, expect_gradient) = solve(true);
+    assert_close(integral, expect_integral, 1e-3, "integral");
+    assert_close(gradient, expect_gradient, 1e-3, "gradient");
+}
+
+#[test]
+fn callback_error_codes_fail_the_solve() {
+    let (ud, _) = new_user_data(7);
+    let ode = new_callbacks(
+        f64_callbacks::desc(ud),
+        MatrixType::NalgebraDense,
+        LinearSolverType::Default,
+        OdeSolverType::Bdf,
+    )
+    .unwrap();
+    // the solver's error, with the callback failure as context
+    let err = err_string(ode.solve_dense(vector_host(&[2.0]), vector_host(&[0.5, 1.0])));
+    assert!(
+        err.contains("(a callback failed during the solve: callback 'rhs' returned error code 7)"),
+        "{err}"
+    );
+    let err = err_string(ode.rhs(vector_host(&[2.0]), 0.0, vector_host(&[0.25])));
+    assert!(
+        err.contains("callback 'rhs' returned error code 7"),
+        "{err}"
+    );
+}
+
+/// A callback failure that the solver recovers from (here by rejecting the step) does not fail
+/// the solve.
+#[test]
+fn solver_recovers_from_a_callback_failure() {
+    let r = 2.0;
+    let t_eval = [0.5, 1.0];
+    for fail_call in [10, 20, 30] {
+        let (ud, _) = new_user_data(0);
+        // SAFETY: `ud` is valid, and nothing else uses it yet
+        unsafe { (*ud).rhs_fail_call = fail_call };
+        let ode = new_callbacks(
+            f64_callbacks::desc(ud),
+            MatrixType::NalgebraDense,
+            LinearSolverType::Default,
+            OdeSolverType::Bdf,
+        )
+        .unwrap();
+        configure(&ode);
+        let solution = ode
+            .solve_dense(vector_host(&[r]), vector_host(&t_eval))
+            .unwrap_or_else(|err| panic!("failure at rhs call {fail_call}: {err}"));
+        assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, r, 1e-5);
+    }
+}
+
+#[test]
+fn rhs_rejects_arguments_of_the_wrong_length() {
+    let ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
+    let err = err_string(ode.rhs(vector_host(&[2.0]), 0.0, vector_host(&[0.25, 0.5])));
+    assert!(err.contains("Expecting 1 values in y but got 2"), "{err}");
+    let err = err_string(ode.rhs_jac_mul(
+        vector_host(&[2.0]),
+        0.0,
+        vector_host(&[0.25]),
+        vector_host(&[]),
+    ));
+    assert!(err.contains("Expecting 1 values in v but got 0"), "{err}");
+}
+
+#[test]
+fn invalid_callbacks_are_rejected_and_user_data_is_freed() {
+    let (ud, frees) = new_user_data(0);
+    let mut desc = f64_callbacks::desc(ud);
+    desc.nout = 0;
+    let err = err_string(new_callbacks(
+        desc,
+        MatrixType::NalgebraDense,
+        LinearSolverType::Default,
+        OdeSolverType::Bdf,
+    ));
+    assert!(err.contains("nout"), "{err}");
+    assert_eq!(frees.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn c_api_constructs_solves_and_frees_user_data_once() {
+    // the C enum values of MatrixType::FaerSparse, LinearSolverType::Default and
+    // OdeSolverType::Bdf
+    let (matrix_type, linear_solver, ode_solver) = (2, 0, 0);
+
+    let (ud, frees) = new_user_data(0);
+    let desc = f64_callbacks::desc(ud);
+    let ode =
+        unsafe { diffsol_ode_new_callbacks_f64(&desc, matrix_type, linear_solver, ode_solver) };
+    assert!(!ode.is_null());
+    {
+        let ode = unsafe { &*ode };
+        configure(ode);
+        let t_eval = [0.25, 0.5, 1.0];
+        let solution = ode
+            .solve_dense(vector_host(&[2.0]), vector_host(&t_eval))
+            .unwrap();
+        assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);
+    }
+    assert_eq!(frees.load(Ordering::SeqCst), 0);
+    unsafe { diffsol_ode_free(ode) };
+    assert_eq!(frees.load(Ordering::SeqCst), 1);
+
+    // an invalid argument is rejected before the equations are built, and still frees
+    let (ud, frees) = new_user_data(0);
+    let desc = f64_callbacks::desc(ud);
+    let ode = unsafe { diffsol_ode_new_callbacks_f64(&desc, -1, linear_solver, ode_solver) };
+    assert!(ode.is_null());
+    assert_eq!(frees.load(Ordering::SeqCst), 1);
+
+    // f32
+    let (ud, frees) = new_user_data(0);
+    let desc: DiffsolOdeCallbacksF32 = f32_callbacks::desc(ud);
+    let ode =
+        unsafe { diffsol_ode_new_callbacks_f32(&desc, matrix_type, linear_solver, ode_solver) };
+    assert!(!ode.is_null());
+    assert_eq!(unsafe { &*ode }.get_scalar_type().unwrap(), ScalarType::F32);
+    unsafe { diffsol_ode_free(ode) };
+    assert_eq!(frees.load(Ordering::SeqCst), 1);
+
+    // a null descriptor
+    let ode = unsafe {
+        diffsol_ode_new_callbacks_f64(std::ptr::null(), matrix_type, linear_solver, ode_solver)
+    };
+    assert!(ode.is_null());
+}

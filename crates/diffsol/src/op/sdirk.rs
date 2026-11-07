@@ -44,7 +44,11 @@ impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
     }
     //  y = h * g(phi + c * y_s)
     pub fn integrate_out(&self, ys: &Eqn::V, t: Eqn::T, y: &mut Eqn::V) {
-        self.eqn.out().unwrap().call_inplace(ys, t, y);
+        // with no output function the output is the identity on the state
+        match self.eqn.out() {
+            Some(out) => out.call_inplace(ys, t, y),
+            None => y.copy_from(ys),
+        }
         y.mul_assign(scale(*self.h.borrow().deref()));
     }
     /// The Jacobian of the rhs at the state `y` and time `t`.

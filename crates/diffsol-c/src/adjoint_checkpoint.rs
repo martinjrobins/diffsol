@@ -3,7 +3,7 @@ use std::{
     sync::{Arc, Mutex, MutexGuard},
 };
 
-use diffsol::{CheckpointingPath, DefaultSolver, DiffSl, DiffsolError, OdeEquationsImplicit};
+use diffsol::{CheckpointingPath, DefaultSolver, DiffsolError, OdeEquationsImplicit};
 
 use crate::{
     error::DiffsolRtError, linear_solver_type::LinearSolverType,
@@ -18,17 +18,16 @@ pub(crate) trait AdjointCheckpoint: Any + Send {
 }
 
 impl dyn AdjointCheckpoint + '_ {
-    pub(crate) fn data<M, CG, Tag>(
+    pub(crate) fn data<M, Eqn, Tag>(
         &self,
-    ) -> Result<&AdjointCheckpointData<M, CG, Tag>, DiffsolError>
+    ) -> Result<&AdjointCheckpointData<M, Eqn, Tag>, DiffsolError>
     where
         M: diffsol::Matrix<T: Scalar> + DefaultSolver + 'static,
-        CG: diffsol::CodegenModule + 'static,
-        DiffSl<M, CG>: OdeEquationsImplicit<V = M::V> + 'static,
-        Tag: OdeSolverMethodTag<M, CG> + 'static,
+        Eqn: OdeEquationsImplicit<M = M, T = M::T, V = M::V, C = M::C> + 'static,
+        Tag: OdeSolverMethodTag<M, Eqn> + 'static,
     {
         self.as_any()
-            .downcast_ref::<AdjointCheckpointData<M, CG, Tag>>()
+            .downcast_ref::<AdjointCheckpointData<M, Eqn, Tag>>()
             .ok_or_else(|| {
                 DiffsolError::Other(
                     "Adjoint checkpoint is incompatible with this ODE solver".to_string(),
@@ -37,28 +36,26 @@ impl dyn AdjointCheckpoint + '_ {
     }
 }
 
-pub(crate) struct AdjointCheckpointData<M, CG, Tag>
+pub(crate) struct AdjointCheckpointData<M, Eqn, Tag>
 where
     M: diffsol::Matrix<T: Scalar> + DefaultSolver,
-    CG: diffsol::CodegenModule,
-    DiffSl<M, CG>: OdeEquationsImplicit<V = M::V>,
-    Tag: OdeSolverMethodTag<M, CG>,
+    Eqn: OdeEquationsImplicit<M = M, T = M::T, V = M::V, C = M::C>,
+    Tag: OdeSolverMethodTag<M, Eqn>,
 {
-    pub(crate) checkpointing: CheckpointingPath<DiffSl<M, CG>, Tag::State>,
+    pub(crate) checkpointing: CheckpointingPath<Eqn, Tag::State>,
     params: Vec<f64>,
     method: OdeSolverType,
     linear_solver: LinearSolverType,
 }
 
-impl<M, CG, Tag> AdjointCheckpointData<M, CG, Tag>
+impl<M, Eqn, Tag> AdjointCheckpointData<M, Eqn, Tag>
 where
     M: diffsol::Matrix<T: Scalar> + DefaultSolver,
-    CG: diffsol::CodegenModule,
-    DiffSl<M, CG>: OdeEquationsImplicit<V = M::V>,
-    Tag: OdeSolverMethodTag<M, CG>,
+    Eqn: OdeEquationsImplicit<M = M, T = M::T, V = M::V, C = M::C>,
+    Tag: OdeSolverMethodTag<M, Eqn>,
 {
     pub(crate) fn new(
-        checkpointing: CheckpointingPath<DiffSl<M, CG>, Tag::State>,
+        checkpointing: CheckpointingPath<Eqn, Tag::State>,
         params: Vec<f64>,
         method: OdeSolverType,
         linear_solver: LinearSolverType,
@@ -72,12 +69,11 @@ where
     }
 }
 
-impl<M, CG, Tag> AdjointCheckpoint for AdjointCheckpointData<M, CG, Tag>
+impl<M, Eqn, Tag> AdjointCheckpoint for AdjointCheckpointData<M, Eqn, Tag>
 where
     M: diffsol::Matrix<T: Scalar> + DefaultSolver + 'static,
-    CG: diffsol::CodegenModule + 'static,
-    DiffSl<M, CG>: OdeEquationsImplicit<V = M::V> + 'static,
-    Tag: OdeSolverMethodTag<M, CG> + 'static,
+    Eqn: OdeEquationsImplicit<M = M, T = M::T, V = M::V, C = M::C> + 'static,
+    Tag: OdeSolverMethodTag<M, Eqn> + 'static,
 {
     fn as_any(&self) -> &dyn Any {
         self

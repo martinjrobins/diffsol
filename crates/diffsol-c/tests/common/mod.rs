@@ -18,22 +18,19 @@ pub fn all_ode_solvers() -> [OdeSolverType; 4] {
 }
 
 pub fn available_jit_backends() -> Vec<JitBackendType> {
-    [
+    let backends: &[JitBackendType] = &[
         #[cfg(feature = "diffsl-cranelift")]
-        Some(JitBackendType::Cranelift),
+        JitBackendType::Cranelift,
         #[cfg(feature = "diffsl-llvm")]
-        Some(JitBackendType::Llvm),
-    ]
-    .into_iter()
-    .flatten()
-    .collect()
+        JitBackendType::Llvm,
+    ];
+    backends.to_vec()
 }
 
 pub fn vector_host(values: &[f64]) -> HostArray {
     values.to_vec().to_host_array()
 }
 
-#[cfg(feature = "diffsl-llvm")]
 pub fn matrix_host(rows: usize, cols: usize, values_col_major: &[f64]) -> HostArray {
     nalgebra::DMatrix::from_column_slice(rows, cols, values_col_major).to_host_array()
 }
