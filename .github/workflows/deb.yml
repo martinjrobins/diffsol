@@ -1,0 +1,179 @@
+name: Debian packages
+
+# Build the Debian packages of diffsol-c (libdiffsol<soversion> and libdiffsol-dev) for
+# amd64 and arm64, test them on several distributions, and (with `publish`) upload them to the
+# GitHub release and to the Cloudsmith APT repository.
+#
+# release-plz.yml calls this workflow when it releases diffsol-c. The packaging is in
+# crates/diffsol-c/debian.
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "The tag of the GitHub release to upload the packages to"
+        type: string
+        default: ""
+      publish:
+        description: "Upload the packages to the GitHub release and to Cloudsmith"
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The tag of the GitHub release to upload the packages to"
+        type: string
+        default: ""
+      publish:
+        description: "Upload the packages to the GitHub release and to Cloudsmith"
+        type: boolean
+        default: false
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "crates/diffsol-c/debian/**"
+      - "crates/diffsol-c/build.rs"
+      - ".github/workflows/deb.yml"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  LLVM_VERSION: "17"
+
+jobs:
+  build:
+    name: Build (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    # build on the oldest supported distribution (glibc 2.35), so that the packages install on
+    # Ubuntu 22.04+ and Debian 12+
+    container: ubuntu:22.04
+    steps:
+      - name: Install the build tools and LLVM
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential debhelper devscripts \
+            lintian pkg-config curl ca-certificates gnupg git
+          curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key \
+            | gpg --dearmor -o /usr/share/keyrings/llvm.gpg
+          echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] http://apt.llvm.org/jammy/ llvm-toolchain-jammy-${LLVM_VERSION} main" \
+            > /etc/apt/sources.list.d/llvm.list
+          apt-get update
+          apt-get install -y --no-install-recommends llvm-${LLVM_VERSION}-dev \
+            libpolly-${LLVM_VERSION}-dev zlib1g-dev libzstd-dev libtinfo-dev libxml2-dev
+      - name: Install Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - uses: actions/checkout@v6
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: deb-${{ matrix.arch }}-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: deb-${{ matrix.arch }}-
+      - name: Build the packages
+        working-directory: crates/diffsol-c
+        run: |
+          debian/prepare.sh
+          dpkg-buildpackage -b -us -uc -d
+      - name: Show the packages
+        run: |
+          for deb in crates/*.deb; do
+            echo "== $deb"
+            dpkg-deb --info "$deb"
+            dpkg-deb --contents "$deb"
+          done
+          # dpkg-buildpackage installed the library as libdiffsol.so.<version>
+          readelf -d crates/diffsol-c/debian/tmp/usr/lib/*/libdiffsol.so.*.*.* | grep SONAME
+      - name: Lintian
+        # warnings only: the packages are not for the Debian archive
+        run: lintian --info --no-tag-display-limit crates/*.changes || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debs-${{ matrix.arch }}
+          path: crates/*.deb
+          if-no-files-found: error
+
+  test:
+    name: Test (${{ matrix.image }}, ${{ matrix.arch }})
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["debian:12", "debian:13", "ubuntu:22.04", "ubuntu:24.04"]
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: crates/diffsol-c/examples
+      - uses: actions/download-artifact@v4
+        with:
+          name: debs-${{ matrix.arch }}
+          path: debs
+      - name: Install the packages
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ./debs/*.deb build-essential pkg-config
+      - name: Compile and run the C examples
+        run: |
+          readelf -d /usr/lib/*/libdiffsol.so.*.*.* | grep SONAME
+          pkg-config --modversion diffsol
+          for example in logistic_callbacks logistic_diffsl_jit; do
+            cc -std=c11 -Wall -Wextra -Werror "crates/diffsol-c/examples/c/$example.c" \
+              $(pkg-config --cflags --libs diffsol) -lm -o "$example"
+            "./$example"
+          done
+
+  publish:
+    name: Publish
+    needs: test
+    if: ${{ inputs.publish }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      CLOUDSMITH_API_KEY: ${{ secrets.CLOUDSMITH_API_KEY }}
+      CLOUDSMITH_REPOSITORY: ${{ vars.CLOUDSMITH_REPOSITORY }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: debs-*
+          path: debs
+          merge-multiple: true
+      - name: Upload to the GitHub release
+        if: ${{ inputs.tag != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: gh release upload "$TAG" debs/*.deb --clobber --repo "$GITHUB_REPOSITORY"
+      - name: Upload to Cloudsmith
+        if: ${{ env.CLOUDSMITH_API_KEY != '' && env.CLOUDSMITH_REPOSITORY != '' }}
+        run: |
+          pipx install cloudsmith-cli
+          for deb in debs/*.deb; do
+            cloudsmith push deb "$CLOUDSMITH_REPOSITORY/any-distro/any-version" "$deb"
+          done

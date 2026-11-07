@@ -1,0 +1,3 @@
+usr/include/diffsol.h
+usr/lib/*/libdiffsol.so
+usr/lib/*/pkgconfig/diffsol.pc

@@ -1,0 +1,14 @@
+# written by prepare.sh
+/control
+/changelog
+/soversion
+/libdiffsol[0-9]*.install
+# written by dpkg-buildpackage
+/tmp/
+/.debhelper/
+/libdiffsol[0-9]*/
+/libdiffsol-dev/
+/files
+/*.substvars
+/debhelper-build-stamp
+/*.debhelper.log

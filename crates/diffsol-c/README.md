@@ -27,6 +27,13 @@ The crate is built as a C dynamic library and a Rust library
 
 ## Use from C
 
+On Debian 12+ and Ubuntu 22.04+, you can install the library as Debian packages
+(`libdiffsol<version>` and `libdiffsol-dev`, which install the library as `libdiffsol.so`). See the book chapter
+[The C API](https://martinjrobins.github.io/diffsol/use/c_api.html). The packaging is in
+`debian/`.
+
+To build the library yourself:
+
 A build of this crate makes these files in `target/<profile>`:
 
 - The dynamic library: `libdiffsol_c.so` (Linux), `libdiffsol_c.dylib` (macOS), or

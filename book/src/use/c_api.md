@@ -5,6 +5,41 @@ The [`diffsol-c`](https://crates.io/crates/diffsol-c) crate wraps the
 A language that can call C functions (for example with `ctypes`, `cffi` or a foreign
 function interface) can also be used.
 
+## Install the Debian packages
+
+On Debian 12 or later, and on Ubuntu 22.04 or later (amd64 and arm64), you can install the
+library with apt. You do not need Rust. There are two packages:
+
+- `libdiffsol<version>`, for example `libdiffsol0.7`: the shared library `libdiffsol.so`. The
+  library has the Cranelift and LLVM JIT backends, and it can load DiffSL code that was compiled
+  before.
+- `libdiffsol-dev`: the header `diffsol.h`, the pkg-config file `diffsol.pc`, and the link to the
+  shared library. Install this package to compile programs.
+
+Add the APT repository of diffsol, then install the development package:
+
+```sh
+curl -1sLf 'https://dl.cloudsmith.io/public/<owner>/<repository>/setup.deb.sh' | sudo -E bash
+sudo apt install libdiffsol-dev
+```
+
+You can also get the packages from the assets of the diffsol-c
+[GitHub release](https://github.com/martinjrobins/diffsol/releases), and install them with:
+
+```sh
+sudo apt install ./libdiffsol0.7_*.deb ./libdiffsol-dev_*.deb
+```
+
+Then compile and link a program with pkg-config:
+
+```sh
+cc main.c $(pkg-config --cflags --libs diffsol) -lm -o main
+```
+
+The packages install the library as `libdiffsol.so`, so a program links with `-ldiffsol`. A
+library that you build with Cargo has the name `libdiffsol_c.so` (see below), so a program links
+with `-ldiffsol_c`. The header and the functions are the same.
+
 ## Build the library
 
 Build the crate with Cargo. By default the ODE equations can be supplied as C callbacks.

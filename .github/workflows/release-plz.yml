@@ -15,6 +15,8 @@ jobs:
     permissions:
       contents: write
       pull-requests: read
+    outputs:
+      diffsol_c_tag: ${{ steps.diffsol-c.outputs.tag }}
     steps:
       - &checkout
         name: Checkout repository
@@ -26,12 +28,36 @@ jobs:
         name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Run release-plz
+        id: release-plz
         uses: release-plz/action@v0.5
         with:
           command: release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      # the tag of the diffsol-c release, or empty if this run did not release diffsol-c
+      - name: Find the diffsol-c release
+        id: diffsol-c
+        env:
+          RELEASES: ${{ steps.release-plz.outputs.releases }}
+        run: |
+          tag=$(echo "${RELEASES:-[]}" | jq -r '.[] | select(.package_name == "diffsol-c") | .tag')
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  # Build the Debian packages of a new diffsol-c release, and upload them to the release and to
+  # Cloudsmith. The release above uses GITHUB_TOKEN, which does not start other workflows, so
+  # this job calls the packaging workflow directly.
+  release-diffsol-c-deb:
+    name: Debian packages of diffsol-c
+    needs: release-plz-release
+    if: ${{ needs.release-plz-release.outputs.diffsol_c_tag != '' }}
+    permissions:
+      contents: write
+    uses: ./.github/workflows/deb.yml
+    with:
+      tag: ${{ needs.release-plz-release.outputs.diffsol_c_tag }}
+      publish: true
+    secrets: inherit
 
   # Create a PR with the new versions and changelog, preparing the next release.
   release-plz-pr:

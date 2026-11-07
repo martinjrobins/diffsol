@@ -33,6 +33,7 @@ fn main() {
     for var in ["TARGET", "HOST"] {
         println!("cargo:rustc-env=DIFFSOL_C_{var}={}", env::var(var).unwrap());
     }
+    set_soname();
 
     let mut config = cbindgen::Config::from_file(crate_dir.join("cbindgen.toml"))
         .expect("cannot read cbindgen.toml");
@@ -62,6 +63,21 @@ fn main() {
     if fs::read_to_string(&path).ok().as_deref() != Some(header.as_str()) {
         fs::create_dir_all(path.parent().unwrap()).expect("cannot make the include directory");
         fs::write(&path, header).expect("cannot write the C header");
+    }
+}
+
+/// On Linux, give the dynamic library the SONAME in the environment variable `DIFFSOL_SONAME`,
+/// if it is set. The Debian packaging (`debian/rules`) sets it to `libdiffsol.so.<soversion>`.
+///
+/// A normal build must not have a SONAME: a program that links a library records its SONAME as
+/// the dependency, and Cargo writes only `libdiffsol_c.so`, without a file for the SONAME.
+fn set_soname() {
+    println!("cargo:rerun-if-env-changed=DIFFSOL_SONAME");
+    let Ok(soname) = env::var("DIFFSOL_SONAME") else {
+        return;
+    };
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
+        println!("cargo:rustc-cdylib-link-arg=-Wl,-soname,{soname}");
     }
 }
 

@@ -1,0 +1,10 @@
+prefix=/usr
+includedir=${prefix}/include
+libdir=@LIBDIR@
+
+Name: diffsol
+Description: ODE and DAE solvers with a C API
+URL: https://github.com/martinjrobins/diffsol
+Version: @VERSION@
+Cflags: -I${includedir}
+Libs: -L${libdir} -ldiffsol
