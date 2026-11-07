@@ -201,6 +201,9 @@ jobs:
     - name: Docs - all features
       if: matrix.rustdoc == true
       run: cargo rustdoc -p diffsol ${{ env.ADDITIONAL_FEATURES_FLAGS || ''}}
+    - name: Docs (diffsol-c) - all features
+      if: matrix.rustdoc == true
+      run: cargo rustdoc -p diffsol-c ${{ env.ADDITIONAL_FEATURES_FLAGS || ''}}
     - name: Build book and wasm examples
       if: matrix.book == true
       run: |
