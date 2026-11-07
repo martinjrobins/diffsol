@@ -255,7 +255,8 @@ where
 
     let have_neqn = solver.augmented_eqn().unwrap().max_index();
     if dgdu_eval.is_empty() {
-        let expected_neqn = solver.problem().eqn.out().map(|o| o.nout()).unwrap_or(0);
+        // with no output function the output is the identity on the state
+        let expected_neqn = solver.problem().eqn.nout();
         if have_neqn != expected_neqn {
             return Err(ode_solver_error!(
                 Other,

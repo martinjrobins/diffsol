@@ -407,7 +407,8 @@ where
         } else {
             self.problem().eqn.rhs().nstates()
         };
-        let nout = self.problem().eqn.out().map(|out| out.nout()).unwrap_or(0);
+        // the integrated output is the state when there is no output function
+        let nout = self.problem().eqn.nout();
         let nstates = self.problem().eqn.rhs().nstates();
         soln.ensure_ode_allocation(self.problem().context(), nrows, nout, nstates)?;
 
@@ -472,7 +473,8 @@ where
         } else {
             self.problem().eqn.rhs().nstates()
         };
-        let nout = self.problem().eqn.out().map(|out| out.nout()).unwrap_or(0);
+        // the integrated output is the state when there is no output function
+        let nout = self.problem().eqn.nout();
         let nstates = self.problem().eqn.rhs().nstates();
         soln.ensure_ode_allocation(self.problem().context(), nrows, nout, nstates)?;
         let max_steps_between_checkpoints = max_steps_between_checkpoints.unwrap_or(500);
@@ -1145,6 +1147,57 @@ mod test {
         OdeEquations, OdeSolverMethod, OdeSolverStopReason, Op, SensitivitiesOdeSolverMethod,
         Solution, Vector, VectorView,
     };
+
+    /// With no output function, the integrated output is the integral of the state, for every
+    /// method.
+    #[test]
+    fn test_integrate_out_without_out_function() {
+        let (mut problem, _soln) = exponential_decay_problem::<NalgebraMat<f64>>(false);
+        assert!(problem.eqn.out().is_none());
+        problem.integrate_out = true;
+        let t_eval = [1.0, 5.0, 10.0];
+        let k = 0.1;
+        let check = |ys: &NalgebraMat<f64>, method: &str| {
+            for (j, &t) in t_eval.iter().enumerate() {
+                let expect = (1.0 - f64::exp(-k * t)) / k;
+                for i in 0..2 {
+                    let got = ys.get_index(i, j);
+                    assert!(
+                        (got - expect).abs() < 1e-3 * expect,
+                        "{method}: state {i} at t = {t}: expected {expect}, got {got}"
+                    );
+                }
+            }
+        };
+        let (ys, _) = problem
+            .bdf::<NalgebraLU<f64>>()
+            .unwrap()
+            .solve_dense(&t_eval)
+            .unwrap();
+        check(&ys, "bdf");
+        let (ys, _) = problem
+            .esdirk34::<NalgebraLU<f64>>()
+            .unwrap()
+            .solve_dense(&t_eval)
+            .unwrap();
+        check(&ys, "esdirk34");
+        let (ys, _) = problem
+            .tr_bdf2::<NalgebraLU<f64>>()
+            .unwrap()
+            .solve_dense(&t_eval)
+            .unwrap();
+        check(&ys, "tr_bdf2");
+        let (ys, _) = problem.tsit45().unwrap().solve_dense(&t_eval).unwrap();
+        check(&ys, "tsit45");
+        // the `Solution` API sizes its own output buffers
+        let mut soln = Solution::new_dense(t_eval.to_vec()).unwrap();
+        problem
+            .bdf::<NalgebraLU<f64>>()
+            .unwrap()
+            .solve_soln(&mut soln)
+            .unwrap();
+        check(&soln.ys, "bdf, solve_soln");
+    }
 
     #[test]
     fn test_solve() {

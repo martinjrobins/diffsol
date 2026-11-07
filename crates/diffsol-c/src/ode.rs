@@ -28,11 +28,14 @@ pub struct Ode {
     ode_solver: OdeSolverType,
 }
 
-unsafe impl Send for Ode {}
-unsafe impl Sync for Ode {}
-
 #[derive(Clone)]
 pub struct OdeWrapper(Arc<Mutex<Ode>>);
+
+// `OdeWrapper` must be `Send` and `Sync`
+const _: () = {
+    const fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<OdeWrapper>();
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct OdeWrapperSnapshot {
@@ -100,7 +103,7 @@ impl OdeWrapper {
         })
     }
 
-    fn build(
+    pub(crate) fn build(
         code: String,
         scalar_type: ScalarType,
         solve: Box<dyn Solve>,
@@ -120,7 +123,7 @@ impl OdeWrapper {
     }
 
     fn from_snapshot(snapshot: OdeWrapperSnapshot) -> Result<Self, DiffsolRtError> {
-        let solve = crate::solve::solve_factory_from_serialized_diffsl(
+        let solve = crate::ode_diffsl::solve_factory_from_serialized_diffsl(
             snapshot.equation.as_slice(),
             snapshot.matrix_type,
             snapshot.scalar_type,
@@ -150,86 +153,6 @@ impl OdeWrapper {
             snapshot.ode_options.apply_to_solve(ode.solve.as_mut());
         }
         Ok(wrapper)
-    }
-
-    /// Construct an ODE solver backed by externally-provided DiffSL symbols.
-    #[cfg(feature = "external")]
-    pub fn new_external(
-        rhs_state_deps: Vec<(usize, usize)>,
-        rhs_input_deps: Vec<(usize, usize)>,
-        mass_state_deps: Vec<(usize, usize)>,
-        scalar_type: ScalarType,
-        matrix_type: MatrixType,
-        linear_solver: LinearSolverType,
-        ode_solver: OdeSolverType,
-    ) -> Result<Self, DiffsolRtError> {
-        let solve = crate::solve::solve_factory_external(
-            rhs_state_deps,
-            rhs_input_deps,
-            mass_state_deps,
-            matrix_type,
-            scalar_type,
-        )?;
-        Self::build(
-            String::new(),
-            scalar_type,
-            solve,
-            None,
-            linear_solver,
-            ode_solver,
-        )
-    }
-
-    /// Construct an ODE solver backed by DiffSL symbols loaded from a dynamic library.
-    #[cfg(feature = "diffsl-external-dynamic")]
-    #[allow(clippy::too_many_arguments)]
-    pub fn new_external_dynamic(
-        path: impl Into<std::path::PathBuf>,
-        rhs_state_deps: Vec<(usize, usize)>,
-        rhs_input_deps: Vec<(usize, usize)>,
-        mass_state_deps: Vec<(usize, usize)>,
-        scalar_type: ScalarType,
-        matrix_type: MatrixType,
-        linear_solver: LinearSolverType,
-        ode_solver: OdeSolverType,
-    ) -> Result<Self, DiffsolRtError> {
-        let solve = crate::solve::solve_factory_external_dynamic(
-            path.into(),
-            rhs_state_deps,
-            rhs_input_deps,
-            mass_state_deps,
-            matrix_type,
-            scalar_type,
-        )?;
-        Self::build(
-            String::new(),
-            scalar_type,
-            solve,
-            None,
-            linear_solver,
-            ode_solver,
-        )
-    }
-
-    /// Construct an ODE solver by JIT-compiling DiffSL code immediately.
-    #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
-    pub fn new_jit(
-        code: &str,
-        jit_backend: JitBackendType,
-        scalar_type: ScalarType,
-        matrix_type: MatrixType,
-        linear_solver: LinearSolverType,
-        ode_solver: OdeSolverType,
-    ) -> Result<Self, DiffsolRtError> {
-        let solve = crate::solve::solve_factory_jit(code, jit_backend, matrix_type, scalar_type)?;
-        Self::build(
-            code.to_owned(),
-            scalar_type,
-            solve,
-            Some(jit_backend),
-            linear_solver,
-            ode_solver,
-        )
     }
 
     /// Matrix type used in the ODE solver. This is fixed after construction.

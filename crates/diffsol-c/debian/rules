@@ -1,0 +1,64 @@
+#!/usr/bin/make -f
+# Build the Debian packages libdiffsol<soversion> and libdiffsol-dev from the crate diffsol-c.
+# Run `debian/prepare.sh` first: it writes the files that depend on the crate version (control,
+# changelog, soversion and the .install file of the runtime package).
+#
+# Cargo writes the library as libdiffsol_c.so. The packages install it as
+# libdiffsol.so.<version>, with the SONAME libdiffsol.so.<soversion>, so that the names of the
+# library and of the packages agree.
+
+include /usr/share/dpkg/pkg-info.mk
+include /usr/share/dpkg/architecture.mk
+
+VERSION := $(DEB_VERSION_UPSTREAM)
+SOVERSION := $(shell cat debian/soversion)
+LIBDIR := usr/lib/$(DEB_HOST_MULTIARCH)
+
+# The LLVM package of the distribution, which the library links as a shared library.
+LLVM := $(shell cat debian/llvm-version)
+FEATURES := diffsl-cranelift,diffsl-llvm$(LLVM)-prefer-dynamic,diffsl-external-dynamic
+# llvm-sys finds LLVM with the variable LLVM_SYS_<llvm-sys major version>_PREFIX
+LLVM_SYS_15 := 150
+LLVM_SYS_16 := 160
+LLVM_SYS_17 := 170
+LLVM_SYS_18 := 181
+LLVM_SYS_19 := 191
+LLVM_SYS_20 := 201
+LLVM_SYS_21 := 211
+export LLVM_SYS_$(LLVM_SYS_$(LLVM))_PREFIX ?= /usr/lib/llvm-$(LLVM)
+# bindgen (for the Enzyme bindings of diffsl) needs libclang
+export LIBCLANG_PATH ?= /usr/lib/llvm-$(LLVM)/lib
+
+# the crate is part of the workspace two directories up
+export CARGO_TARGET_DIR ?= $(abspath $(CURDIR)/../../target)
+# build.rs gives the library this SONAME
+export DIFFSOL_SONAME := libdiffsol.so.$(SOVERSION)
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	cargo build -p diffsol-c --release --features $(FEATURES)
+	# llvm-sys links LLVM statically if it does not find the shared library: stop if it did
+	readelf -d $(CARGO_TARGET_DIR)/release/libdiffsol_c.so | grep -q 'NEEDED.*libLLVM' \
+		|| { echo "error: the library does not link libLLVM dynamically" >&2; exit 1; }
+
+override_dh_auto_install:
+	install -D -m 0644 $(CARGO_TARGET_DIR)/release/libdiffsol_c.so \
+		debian/tmp/$(LIBDIR)/libdiffsol.so.$(VERSION)
+	ln -s libdiffsol.so.$(VERSION) debian/tmp/$(LIBDIR)/$(DIFFSOL_SONAME)
+	ln -s $(DIFFSOL_SONAME) debian/tmp/$(LIBDIR)/libdiffsol.so
+	install -D -m 0644 $(CARGO_TARGET_DIR)/release/include/diffsol.h \
+		debian/tmp/usr/include/diffsol.h
+	mkdir -p debian/tmp/$(LIBDIR)/pkgconfig
+	sed -e 's|@VERSION@|$(VERSION)|' -e 's|@LIBDIR@|/$(LIBDIR)|' debian/diffsol.pc.in \
+		> debian/tmp/$(LIBDIR)/pkgconfig/diffsol.pc
+
+# the workflow tests the installed packages; the build keeps the Cargo target directory
+override_dh_auto_test:
+override_dh_auto_clean:
+
+# a release build of the library has no debug information
+override_dh_strip:
+	dh_strip --no-automatic-dbgsym
+override_dh_dwz:

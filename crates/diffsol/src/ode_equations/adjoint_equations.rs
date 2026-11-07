@@ -300,9 +300,8 @@ where
                 <Eqn::M as Matrix>::new_from_sparsity(nstates, nout, out.adjoint_sparsity(), ctx)
             }
             (true, None) => {
-                // The default output is the identity on the state, so `g_y = I` and this operator
-                // contributes `-g_y^T = -I` — this is currently dead code as you can't integrate
-                // the output without defining one, kept in case this changes.
+                // With no output function, the integrated output is the identity on the state.
+                // Thus `g_y = I`, and this operator contributes `-g_y^T = -I`.
                 let n = nstates.min(nout);
                 let indices = (0..n).map(|i| (i, i)).collect::<Vec<_>>();
                 let values = vec![-Eqn::T::one(); n * ctx.nbatch()];

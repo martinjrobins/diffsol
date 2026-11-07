@@ -1,39 +1,28 @@
 // Delegate solver types selected at runtime in Host to concrete solver types
 // in Rust.
 
-#[cfg(feature = "diffsl-external-dynamic")]
-use std::path::PathBuf;
-
 use crate::adjoint_checkpoint::AdjointCheckpointWrapper;
 use crate::error::DiffsolRtError;
 use crate::host_array::HostArray;
 use crate::host_array::ToHostArray;
-#[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
-use crate::jit::JitBackendType;
-#[cfg(feature = "external")]
-use crate::scalar_type::ExternalScalar;
 use crate::scalar_type::Scalar;
-use crate::scalar_type::ScalarType;
 use crate::{
     generate_ic_option_accessors, generate_ode_option_accessors, generate_option_accessors,
     option_value_from_store, option_value_to_store,
 };
 use crate::{generate_trait_ic_option_accessors, generate_trait_ode_option_accessors};
-use diffsol::ObjectModule;
 use diffsol::OdeBuilder;
 use diffsol::{
     error::DiffsolError,
     matrix::{Matrix, MatrixRef},
-    CodegenModule, ConstantOp, Context, DefaultDenseMatrix, DefaultSolver, DenseMatrix, DiffSl,
-    MatrixCommon, NonLinearOp, NonLinearOpJacobian, OdeEquations, OdeSolverProblem, Op, Vector,
-    VectorCommon, VectorRef, VectorView,
+    ConstantOp, Context, DefaultDenseMatrix, DefaultSolver, DenseMatrix, MatrixCommon, NonLinearOp,
+    NonLinearOpJacobian, OdeEquations, OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens,
+    OdeSolverProblem, Vector, VectorCommon, VectorRef, VectorView,
 };
-#[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
-use diffsol::{CodegenModuleCompile, CodegenModuleJit};
 use num_traits::{FromPrimitive, ToPrimitive}; // for from_f64 and to_f64
 use paste::paste;
 
-use crate::solve_serialization::{unsupported_serialization_error, SolveSerialization};
+use crate::solve_eqn::{EqnRequirement, SolveEqn};
 use crate::{
     linear_solver_type::LinearSolverType, matrix_type::MatrixType, ode_solver_type::OdeSolverType,
 };
@@ -47,7 +36,7 @@ use crate::{
 use crate::solution::Solution;
 pub(crate) type SolveResult = Result<Box<dyn Solution>, DiffsolRtError>;
 
-pub(crate) trait Solve {
+pub(crate) trait Solve: Send {
     fn matrix_type(&self) -> MatrixType;
     fn nstates(&self) -> usize;
     fn nparams(&self) -> usize;
@@ -89,11 +78,7 @@ pub(crate) trait Solve {
     fn param_rtol(&self) -> Option<f64>;
     fn set_param_atol(&mut self, param_atol: Option<f64>);
     fn param_atol(&self) -> Option<f64>;
-    fn serialized_diffsl(&self) -> Result<Vec<u8>, DiffsolRtError> {
-        unsupported_serialization_error(
-            "ODE serialization is only supported for JIT-backed solvers",
-        )
-    }
+    fn serialized_diffsl(&self) -> Result<Vec<u8>, DiffsolRtError>;
 
     // New API: solution object support
     fn solve(
@@ -166,277 +151,91 @@ pub(crate) trait Solve {
         derivative_solve_max_iter: usize
     }
 }
-// Public factory method for generating an instance based on matrix type
-#[cfg(feature = "external")]
-pub(crate) fn solve_factory_external(
-    rhs_state_deps: Vec<(usize, usize)>,
-    rhs_input_deps: Vec<(usize, usize)>,
-    mass_state_deps: Vec<(usize, usize)>,
-    matrix_type: MatrixType,
-    scalar_type: ScalarType,
-) -> Result<Box<dyn Solve>, DiffsolRtError> {
-    // the C ABI only carries the rhs and mass patterns; the out, reset and stop operators' are
-    // left empty, which is the same "no non-zeros" contract the other lists already use
-    let deps = diffsol::DiffSlDeps {
-        rhs_state: rhs_state_deps,
-        rhs_input: rhs_input_deps,
-        mass_state: mass_state_deps,
-        ..Default::default()
-    };
-    let solve: Box<dyn Solve> = match matrix_type {
-        MatrixType::NalgebraDense => match scalar_type {
-            #[cfg(feature = "diffsl-external-f32")]
-            ScalarType::F32 => Box::new(GenericSolve::<
-                diffsol::NalgebraMat<f32>,
-                diffsl::ExternalModule<f32>,
-            >::from_external(deps, false)?),
-            #[cfg(feature = "diffsl-external-f64")]
-            ScalarType::F64 => Box::new(GenericSolve::<
-                diffsol::NalgebraMat<f64>,
-                diffsl::ExternalModule<f64>,
-            >::from_external(deps, false)?),
-            _ => {
-                return Err(DiffsolRtError::from(DiffsolError::Other(
-                    "Unsupported scalar type for NalgebraDense".to_string(),
-                )));
-            }
-        },
-        MatrixType::FaerDense => match scalar_type {
-            #[cfg(feature = "diffsl-external-f32")]
-            ScalarType::F32 => Box::new(GenericSolve::<
-                diffsol::FaerMat<f32>,
-                diffsl::ExternalModule<f32>,
-            >::from_external(deps, false)?),
-            #[cfg(feature = "diffsl-external-f64")]
-            ScalarType::F64 => Box::new(GenericSolve::<
-                diffsol::FaerMat<f64>,
-                diffsl::ExternalModule<f64>,
-            >::from_external(deps, false)?),
-            _ => {
-                return Err(DiffsolRtError::from(DiffsolError::Other(
-                    "Unsupported scalar type for FaerDense".to_string(),
-                )));
-            }
-        },
-        MatrixType::FaerSparse => match scalar_type {
-            #[cfg(feature = "diffsl-external-f32")]
-            ScalarType::F32 => Box::new(GenericSolve::<
-                diffsol::FaerSparseMat<f32>,
-                diffsl::ExternalModule<f32>,
-            >::from_external(deps, false)?),
-            #[cfg(feature = "diffsl-external-f64")]
-            ScalarType::F64 => Box::new(GenericSolve::<
-                diffsol::FaerSparseMat<f64>,
-                diffsl::ExternalModule<f64>,
-            >::from_external(deps, false)?),
-            _ => {
-                return Err(DiffsolRtError::from(DiffsolError::Other(
-                    "Unsupported scalar type for FaerSparse".to_string(),
-                )));
-            }
-        },
-    };
-    Ok(solve)
-}
-
-#[cfg(feature = "diffsl-external-dynamic")]
-pub(crate) fn solve_factory_external_dynamic(
-    path: PathBuf,
-    rhs_state_deps: Vec<(usize, usize)>,
-    rhs_input_deps: Vec<(usize, usize)>,
-    mass_state_deps: Vec<(usize, usize)>,
-    matrix_type: MatrixType,
-    scalar_type: ScalarType,
-) -> Result<Box<dyn Solve>, DiffsolRtError> {
-    // see `solve_factory_external`: the C ABI carries only the rhs and mass patterns
-    let deps = diffsol::DiffSlDeps {
-        rhs_state: rhs_state_deps,
-        rhs_input: rhs_input_deps,
-        mass_state: mass_state_deps,
-        ..Default::default()
-    };
-    let solve: Box<dyn Solve> = match matrix_type {
-        MatrixType::NalgebraDense => match scalar_type {
-            ScalarType::F32 => Box::new(GenericSolve::<
-                diffsol::NalgebraMat<f32>,
-                diffsl::ExternalDynModule<f32>,
-            >::from_external_dynamic(path, deps, false)?),
-            ScalarType::F64 => Box::new(GenericSolve::<
-                diffsol::NalgebraMat<f64>,
-                diffsl::ExternalDynModule<f64>,
-            >::from_external_dynamic(path, deps, false)?),
-        },
-        MatrixType::FaerDense => match scalar_type {
-            ScalarType::F32 => Box::new(GenericSolve::<
-                diffsol::FaerMat<f32>,
-                diffsl::ExternalDynModule<f32>,
-            >::from_external_dynamic(path, deps, false)?),
-            ScalarType::F64 => Box::new(GenericSolve::<
-                diffsol::FaerMat<f64>,
-                diffsl::ExternalDynModule<f64>,
-            >::from_external_dynamic(path, deps, false)?),
-        },
-        MatrixType::FaerSparse => match scalar_type {
-            ScalarType::F32 => Box::new(GenericSolve::<
-                diffsol::FaerSparseMat<f32>,
-                diffsl::ExternalDynModule<f32>,
-            >::from_external_dynamic(path, deps, false)?),
-            ScalarType::F64 => Box::new(GenericSolve::<
-                diffsol::FaerSparseMat<f64>,
-                diffsl::ExternalDynModule<f64>,
-            >::from_external_dynamic(path, deps, false)?),
-        },
-    };
-    Ok(solve)
-}
-
-#[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
-pub(crate) fn solve_factory_jit(
-    code: &str,
-    jit_backend: JitBackendType,
-    matrix_type: MatrixType,
-    scalar_type: ScalarType,
-) -> Result<Box<dyn Solve>, DiffsolRtError> {
-    match jit_backend {
-        #[cfg(feature = "diffsl-cranelift")]
-        JitBackendType::Cranelift => solve_factory_with_jit_backend::<diffsol::CraneliftJitModule>(
-            code,
-            matrix_type,
-            scalar_type,
-        ),
-        #[cfg(feature = "diffsl-llvm")]
-        JitBackendType::Llvm => {
-            solve_factory_with_jit_backend::<diffsol::LlvmModule>(code, matrix_type, scalar_type)
-        }
-    }
-}
-
-#[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
-fn solve_factory_with_jit_backend<CG>(
-    code: &str,
-    matrix_type: MatrixType,
-    scalar_type: ScalarType,
-) -> Result<Box<dyn Solve>, DiffsolRtError>
-where
-    CG: CodegenModule
-        + CodegenModuleJit
-        + CodegenModuleCompile
-        + SolveSerialization<diffsol::NalgebraMat<f32>>
-        + SolveSerialization<diffsol::NalgebraMat<f64>>
-        + SolveSerialization<diffsol::FaerMat<f32>>
-        + SolveSerialization<diffsol::FaerMat<f64>>
-        + SolveSerialization<diffsol::FaerSparseMat<f32>>
-        + SolveSerialization<diffsol::FaerSparseMat<f64>>,
-{
-    let solve: Box<dyn Solve> = match matrix_type {
-        MatrixType::NalgebraDense => match scalar_type {
-            ScalarType::F32 => {
-                let problem =
-                    OdeBuilder::<diffsol::NalgebraMat<f32>>::new().build_from_diffsl::<CG>(code)?;
-                Box::new(GenericSolve { problem })
-            }
-            ScalarType::F64 => {
-                let problem =
-                    OdeBuilder::<diffsol::NalgebraMat<f64>>::new().build_from_diffsl::<CG>(code)?;
-                Box::new(GenericSolve { problem })
-            }
-        },
-        MatrixType::FaerDense => match scalar_type {
-            ScalarType::F32 => {
-                let problem =
-                    OdeBuilder::<diffsol::FaerMat<f32>>::new().build_from_diffsl::<CG>(code)?;
-                Box::new(GenericSolve { problem })
-            }
-            ScalarType::F64 => {
-                let problem =
-                    OdeBuilder::<diffsol::FaerMat<f64>>::new().build_from_diffsl::<CG>(code)?;
-                Box::new(GenericSolve { problem })
-            }
-        },
-        MatrixType::FaerSparse => match scalar_type {
-            ScalarType::F32 => {
-                let problem = OdeBuilder::<diffsol::FaerSparseMat<f32>>::new()
-                    .build_from_diffsl::<CG>(code)?;
-                Box::new(GenericSolve { problem })
-            }
-            ScalarType::F64 => {
-                let problem = OdeBuilder::<diffsol::FaerSparseMat<f64>>::new()
-                    .build_from_diffsl::<CG>(code)?;
-                Box::new(GenericSolve { problem })
-            }
-        },
-    };
-    Ok(solve)
-}
-
-pub(crate) fn solve_factory_from_serialized_diffsl(
-    serialized_diffsl: &[u8],
-    matrix_type: MatrixType,
-    scalar_type: ScalarType,
-) -> Result<Box<dyn Solve>, DiffsolRtError> {
-    let solve: Box<dyn Solve> = match matrix_type {
-        MatrixType::NalgebraDense => match scalar_type {
-            ScalarType::F32 => Box::new(
-                GenericSolve::<diffsol::NalgebraMat<f32>, ObjectModule>::from_serialized_diffsl(
-                    serialized_diffsl,
-                )?,
-            ),
-            ScalarType::F64 => Box::new(
-                GenericSolve::<diffsol::NalgebraMat<f64>, ObjectModule>::from_serialized_diffsl(
-                    serialized_diffsl,
-                )?,
-            ),
-        },
-        MatrixType::FaerDense => match scalar_type {
-            ScalarType::F32 => Box::new(
-                GenericSolve::<diffsol::FaerMat<f32>, ObjectModule>::from_serialized_diffsl(
-                    serialized_diffsl,
-                )?,
-            ),
-            ScalarType::F64 => Box::new(
-                GenericSolve::<diffsol::FaerMat<f64>, ObjectModule>::from_serialized_diffsl(
-                    serialized_diffsl,
-                )?,
-            ),
-        },
-        MatrixType::FaerSparse => match scalar_type {
-            ScalarType::F32 => Box::new(
-                GenericSolve::<diffsol::FaerSparseMat<f32>, ObjectModule>::from_serialized_diffsl(
-                    serialized_diffsl,
-                )?,
-            ),
-            ScalarType::F64 => Box::new(
-                GenericSolve::<diffsol::FaerSparseMat<f64>, ObjectModule>::from_serialized_diffsl(
-                    serialized_diffsl,
-                )?,
-            ),
-        },
-    };
-    Ok(solve)
-}
-
-pub(crate) struct GenericSolve<M, CG>
+pub(crate) struct GenericSolve<M, Eqn>
 where
     M: Matrix<T: Scalar>,
     M::V: Vector,
-    CG: CodegenModule,
+    Eqn: OdeEquations<M = M, T = M::T, V = M::V, C = M::C>,
 {
-    problem: OdeSolverProblem<DiffSl<M, CG>>,
+    pub(crate) problem: OdeSolverProblem<Eqn>,
 }
 
-impl<M, CG> GenericSolve<M, CG>
+impl<M, Eqn> GenericSolve<M, Eqn>
 where
     M: Matrix<T: Scalar>,
     M::V: Vector + DefaultDenseMatrix,
-    CG: CodegenModule,
+    Eqn: OdeEquations<M = M, T = M::T, V = M::V, C = M::C> + SolveEqn,
 {
-    fn from_eqn(eqn: DiffSl<M, CG>) -> Result<Self, DiffsolRtError> {
+    pub(crate) fn from_eqn(eqn: Eqn) -> Result<Self, DiffsolRtError> {
         let default_p = vec![0.0; eqn.nparams()];
         let problem = OdeBuilder::<M>::new().p(default_p).build_from_eqn(eqn)?;
         Ok(GenericSolve { problem })
     }
 
+    /// Finish a solve with `result`.
+    ///
+    /// If the solve succeeded, discard the errors that the equations recorded. The solver
+    /// recovered from them, for example by rejecting a step.
+    ///
+    /// If the solve failed, return the error of the solver. If the equations recorded an error
+    /// during the solve, add it to the message. It is often the cause of the failure, but it can
+    /// also be an earlier failure that the solver recovered from.
+    fn finish<R, E: Into<DiffsolRtError>>(
+        &self,
+        result: Result<R, E>,
+    ) -> Result<R, DiffsolRtError> {
+        let recorded = self.problem.eqn.take_error();
+        result.map_err(|err| {
+            let err = err.into();
+            match recorded {
+                Some(recorded) => DiffsolError::Other(format!(
+                    "{err} (a callback failed during the solve: {recorded})"
+                ))
+                .into(),
+                None => err,
+            }
+        })
+    }
+
+    /// Return an error if `values` (the argument `name`) does not have one value per state.
+    fn check_state_len(&self, name: &str, values: &[f64]) -> Result<(), DiffsolRtError> {
+        let n = self.problem.eqn.nstates();
+        if values.len() == n {
+            Ok(())
+        } else {
+            Err(DiffsolError::Other(format!(
+                "Expecting {n} values in {name} but got {}",
+                values.len()
+            ))
+            .into())
+        }
+    }
+
+    /// Return the error recorded by the equations during the last evaluation, if any.
+    fn take_eqn_error(&self) -> Result<(), DiffsolRtError> {
+        match self.problem.eqn.take_error() {
+            Some(message) => Err(DiffsolError::Other(message).into()),
+            None => Ok(()),
+        }
+    }
+
+    /// Check, before a solve, that `linear_solver` is valid and that the equations provide
+    /// everything `requirement` needs.
+    fn precheck(
+        &self,
+        linear_solver: LinearSolverType,
+        requirement: EqnRequirement,
+    ) -> Result<(), DiffsolRtError>
+    where
+        Self: Solve,
+    {
+        self.check(linear_solver)?;
+        self.problem.eqn.check_requirement(requirement)
+    }
+
     pub(crate) fn setup_problem(&mut self, params: &[f64]) -> Result<(), DiffsolRtError> {
+        // discard any error left over from an earlier evaluation
+        let _ = self.problem.eqn.take_error();
         let params: Vec<M::T> = params.iter().map(|&x| M::T::from_f64(x).unwrap()).collect();
         let params = M::V::from_slice(&params, M::C::default());
 
@@ -456,83 +255,26 @@ where
             .into())
         }
     }
-
-    pub(crate) fn serialize_eqn(&self) -> Result<Vec<u8>, DiffsolRtError>
-    where
-        DiffSl<M, CG>: serde::Serialize,
-    {
-        serde_json::to_vec(&self.problem.eqn)
-            .map_err(|e| DiffsolRtError::from(DiffsolError::Other(e.to_string())))
-    }
 }
 
-#[cfg(feature = "external")]
-impl<M> GenericSolve<M, diffsl::ExternalModule<M::T>>
-where
-    M: Matrix<T: ExternalScalar>,
-    M::V: Vector + DefaultDenseMatrix,
-{
-    pub fn from_external(
-        deps: diffsol::DiffSlDeps,
-        include_sensitivities: bool,
-    ) -> Result<Self, DiffsolRtError> {
-        let eqn = DiffSl::<M, diffsl::ExternalModule<M::T>>::from_external(
-            M::C::default(),
-            deps,
-            include_sensitivities,
-        )?;
-        Self::from_eqn(eqn)
-    }
-}
-
-#[cfg(feature = "diffsl-external-dynamic")]
-impl<M> GenericSolve<M, diffsl::ExternalDynModule<M::T>>
-where
-    M: Matrix<T: Scalar>,
-    M::V: Vector + DefaultDenseMatrix,
-{
-    pub fn from_external_dynamic(
-        path: impl Into<PathBuf>,
-        deps: diffsol::DiffSlDeps,
-        include_sensitivities: bool,
-    ) -> Result<Self, DiffsolRtError> {
-        let eqn = DiffSl::<M, diffsl::ExternalDynModule<M::T>>::from_external_dynamic(
-            path,
-            M::C::default(),
-            deps,
-            include_sensitivities,
-        )?;
-        Self::from_eqn(eqn)
-    }
-}
-
-impl<M> GenericSolve<M, ObjectModule>
-where
-    M: Matrix<T: Scalar>,
-    M::V: Vector + DefaultDenseMatrix,
-{
-    pub fn from_serialized_diffsl(serialized_diffsl: &[u8]) -> Result<Self, DiffsolRtError> {
-        let eqn = serde_json::from_slice::<DiffSl<M, ObjectModule>>(serialized_diffsl)
-            .map_err(|e| DiffsolRtError::from(DiffsolError::Other(e.to_string())))?;
-        Self::from_eqn(eqn)
-    }
-}
-
-impl<M, CG> Solve for GenericSolve<M, CG>
+impl<M, Eqn> Solve for GenericSolve<M, Eqn>
 where
     M: Matrix<T: Scalar + ToPrimitive>
         + DefaultSolver
         + LuValidator<M>
         + KluValidator<M>
         + MatrixKind,
-    CG: CodegenModule,
+    Eqn: OdeEquationsImplicitSens<M = M, T = M::T, V = M::V, C = M::C>
+        + OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>
+        + SolveEqn
+        + Send
+        + 'static,
     for<'b> <<M::V as DefaultDenseMatrix>::M as MatrixCommon>::Inner: ToHostArray<M::T> + Clone,
     for<'b> <M::V as VectorCommon>::Inner: ToHostArray<M::T> + Clone,
     M::V: DefaultDenseMatrix + Send + Sync + 'static,
     <M::V as DefaultDenseMatrix>::M: Send + Sync,
     for<'b> &'b M::V: VectorRef<M::V>,
     for<'b> &'b M: MatrixRef<M>,
-    CG: SolveSerialization<M>,
 {
     fn matrix_type(&self) -> MatrixType {
         MatrixType::from_diffsol::<M>()
@@ -567,7 +309,7 @@ where
     }
 
     fn serialized_diffsl(&self) -> Result<Vec<u8>, DiffsolRtError> {
-        CG::serialized_diffsl(self)
+        self.problem.eqn.serialized()
     }
 
     fn set_rtol(&mut self, rtol: f64) {
@@ -713,10 +455,12 @@ where
         let mut y0 = M::V::zeros(n, M::C::default());
         let t0 = self.problem.t0;
         self.problem.eqn.init().call_inplace(t0, &mut y0);
+        self.take_eqn_error()?;
         Ok(y0.clone_as_vec().to_host_array())
     }
 
     fn rhs(&mut self, params: &[f64], t: f64, y: &[f64]) -> Result<HostArray, DiffsolRtError> {
+        self.check_state_len("y", y)?;
         self.setup_problem(params)?;
         let n = self.problem.eqn.nstates();
         let y = y
@@ -729,6 +473,7 @@ where
             .eqn
             .rhs()
             .call_inplace(&y_vec, M::T::from_f64(t).unwrap(), &mut dydt);
+        self.take_eqn_error()?;
         Ok(dydt.clone_as_vec().to_host_array())
     }
 
@@ -740,6 +485,8 @@ where
         y: &[f64],
         v: &[f64],
     ) -> Result<HostArray, DiffsolRtError> {
+        self.check_state_len("y", y)?;
+        self.check_state_len("v", v)?;
         self.setup_problem(params)?;
         let n = self.problem.eqn.nstates();
         let y = y
@@ -759,6 +506,7 @@ where
             &v_vec,
             &mut dydt,
         );
+        self.take_eqn_error()?;
         Ok(dydt.clone_as_vec().to_host_array())
     }
 
@@ -769,21 +517,21 @@ where
         params: &[f64],
         final_time: f64,
     ) -> SolveResult {
-        self.check(linear_solver)?;
+        self.precheck(linear_solver, EqnRequirement::Solve(method))?;
         self.setup_problem(params)?;
         let final_time = M::T::from_f64(final_time).unwrap();
         let soln = match linear_solver {
             LinearSolverType::Default => {
-                method.solve::<M, CG, <M as DefaultSolver>::LS>(&mut self.problem, final_time)
+                method.solve::<M, Eqn, <M as DefaultSolver>::LS>(&mut self.problem, final_time)
             }
             LinearSolverType::Lu => {
-                method.solve::<M, CG, <M as LuValidator<M>>::LS>(&mut self.problem, final_time)
+                method.solve::<M, Eqn, <M as LuValidator<M>>::LS>(&mut self.problem, final_time)
             }
             LinearSolverType::Klu => {
-                method.solve::<M, CG, <M as KluValidator<M>>::LS>(&mut self.problem, final_time)
+                method.solve::<M, Eqn, <M as KluValidator<M>>::LS>(&mut self.problem, final_time)
             }
         };
-        Ok(Box::new(soln?))
+        Ok(Box::new(self.finish(soln)?))
     }
 
     fn solve_dense(
@@ -793,20 +541,20 @@ where
         params: &[f64],
         t_eval: &[f64],
     ) -> SolveResult {
-        self.check(linear_solver)?;
+        self.precheck(linear_solver, EqnRequirement::Solve(method))?;
         self.setup_problem(params)?;
 
         let t_eval: Vec<M::T> = t_eval.iter().map(|&x| M::T::from_f64(x).unwrap()).collect();
         let soln =
             match linear_solver {
                 LinearSolverType::Default => method
-                    .solve_dense::<M, CG, <M as DefaultSolver>::LS>(&mut self.problem, &t_eval),
+                    .solve_dense::<M, Eqn, <M as DefaultSolver>::LS>(&mut self.problem, &t_eval),
                 LinearSolverType::Lu => method
-                    .solve_dense::<M, CG, <M as LuValidator<M>>::LS>(&mut self.problem, &t_eval),
+                    .solve_dense::<M, Eqn, <M as LuValidator<M>>::LS>(&mut self.problem, &t_eval),
                 LinearSolverType::Klu => method
-                    .solve_dense::<M, CG, <M as KluValidator<M>>::LS>(&mut self.problem, &t_eval),
+                    .solve_dense::<M, Eqn, <M as KluValidator<M>>::LS>(&mut self.problem, &t_eval),
             };
-        Ok(Box::new(soln?))
+        Ok(Box::new(self.finish(soln)?))
     }
 
     fn solve_fwd_sens(
@@ -816,20 +564,19 @@ where
         params: &[f64],
         t_eval: &[f64],
     ) -> SolveResult {
-        self.check(linear_solver)?;
+        self.precheck(linear_solver, EqnRequirement::FwdSens)?;
         self.setup_problem(params)?;
 
         let t_eval: Vec<M::T> = t_eval.iter().map(|&x| M::T::from_f64(x).unwrap()).collect();
         let soln = match linear_solver {
-            LinearSolverType::Default => {
-                method.solve_fwd_sens::<M, CG, <M as DefaultSolver>::LS>(&mut self.problem, &t_eval)
-            }
+            LinearSolverType::Default => method
+                .solve_fwd_sens::<M, Eqn, <M as DefaultSolver>::LS>(&mut self.problem, &t_eval),
             LinearSolverType::Lu => method
-                .solve_fwd_sens::<M, CG, <M as LuValidator<M>>::LS>(&mut self.problem, &t_eval),
+                .solve_fwd_sens::<M, Eqn, <M as LuValidator<M>>::LS>(&mut self.problem, &t_eval),
             LinearSolverType::Klu => method
-                .solve_fwd_sens::<M, CG, <M as KluValidator<M>>::LS>(&mut self.problem, &t_eval),
+                .solve_fwd_sens::<M, Eqn, <M as KluValidator<M>>::LS>(&mut self.problem, &t_eval),
         };
-        Ok(Box::new(soln?))
+        Ok(Box::new(self.finish(soln)?))
     }
 
     fn solve_continuous_adjoint(
@@ -839,7 +586,7 @@ where
         params: &[f64],
         final_time: f64,
     ) -> Result<(HostArray, HostArray), DiffsolRtError> {
-        self.check(linear_solver)?;
+        self.precheck(linear_solver, EqnRequirement::Adjoint(method))?;
         self.setup_problem(params)?;
 
         let final_time = M::T::from_f64(final_time).unwrap();
@@ -847,23 +594,23 @@ where
         self.problem.integrate_out = true;
         let result = match linear_solver {
             LinearSolverType::Default => method
-                .solve_continuous_adjoint::<M, CG, <M as DefaultSolver>::LS>(
+                .solve_continuous_adjoint::<M, Eqn, <M as DefaultSolver>::LS>(
                     &mut self.problem,
                     final_time,
                 ),
             LinearSolverType::Lu => method
-                .solve_continuous_adjoint::<M, CG, <M as LuValidator<M>>::LS>(
+                .solve_continuous_adjoint::<M, Eqn, <M as LuValidator<M>>::LS>(
                     &mut self.problem,
                     final_time,
                 ),
             LinearSolverType::Klu => method
-                .solve_continuous_adjoint::<M, CG, <M as KluValidator<M>>::LS>(
+                .solve_continuous_adjoint::<M, Eqn, <M as KluValidator<M>>::LS>(
                     &mut self.problem,
                     final_time,
                 ),
         };
         self.problem.integrate_out = integrate_out;
-        let (integral, gradient) = result?;
+        let (integral, gradient) = self.finish(result)?;
         Ok((
             integral.clone_as_vec().to_host_array(),
             gradient.to_host_array(),
@@ -877,31 +624,33 @@ where
         params: &[f64],
         t_eval: &[f64],
     ) -> Result<(Box<dyn Solution>, AdjointCheckpointWrapper), DiffsolRtError> {
-        self.check(linear_solver)?;
+        self.precheck(linear_solver, EqnRequirement::Adjoint(method))?;
         self.setup_problem(params)?;
 
         let t_eval: Vec<M::T> = t_eval.iter().map(|&x| M::T::from_f64(x).unwrap()).collect();
-        let (soln, checkpoint) = match linear_solver {
+        let result = match linear_solver {
             LinearSolverType::Default => method
-                .solve_adjoint_fwd::<M, CG, <M as DefaultSolver>::LS>(
+                .solve_adjoint_fwd::<M, Eqn, <M as DefaultSolver>::LS>(
                     &mut self.problem,
                     &t_eval,
                     params,
                     linear_solver,
                 ),
-            LinearSolverType::Lu => method.solve_adjoint_fwd::<M, CG, <M as LuValidator<M>>::LS>(
+            LinearSolverType::Lu => method.solve_adjoint_fwd::<M, Eqn, <M as LuValidator<M>>::LS>(
                 &mut self.problem,
                 &t_eval,
                 params,
                 linear_solver,
             ),
-            LinearSolverType::Klu => method.solve_adjoint_fwd::<M, CG, <M as KluValidator<M>>::LS>(
-                &mut self.problem,
-                &t_eval,
-                params,
-                linear_solver,
-            ),
-        }?;
+            LinearSolverType::Klu => method
+                .solve_adjoint_fwd::<M, Eqn, <M as KluValidator<M>>::LS>(
+                    &mut self.problem,
+                    &t_eval,
+                    params,
+                    linear_solver,
+                ),
+        };
+        let (soln, checkpoint) = self.finish(result)?;
         Ok((Box::new(soln), AdjointCheckpointWrapper::new(checkpoint)))
     }
 
@@ -913,7 +662,7 @@ where
         t_eval: &[f64],
         dgdu_eval: HostArray,
     ) -> Result<HostArray, DiffsolRtError> {
-        self.check(linear_solver)?;
+        self.precheck(linear_solver, EqnRequirement::Adjoint(method))?;
         let checkpoint = checkpoint.guard()?;
         self.setup_problem(checkpoint.params())?;
 
@@ -936,28 +685,29 @@ where
             .into());
         }
 
-        let gradient = match linear_solver {
+        let result = match linear_solver {
             LinearSolverType::Default => method
-                .solve_adjoint_bkwd::<M, CG, <M as DefaultSolver>::LS>(
+                .solve_adjoint_bkwd::<M, Eqn, <M as DefaultSolver>::LS>(
                     &mut self.problem,
                     checkpoint.as_ref(),
                     &dgdu_eval,
                     &t_eval,
                 ),
-            LinearSolverType::Lu => method.solve_adjoint_bkwd::<M, CG, <M as LuValidator<M>>::LS>(
+            LinearSolverType::Lu => method.solve_adjoint_bkwd::<M, Eqn, <M as LuValidator<M>>::LS>(
                 &mut self.problem,
                 checkpoint.as_ref(),
                 &dgdu_eval,
                 &t_eval,
             ),
             LinearSolverType::Klu => method
-                .solve_adjoint_bkwd::<M, CG, <M as KluValidator<M>>::LS>(
+                .solve_adjoint_bkwd::<M, Eqn, <M as KluValidator<M>>::LS>(
                     &mut self.problem,
                     checkpoint.as_ref(),
                     &dgdu_eval,
                     &t_eval,
                 ),
-        }?;
+        };
+        let gradient = self.finish(result)?;
         Ok(gradient.to_host_array())
     }
 }
@@ -982,368 +732,4 @@ where
         values,
         M::C::default(),
     ))
-}
-
-#[cfg(all(test, any(feature = "diffsl-cranelift", feature = "diffsl-llvm")))]
-mod tests {
-    use diffsol::MatrixCommon;
-    use diffsol::{
-        CodegenModuleCompile, CodegenModuleJit, Context, OdeBuilder, OdeEquations, Vector,
-    };
-
-    #[cfg(feature = "diffsl-llvm")]
-    use crate::test_support::{hybrid_logistic_state_dr, logistic_state_dr};
-    use crate::{
-        host_array::FromHostArray,
-        linear_solver_type::LinearSolverType,
-        matrix_type::MatrixType,
-        ode_solver_type::OdeSolverType,
-        scalar_type::ScalarType,
-        test_support::{
-            assert_close, hybrid_logistic_diffsl_code, hybrid_logistic_state, logistic_diffsl_code,
-            logistic_state, two_param_logistic_diffsl_code, LOGISTIC_X0,
-        },
-    };
-
-    use super::{solve_factory_with_jit_backend, GenericSolve, Solve, SolveSerialization};
-
-    fn make_generic_solve<T, CG>() -> GenericSolve<diffsol::NalgebraMat<T>, CG>
-    where
-        T: crate::scalar_type::Scalar + diffsol::NalgebraScalar,
-        CG: diffsol::CodegenModule
-            + CodegenModuleJit
-            + CodegenModuleCompile
-            + SolveSerialization<diffsol::NalgebraMat<T>>,
-        diffsol::NalgebraMat<T>: diffsol::matrix::Matrix,
-        <diffsol::NalgebraMat<T> as MatrixCommon>::T: crate::scalar_type::Scalar,
-        <diffsol::NalgebraMat<T> as MatrixCommon>::V: diffsol::DefaultDenseMatrix,
-    {
-        let problem = OdeBuilder::<diffsol::NalgebraMat<T>>::new()
-            .build_from_diffsl::<CG>(logistic_diffsl_code())
-            .unwrap();
-        GenericSolve { problem }
-    }
-
-    fn assert_factory_supports_all_matrix_and_scalar_types<CG>()
-    where
-        CG: diffsol::CodegenModule
-            + CodegenModuleJit
-            + CodegenModuleCompile
-            + SolveSerialization<diffsol::NalgebraMat<f32>>
-            + SolveSerialization<diffsol::NalgebraMat<f64>>
-            + SolveSerialization<diffsol::FaerMat<f32>>
-            + SolveSerialization<diffsol::FaerMat<f64>>
-            + SolveSerialization<diffsol::FaerSparseMat<f32>>
-            + SolveSerialization<diffsol::FaerSparseMat<f64>>,
-    {
-        for matrix_type in [
-            MatrixType::NalgebraDense,
-            MatrixType::FaerDense,
-            MatrixType::FaerSparse,
-        ] {
-            for scalar_type in [ScalarType::F32, ScalarType::F64] {
-                assert!(solve_factory_with_jit_backend::<CG>(
-                    logistic_diffsl_code(),
-                    matrix_type,
-                    scalar_type,
-                )
-                .is_ok());
-            }
-        }
-    }
-
-    fn assert_solve_metadata_and_helpers<T, CG>(tol: f64)
-    where
-        T: crate::scalar_type::Scalar + diffsol::NalgebraScalar,
-        CG: diffsol::CodegenModule
-            + CodegenModuleJit
-            + CodegenModuleCompile
-            + SolveSerialization<diffsol::NalgebraMat<T>>,
-        diffsol::NalgebraMat<T>: diffsol::matrix::Matrix,
-        <diffsol::NalgebraMat<T> as MatrixCommon>::T: crate::scalar_type::Scalar,
-        <diffsol::NalgebraMat<T> as MatrixCommon>::V: diffsol::DefaultDenseMatrix,
-        GenericSolve<diffsol::NalgebraMat<T>, CG>: Solve,
-    {
-        let mut solve = make_generic_solve::<T, CG>();
-        assert_eq!(solve.matrix_type(), MatrixType::NalgebraDense);
-        assert_eq!(solve.nstates(), 1);
-        assert_eq!(solve.nparams(), 1);
-        assert_eq!(solve.nout(), 1);
-        assert!(!solve.has_stop());
-        assert!(solve.check(LinearSolverType::Default).is_ok());
-        assert!(solve.check(LinearSolverType::Lu).is_ok());
-        assert!(solve.check(LinearSolverType::Klu).is_err());
-
-        solve.set_atol(1e-5);
-        solve.set_rtol(1e-4);
-        assert_close(solve.atol(), 1e-5, tol, "solve atol");
-        assert_close(solve.rtol(), 1e-4, tol, "solve rtol");
-        solve.set_t0(0.125);
-        solve.set_h0(0.25);
-        solve.set_integrate_out(true);
-        assert_close(solve.t0(), 0.125, tol, "solve t0");
-        assert_close(solve.h0(), 0.25, tol, "solve h0");
-        assert!(solve.integrate_out());
-
-        solve.set_sens_rtol(Some(1e-3));
-        solve.set_sens_atol(Some(1e-4));
-        solve.set_out_rtol(Some(2e-3));
-        solve.set_out_atol(Some(2e-4));
-        solve.set_param_rtol(Some(3e-3));
-        solve.set_param_atol(Some(3e-4));
-        assert_close(solve.sens_rtol().unwrap(), 1e-3, tol, "solve sens rtol");
-        assert_close(solve.sens_atol().unwrap(), 1e-4, tol, "solve sens atol");
-        assert_close(solve.out_rtol().unwrap(), 2e-3, tol, "solve out rtol");
-        assert_close(solve.out_atol().unwrap(), 2e-4, tol, "solve out atol");
-        assert_close(solve.param_rtol().unwrap(), 3e-3, tol, "solve param rtol");
-        assert_close(solve.param_atol().unwrap(), 3e-4, tol, "solve param atol");
-
-        solve.set_sens_rtol(None);
-        solve.set_sens_atol(None);
-        solve.set_out_rtol(None);
-        solve.set_out_atol(None);
-        solve.set_param_rtol(None);
-        solve.set_param_atol(None);
-        assert_eq!(solve.sens_rtol(), None);
-        assert_eq!(solve.sens_atol(), None);
-        assert_eq!(solve.out_rtol(), None);
-        assert_eq!(solve.out_atol(), None);
-        assert_eq!(solve.param_rtol(), None);
-        assert_eq!(solve.param_atol(), None);
-
-        let y0 = Vec::<f64>::from_host_array(solve.y0(&[2.0]).unwrap()).unwrap();
-        assert_eq!(y0.len(), 1);
-        assert_close(y0[0], LOGISTIC_X0, tol, "y0[0]");
-
-        let rhs = Vec::<f64>::from_host_array(solve.rhs(&[2.0], 0.0, &[0.25]).unwrap()).unwrap();
-        assert_eq!(rhs.len(), 1);
-        assert_close(rhs[0], 0.375, tol, "solve rhs");
-
-        let jac_mul =
-            Vec::<f64>::from_host_array(solve.rhs_jac_mul(&[2.0], 0.0, &[0.25], &[3.0]).unwrap())
-                .unwrap();
-        assert_eq!(jac_mul.len(), 1);
-        assert_close(jac_mul[0], 3.0, tol, "solve rhs jac mul");
-    }
-
-    fn assert_solve_runtime_paths<T, CG>(tol: f64)
-    where
-        T: crate::scalar_type::Scalar + diffsol::NalgebraScalar,
-        CG: diffsol::CodegenModule
-            + CodegenModuleJit
-            + CodegenModuleCompile
-            + SolveSerialization<diffsol::NalgebraMat<T>>,
-        diffsol::NalgebraMat<T>: diffsol::matrix::Matrix,
-        <diffsol::NalgebraMat<T> as MatrixCommon>::T: crate::scalar_type::Scalar,
-        <diffsol::NalgebraMat<T> as MatrixCommon>::V: diffsol::DefaultDenseMatrix,
-        GenericSolve<diffsol::NalgebraMat<T>, CG>: Solve,
-    {
-        let mut solve = make_generic_solve::<T, CG>();
-        let soln = solve
-            .solve(OdeSolverType::Bdf, LinearSolverType::Lu, &[2.0], 1.0)
-            .unwrap();
-        let ts = Vec::<f64>::from_host_array(soln.get_ts()).unwrap();
-        let ys = Vec::<Vec<f64>>::from_host_array(soln.get_ys()).unwrap();
-        assert_close(*ts.last().unwrap(), 1.0, tol, "solve final time");
-        assert_close(
-            ys[0][ts.len() - 1],
-            logistic_state(LOGISTIC_X0, 2.0, 1.0),
-            tol,
-            "solve final value",
-        );
-
-        let mut solve = make_generic_solve::<T, CG>();
-        let dense = solve
-            .solve_dense(
-                OdeSolverType::Tsit45,
-                LinearSolverType::Lu,
-                &[2.0],
-                &[0.25, 0.5, 1.0],
-            )
-            .unwrap();
-        let ts = Vec::<f64>::from_host_array(dense.get_ts()).unwrap();
-        let ys = Vec::<Vec<f64>>::from_host_array(dense.get_ys()).unwrap();
-        assert_eq!(ts, vec![0.25, 0.5, 1.0]);
-        for (i, &t) in ts.iter().enumerate() {
-            assert_close(
-                ys[0][i],
-                logistic_state(LOGISTIC_X0, 2.0, t),
-                tol,
-                &format!("solve_dense[{i}]"),
-            );
-        }
-
-        let mut solve = make_generic_solve::<T, CG>();
-        let err = match solve.solve(OdeSolverType::Bdf, LinearSolverType::Default, &[], 1.0) {
-            Ok(_) => panic!("expected parameter count mismatch"),
-            Err(err) => err,
-        };
-        assert!(err.to_string().contains("Expecting 1 params but got 0"));
-
-        let hybrid_problem = OdeBuilder::<diffsol::NalgebraMat<T>>::new()
-            .build_from_diffsl::<CG>(hybrid_logistic_diffsl_code())
-            .unwrap();
-        let mut hybrid_solve = GenericSolve {
-            problem: hybrid_problem,
-        };
-        let hybrid = hybrid_solve
-            .solve(OdeSolverType::Bdf, LinearSolverType::Lu, &[2.0], 2.0)
-            .unwrap();
-        let hybrid_ts = Vec::<f64>::from_host_array(hybrid.get_ts()).unwrap();
-        let hybrid_ys = Vec::<Vec<f64>>::from_host_array(hybrid.get_ys()).unwrap();
-        assert_close(*hybrid_ts.last().unwrap(), 2.0, tol, "solve final time");
-        assert_close(
-            hybrid_ys[0][hybrid_ts.len() - 1],
-            hybrid_logistic_state(2.0, 2.0),
-            tol,
-            "solve final value",
-        );
-
-        let hybrid_problem = OdeBuilder::<diffsol::NalgebraMat<T>>::new()
-            .build_from_diffsl::<CG>(hybrid_logistic_diffsl_code())
-            .unwrap();
-        let mut hybrid_solve = GenericSolve {
-            problem: hybrid_problem,
-        };
-        let hybrid_dense = hybrid_solve
-            .solve_dense(
-                OdeSolverType::Tsit45,
-                LinearSolverType::Lu,
-                &[2.0],
-                &[0.5, 1.0, 1.5, 2.0],
-            )
-            .unwrap();
-        let hybrid_dense_ts = Vec::<f64>::from_host_array(hybrid_dense.get_ts()).unwrap();
-        let hybrid_dense_ys = Vec::<Vec<f64>>::from_host_array(hybrid_dense.get_ys()).unwrap();
-        assert_eq!(hybrid_dense_ts, vec![0.5, 1.0, 1.5, 2.0]);
-        for (i, &t) in hybrid_dense_ts.iter().enumerate() {
-            assert_close(
-                hybrid_dense_ys[0][i],
-                hybrid_logistic_state(2.0, t),
-                tol,
-                &format!("solve_dense[{i}]"),
-            );
-        }
-    }
-
-    #[cfg(feature = "diffsl-llvm")]
-    fn assert_solve_sensitivity_paths() {
-        let t_eval = [0.25, 0.5, 1.0];
-
-        let mut solve = make_generic_solve::<f64, diffsol::LlvmModule>();
-        let sens = solve
-            .solve_fwd_sens(OdeSolverType::Bdf, LinearSolverType::Lu, &[2.0], &t_eval)
-            .unwrap();
-        let sens_values = sens.get_sens();
-        assert_eq!(sens_values.len(), 1);
-        let sens_matrix =
-            Vec::<Vec<f64>>::from_host_array(sens_values.into_iter().next().unwrap()).unwrap();
-        for (i, &t) in t_eval.iter().enumerate() {
-            assert_close(
-                sens_matrix[0][i],
-                logistic_state_dr(LOGISTIC_X0, 2.0, t),
-                5e-4,
-                &format!("solve_fwd_sens[{i}]"),
-            );
-        }
-
-        let hybrid_problem = OdeBuilder::<diffsol::NalgebraMat<f64>>::new()
-            .build_from_diffsl::<diffsol::LlvmModule>(hybrid_logistic_diffsl_code())
-            .unwrap();
-        let mut solve = GenericSolve {
-            problem: hybrid_problem,
-        };
-        let hybrid_sens = solve
-            .solve_fwd_sens(OdeSolverType::Bdf, LinearSolverType::Lu, &[2.0], &t_eval)
-            .unwrap();
-        let sens_values = hybrid_sens.get_sens();
-        let sens_matrix =
-            Vec::<Vec<f64>>::from_host_array(sens_values.into_iter().next().unwrap()).unwrap();
-        for (i, &t) in t_eval.iter().enumerate() {
-            assert_close(
-                sens_matrix[0][i],
-                hybrid_logistic_state_dr(2.0, t),
-                5e-4,
-                &format!("solve_fwd_sens[{i}]"),
-            );
-        }
-    }
-
-    #[cfg(feature = "diffsl-cranelift")]
-    fn assert_sens_atol_round_trips_with_multiple_params() {
-        // two params make sens_atol batched (nbatch = 2), which get_index rejects
-        let problem = OdeBuilder::<diffsol::NalgebraMat<f64>>::new()
-            .build_from_diffsl::<diffsol::CraneliftJitModule>(two_param_logistic_diffsl_code())
-            .unwrap();
-        let mut solve = GenericSolve { problem };
-        assert_eq!(solve.nparams(), 2);
-
-        solve.set_sens_atol(Some(1e-4));
-        let sens_atol = solve.problem.sens_atol.as_ref().unwrap();
-        assert_eq!(sens_atol.context().nbatch(), 2);
-        assert_eq!(sens_atol.len(), solve.nstates());
-        assert_close(solve.sens_atol().unwrap(), 1e-4, 1e-12, "sens atol");
-    }
-
-    #[cfg(feature = "diffsl-cranelift")]
-    #[test]
-    fn solve_factory_supports_all_jit_matrix_and_scalar_types_for_cranelift() {
-        assert_factory_supports_all_matrix_and_scalar_types::<diffsol::CraneliftJitModule>();
-    }
-
-    #[cfg(feature = "diffsl-cranelift")]
-    #[test]
-    fn solve_trait_helpers_and_runtime_paths_for_cranelift() {
-        assert_solve_metadata_and_helpers::<f64, diffsol::CraneliftJitModule>(1e-12);
-        assert_solve_runtime_paths::<f64, diffsol::CraneliftJitModule>(5e-4);
-        assert_solve_metadata_and_helpers::<f32, diffsol::CraneliftJitModule>(5e-3);
-        assert_solve_runtime_paths::<f32, diffsol::CraneliftJitModule>(5e-3);
-    }
-
-    #[cfg(feature = "diffsl-cranelift")]
-    #[test]
-    fn sens_atol_round_trips_with_multiple_params_for_cranelift() {
-        assert_sens_atol_round_trips_with_multiple_params();
-    }
-
-    #[cfg(feature = "diffsl-llvm")]
-    #[test]
-    fn solve_trait_helpers_and_runtime_paths_for_llvm() {
-        assert_solve_metadata_and_helpers::<f64, diffsol::LlvmModule>(1e-12);
-        assert_solve_runtime_paths::<f64, diffsol::LlvmModule>(5e-4);
-        assert_solve_metadata_and_helpers::<f32, diffsol::LlvmModule>(5e-3);
-        assert_solve_runtime_paths::<f32, diffsol::LlvmModule>(5e-3);
-    }
-
-    #[cfg(feature = "diffsl-llvm")]
-    #[test]
-    fn solve_trait_sensitivity_paths_for_llvm() {
-        assert_solve_sensitivity_paths();
-    }
-
-    #[cfg(feature = "diffsl-cranelift")]
-    #[test]
-    fn setup_problem_validates_parameter_count_for_cranelift() {
-        let mut solve = make_generic_solve::<f64, diffsol::CraneliftJitModule>();
-        let err = solve.setup_problem(&[]).unwrap_err();
-        assert!(err.to_string().contains("Expecting 1 params but got 0"));
-
-        solve.setup_problem(&[2.0]).unwrap();
-        let mut params = solve.problem.context().vector_zeros(1);
-        solve.problem.eqn.get_params(&mut params);
-        assert_eq!(params.get_index(0), 2.0);
-    }
-
-    #[cfg(feature = "diffsl-llvm")]
-    #[test]
-    fn setup_problem_validates_parameter_count_for_llvm() {
-        let mut solve = make_generic_solve::<f64, diffsol::LlvmModule>();
-        let err = solve.setup_problem(&[]).unwrap_err();
-        assert!(err.to_string().contains("Expecting 1 params but got 0"));
-
-        solve.setup_problem(&[2.0]).unwrap();
-        let mut params = solve.problem.context().vector_zeros(1);
-        solve.problem.eqn.get_params(&mut params);
-        assert_eq!(params.get_index(0), 2.0);
-    }
 }

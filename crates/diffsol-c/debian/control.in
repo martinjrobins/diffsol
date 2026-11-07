@@ -1,0 +1,39 @@
+Source: diffsol
+Section: libs
+Priority: optional
+Maintainer: Martin Robinson <martinjrobins@gmail.com>
+# The CMake configuration of LLVM, which the Enzyme build of diffsl uses, needs the -dev
+# packages of the libraries that LLVM links (zlib, zstd, libedit, ncurses, libffi, libxml2).
+Build-Depends: debhelper-compat (= 13), cmake, llvm-@LLVM@-dev, libclang-@LLVM@-dev,
+ zlib1g-dev, libzstd-dev, libedit-dev, libncurses-dev, libffi-dev, libxml2-dev
+Standards-Version: 4.6.2
+Homepage: https://github.com/martinjrobins/diffsol
+Rules-Requires-Root: no
+
+Package: libdiffsol@SOVERSION@
+Architecture: any
+Multi-Arch: same
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: ODE and DAE solvers with a C API - shared library
+ diffsol is a library of solvers for ordinary differential equations (ODEs) and
+ differential-algebraic equations (DAEs), with forward and adjoint sensitivity
+ analysis. diffsol-c gives diffsol a C API. The equations can come from C
+ callbacks, or from DiffSL code that the library compiles at run time with the
+ Cranelift or LLVM JIT backend.
+ .
+ This package contains the shared library.
+
+Package: libdiffsol-dev
+Section: libdevel
+Architecture: any
+Multi-Arch: same
+Depends: libdiffsol@SOVERSION@ (= ${binary:Version}), ${misc:Depends}
+Description: ODE and DAE solvers with a C API - development files
+ diffsol is a library of solvers for ordinary differential equations (ODEs) and
+ differential-algebraic equations (DAEs), with forward and adjoint sensitivity
+ analysis. diffsol-c gives diffsol a C API. The equations can come from C
+ callbacks, or from DiffSL code that the library compiles at run time with the
+ Cranelift or LLVM JIT backend.
+ .
+ This package contains the C header diffsol.h, the pkg-config file
+ diffsol.pc, and the link to the shared library. Link with -ldiffsol.

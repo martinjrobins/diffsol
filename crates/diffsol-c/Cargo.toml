@@ -10,6 +10,8 @@ keywords = ["ode", "solver", "math", "simulation", "science"]
 readme = "README.md"
 
 [lib]
+# a static library is made only on request:
+# `cargo rustc -p diffsol-c --release --lib --crate-type staticlib`
 crate-type = ["cdylib", "rlib"]
 
 [features]
@@ -40,6 +42,14 @@ diffsl-llvm18 = ["diffsol/diffsl-llvm18", "diffsl-llvm"]
 diffsl-llvm19 = ["diffsol/diffsl-llvm19", "diffsl-llvm"]
 diffsl-llvm20 = ["diffsol/diffsl-llvm20", "diffsl-llvm"]
 diffsl-llvm21 = ["diffsol/diffsl-llvm21", "diffsl-llvm"]
+# the same as the features above, but link LLVM as a shared library (libLLVM) if it is available
+diffsl-llvm15-prefer-dynamic = ["diffsl-llvm15", "diffsol/diffsl-llvm15-prefer-dynamic"]
+diffsl-llvm16-prefer-dynamic = ["diffsl-llvm16", "diffsol/diffsl-llvm16-prefer-dynamic"]
+diffsl-llvm17-prefer-dynamic = ["diffsl-llvm17", "diffsol/diffsl-llvm17-prefer-dynamic"]
+diffsl-llvm18-prefer-dynamic = ["diffsl-llvm18", "diffsol/diffsl-llvm18-prefer-dynamic"]
+diffsl-llvm19-prefer-dynamic = ["diffsl-llvm19", "diffsol/diffsl-llvm19-prefer-dynamic"]
+diffsl-llvm20-prefer-dynamic = ["diffsl-llvm20", "diffsol/diffsl-llvm20-prefer-dynamic"]
+diffsl-llvm21-prefer-dynamic = ["diffsl-llvm21", "diffsol/diffsl-llvm21-prefer-dynamic"]
 suitesparse = ["diffsol/suitesparse"]
 
 [dependencies]
@@ -54,6 +64,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 paste = { workspace = true }
 
+[build-dependencies]
+cbindgen = { version = "0.29", default-features = false }
+
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
@@ -62,3 +75,6 @@ faer = { workspace = true }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 getrandom = { version = "0.2", optional = true }
 faer = { workspace = true, features = ["rayon"] }
+
+[package.metadata.docs.rs]
+features = ["diffsl-cranelift", "diffsl-external-dynamic", "diffsl-external-f64"]

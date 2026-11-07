@@ -635,8 +635,11 @@ where
     fn calculate_output_delta(&mut self) {
         // integrate output function
         let state = &mut self.state;
-        let out = self.ode_problem.eqn.out().unwrap();
-        out.call_inplace(&self.y_new, self.t_predict, &mut state.dg);
+        // with no output function the output is the identity on the state
+        match self.ode_problem.eqn.out() {
+            Some(out) => out.call_inplace(&self.y_new, self.t_predict, &mut state.dg),
+            None => state.dg.copy_from(&self.y_new),
+        }
         self.op.as_ref().unwrap().integrate_out(
             &state.dg,
             &state.gdiff,
