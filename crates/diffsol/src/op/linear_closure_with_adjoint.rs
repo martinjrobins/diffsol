@@ -169,7 +169,7 @@ where
     }
     fn transpose_inplace(&self, t: Self::T, y: &mut Self::M) {
         if let Some(coloring) = &self.op.coloring_adjoint {
-            coloring.matrix_inplace(self, t, y);
+            coloring.transpose_inplace(self, t, y);
         } else {
             self._default_transpose_inplace(t, y);
         }
@@ -239,7 +239,7 @@ mod tests {
         pop.transpose_inplace(0.0, &mut transpose);
         assert_eq!(transpose.get_index(0, 0), 2.0);
         assert_eq!(transpose.get_index(1, 0), 0.0);
-        assert_eq!(transpose.get_index(0, 1), 0.0);
+        assert_eq!(transpose.get_index(0, 1), 1.0);
         assert_eq!(transpose.get_index(1, 1), 3.0);
         assert!(pop.transpose_sparsity().is_some());
 

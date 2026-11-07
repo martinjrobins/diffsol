@@ -174,7 +174,8 @@ where
         };
 
         let gdiff_rows = if problem.integrate_out {
-            problem.eqn.out().unwrap().nout()
+            // the output, or the state if there is no output function
+            problem.eqn.nout()
         } else {
             0
         };
@@ -614,8 +615,12 @@ where
 
             // calculate dg and store in gdiff
             if self.problem.integrate_out {
-                let out = self.problem.eqn.out().unwrap();
-                out.call_inplace(&self.old_state.y, t, &mut self.old_state.dg);
+                // with no output function the output is the identity on the state
+                let old_state = &mut *self.old_state;
+                match self.problem.eqn.out() {
+                    Some(out) => out.call_inplace(&old_state.y, t, &mut old_state.dg),
+                    None => old_state.dg.copy_from(&old_state.y),
+                }
                 self.gdiff
                     .column_mut(i)
                     .axpy(h, &self.old_state.dg, Eqn::T::zero());
@@ -729,8 +734,12 @@ where
 
             // calculate dg and store in gdiff
             if self.problem.integrate_out {
-                let out = self.problem.eqn.out().unwrap();
-                out.call_inplace(&self.old_state.y, t, &mut self.old_state.dg);
+                // with no output function the output is the identity on the state
+                let old_state = &mut *self.old_state;
+                match self.problem.eqn.out() {
+                    Some(out) => out.call_inplace(&old_state.y, t, &mut old_state.dg),
+                    None => old_state.dg.copy_from(&old_state.y),
+                }
                 self.gdiff
                     .column_mut(i)
                     .axpy(h, &self.old_state.dg, Eqn::T::zero());
