@@ -10,6 +10,8 @@ keywords = ["ode", "solver", "math", "simulation", "science"]
 readme = "README.md"
 
 [lib]
+# a static library is made only on request:
+# `cargo rustc -p diffsol-c --release --lib --crate-type staticlib`
 crate-type = ["cdylib", "rlib"]
 
 [features]
@@ -53,6 +55,13 @@ schemars = "1.2"
 serde = { workspace = true }
 serde_json = { workspace = true }
 paste = { workspace = true }
+
+[dev-dependencies]
+# finds the C compiler (also MSVC on Windows) for the test that compiles the C examples
+cc = "1"
+
+[build-dependencies]
+cbindgen = { version = "0.29", default-features = false }
 
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

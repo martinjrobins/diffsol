@@ -124,41 +124,50 @@ use crate::{
     solve_eqn::{EqnRequirement, SolveEqn},
 };
 
+// Each callback type is a nullable function pointer, the same as a function pointer type in C:
+// `None` is `NULL`, and means that the callback is not given.
+
 /// `y = F(x, p, t)`: used for `rhs`, `root`, `out` and `reset`.
-pub type OdeCallbackFn<T> =
-    unsafe extern "C" fn(x: *const T, p: *const T, t: T, y: *mut T, user_data: *mut c_void) -> i32;
+pub type OdeCallbackFn<T> = Option<
+    unsafe extern "C" fn(x: *const T, p: *const T, t: T, y: *mut T, user_data: *mut c_void) -> i32,
+>;
 
 /// `y = A(x, p, t) v`: used for every `*_jac`, `*_sens`, `*_adjoint` and `*_sens_adjoint`
 /// callback of `rhs`, `root`, `out` and `reset`.
-pub type OdeCallbackMulFn<T> = unsafe extern "C" fn(
-    x: *const T,
-    p: *const T,
-    t: T,
-    v: *const T,
-    y: *mut T,
-    user_data: *mut c_void,
-) -> i32;
+pub type OdeCallbackMulFn<T> = Option<
+    unsafe extern "C" fn(
+        x: *const T,
+        p: *const T,
+        t: T,
+        v: *const T,
+        y: *mut T,
+        user_data: *mut c_void,
+    ) -> i32,
+>;
 
 /// `y = y0(p, t)`: the initial state.
 pub type OdeCallbackInitFn<T> =
-    unsafe extern "C" fn(p: *const T, t: T, y: *mut T, user_data: *mut c_void) -> i32;
+    Option<unsafe extern "C" fn(p: *const T, t: T, y: *mut T, user_data: *mut c_void) -> i32>;
 
 /// `y = A(p, t) v`: used for `init_sens` and `init_sens_adjoint`.
-pub type OdeCallbackInitMulFn<T> =
-    unsafe extern "C" fn(p: *const T, t: T, v: *const T, y: *mut T, user_data: *mut c_void) -> i32;
+pub type OdeCallbackInitMulFn<T> = Option<
+    unsafe extern "C" fn(p: *const T, t: T, v: *const T, y: *mut T, user_data: *mut c_void) -> i32,
+>;
 
 /// `y = M(p, t) v + beta y`: used for `mass` (and `mass_adjoint`, with `M^T`).
-pub type OdeCallbackMassFn<T> = unsafe extern "C" fn(
-    v: *const T,
-    p: *const T,
-    t: T,
-    beta: T,
-    y: *mut T,
-    user_data: *mut c_void,
-) -> i32;
+pub type OdeCallbackMassFn<T> = Option<
+    unsafe extern "C" fn(
+        v: *const T,
+        p: *const T,
+        t: T,
+        beta: T,
+        y: *mut T,
+        user_data: *mut c_void,
+    ) -> i32,
+>;
 
 /// Frees `user_data`, see the [module documentation](self).
-pub type OdeCallbackFreeFn = unsafe extern "C" fn(user_data: *mut c_void);
+pub type OdeCallbackFreeFn = Option<unsafe extern "C" fn(user_data: *mut c_void)>;
 
 /// The C callbacks (and the problem dimensions) that define an [`OdeCallbacks`].
 ///
@@ -179,38 +188,38 @@ pub struct OdeCallbacksDesc<T> {
     /// Passed as the last argument of every callback.
     pub user_data: *mut c_void,
     /// Called once with `user_data` when the equations are dropped. May be `NULL`.
-    pub free_user_data: Option<OdeCallbackFreeFn>,
+    pub free_user_data: OdeCallbackFreeFn,
 
-    pub rhs: Option<OdeCallbackFn<T>>,
-    pub rhs_jac: Option<OdeCallbackMulFn<T>>,
-    pub rhs_sens: Option<OdeCallbackMulFn<T>>,
-    pub rhs_adjoint: Option<OdeCallbackMulFn<T>>,
-    pub rhs_sens_adjoint: Option<OdeCallbackMulFn<T>>,
+    pub rhs: OdeCallbackFn<T>,
+    pub rhs_jac: OdeCallbackMulFn<T>,
+    pub rhs_sens: OdeCallbackMulFn<T>,
+    pub rhs_adjoint: OdeCallbackMulFn<T>,
+    pub rhs_sens_adjoint: OdeCallbackMulFn<T>,
 
-    pub init: Option<OdeCallbackInitFn<T>>,
-    pub init_sens: Option<OdeCallbackInitMulFn<T>>,
-    pub init_sens_adjoint: Option<OdeCallbackInitMulFn<T>>,
+    pub init: OdeCallbackInitFn<T>,
+    pub init_sens: OdeCallbackInitMulFn<T>,
+    pub init_sens_adjoint: OdeCallbackInitMulFn<T>,
 
-    pub mass: Option<OdeCallbackMassFn<T>>,
-    pub mass_adjoint: Option<OdeCallbackMassFn<T>>,
+    pub mass: OdeCallbackMassFn<T>,
+    pub mass_adjoint: OdeCallbackMassFn<T>,
 
-    pub root: Option<OdeCallbackFn<T>>,
-    pub root_jac: Option<OdeCallbackMulFn<T>>,
-    pub root_sens: Option<OdeCallbackMulFn<T>>,
-    pub root_adjoint: Option<OdeCallbackMulFn<T>>,
-    pub root_sens_adjoint: Option<OdeCallbackMulFn<T>>,
+    pub root: OdeCallbackFn<T>,
+    pub root_jac: OdeCallbackMulFn<T>,
+    pub root_sens: OdeCallbackMulFn<T>,
+    pub root_adjoint: OdeCallbackMulFn<T>,
+    pub root_sens_adjoint: OdeCallbackMulFn<T>,
 
-    pub out: Option<OdeCallbackFn<T>>,
-    pub out_jac: Option<OdeCallbackMulFn<T>>,
-    pub out_sens: Option<OdeCallbackMulFn<T>>,
-    pub out_adjoint: Option<OdeCallbackMulFn<T>>,
-    pub out_sens_adjoint: Option<OdeCallbackMulFn<T>>,
+    pub out: OdeCallbackFn<T>,
+    pub out_jac: OdeCallbackMulFn<T>,
+    pub out_sens: OdeCallbackMulFn<T>,
+    pub out_adjoint: OdeCallbackMulFn<T>,
+    pub out_sens_adjoint: OdeCallbackMulFn<T>,
 
-    pub reset: Option<OdeCallbackFn<T>>,
-    pub reset_jac: Option<OdeCallbackMulFn<T>>,
-    pub reset_sens: Option<OdeCallbackMulFn<T>>,
-    pub reset_adjoint: Option<OdeCallbackMulFn<T>>,
-    pub reset_sens_adjoint: Option<OdeCallbackMulFn<T>>,
+    pub reset: OdeCallbackFn<T>,
+    pub reset_jac: OdeCallbackMulFn<T>,
+    pub reset_sens: OdeCallbackMulFn<T>,
+    pub reset_adjoint: OdeCallbackMulFn<T>,
+    pub reset_sens_adjoint: OdeCallbackMulFn<T>,
 }
 
 /// [`OdeCallbacksDesc`] for `double` precision.
@@ -223,8 +232,14 @@ impl<T> OdeCallbacksDesc<T> {
     pub fn new(
         nstates: usize,
         nparams: usize,
-        rhs: OdeCallbackFn<T>,
-        init: OdeCallbackInitFn<T>,
+        rhs: unsafe extern "C" fn(
+            x: *const T,
+            p: *const T,
+            t: T,
+            y: *mut T,
+            user_data: *mut c_void,
+        ) -> i32,
+        init: unsafe extern "C" fn(p: *const T, t: T, y: *mut T, user_data: *mut c_void) -> i32,
     ) -> Self {
         Self {
             nstates,
@@ -643,14 +658,7 @@ impl<M: Matrix> OdeCallbacks<M> {
     // callback, and `user_data` is the pointer the caller gave with the callbacks.
 
     /// Evaluate `y = f(x, p, t)` for each batch lane.
-    fn eval(
-        &self,
-        name: &'static str,
-        f: Option<OdeCallbackFn<M::T>>,
-        x: &M::V,
-        t: M::T,
-        y: &mut M::V,
-    ) {
+    fn eval(&self, name: &'static str, f: OdeCallbackFn<M::T>, x: &M::V, t: M::T, y: &mut M::V) {
         let ud = self.callbacks.user_data;
         y.for_each_batch_host([x, &self.p], |y, [x, p], _| {
             self.run(name, f, y, |f, y| unsafe {
@@ -663,7 +671,7 @@ impl<M: Matrix> OdeCallbacks<M> {
     fn eval_mul(
         &self,
         name: &'static str,
-        f: Option<OdeCallbackMulFn<M::T>>,
+        f: OdeCallbackMulFn<M::T>,
         x: &M::V,
         t: M::T,
         v: &M::V,
@@ -678,13 +686,7 @@ impl<M: Matrix> OdeCallbacks<M> {
     }
 
     /// Evaluate `y = f(p, t)` for each batch lane.
-    fn eval_init(
-        &self,
-        name: &'static str,
-        f: Option<OdeCallbackInitFn<M::T>>,
-        t: M::T,
-        y: &mut M::V,
-    ) {
+    fn eval_init(&self, name: &'static str, f: OdeCallbackInitFn<M::T>, t: M::T, y: &mut M::V) {
         let ud = self.callbacks.user_data;
         y.for_each_batch_host([&self.p], |y, [p], _| {
             self.run(name, f, y, |f, y| unsafe {
@@ -697,7 +699,7 @@ impl<M: Matrix> OdeCallbacks<M> {
     fn eval_init_mul(
         &self,
         name: &'static str,
-        f: Option<OdeCallbackInitMulFn<M::T>>,
+        f: OdeCallbackInitMulFn<M::T>,
         t: M::T,
         v: &M::V,
         y: &mut M::V,
@@ -714,7 +716,7 @@ impl<M: Matrix> OdeCallbacks<M> {
     fn eval_mass(
         &self,
         name: &'static str,
-        f: Option<OdeCallbackMassFn<M::T>>,
+        f: OdeCallbackMassFn<M::T>,
         v: &M::V,
         t: M::T,
         beta: M::T,
@@ -858,7 +860,7 @@ fn nonlinear_patterns<M, F>(
     op: &F,
     y0: &M::V,
     t0: M::T,
-    callbacks: [Option<OdeCallbackMulFn<M::T>>; 4],
+    callbacks: [OdeCallbackMulFn<M::T>; 4],
     ctx: &M::C,
 ) -> NonLinearPatterns<M>
 where

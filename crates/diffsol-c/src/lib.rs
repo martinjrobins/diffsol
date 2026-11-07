@@ -89,6 +89,13 @@
 //! - [error_c] — retrieve and clear thread-local error messages.
 //! - [string_c] — allocate and free Rust-owned strings from C.
 //!
+//! A build of this crate makes a dynamic library (`libdiffsol_c.so`, `.dylib` or `.dll`) and
+//! the C header `target/<profile>/include/diffsol.h`. A static library is made on request, with
+//! `cargo rustc -p diffsol-c --lib --crate-type staticlib`.
+//! The build script makes the header with cbindgen, and the header agrees with the features of
+//! the build. The README and the examples in `examples/c` show how to compile and link a C
+//! program.
+//!
 //! All C FFI functions follow a common pattern:
 //! - Return `i32` (0 = success, negative = error).
 //! - Store error details in a thread-local variable retrievable via functions in [error_c].

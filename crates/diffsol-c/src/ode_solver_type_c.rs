@@ -9,22 +9,31 @@ const ODE_SOLVER_ESDIRK34: &[u8] = b"esdirk34\0";
 const ODE_SOLVER_TR_BDF2: &[u8] = b"tr_bdf2\0";
 const ODE_SOLVER_TSIT45: &[u8] = b"tsit45\0";
 
+/// The C value of `OdeSolverType::Bdf`.
+pub const DIFFSOL_ODE_SOLVER_TYPE_BDF: i32 = 0;
+/// The C value of `OdeSolverType::Esdirk34`.
+pub const DIFFSOL_ODE_SOLVER_TYPE_ESDIRK34: i32 = 1;
+/// The C value of `OdeSolverType::TrBdf2`.
+pub const DIFFSOL_ODE_SOLVER_TYPE_TR_BDF2: i32 = 2;
+/// The C value of `OdeSolverType::Tsit45`.
+pub const DIFFSOL_ODE_SOLVER_TYPE_TSIT45: i32 = 3;
+
 pub(crate) fn ode_solver_from_i32(value: i32) -> Option<OdeSolverType> {
     match value {
-        0 => Some(OdeSolverType::Bdf),
-        1 => Some(OdeSolverType::Esdirk34),
-        2 => Some(OdeSolverType::TrBdf2),
-        3 => Some(OdeSolverType::Tsit45),
+        DIFFSOL_ODE_SOLVER_TYPE_BDF => Some(OdeSolverType::Bdf),
+        DIFFSOL_ODE_SOLVER_TYPE_ESDIRK34 => Some(OdeSolverType::Esdirk34),
+        DIFFSOL_ODE_SOLVER_TYPE_TR_BDF2 => Some(OdeSolverType::TrBdf2),
+        DIFFSOL_ODE_SOLVER_TYPE_TSIT45 => Some(OdeSolverType::Tsit45),
         _ => None,
     }
 }
 
 pub(crate) fn ode_solver_to_i32(value: OdeSolverType) -> i32 {
     match value {
-        OdeSolverType::Bdf => 0,
-        OdeSolverType::Esdirk34 => 1,
-        OdeSolverType::TrBdf2 => 2,
-        OdeSolverType::Tsit45 => 3,
+        OdeSolverType::Bdf => DIFFSOL_ODE_SOLVER_TYPE_BDF,
+        OdeSolverType::Esdirk34 => DIFFSOL_ODE_SOLVER_TYPE_ESDIRK34,
+        OdeSolverType::TrBdf2 => DIFFSOL_ODE_SOLVER_TYPE_TR_BDF2,
+        OdeSolverType::Tsit45 => DIFFSOL_ODE_SOLVER_TYPE_TSIT45,
     }
 }
 

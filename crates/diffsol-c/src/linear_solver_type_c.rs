@@ -8,20 +8,27 @@ const LINEAR_SOLVER_DEFAULT: &[u8] = b"default\0";
 const LINEAR_SOLVER_LU: &[u8] = b"lu\0";
 const LINEAR_SOLVER_KLU: &[u8] = b"klu\0";
 
+/// The C value of `LinearSolverType::Default`.
+pub const DIFFSOL_LINEAR_SOLVER_TYPE_DEFAULT: i32 = 0;
+/// The C value of `LinearSolverType::Lu`.
+pub const DIFFSOL_LINEAR_SOLVER_TYPE_LU: i32 = 1;
+/// The C value of `LinearSolverType::Klu`.
+pub const DIFFSOL_LINEAR_SOLVER_TYPE_KLU: i32 = 2;
+
 pub(crate) fn linear_solver_from_i32(value: i32) -> Option<LinearSolverType> {
     match value {
-        0 => Some(LinearSolverType::Default),
-        1 => Some(LinearSolverType::Lu),
-        2 => Some(LinearSolverType::Klu),
+        DIFFSOL_LINEAR_SOLVER_TYPE_DEFAULT => Some(LinearSolverType::Default),
+        DIFFSOL_LINEAR_SOLVER_TYPE_LU => Some(LinearSolverType::Lu),
+        DIFFSOL_LINEAR_SOLVER_TYPE_KLU => Some(LinearSolverType::Klu),
         _ => None,
     }
 }
 
 pub(crate) fn linear_solver_to_i32(value: LinearSolverType) -> i32 {
     match value {
-        LinearSolverType::Default => 0,
-        LinearSolverType::Lu => 1,
-        LinearSolverType::Klu => 2,
+        LinearSolverType::Default => DIFFSOL_LINEAR_SOLVER_TYPE_DEFAULT,
+        LinearSolverType::Lu => DIFFSOL_LINEAR_SOLVER_TYPE_LU,
+        LinearSolverType::Klu => DIFFSOL_LINEAR_SOLVER_TYPE_KLU,
     }
 }
 
