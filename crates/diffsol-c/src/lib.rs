@@ -189,8 +189,8 @@ compile_error!("diffsol-c cannot enable more than one `diffsl-llvm*` feature.");
 ///
 /// This module provides [AdjointCheckpointWrapper], a thread-safe wrapper around the
 /// internal `AdjointCheckpoint` trait object. It is created during the forward pass of a
-/// discrete adjoint solve (via [OdeWrapper::solve_adjoint_fwd](crate::ode::OdeWrapper::solve_adjoint_fwd))
-/// and consumed during the backward pass (via [OdeWrapper::solve_adjoint_bkwd](crate::ode::OdeWrapper::solve_adjoint_bkwd)).
+/// discrete adjoint solve (via [OdeWrapper::solve_adjoint_fwd])
+/// and consumed during the backward pass (via [OdeWrapper::solve_adjoint_bkwd]).
 ///
 /// The internal `AdjointCheckpoint` trait erases the concrete matrix, codegen, and solver tag
 /// types, allowing the checkpoint to be shared between the forward and backward solvers which
@@ -267,7 +267,7 @@ pub mod host_array_c;
 /// Options for the initial condition solver used before integration.
 ///
 /// This module defines [InitialConditionSolverOptions], a handle obtained via
-/// [OdeWrapper::get_ic_options](crate::ode::OdeWrapper::get_ic_options). It provides
+/// [OdeWrapper::get_ic_options]. It provides
 /// getters and setters for configuring the nonlinear root-finding solver that computes
 /// the initial state of the ODE system:
 /// - Line search settings: [InitialConditionSolverOptions::get_use_linesearch],
@@ -413,7 +413,7 @@ pub mod ode_diffsl_c;
 /// ODE solver convergence and performance options for the dynamic dispatch API.
 ///
 /// This module defines [OdeSolverOptions], a handle obtained via
-/// [OdeWrapper::get_options](crate::ode::OdeWrapper::get_options). It provides getters and
+/// [OdeWrapper::get_options]. It provides getters and
 /// setters for tuning the nonlinear solver and time-stepping behaviour of the ODE integrator:
 /// - Nonlinear solver: [OdeSolverOptions::get_max_nonlinear_solver_iterations],
 ///   [OdeSolverOptions::get_max_error_test_failures],

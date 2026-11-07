@@ -1,6 +1,6 @@
 //! ODE equations defined by C callbacks.
 //!
-//! [`OdeCallbacks`] implements [`OdeEquations`](diffsol::OdeEquations). It also implements each
+//! [`OdeCallbacks`] implements [`diffsol::OdeEquations`]. It also implements each
 //! flavour that the solvers need: implicit, forward sensitivities and adjoint. The equations
 //! come from a table of C function pointers, [`OdeCallbacksDesc`]. Thus a C host (or a different
 //! FFI host) can define its own equations.
