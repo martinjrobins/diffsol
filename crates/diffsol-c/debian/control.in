@@ -2,7 +2,7 @@ Source: diffsol
 Section: libs
 Priority: optional
 Maintainer: Martin Robinson <martinjrobins@gmail.com>
-Build-Depends: debhelper-compat (= 13)
+Build-Depends: debhelper-compat (= 13), cmake, llvm-@LLVM@-dev, libclang-@LLVM@-dev
 Standards-Version: 4.6.2
 Homepage: https://github.com/martinjrobins/diffsol
 Rules-Requires-Root: no

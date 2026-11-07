@@ -19,7 +19,10 @@ The crate is built as a C dynamic library and a Rust library
 ## Features
 
 - `diffsl-cranelift`: DiffSL with the Cranelift JIT backend.
-- `diffsl-llvm15` … `diffsl-llvm21`: DiffSL with the corresponding LLVM backend.
+- `diffsl-llvm15` … `diffsl-llvm21`: DiffSL with the corresponding LLVM backend, linked
+  statically.
+- `diffsl-llvm15-prefer-dynamic` … `diffsl-llvm21-prefer-dynamic`: the same, but link the shared
+  LLVM library (`libLLVM`) if it is available.
 - `diffsl-external-f64` / `diffsl-external-f32` / `diffsl-external-dynamic`:
   externally compiled DiffSL modules.
 - `suitesparse`: enable the KLU sparse direct solver (via `diffsol/suitesparse`).

@@ -7,27 +7,32 @@ function interface) can also be used.
 
 ## Install the Debian packages
 
-On Debian 12 or later, and on Ubuntu 22.04 or later (amd64 and arm64), you can install the
-library with apt. You do not need Rust. There are two packages:
+On Debian 12 (bookworm) and 13 (trixie), and on Ubuntu 22.04 (jammy) and 24.04 (noble), for
+amd64 and arm64, you can install the library with apt. You do not need Rust. There are two
+packages:
 
 - `libdiffsol<version>`, for example `libdiffsol0.7`: the shared library `libdiffsol.so`. The
   library has the Cranelift and LLVM JIT backends, and it can load DiffSL code that was compiled
-  before.
+  before. It uses the LLVM library of the distribution: `libllvm19` on Debian 12, Debian 13 and
+  Ubuntu 24.04, and `libllvm15` on Ubuntu 22.04. apt installs it as a dependency.
 - `libdiffsol-dev`: the header `diffsol.h`, the pkg-config file `diffsol.pc`, and the link to the
   shared library. Install this package to compile programs.
 
 Add the APT repository of diffsol, then install the development package:
 
 ```sh
-curl -1sLf 'https://dl.cloudsmith.io/public/<owner>/<repository>/setup.deb.sh' | sudo -E bash
+curl -1sLf 'https://dl.cloudsmith.io/public/martinjrobins/diffsol/setup.deb.sh' | sudo -E bash
 sudo apt install libdiffsol-dev
 ```
 
 You can also get the packages from the assets of the diffsol-c
-[GitHub release](https://github.com/martinjrobins/diffsol/releases), and install them with:
+[GitHub release](https://github.com/martinjrobins/diffsol/releases). There are packages for each
+distribution: the codename of the distribution is part of the package version, for example
+`libdiffsol0.7_0.7.0-1~noble_amd64.deb`. Install the two packages of your distribution and
+architecture, for example on Ubuntu 24.04:
 
 ```sh
-sudo apt install ./libdiffsol0.7_*.deb ./libdiffsol-dev_*.deb
+sudo apt install ./libdiffsol0.7_*~noble_amd64.deb ./libdiffsol-dev_*~noble_amd64.deb
 ```
 
 Then compile and link a program with pkg-config:
@@ -47,7 +52,11 @@ You can also supply the equations using DiffSL via the additional features:
 
 - `diffsl-cranelift`: compile DiffSL code at runtime with the Cranelift JIT backend.
 - `diffsl-llvm15` to `diffsl-llvm21`: compile DiffSL code at runtime with LLVM. LLVM of that
-  version must be on the build machine.
+  version must be on the build machine. These features link LLVM statically.
+- `diffsl-llvm15-prefer-dynamic` to `diffsl-llvm21-prefer-dynamic`: the same, but link the
+  shared LLVM library (`libLLVM`) if it is available. Use these to depend on the LLVM package of
+  a Linux distribution. The library is then much smaller, but the LLVM library must be installed
+  where the program runs.
 - `diffsl-external-dynamic` (default): load DiffSL code that was compiled before, from a dynamic
   library.
 - `suitesparse`: add the KLU sparse linear solver.

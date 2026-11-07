@@ -8,16 +8,19 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// `target/<profile>`, which holds the dynamic library and `include/diffsol.h`. The test
-/// executable is in `target/<profile>/deps`.
-fn profile_dir() -> PathBuf {
+/// `target/<profile>/deps`, which holds the dynamic library of this build. The test executable is
+/// in the same directory. (`cargo test` does not copy the library to `target/<profile>`, as
+/// `cargo build` does.)
+fn library_dir() -> PathBuf {
     let exe = std::env::current_exe().unwrap();
-    exe.parent().unwrap().parent().unwrap().to_path_buf()
+    exe.parent().unwrap().to_path_buf()
 }
 
-fn compile_and_run(example: &str) {
-    let profile = profile_dir();
-    let include = profile.join("include");
+/// Compile the example `example`, and run it with the environment variables `envs`.
+fn compile_and_run(example: &str, envs: &[(&str, &str)]) {
+    let library = library_dir();
+    // the header that the build script of this build wrote
+    let include = PathBuf::from(env!("DIFFSOL_C_INCLUDE_DIR"));
     assert!(
         include.join("diffsol.h").exists(),
         "the build did not make {}",
@@ -45,19 +48,19 @@ fn compile_and_run(example: &str) {
             .args(["/nologo", "/W3"])
             .arg(format!("/I{}", include.display()))
             .arg(format!("/Fe{}", exe.display()))
-            .arg(profile.join("diffsol_c.dll.lib"));
+            .arg(library.join("diffsol_c.dll.lib"));
     } else {
         command
             .args(["-std=c11", "-Wall", "-Wextra", "-Werror"])
             .arg(format!("-I{}", include.display()))
-            .arg(format!("-L{}", profile.display()))
+            .arg(format!("-L{}", library.display()))
             .arg("-ldiffsol_c")
             .arg("-o")
             .arg(&exe);
         if !cfg!(windows) {
             command
                 .arg("-lm")
-                .arg(format!("-Wl,-rpath,{}", profile.display()));
+                .arg(format!("-Wl,-rpath,{}", library.display()));
         }
     }
     let output = command
@@ -71,10 +74,11 @@ fn compile_and_run(example: &str) {
     );
 
     let mut run = Command::new(&exe);
+    run.envs(envs.iter().copied());
     if cfg!(windows) {
         // Windows finds the DLL with PATH
         let path = std::env::var_os("PATH").unwrap_or_default();
-        let mut paths = vec![profile.clone()];
+        let mut paths = vec![library.clone()];
         paths.extend(std::env::split_paths(&path));
         run.env("PATH", std::env::join_paths(paths).unwrap());
     }
@@ -89,11 +93,17 @@ fn compile_and_run(example: &str) {
 
 #[test]
 fn c_example_logistic_callbacks() {
-    compile_and_run("logistic_callbacks");
+    compile_and_run("logistic_callbacks", &[]);
 }
 
 #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
 #[test]
 fn c_example_logistic_diffsl_jit() {
-    compile_and_run("logistic_diffsl_jit");
+    compile_and_run("logistic_diffsl_jit", &[]);
+}
+
+#[cfg(feature = "diffsl-llvm")]
+#[test]
+fn c_example_logistic_diffsl_jit_llvm() {
+    compile_and_run("logistic_diffsl_jit", &[("DIFFSOL_JIT_BACKEND", "llvm")]);
 }

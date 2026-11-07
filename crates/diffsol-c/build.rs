@@ -58,11 +58,25 @@ fn main() {
     let header = String::from_utf8(header).expect("the C header is not UTF-8");
     let header = insert_option_accessors(header, &crate_dir);
 
-    let path = include_dir().join("diffsol.h");
-    // only write a changed header, so that C builds that depend on it do not rebuild
-    if fs::read_to_string(&path).ok().as_deref() != Some(header.as_str()) {
+    // `OUT_DIR` belongs to this build (one set of features), so its copy of the header always
+    // agrees with the library. The test that compiles the C examples uses it. The copy in
+    // `target/<profile>/include` is for C programs; the last build writes it.
+    let own_include = PathBuf::from(env::var("OUT_DIR").unwrap()).join("include");
+    println!(
+        "cargo:rustc-env=DIFFSOL_C_INCLUDE_DIR={}",
+        own_include.display()
+    );
+    for dir in [own_include, include_dir()] {
+        write_if_changed(&dir.join("diffsol.h"), &header);
+    }
+}
+
+/// Write `contents` to `path`, but only if it changes the file, so that C builds that depend on
+/// the file do not rebuild.
+fn write_if_changed(path: &std::path::Path, contents: &str) {
+    if fs::read_to_string(path).ok().as_deref() != Some(contents) {
         fs::create_dir_all(path.parent().unwrap()).expect("cannot make the include directory");
-        fs::write(&path, header).expect("cannot write the C header");
+        fs::write(path, contents).expect("cannot write the C header");
     }
 }
 

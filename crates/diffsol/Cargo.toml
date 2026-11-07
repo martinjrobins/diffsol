@@ -40,6 +40,14 @@ diffsl-llvm18 = ["diffsl/llvm18-1", "diffsl", "diffsl-llvm"]
 diffsl-llvm19 = ["diffsl/llvm19-1", "diffsl", "diffsl-llvm"]
 diffsl-llvm20 = ["diffsl/llvm20-1", "diffsl", "diffsl-llvm"]
 diffsl-llvm21 = ["diffsl/llvm21-1", "diffsl", "diffsl-llvm"]
+# the same as the features above, but link LLVM as a shared library (libLLVM) if it is available
+diffsl-llvm15-prefer-dynamic = ["diffsl-llvm15", "diffsl/llvm15-0-prefer-dynamic"]
+diffsl-llvm16-prefer-dynamic = ["diffsl-llvm16", "diffsl/llvm16-0-prefer-dynamic"]
+diffsl-llvm17-prefer-dynamic = ["diffsl-llvm17", "diffsl/llvm17-0-prefer-dynamic"]
+diffsl-llvm18-prefer-dynamic = ["diffsl-llvm18", "diffsl/llvm18-1-prefer-dynamic"]
+diffsl-llvm19-prefer-dynamic = ["diffsl-llvm19", "diffsl/llvm19-1-prefer-dynamic"]
+diffsl-llvm20-prefer-dynamic = ["diffsl-llvm20", "diffsl/llvm20-1-prefer-dynamic"]
+diffsl-llvm21-prefer-dynamic = ["diffsl-llvm21", "diffsl/llvm21-1-prefer-dynamic"]
 
 [dependencies]
 diffsol-la = { workspace = true, features = ["nalgebra", "faer"] }

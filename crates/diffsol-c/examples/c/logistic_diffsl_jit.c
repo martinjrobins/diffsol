@@ -3,7 +3,10 @@
  * library compiles at run time (JIT). The program compares the solution with the exact solution
  * and returns a non-zero exit code if they do not agree.
  *
- * The library must have a JIT backend, for example the Cranelift backend:
+ * The library must have a JIT backend, for example the Cranelift backend. The program uses
+ * Cranelift if the library has it, otherwise LLVM. To select the backend, set the environment
+ * variable DIFFSOL_JIT_BACKEND to "cranelift" or "llvm".
+ *
  *
  *   cargo build -p diffsol-c --release --features diffsl-cranelift
  *   cc logistic_diffsl_jit.c -I target/release/include -L target/release -ldiffsol_c -lm \
@@ -11,6 +14,7 @@
  */
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "diffsol.h"
@@ -41,12 +45,19 @@ static int fail(const char *what) {
 
 int main(void) {
     /* ANCHOR: create */
-    /* Use Cranelift if the library has it, otherwise LLVM. */
+    /* Use Cranelift if the library has it, otherwise LLVM. The environment variable
+     * DIFFSOL_JIT_BACKEND can select a different backend. */
 #if defined(DIFFSOL_DIFFSL_CRANELIFT)
-    const int32_t backend = DIFFSOL_JIT_BACKEND_TYPE_CRANELIFT;
+    int32_t backend = DIFFSOL_JIT_BACKEND_TYPE_CRANELIFT;
 #else
-    const int32_t backend = DIFFSOL_JIT_BACKEND_TYPE_LLVM;
+    int32_t backend = DIFFSOL_JIT_BACKEND_TYPE_LLVM;
 #endif
+    const char *requested = getenv("DIFFSOL_JIT_BACKEND");
+    if (requested != NULL && strcmp(requested, "llvm") == 0) {
+        backend = DIFFSOL_JIT_BACKEND_TYPE_LLVM;
+    } else if (requested != NULL && strcmp(requested, "cranelift") == 0) {
+        backend = DIFFSOL_JIT_BACKEND_TYPE_CRANELIFT;
+    }
     printf("JIT backend: %s\n", diffsol_jit_backend_type_name(backend));
 
     OdeWrapper *ode = diffsol_ode_new_jit(CODE, backend, DIFFSOL_MATRIX_TYPE_NALGEBRA_DENSE,

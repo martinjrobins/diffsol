@@ -2,6 +2,7 @@
 /control
 /changelog
 /soversion
+/llvm-version
 /libdiffsol[0-9]*.install
 # written by dpkg-buildpackage
 /tmp/

@@ -85,8 +85,10 @@
 //! You can use DiffSL with diffsol using the [DiffSl] struct, which is created using the
 //! [OdeBuilder::build_from_diffsl] method. You need to enable one of the `diffsl-llvm*` features
 //! corresponding to the version of LLVM you have installed. E.g. to use your LLVM 17 installation,
-//! enable the `diffsl-llvm17` feature. Or you can use the `diffsl-cranelift` feature to use the
-//! Cranelift backend.
+//! enable the `diffsl-llvm17` feature. These features link LLVM statically. To link the shared
+//! LLVM library (`libLLVM`) instead, if it is available, use the feature with the suffix
+//! `-prefer-dynamic`, e.g. `diffsl-llvm17-prefer-dynamic`. Or you can use the `diffsl-cranelift`
+//! feature to use the Cranelift backend.
 //!
 //! For more information on the DiffSL language, see the [DiffSL
 //! documentation](https://martinjrobins.github.io/diffsl/)

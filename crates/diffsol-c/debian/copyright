@@ -8,8 +8,9 @@ Copyright: 2024 Martin Robinson
 License: MIT
 Comment:
  The shared library also contains code of its Rust dependencies, which are
- under the MIT or Apache-2.0 licenses, and of LLVM, which is under the
- Apache-2.0 license with LLVM exceptions. These are linked statically.
+ under the MIT or Apache-2.0 licenses, and of Enzyme, which is under the
+ Apache-2.0 license with LLVM exceptions. These are linked statically. The
+ library links the LLVM library of the distribution dynamically.
 
 License: MIT
  Permission is hereby granted, free of charge, to any person obtaining a copy
