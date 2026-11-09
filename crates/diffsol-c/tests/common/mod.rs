@@ -98,10 +98,9 @@ pub fn hybrid_logistic_state_dr(r: f64, t: f64) -> f64 {
 /// The value of `array` at `index` as `f64`. The array has the scalar type of the solver, `f32`
 /// or `f64`.
 pub fn value_f64(array: &HostArray, index: &[usize]) -> f64 {
-    let i = array.offset(index);
-    match array.as_slice::<f64>() {
-        Ok(data) => data[i],
-        Err(_) => array.as_slice::<f32>().unwrap()[i] as f64,
+    match array.index::<f64>(index) {
+        Ok(&value) => value,
+        Err(_) => *array.index::<f32>(index).unwrap() as f64,
     }
 }
 

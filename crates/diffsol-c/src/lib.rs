@@ -253,6 +253,7 @@ pub mod error_c;
 /// - [HostArray::new] — wrap data that the caller owns (`unsafe`: the caller keeps the data valid
 ///   while the array exists).
 /// - [HostArray::from_vec] — make an array that owns its data, in column-major order.
+/// - [HostArray::index] — a reference to the value at an index, with one value for each axis.
 /// - [HostArray::offset] — the index of a value in the slice of [HostArray::as_slice].
 /// - [HostArray::as_slice] — view the data as `&[T]`, with no copy. The [HostArray] docs give
 ///   the data layout.

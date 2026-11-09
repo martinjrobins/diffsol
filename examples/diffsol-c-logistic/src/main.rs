@@ -42,10 +42,8 @@ fn main() {
 
     // ANCHOR: extract
     // ys is a `[nout, nt, nbatch]` array; ts is a `[nt]` array that all lanes share.
-    // `as_slice` views the data, and `offset` gives the index of a value in it.
     let ys = solution.get_ys().unwrap();
     let ts = solution.get_ts().unwrap();
-    let (ys_data, ts_data) = (ys.as_slice::<f64>().unwrap(), ts.as_slice::<f64>().unwrap());
     // ANCHOR_END: extract
 
     // ANCHOR: check
@@ -53,8 +51,9 @@ fn main() {
     let y0 = 0.1f64;
     let tol = 1e-5;
     for i in 0..ts.shape()[0] {
-        let t = ts_data[ts.offset(&[i])];
-        let y_computed = ys_data[ys.offset(&[0, i, 0])];
+        // `index` gives a reference to the value at an index, with one value for each axis
+        let t = *ts.index::<f64>([i]).unwrap();
+        let y_computed = *ys.index::<f64>([0, i, 0]).unwrap();
         let y_analytical = y0 * (r * t).exp() / (1.0 - y0 + y0 * (r * t).exp());
         assert!(
             (y_computed - y_analytical).abs() < tol,

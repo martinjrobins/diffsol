@@ -402,6 +402,16 @@ impl HostArray {
         // while `self` exists
         Ok(unsafe { std::slice::from_raw_parts(self.ptr as *const T, last + 1) })
     }
+
+    /// A reference to the value at `index`, with one value for each axis, for example
+    /// `array.index::<f64>([0, i, 0])`. The scalar type must be `T`.
+    ///
+    /// # Panics
+    /// If `index` does not have one value for each axis, or a value is out of range.
+    pub fn index<T: Scalar>(&self, index: impl AsRef<[usize]>) -> Result<&T, DiffsolRtError> {
+        let i = self.offset(index.as_ref());
+        Ok(&self.as_slice::<T>()?[i])
+    }
 }
 
 #[cfg(test)]
@@ -420,7 +430,7 @@ mod tests {
 
     /// The `f64` value of `array` at `index`.
     fn at(array: &HostArray, index: &[usize]) -> f64 {
-        array.as_slice::<f64>().unwrap()[array.offset(index)]
+        *array.index::<f64>(index).unwrap()
     }
 
     /// All the `f64` values of `array`, in column-major order of its shape (the first axis
