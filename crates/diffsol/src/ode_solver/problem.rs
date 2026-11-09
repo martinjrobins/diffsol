@@ -162,7 +162,7 @@ pub struct OdeSolverOptions<T: Scalar> {
     pub pi_control_integral: T,
     /// Turn off all error control and take steps of constant size (default: false).
     ///
-    /// This mode is for manual stepping with [OdeSolverMethod::step](crate::OdeSolverMethod::step)
+    /// This mode is for manual stepping with [OdeSolverMethod::step]
     /// only. A stop time cannot be set.
     pub fixed_step: bool,
     /// Maximum BDF order when `fixed_step` is true (default: 2).
