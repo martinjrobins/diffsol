@@ -478,6 +478,9 @@ where
     }
 
     pub(crate) fn set_stop_time(&mut self, tstop: <Eqn as Op>::T) -> Result<(), DiffsolError> {
+        if self.problem.ode_options.fixed_step {
+            return Err(DiffsolError::from(OdeSolverError::StopTimeWithFixedStep));
+        }
         self.tstop = Some(tstop);
         if let Some(OdeSolverStopReason::TstopReached) = self.handle_tstop(tstop)? {
             let error = OdeSolverError::StopTimeAtCurrentTime;
@@ -953,6 +956,16 @@ where
         Ok(())
     }
 
+    /// Record a nonlinear solver failure after which the step is not tried again, the
+    /// `nonlinear_failures`th of the step, and return the error for it.
+    pub(crate) fn last_solve_fail(&mut self, nonlinear_failures: usize) -> DiffsolError {
+        self.statistics.number_of_nonlinear_solver_fails += 1;
+        DiffsolError::from(OdeSolverError::TooManyNonlinearSolverFailures {
+            time: self.state.t.to_f64().unwrap(),
+            num_failures: nonlinear_failures,
+        })
+    }
+
     pub(crate) fn solve_fail(
         &mut self,
         h: Eqn::T,
@@ -960,16 +973,11 @@ where
         min_timestep: Eqn::T,
         max_nonlinear_solver_fails: usize,
     ) -> Result<(), DiffsolError> {
-        self.statistics.number_of_nonlinear_solver_fails += 1;
         // if too many nonlinear solver failures, then fail
         if nonlinear_failures > max_nonlinear_solver_fails {
-            return Err(DiffsolError::from(
-                OdeSolverError::TooManyNonlinearSolverFailures {
-                    time: self.state.t.to_f64().unwrap(),
-                    num_failures: nonlinear_failures,
-                },
-            ));
+            return Err(self.last_solve_fail(nonlinear_failures));
         }
+        self.statistics.number_of_nonlinear_solver_fails += 1;
         // if step size too small, then fail
         if abs(h) < min_timestep {
             return Err(DiffsolError::from(OdeSolverError::StepSizeTooSmall {

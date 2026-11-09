@@ -2074,6 +2074,58 @@ pub(crate) mod tests {
             }
         }
     }
+
+    /// With a fixed step size, one step of each method does not change the step size, and BDF
+    /// increases its order to 2.
+    #[test]
+    fn fixed_step_keeps_step_size() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_problem;
+        type M = NalgebraMat<f64>;
+        type LS = NalgebraLU<f64>;
+        let h = 0.1;
+        let (mut problem, _soln) = exponential_decay_problem::<M>(false);
+        problem.h0 = h;
+        problem.ode_options.fixed_step = true;
+
+        let mut tsit45 = problem.tsit45().unwrap();
+        tsit45.step().unwrap();
+        assert_eq!(tsit45.state().h, h);
+
+        let mut tr_bdf2 = problem.tr_bdf2::<LS>().unwrap();
+        tr_bdf2.step().unwrap();
+        assert_eq!(tr_bdf2.state().h, h);
+
+        let mut bdf = problem.bdf::<LS>().unwrap();
+        bdf.step().unwrap();
+        assert_eq!(bdf.state().h, h);
+        assert_eq!(bdf.order(), 1);
+        bdf.step().unwrap();
+        assert_eq!(bdf.state().h, h);
+        assert_eq!(bdf.order(), 2);
+    }
+
+    /// A stop time cannot be set with a fixed step size.
+    #[test]
+    fn fixed_step_stop_time_is_an_error() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_problem;
+        type M = NalgebraMat<f64>;
+        type LS = NalgebraLU<f64>;
+        let (mut problem, _soln) = exponential_decay_problem::<M>(false);
+        problem.h0 = 0.1;
+        problem.ode_options.fixed_step = true;
+        for result in [
+            problem.tsit45().unwrap().set_stop_time(1.0),
+            problem.tr_bdf2::<LS>().unwrap().set_stop_time(1.0),
+            problem.bdf::<LS>().unwrap().set_stop_time(1.0),
+        ] {
+            assert_matches!(
+                result,
+                Err(DiffsolError::OdeSolverError(
+                    OdeSolverError::StopTimeWithFixedStep
+                ))
+            );
+        }
+    }
 }
 
 #[test]

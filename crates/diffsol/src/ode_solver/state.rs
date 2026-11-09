@@ -972,13 +972,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
         Eqn: OdeEquations<T = V::T, V = V, C = V::C>,
     {
         let mut ret = Self::new_without_initialise(ode_problem)?;
-        ret.as_mut().set_step_size(
-            ode_problem.h0,
-            &ode_problem.atol,
-            ode_problem.rtol,
-            &ode_problem.eqn,
-            solver_order,
-        );
+        ret.set_initial_step_size(ode_problem, solver_order);
         Ok(ret)
     }
 
@@ -1007,13 +1001,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
             let mut root_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
             ret.as_mut().set_consistent(ode_problem, &mut root_solver)?;
         }
-        ret.as_mut().set_step_size(
-            ode_problem.h0,
-            &ode_problem.atol,
-            ode_problem.rtol,
-            &ode_problem.eqn,
-            solver_order,
-        );
+        ret.set_initial_step_size(ode_problem, solver_order);
         Ok(ret)
     }
 
@@ -1035,13 +1023,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
         augmented_eqn
             .rhs()
             .call_inplace(state.s, *state.t, state.ds);
-        ret.as_mut().set_step_size(
-            ode_problem.h0,
-            &ode_problem.atol,
-            ode_problem.rtol,
-            &ode_problem.eqn,
-            solver_order,
-        );
+        ret.set_initial_step_size(ode_problem, solver_order);
         Ok(ret)
     }
 
@@ -1086,13 +1068,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
                 &mut root_solver_sens,
             )?;
         }
-        ret.as_mut().set_step_size(
-            ode_problem.h0,
-            &ode_problem.atol,
-            ode_problem.rtol,
-            &ode_problem.eqn,
-            solver_order,
-        );
+        ret.set_initial_step_size(ode_problem, solver_order);
         Ok(ret)
     }
 
@@ -1200,6 +1176,27 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
         state.sg = sg;
         state.dsg = dsg;
         Ok(())
+    }
+
+    /// Set the step size of a new state made from `ode_problem`. With a fixed step size this is
+    /// `h0` exactly (the step size of a state made by [Self::new_without_initialise]), else it
+    /// is from the heuristic in [Self::set_step_size], starting at `h0`.
+    fn set_initial_step_size<Eqn>(
+        &mut self,
+        ode_problem: &OdeSolverProblem<Eqn>,
+        solver_order: usize,
+    ) where
+        Eqn: OdeEquations<T = V::T, V = V, C = V::C>,
+    {
+        if !ode_problem.ode_options.fixed_step {
+            self.set_step_size(
+                ode_problem.h0,
+                &ode_problem.atol,
+                ode_problem.rtol,
+                &ode_problem.eqn,
+                solver_order,
+            );
+        }
     }
 
     /// compute size of first step based on alg in Hairer, Norsett, Wanner
