@@ -48,6 +48,8 @@ pub enum OdeSolverError {
     MassMatrixNotSupported,
     #[error("Stop time is at the current state time")]
     StopTimeAtCurrentTime,
+    #[error("A stop time cannot be set with a fixed step size (OdeSolverOptions::fixed_step): use step()")]
+    StopTimeWithFixedStep,
     #[error("Interpolation vector is not the correct length, expected {expected}, got {found}")]
     InterpolationVectorWrongSize { expected: usize, found: usize },
     #[error("Batch count does not match, expected {expected}, got {found}")]

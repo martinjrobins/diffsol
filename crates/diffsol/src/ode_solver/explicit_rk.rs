@@ -209,6 +209,7 @@ where
             self.state().t,
             h
         );
+        let fixed_step = self.problem().ode_options.fixed_step;
 
         // loop until step is accepted
         let mut nattempts = 0;
@@ -217,6 +218,10 @@ where
             self.rk.start_step_attempt(h, self.augmented_eqn.as_mut());
             for i in 1..self.rk.tableau().s() {
                 self.rk.do_stage(i, h, self.augmented_eqn.as_mut());
+            }
+            if fixed_step {
+                // no error control: accept the step
+                break (Eqn::T::one(), <Eqn::T as num_traits::Zero>::zero());
             }
             let error_norm =
                 self.rk

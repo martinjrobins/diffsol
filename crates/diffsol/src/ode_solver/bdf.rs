@@ -606,16 +606,8 @@ where
             }
         }
 
-        if let Some(op) = self.op.as_mut() {
-            op.set_c(new_h, self.alpha[order]);
-        }
-        if let Some(s_op) = self.s_op.as_mut() {
-            s_op.set_c(new_h, self.alpha[order]);
-        }
-
         self.state.h = new_h;
-        self.convergence.reset_eta_timestep_change();
-        self.s_convergence.reset_eta_timestep_change();
+        self._set_c();
 
         // if step size too small, then fail
         if self.state.h.abs() < self.config.minimum_timestep {
@@ -625,6 +617,20 @@ where
         }
 
         Ok(new_h)
+    }
+
+    /// Set the BDF coefficient `c` of the operators for the current step size and order, which
+    /// changes the Newton matrix, so the convergence rate estimates are reset.
+    fn _set_c(&mut self) {
+        let (h, alpha) = (self.state.h, self.alpha[self.state.order]);
+        if let Some(op) = self.op.as_mut() {
+            op.set_c(h, alpha);
+        }
+        if let Some(s_op) = self.s_op.as_mut() {
+            s_op.set_c(h, alpha);
+        }
+        self.convergence.reset_eta_timestep_change();
+        self.s_convergence.reset_eta_timestep_change();
     }
 
     // D[0:order+1] = D[0:order+1] * R * U
@@ -1376,6 +1382,7 @@ where
             "Taking BDF step at time {} with step size {} and order {}",
             self.state.t, self.state.h, self.state.order
         );
+        let fixed_step = self.ode_problem.ode_options.fixed_step;
         let mut safety: Eqn::T;
         let mut error_norm: Eqn::T;
         let problem = self.ode_problem;
@@ -1483,7 +1490,10 @@ where
             if solve_result.is_err() {
                 self.statistics.number_of_nonlinear_solver_fails += 1;
                 nonlinear_failures += 1;
-                if nonlinear_failures > self.config.maximum_newton_fails {
+                // with a fixed step size, the step is not reduced after a second failure
+                if nonlinear_failures > self.config.maximum_newton_fails
+                    || (convergence_fail && fixed_step)
+                {
                     return Err(DiffsolError::from(
                         OdeSolverError::TooManyNonlinearSolverFailures {
                             time: self.state.t.to_f64().unwrap(),
@@ -1524,6 +1534,13 @@ where
                     // same prediction as last time
                 }
                 continue;
+            }
+
+            if fixed_step {
+                // no error control: accept the step
+                error_norm = Eqn::T::zero();
+                safety = Eqn::T::one();
+                break;
             }
 
             error_norm = self.error_control();
@@ -1639,7 +1656,26 @@ where
         // (see page 83 of [2])
         self.n_equal_steps += 1;
 
-        if self.n_equal_steps > self.state.order {
+        if fixed_step {
+            // with no error estimates, increase the order up to the maximum, with the same step
+            // size (the same as the order increase below, with a factor of one)
+            let order = self.state.order;
+            let max_order = self
+                .ode_problem
+                .ode_options
+                .fixed_step_max_order
+                .clamp(1, MAX_ORDER);
+            if self.n_equal_steps > order && order < max_order {
+                let new_order = order + 1;
+                self.state.order = new_order;
+                self.u = Self::_compute_r(new_order, Eqn::T::one());
+                self.n_equal_steps = 0;
+                // the BDF coefficient changes with the order. Not `_update_step_size(1)`, which
+                // also fails for a step size below the minimum, which a fixed step can be
+                self._set_c();
+                debug!("Changing order to {}", order + 1);
+            }
+        } else if self.n_equal_steps > self.state.order {
             let order = self.state.order;
             // similar to the optimal step size factor we calculated above for the current
             // order k, we need to calculate the optimal step size factors for orders
@@ -1753,6 +1789,9 @@ where
     }
 
     fn set_stop_time(&mut self, tstop: <Eqn as Op>::T) -> Result<(), DiffsolError> {
+        if self.ode_problem.ode_options.fixed_step {
+            return Err(DiffsolError::from(OdeSolverError::StopTimeWithFixedStep));
+        }
         self.tstop = Some(tstop);
         if let Some(OdeSolverStopReason::TstopReached) = self.handle_tstop(tstop)? {
             let error = OdeSolverError::StopTimeAtCurrentTime;

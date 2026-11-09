@@ -68,6 +68,11 @@ impl<T: Scalar> Default for InitialConditionSolverOptions<T> {
 /// For implicit methods (BDF, SDIRK) the safety factor also incorporates the Newton iteration
 /// count: `(2*maxiter+1) / (2*maxiter+niter)`, penalising steps that require many iterations.
 ///
+/// ## Fixed Step Size
+///
+/// Set `fixed_step` to turn off the error control and take steps of a constant size `h`. See
+/// the field for the full behaviour.
+///
 /// ## Solver Limits
 ///
 /// The solver aborts with an error when:
@@ -155,6 +160,16 @@ pub struct OdeSolverOptions<T: Scalar> {
     pub pi_control_proportional: T,
     /// PI controller integral gain `kI` (default: 0.5). Exponent is `kI / (order + 1)`.
     pub pi_control_integral: T,
+    /// Turn off all error control and take steps of constant size (default: false).
+    ///
+    /// This mode is for manual stepping with [OdeSolverMethod::step](crate::OdeSolverMethod::step)
+    /// only. A stop time cannot be set.
+    pub fixed_step: bool,
+    /// Maximum BDF order when `fixed_step` is true (default: 2).
+    ///
+    /// The BDF order starts at 1 and increases by one after `order + 1` steps, up to this
+    /// value (clamped to `1..=5`). Other methods ignore it.
+    pub fixed_step_max_order: usize,
 }
 
 impl<T: Scalar> Default for OdeSolverOptions<T> {
@@ -178,6 +193,8 @@ impl<T: Scalar> Default for OdeSolverOptions<T> {
             threshold_to_update_rhs_jacobian: T::from_f64(0.2).unwrap(),
             pi_control_proportional: T::from_f64(0.0).unwrap(),
             pi_control_integral: T::from_f64(0.5).unwrap(),
+            fixed_step: false,
+            fixed_step_max_order: 2,
         }
     }
 }
