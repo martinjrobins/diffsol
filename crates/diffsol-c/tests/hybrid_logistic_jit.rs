@@ -1,14 +1,14 @@
 #![cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
 
 mod common;
+use common::lane_matrix;
 
 #[cfg(feature = "diffsl-llvm")]
 use common::hybrid_logistic_state_dr;
 use common::{
     all_ode_solvers, assert_close, available_jit_backends, hybrid_logistic_period,
-    hybrid_logistic_state, vector_host, ASSERT_TOL,
+    hybrid_logistic_state, lane_f64, vector_host, ASSERT_TOL,
 };
-use diffsol_c::host_array::FromHostArray;
 use diffsol_c::{
     JitBackendType, LinearSolverType, MatrixType, OdeSolverType, OdeWrapper, ScalarType,
 };
@@ -60,10 +60,10 @@ fn assert_hybrid_solution_matches_piecewise_logistic_diffsl_model(
     assert_eq!(ode.get_nout().unwrap(), 1);
     assert!(ode.has_stop().unwrap());
 
-    let solution = ode.solve(vector_host(&[r]), final_time).unwrap();
+    let solution = ode.solve(&vector_host(&[r]), final_time).unwrap();
     let ys = solution.get_ys().unwrap();
-    let ys = ys.as_array::<f64>().unwrap();
-    let ts = Vec::<f64>::from_host_array(solution.get_ts().unwrap()).unwrap();
+    let ys = lane_matrix(&ys, 0);
+    let ts = lane_f64(&solution.get_ts().unwrap(), 0);
 
     assert_eq!(ys.nrows(), 1);
     assert_eq!(ys.ncols(), ts.len());
@@ -106,11 +106,11 @@ fn assert_hybrid_dense_solution_matches_piecewise_logistic_diffsl_model(
     ode.set_atol(1e-8).unwrap();
 
     let solution = ode
-        .solve_dense(vector_host(&[r]), vector_host(&t_eval))
+        .solve_dense(&vector_host(&[r]), &vector_host(&t_eval))
         .unwrap();
     let ys = solution.get_ys().unwrap();
-    let ys = ys.as_array::<f64>().unwrap();
-    let ts = Vec::<f64>::from_host_array(solution.get_ts().unwrap()).unwrap();
+    let ys = lane_matrix(&ys, 0);
+    let ts = lane_f64(&solution.get_ts().unwrap(), 0);
 
     assert_eq!(ys.nrows(), 1);
     assert_eq!(ys.ncols(), t_eval.len());
@@ -138,16 +138,16 @@ fn assert_hybrid_forward_sensitivities_match_piecewise_logistic_diffsl_model(
     ode.set_sens_atol(Some(1e-6)).unwrap();
 
     let solution = ode
-        .solve_fwd_sens(vector_host(&[r]), vector_host(&t_eval))
+        .solve_fwd_sens(&vector_host(&[r]), &vector_host(&t_eval))
         .unwrap();
     let ys = solution.get_ys().unwrap();
-    let ys = ys.as_array::<f64>().unwrap();
+    let ys = lane_matrix(&ys, 0);
     let sens = solution.get_sens().unwrap();
 
     assert_eq!(ys.nrows(), 1);
     assert_eq!(ys.ncols(), t_eval.len());
     assert_eq!(sens.len(), 1);
-    let sens_values = sens[0].as_array::<f64>().unwrap();
+    let sens_values = lane_matrix(&sens[0], 0);
     assert_eq!(sens_values.nrows(), 1);
     assert_eq!(sens_values.ncols(), t_eval.len());
     for (col, &t) in t_eval.iter().enumerate() {

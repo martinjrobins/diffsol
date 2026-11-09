@@ -1,16 +1,16 @@
 #![cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
 
 mod common;
+use common::lane_matrix;
 
 #[cfg(feature = "diffsl-llvm")]
 use common::matrix_host;
 use common::{
-    assert_close, assert_solution_tail, available_jit_backends, logistic_state, vector_host,
-    ASSERT_TOL, LOGISTIC_X0,
+    assert_close, assert_solution_tail, available_jit_backends, lane_f64, logistic_state,
+    vector_host, ASSERT_TOL, LOGISTIC_X0,
 };
 #[cfg(feature = "diffsl-llvm")]
 use common::{logistic_integral, logistic_state_dr};
-use diffsol_c::host_array::FromHostArray;
 use diffsol_c::{
     JitBackendType, LinearSolverType, MatrixType, OdeSolverType, OdeWrapper, ScalarType,
 };
@@ -113,12 +113,12 @@ fn assert_serialization_roundtrip(
         return;
     }
 
-    let y0_before = Vec::<f64>::from_host_array(ode.y0(vector_host(&[2.0])).unwrap()).unwrap();
-    let rhs_before = Vec::<f64>::from_host_array(
-        ode.rhs(vector_host(&[2.0]), 0.0, vector_host(&[0.25]))
+    let y0_before = lane_f64(&ode.y0(&vector_host(&[2.0])).unwrap(), 0);
+    let rhs_before = lane_f64(
+        &ode.rhs(&vector_host(&[2.0]), 0.0, &vector_host(&[0.25]))
             .unwrap(),
-    )
-    .unwrap();
+        0,
+    );
 
     let encoded = serde_json::to_string(&ode).unwrap();
     let decoded: OdeWrapper = serde_json::from_str(&encoded).unwrap();
@@ -227,13 +227,13 @@ fn assert_serialization_roundtrip(
         "serialized min_timestep",
     );
 
-    let y0_after = Vec::<f64>::from_host_array(decoded.y0(vector_host(&[2.0])).unwrap()).unwrap();
-    let rhs_after = Vec::<f64>::from_host_array(
-        decoded
-            .rhs(vector_host(&[2.0]), 0.0, vector_host(&[0.25]))
+    let y0_after = lane_f64(&decoded.y0(&vector_host(&[2.0])).unwrap(), 0);
+    let rhs_after = lane_f64(
+        &decoded
+            .rhs(&vector_host(&[2.0]), 0.0, &vector_host(&[0.25]))
             .unwrap(),
-    )
-    .unwrap();
+        0,
+    );
     assert_eq!(y0_after, y0_before);
     assert_close(
         rhs_after[0],
@@ -249,7 +249,7 @@ fn assert_serialization_roundtrip(
     decoded.set_integrate_out(false).unwrap();
     let t_eval = [0.25, 0.5, 1.0];
     let solution = decoded
-        .solve_dense(vector_host(&[2.0]), vector_host(&t_eval))
+        .solve_dense(&vector_host(&[2.0]), &vector_host(&t_eval))
         .unwrap();
     assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);
 }
@@ -268,29 +268,24 @@ fn assert_runtime_dispatch(jit_backend: JitBackendType, matrix_type: MatrixType)
     assert_eq!(ode.get_nout().unwrap(), 1);
     assert!(!ode.has_stop().unwrap());
 
-    let y0 = ode.y0(vector_host(&[2.0])).unwrap();
-    assert_eq!(Vec::<f64>::from_host_array(y0).unwrap(), vec![LOGISTIC_X0]);
+    let y0 = ode.y0(&vector_host(&[2.0])).unwrap();
+    assert_eq!(lane_f64(&y0, 0), vec![LOGISTIC_X0]);
 
     let rhs = ode
-        .rhs(vector_host(&[2.0]), 0.0, vector_host(&[0.25]))
+        .rhs(&vector_host(&[2.0]), 0.0, &vector_host(&[0.25]))
         .unwrap();
-    assert_close(
-        Vec::<f64>::from_host_array(rhs).unwrap()[0],
-        0.375,
-        ASSERT_TOL,
-        "jit rhs(0.25)",
-    );
+    assert_close(lane_f64(&rhs, 0)[0], 0.375, ASSERT_TOL, "jit rhs(0.25)");
 
     let rhs_jac_mul = ode
         .rhs_jac_mul(
-            vector_host(&[2.0]),
+            &vector_host(&[2.0]),
             0.0,
-            vector_host(&[0.25]),
-            vector_host(&[3.0]),
+            &vector_host(&[0.25]),
+            &vector_host(&[3.0]),
         )
         .unwrap();
     assert_close(
-        Vec::<f64>::from_host_array(rhs_jac_mul).unwrap()[0],
+        lane_f64(&rhs_jac_mul, 0)[0],
         3.0,
         ASSERT_TOL,
         "jit rhs_jac_mul(0.25, 3.0)",
@@ -309,7 +304,7 @@ fn assert_solver_dense_solution(
 
     let t_eval = [0.25, 0.5, 1.0];
     let solution = ode
-        .solve_dense(vector_host(&[2.0]), vector_host(&t_eval))
+        .solve_dense(&vector_host(&[2.0]), &vector_host(&t_eval))
         .unwrap();
 
     assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);
@@ -359,7 +354,7 @@ fn bdf_dense_solution_matches_logistic_diffsl_model() {
 
         let t_eval = [0.25, 0.5, 1.0];
         let solution = ode
-            .solve_dense(vector_host(&[2.0]), vector_host(&t_eval))
+            .solve_dense(&vector_host(&[2.0]), &vector_host(&t_eval))
             .unwrap();
 
         assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);
@@ -385,11 +380,11 @@ fn bdf_solution_matches_logistic_diffsl_model() {
         ode.set_param_atol(Some(1e-6)).unwrap();
 
         let final_time = 1.0;
-        let solution = ode.solve(vector_host(&[r]), final_time).unwrap();
+        let solution = ode.solve(&vector_host(&[r]), final_time).unwrap();
 
         let ys = solution.get_ys().unwrap();
-        let ys = ys.as_array::<f64>().unwrap();
-        let ts = Vec::<f64>::from_host_array(solution.get_ts().unwrap()).unwrap();
+        let ys = lane_matrix(&ys, 0);
+        let ts = lane_f64(&solution.get_ts().unwrap(), 0);
 
         assert_eq!(ys.nrows(), 1);
         assert_eq!(ys.ncols(), ts.len());
@@ -461,13 +456,13 @@ fn bdf_forward_sensitivities_match_logistic_derivative_from_diffsl() {
 
     let t_eval = [0.25, 0.5, 1.0];
     let solution = ode
-        .solve_fwd_sens(vector_host(&[2.0]), vector_host(&t_eval))
+        .solve_fwd_sens(&vector_host(&[2.0]), &vector_host(&t_eval))
         .unwrap();
 
     assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);
     let sens = solution.get_sens().unwrap();
     assert_eq!(sens.len(), 1);
-    let sens_values = sens[0].as_array::<f64>().unwrap();
+    let sens_values = lane_matrix(&sens[0], 0);
     assert_eq!(sens_values.nrows(), 1);
     assert_eq!(sens_values.ncols(), t_eval.len());
     for (i, &t) in t_eval.iter().enumerate() {
@@ -495,10 +490,10 @@ fn continuous_adjoint_returns_integral_and_parameter_gradient() {
     let r = 2.0;
     let final_time = 1.0;
     let (integral, gradient) = ode
-        .solve_continuous_adjoint(vector_host(&[r]), final_time)
+        .solve_continuous_adjoint(&vector_host(&[r]), final_time)
         .unwrap();
-    let integral = Vec::<f64>::from_host_array(integral).unwrap();
-    let gradient = gradient.as_array::<f64>().unwrap();
+    let integral = lane_f64(&integral, 0);
+    let gradient = lane_matrix(&gradient, 0);
 
     let step = 1e-6;
     let expected_gradient = (logistic_integral(LOGISTIC_X0, r + step, final_time)
@@ -542,12 +537,12 @@ fn split_adjoint_matches_finite_difference_gradient() {
         .map(|&t| logistic_state(LOGISTIC_X0, data_r, t))
         .collect();
     let (solution, checkpoint) = ode
-        .solve_adjoint_fwd(vector_host(&[fit_r]), vector_host(&t_eval))
+        .solve_adjoint_fwd(&vector_host(&[fit_r]), &vector_host(&t_eval))
         .unwrap();
     assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, fit_r, 5e-4);
 
     let ys = solution.get_ys().unwrap();
-    let ys = ys.as_array::<f64>().unwrap();
+    let ys = lane_matrix(&ys, 0);
     let dgdu_values: Vec<f64> = (0..t_eval.len())
         .map(|col| 2.0 * (ys[(0, col)] - data_values[col]))
         .collect();
@@ -555,17 +550,17 @@ fn split_adjoint_matches_finite_difference_gradient() {
         .solve_adjoint_bkwd(
             &solution,
             &checkpoint,
-            matrix_host(1, t_eval.len(), &dgdu_values),
+            &matrix_host(1, t_eval.len(), &dgdu_values),
         )
         .unwrap();
-    let split_gradient = split_gradient.as_array::<f64>().unwrap();
+    let split_gradient = lane_matrix(&split_gradient, 0);
 
     let objective = |r: f64| -> f64 {
         let solution = ode
-            .solve_dense(vector_host(&[r]), vector_host(&t_eval))
+            .solve_dense(&vector_host(&[r]), &vector_host(&t_eval))
             .unwrap();
         let ys = solution.get_ys().unwrap();
-        let ys = ys.as_array::<f64>().unwrap();
+        let ys = lane_matrix(&ys, 0);
         (0..t_eval.len())
             .map(|col| {
                 let residual = ys[(0, col)] - data_values[col];
@@ -598,22 +593,22 @@ fn split_adjoint_rejects_invalid_dgdu_shapes() {
     );
     let t_eval = [0.0, 0.25, 0.5, 1.0];
     let (solution, checkpoint) = ode
-        .solve_adjoint_fwd(vector_host(&[2.0]), vector_host(&t_eval))
+        .solve_adjoint_fwd(&vector_host(&[2.0]), &vector_host(&t_eval))
         .unwrap();
 
     let wrong_rows = matrix_host(2, t_eval.len(), &[0.0; 8]);
-    let err = match ode.solve_adjoint_bkwd(&solution, &checkpoint, wrong_rows) {
+    let err = match ode.solve_adjoint_bkwd(&solution, &checkpoint, &wrong_rows) {
         Ok(_) => panic!("expected invalid dgdu row count to fail"),
         Err(err) => err.to_string(),
     };
-    assert!(err.contains("Expected dgdu_eval to have 1 rows"));
+    assert!(err.contains("dgdu_eval: Expected 1 rows"));
 
     let wrong_cols = matrix_host(1, t_eval.len() - 1, &[0.0; 3]);
-    let err = match ode.solve_adjoint_bkwd(&solution, &checkpoint, wrong_cols) {
+    let err = match ode.solve_adjoint_bkwd(&solution, &checkpoint, &wrong_cols) {
         Ok(_) => panic!("expected invalid dgdu column count to fail"),
         Err(err) => err.to_string(),
     };
-    assert!(err.contains("Expected dgdu_eval to have 4 columns"));
+    assert!(err.contains("dgdu_eval: Expected 1 rows and 4 columns"));
 }
 
 #[cfg(feature = "diffsl-llvm")]
@@ -627,16 +622,16 @@ fn tsit45_split_adjoint_backward_returns_gradient() {
     );
     let t_eval = [0.0, 0.25, 0.5, 1.0];
     let (solution, checkpoint) = ode
-        .solve_adjoint_fwd(vector_host(&[2.0]), vector_host(&t_eval))
+        .solve_adjoint_fwd(&vector_host(&[2.0]), &vector_host(&t_eval))
         .unwrap();
     let gradient = ode
         .solve_adjoint_bkwd(
             &solution,
             &checkpoint,
-            matrix_host(1, t_eval.len(), &[0.0; 4]),
+            &matrix_host(1, t_eval.len(), &[0.0; 4]),
         )
         .unwrap();
-    let gradient = gradient.as_array::<f64>().unwrap();
+    let gradient = lane_matrix(&gradient, 0);
     assert_eq!(gradient.shape(), &[1, 1]);
     assert!(gradient[(0, 0)].is_finite());
 }
@@ -673,18 +668,18 @@ fn bdf_split_adjoint_matches_finite_difference_gradient_for_logistic_model() {
     let fd_step = 1e-6;
 
     let data_solution = ode
-        .solve_dense(vector_host(&data_params), vector_host(&t_eval))
+        .solve_dense(&vector_host(&data_params), &vector_host(&t_eval))
         .unwrap();
     let data_ys = data_solution.get_ys().unwrap();
-    let data_ys = data_ys.as_array::<f64>().unwrap();
+    let data_ys = lane_matrix(&data_ys, 0);
     let data_values: Vec<f64> = (0..t_eval.len()).map(|col| data_ys[(0, col)]).collect();
 
     let objective_from_dense = |params: [f64; 3]| -> f64 {
         let solution = ode
-            .solve_dense(vector_host(&params), vector_host(&t_eval))
+            .solve_dense(&vector_host(&params), &vector_host(&t_eval))
             .unwrap();
         let ys = solution.get_ys().unwrap();
-        let ys = ys.as_array::<f64>().unwrap();
+        let ys = lane_matrix(&ys, 0);
         (0..t_eval.len())
             .map(|col| {
                 let residual = ys[(0, col)] - data_values[col];
@@ -724,10 +719,10 @@ fn bdf_split_adjoint_matches_finite_difference_gradient_for_logistic_model() {
     ode_adj.set_out_atol(Some(1e-6)).unwrap();
 
     let (solution, checkpoint) = ode_adj
-        .solve_adjoint_fwd(vector_host(&fit_params), vector_host(&t_eval))
+        .solve_adjoint_fwd(&vector_host(&fit_params), &vector_host(&t_eval))
         .unwrap();
     let ys = solution.get_ys().unwrap();
-    let ys = ys.as_array::<f64>().unwrap();
+    let ys = lane_matrix(&ys, 0);
     let dgdu_values: Vec<f64> = (0..t_eval.len())
         .map(|col| 2.0 * (ys[(0, col)] - data_values[col]))
         .collect();
@@ -735,12 +730,13 @@ fn bdf_split_adjoint_matches_finite_difference_gradient_for_logistic_model() {
         .solve_adjoint_bkwd(
             &solution,
             &checkpoint,
-            matrix_host(1, t_eval.len(), &dgdu_values),
+            &matrix_host(1, t_eval.len(), &dgdu_values),
         )
         .unwrap();
-    let adjoint_gradient = adjoint_gradient.as_array::<f64>().unwrap();
+    let adjoint_gradient = lane_matrix(&adjoint_gradient, 0);
 
     assert!(objective_fd.is_finite());
+    // one lane of the gradient is `[nparams, nchannels]`
     assert_eq!(adjoint_gradient.nrows(), 3);
     assert_eq!(adjoint_gradient.ncols(), 1);
     for i in 0..adjoint_gradient.nrows() {
@@ -804,10 +800,10 @@ fn bdf_continuous_adjoint_matches_finite_difference_gradient_for_logistic_integr
     }
 
     let (integral, adjoint_gradient) = ode
-        .solve_continuous_adjoint(vector_host(&fit_params), final_time)
+        .solve_continuous_adjoint(&vector_host(&fit_params), final_time)
         .unwrap();
-    let integral = Vec::<f64>::from_host_array(integral).unwrap();
-    let adjoint_gradient = adjoint_gradient.as_array::<f64>().unwrap();
+    let integral = lane_f64(&integral, 0);
+    let adjoint_gradient = lane_matrix(&adjoint_gradient, 0);
 
     assert!(objective_fd.is_finite());
     assert_eq!(integral.len(), 1);
@@ -817,6 +813,7 @@ fn bdf_continuous_adjoint_matches_finite_difference_gradient_for_logistic_integr
         ASSERT_TOL,
         "continuous adjoint logistic integral",
     );
+    // one lane of the gradient is `[nparams, nchannels]`
     assert_eq!(adjoint_gradient.nrows(), 3);
     assert_eq!(adjoint_gradient.ncols(), 1);
     for i in 0..adjoint_gradient.nrows() {

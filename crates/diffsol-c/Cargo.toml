@@ -57,7 +57,6 @@ diffsl = { workspace = true }
 diffsol = { path = "../diffsol", version = "0.18.0", features = ["diffsl"] }
 dlmalloc = { version = "0.2", features = ["global"] }
 nalgebra = { workspace = true, features = ["std"] }
-ndarray = { version = "0.17" }
 num-traits = { workspace = true }
 schemars = "1.2"
 serde = { workspace = true }
@@ -78,3 +77,6 @@ faer = { workspace = true, features = ["rayon"] }
 
 [package.metadata.docs.rs]
 features = ["diffsl-cranelift", "diffsl-external-dynamic", "diffsl-external-f64"]
+
+[dev-dependencies]
+ndarray = { version = "0.17" }

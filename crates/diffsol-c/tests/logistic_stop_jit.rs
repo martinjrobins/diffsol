@@ -1,12 +1,12 @@
 #![cfg(feature = "diffsl-llvm")]
 
 mod common;
+use common::lane_matrix;
 
 use common::{
-    assert_close, logistic_integral, logistic_state_dr, matrix_host, vector_host, ASSERT_TOL,
-    LOGISTIC_X0,
+    assert_close, lane_f64, logistic_integral, logistic_state_dr, matrix_host, vector_host,
+    ASSERT_TOL, LOGISTIC_X0,
 };
-use diffsol_c::host_array::FromHostArray;
 use diffsol_c::{
     JitBackendType, LinearSolverType, MatrixType, OdeSolverType, OdeWrapper, ScalarType,
 };
@@ -54,10 +54,10 @@ fn bdf_no_reset_stop_terminates_forward_solves_at_first_root() {
     let t_eval = [0.5, 1.0, 1.5, final_time];
 
     let ode = make_no_reset_stop_ode(OdeSolverType::Bdf);
-    let solution = ode.solve(vector_host(&params), final_time).unwrap();
-    let ts = Vec::<f64>::from_host_array(solution.get_ts().unwrap()).unwrap();
+    let solution = ode.solve(&vector_host(&params), final_time).unwrap();
+    let ts = lane_f64(&solution.get_ts().unwrap(), 0);
     let ys = solution.get_ys().unwrap();
-    let ys = ys.as_array::<f64>().unwrap();
+    let ys = lane_matrix(&ys, 0);
     assert_close(*ts.last().unwrap(), root_time, 5e-4, "solve stop time");
     assert_close(
         ys[(0, ys.ncols() - 1)],
@@ -68,11 +68,11 @@ fn bdf_no_reset_stop_terminates_forward_solves_at_first_root() {
     assert!(*ts.last().unwrap() < final_time);
 
     let dense_solution = ode
-        .solve_dense(vector_host(&params), vector_host(&t_eval))
+        .solve_dense(&vector_host(&params), &vector_host(&t_eval))
         .unwrap();
-    let dense_ts = Vec::<f64>::from_host_array(dense_solution.get_ts().unwrap()).unwrap();
+    let dense_ts = lane_f64(&dense_solution.get_ts().unwrap(), 0);
     let dense_ys = dense_solution.get_ys().unwrap();
-    let dense_ys = dense_ys.as_array::<f64>().unwrap();
+    let dense_ys = lane_matrix(&dense_ys, 0);
     assert_eq!(dense_ts.len(), 3);
     assert_close(dense_ts[0], 0.5, ASSERT_TOL, "dense first time");
     assert_close(dense_ts[1], 1.0, ASSERT_TOL, "dense second time");
@@ -86,11 +86,11 @@ fn bdf_no_reset_stop_terminates_forward_solves_at_first_root() {
     );
 
     let sens_solution = ode
-        .solve_fwd_sens(vector_host(&params), vector_host(&t_eval))
+        .solve_fwd_sens(&vector_host(&params), &vector_host(&t_eval))
         .unwrap();
-    let sens_ts = Vec::<f64>::from_host_array(sens_solution.get_ts().unwrap()).unwrap();
+    let sens_ts = lane_f64(&sens_solution.get_ts().unwrap(), 0);
     let sens_ys = sens_solution.get_ys().unwrap();
-    let sens_ys = sens_ys.as_array::<f64>().unwrap();
+    let sens_ys = lane_matrix(&sens_ys, 0);
     let sens = sens_solution.get_sens().unwrap();
     assert_eq!(sens_ts.len(), dense_ts.len());
     for (i, (&actual, &expected)) in sens_ts.iter().zip(dense_ts.iter()).enumerate() {
@@ -98,7 +98,7 @@ fn bdf_no_reset_stop_terminates_forward_solves_at_first_root() {
     }
     assert_eq!(sens_ys.ncols(), sens_ts.len());
     assert_eq!(sens.len(), params.len());
-    let sens_r = sens[0].as_array::<f64>().unwrap();
+    let sens_r = lane_matrix(&sens[0], 0);
     assert_close(
         sens_r[(0, sens_r.ncols() - 1)],
         0.6 + params[0] * logistic_state_dr(LOGISTIC_X0, params[0], root_time),
@@ -106,15 +106,15 @@ fn bdf_no_reset_stop_terminates_forward_solves_at_first_root() {
         "sensitivity stop value",
     );
     for sens_component in sens {
-        let sens_component = sens_component.as_array::<f64>().unwrap();
+        let sens_component = lane_matrix(&sens_component, 0);
         assert_eq!(sens_component.ncols(), sens_ts.len());
     }
 
     let (integral, gradient) = ode
-        .solve_continuous_adjoint(vector_host(&params), final_time)
+        .solve_continuous_adjoint(&vector_host(&params), final_time)
         .unwrap();
-    let integral = Vec::<f64>::from_host_array(integral).unwrap();
-    let gradient = gradient.as_array::<f64>().unwrap();
+    let integral = lane_f64(&integral, 0);
+    let gradient = lane_matrix(&gradient, 0);
     assert_close(
         integral[0],
         params[0] * logistic_integral(LOGISTIC_X0, params[0], root_time),
@@ -124,11 +124,11 @@ fn bdf_no_reset_stop_terminates_forward_solves_at_first_root() {
     assert_eq!(gradient.shape(), &[params.len(), 1]);
 
     let (adjoint_solution, checkpoint) = ode
-        .solve_adjoint_fwd(vector_host(&params), vector_host(&t_eval))
+        .solve_adjoint_fwd(&vector_host(&params), &vector_host(&t_eval))
         .unwrap();
-    let adjoint_ts = Vec::<f64>::from_host_array(adjoint_solution.get_ts().unwrap()).unwrap();
+    let adjoint_ts = lane_f64(&adjoint_solution.get_ts().unwrap(), 0);
     let adjoint_ys = adjoint_solution.get_ys().unwrap();
-    let adjoint_ys = adjoint_ys.as_array::<f64>().unwrap();
+    let adjoint_ys = lane_matrix(&adjoint_ys, 0);
     assert_eq!(adjoint_ts.len(), dense_ts.len());
     for (i, (&actual, &expected)) in adjoint_ts.iter().zip(dense_ts.iter()).enumerate() {
         assert_close(actual, expected, 5e-4, &format!("adjoint time {i}"));
@@ -139,11 +139,8 @@ fn bdf_no_reset_stop_terminates_forward_solves_at_first_root() {
         .solve_adjoint_bkwd(
             &adjoint_solution,
             &checkpoint,
-            matrix_host(1, adjoint_ts.len(), &vec![0.0; adjoint_ts.len()]),
+            &matrix_host(1, adjoint_ts.len(), &vec![0.0; adjoint_ts.len()]),
         )
         .unwrap();
-    assert_eq!(
-        gradient.as_array::<f64>().unwrap().shape(),
-        &[params.len(), 1]
-    );
+    assert_eq!(lane_matrix(&gradient, 0).shape(), &[params.len(), 1]);
 }

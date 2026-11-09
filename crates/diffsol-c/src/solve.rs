@@ -3,8 +3,7 @@
 
 use crate::adjoint_checkpoint::AdjointCheckpointWrapper;
 use crate::error::DiffsolRtError;
-use crate::host_array::HostArray;
-use crate::host_array::ToHostArray;
+use crate::host_array::{FromHostArray, HostArray, ToHostArray};
 use crate::scalar_type::Scalar;
 use crate::{
     generate_ic_option_accessors, generate_ode_option_accessors, generate_option_accessors,
@@ -15,9 +14,9 @@ use diffsol::OdeBuilder;
 use diffsol::{
     error::DiffsolError,
     matrix::{Matrix, MatrixRef},
-    ConstantOp, Context, DefaultDenseMatrix, DefaultSolver, DenseMatrix, MatrixCommon, NonLinearOp,
-    NonLinearOpJacobian, OdeEquations, OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens,
-    OdeSolverProblem, Vector, VectorCommon, VectorRef, VectorView,
+    ConstantOp, Context, DefaultDenseMatrix, DefaultSolver, NonLinearOp, NonLinearOpJacobian,
+    OdeEquations, OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeSolverProblem, Vector,
+    VectorRef, VectorView,
 };
 use num_traits::{FromPrimitive, ToPrimitive}; // for from_f64 and to_f64
 use paste::paste;
@@ -42,18 +41,26 @@ pub(crate) trait Solve: Send {
     fn nparams(&self) -> usize;
     fn nout(&self) -> usize;
     fn has_stop(&self) -> bool;
+    /// The number of lanes (independent copies of the system) that the solver integrates
+    /// together.
+    fn nbatch(&self) -> usize;
 
-    fn rhs(&mut self, params: &[f64], t: f64, y: &[f64]) -> Result<HostArray, DiffsolRtError>;
+    fn rhs(
+        &mut self,
+        params: &HostArray,
+        t: f64,
+        y: &HostArray,
+    ) -> Result<HostArray, DiffsolRtError>;
 
     fn rhs_jac_mul(
         &mut self,
-        params: &[f64],
+        params: &HostArray,
         t: f64,
-        y: &[f64],
-        v: &[f64],
+        y: &HostArray,
+        v: &HostArray,
     ) -> Result<HostArray, DiffsolRtError>;
 
-    fn y0(&mut self, params: &[f64]) -> Result<HostArray, DiffsolRtError>;
+    fn y0(&mut self, params: &HostArray) -> Result<HostArray, DiffsolRtError>;
 
     fn check(&self, linear_solver: LinearSolverType) -> Result<(), DiffsolRtError>;
     fn set_rtol(&mut self, rtol: f64);
@@ -85,7 +92,7 @@ pub(crate) trait Solve: Send {
         &mut self,
         method: OdeSolverType,
         linear_solver: LinearSolverType,
-        params: &[f64],
+        params: &HostArray,
         final_time: f64,
     ) -> SolveResult;
 
@@ -93,23 +100,23 @@ pub(crate) trait Solve: Send {
         &mut self,
         method: OdeSolverType,
         linear_solver: LinearSolverType,
-        params: &[f64],
-        t_eval: &[f64],
+        params: &HostArray,
+        t_eval: &HostArray,
     ) -> SolveResult;
 
     fn solve_fwd_sens(
         &mut self,
         method: OdeSolverType,
         linear_solver: LinearSolverType,
-        params: &[f64],
-        t_eval: &[f64],
+        params: &HostArray,
+        t_eval: &HostArray,
     ) -> SolveResult;
 
     fn solve_continuous_adjoint(
         &mut self,
         method: OdeSolverType,
         linear_solver: LinearSolverType,
-        params: &[f64],
+        params: &HostArray,
         final_time: f64,
     ) -> Result<(HostArray, HostArray), DiffsolRtError>;
 
@@ -117,8 +124,8 @@ pub(crate) trait Solve: Send {
         &mut self,
         method: OdeSolverType,
         linear_solver: LinearSolverType,
-        params: &[f64],
-        t_eval: &[f64],
+        params: &HostArray,
+        t_eval: &HostArray,
     ) -> Result<(Box<dyn Solution>, AdjointCheckpointWrapper), DiffsolRtError>;
 
     fn solve_adjoint_bkwd(
@@ -126,8 +133,8 @@ pub(crate) trait Solve: Send {
         method: OdeSolverType,
         linear_solver: LinearSolverType,
         checkpoint: &AdjointCheckpointWrapper,
-        t_eval: &[f64],
-        dgdu_eval: HostArray,
+        t_eval: &HostArray,
+        dgdu_eval: &HostArray,
     ) -> Result<HostArray, DiffsolRtError>;
 
     generate_trait_ic_option_accessors! {
@@ -160,6 +167,38 @@ where
     pub(crate) problem: OdeSolverProblem<Eqn>,
 }
 
+/// Read the times `t_eval` as `T` values. All the lanes use the same times, so `t_eval` is a 1D
+/// `[nt]` array, or a 2D `[nt, 1]` array with one lane.
+fn read_times<T: Scalar>(times: &HostArray) -> Result<Vec<T>, DiffsolRtError> {
+    let (nt, has_lane_axis) = match times.shape() {
+        [nt] => (*nt, false),
+        [nt, 1] => (*nt, true),
+        shape => {
+            let message = format!("Expected an [nt] or an [nt, 1] array, got the shape {shape:?}");
+            return Err(DiffsolRtError::from(DiffsolError::Other(message)).named("t_eval"));
+        }
+    };
+    let data = times.as_slice::<f64>()?;
+    Ok((0..nt)
+        .map(|i| {
+            let offset = if has_lane_axis {
+                times.offset(&[i, 0])
+            } else {
+                times.offset(&[i])
+            };
+            T::from_f64(data[offset]).unwrap()
+        })
+        .collect())
+}
+
+/// The first value of lane 0 of a tolerance vector, or `None` if it has no values.
+///
+/// This API sets all values of a tolerance vector to one value, in all lanes, so the first
+/// value is the value that was set.
+fn first_lane_value<V: Vector<T: Scalar>>(v: &V) -> Option<f64> {
+    (v.len() > 0).then(|| v.get_batch(0).get_index(0).to_f64().unwrap())
+}
+
 impl<M, Eqn> GenericSolve<M, Eqn>
 where
     M: Matrix<T: Scalar>,
@@ -167,8 +206,13 @@ where
     Eqn: OdeEquations<M = M, T = M::T, V = M::V, C = M::C> + SolveEqn,
 {
     pub(crate) fn from_eqn(eqn: Eqn) -> Result<Self, DiffsolRtError> {
-        let default_p = vec![0.0; eqn.nparams()];
-        let problem = OdeBuilder::<M>::new().p(default_p).build_from_eqn(eqn)?;
+        // the builder needs one block of parameters for each lane
+        let ctx = eqn.context().clone();
+        let default_p = vec![0.0; eqn.nparams() * ctx.nbatch()];
+        let problem = OdeBuilder::<M>::new()
+            .context(ctx)
+            .p(default_p)
+            .build_from_eqn(eqn)?;
         Ok(GenericSolve { problem })
     }
 
@@ -197,18 +241,50 @@ where
         })
     }
 
-    /// Return an error if `values` (the argument `name`) does not have one value per state.
-    fn check_state_len(&self, name: &str, values: &[f64]) -> Result<(), DiffsolRtError> {
-        let n = self.problem.eqn.nstates();
-        if values.len() == n {
-            Ok(())
-        } else {
-            Err(DiffsolError::Other(format!(
-                "Expecting {n} values in {name} but got {}",
-                values.len()
-            ))
-            .into())
+    /// Convert `array` (the argument `name`) to a diffsol value with the lanes of the problem.
+    /// Each lane must have the shape `lane_shape`. The errors start with `name`.
+    fn read_input<T: FromHostArray<Context = M::C>>(
+        &self,
+        array: &HostArray,
+        lane_shape: &[usize],
+        name: &str,
+    ) -> Result<T, DiffsolRtError> {
+        // the conversion checks the number of axes and the number of lanes
+        let value = T::from_host_array(array, self.problem.context()).map_err(|e| e.named(name))?;
+        // the last axis is the lane axis
+        let got = &array.shape()[..array.shape().len() - 1];
+        if got != lane_shape {
+            let message = match (lane_shape, got) {
+                ([n], [m]) => format!("Expected {n} values in each lane, got {m}"),
+                ([r, c], [gr, gc]) => format!(
+                    "Expected {r} rows and {c} columns in each lane, got {gr} rows and {gc} columns"
+                ),
+                _ => format!("Expected the shape {lane_shape:?} in each lane, got {got:?}"),
+            };
+            return Err(DiffsolRtError::from(DiffsolError::Other(message)).named(name));
         }
+        Ok(value)
+    }
+
+    /// Convert an adjoint gradient to a HostArray with the shape `[nparams, nchannels, nbatch]`.
+    ///
+    /// The gradient has one lane for each (batch lane, output channel) pair, with lane
+    /// `b * nchannels + j` for batch lane `b` and channel `j`.
+    fn gradient_to_host_array(&self, gradient: M::V) -> HostArray
+    where
+        M::V: ToHostArray,
+    {
+        // `[nparams, nbatch * nchannels]`, with the lane axis split into `[nchannels, nbatch]`
+        let array = gradient.to_host_array();
+        let nbatch = self.problem.context().nbatch();
+        let nchannels = array.shape()[1] / nbatch;
+        let shape = vec![array.shape()[0], nchannels, nbatch];
+        let strides = vec![
+            array.strides()[0],
+            array.strides()[1],
+            nchannels * array.strides()[1],
+        ];
+        array.with_layout(shape, strides)
     }
 
     /// Return the error recorded by the equations during the last evaluation, if any.
@@ -219,41 +295,23 @@ where
         }
     }
 
-    /// Check, before a solve, that `linear_solver` is valid and that the equations provide
-    /// everything `requirement` needs.
-    fn precheck(
-        &self,
-        linear_solver: LinearSolverType,
-        requirement: EqnRequirement,
-    ) -> Result<(), DiffsolRtError>
+    pub(crate) fn setup_problem(&mut self, params: &HostArray) -> Result<(), DiffsolRtError>
     where
-        Self: Solve,
+        M::V: FromHostArray<Context = M::C>,
     {
-        self.check(linear_solver)?;
-        self.problem.eqn.check_requirement(requirement)
+        self.reset_eval_state();
+        let nparams = self.problem.eqn.nparams();
+        let params = self.read_input(params, &[nparams], "params")?;
+        // a single lane of parameters broadcasts to all the lanes of the problem
+        self.problem.eqn.set_params(&params);
+        Ok(())
     }
 
-    pub(crate) fn setup_problem(&mut self, params: &[f64]) -> Result<(), DiffsolRtError> {
-        // discard any error left over from an earlier evaluation
+    /// Discard any error left over from an earlier evaluation, and reset the model index to 0
+    /// for hybrid solves.
+    fn reset_eval_state(&mut self) {
         let _ = self.problem.eqn.take_error();
-        let params: Vec<M::T> = params.iter().map(|&x| M::T::from_f64(x).unwrap()).collect();
-        let params = M::V::from_slice(&params, M::C::default());
-
-        // Attempt to set problem from params and config
-        let nparams = self.problem.eqn.nparams();
-        if params.len() == nparams {
-            self.problem.eqn.set_params(&params);
-            // Reset model index to 0 for hybrid solves
-            self.problem.eqn.set_model_index(0);
-            Ok(())
-        } else {
-            Err(DiffsolError::Other(format!(
-                "Expecting {} params but got {}",
-                nparams,
-                params.len()
-            ))
-            .into())
-        }
+        self.problem.eqn.set_model_index(0);
     }
 }
 
@@ -269,8 +327,8 @@ where
         + SolveEqn
         + Send
         + 'static,
-    for<'b> <<M::V as DefaultDenseMatrix>::M as MatrixCommon>::Inner: ToHostArray<M::T> + Clone,
-    for<'b> <M::V as VectorCommon>::Inner: ToHostArray<M::T> + Clone,
+    <M::V as DefaultDenseMatrix>::M: ToHostArray + FromHostArray<Context = M::C>,
+    M::V: ToHostArray + FromHostArray<Context = M::C>,
     M::V: DefaultDenseMatrix + Send + Sync + 'static,
     <M::V as DefaultDenseMatrix>::M: Send + Sync,
     for<'b> &'b M::V: VectorRef<M::V>,
@@ -296,6 +354,10 @@ where
         self.problem.eqn.root().is_some()
     }
 
+    fn nbatch(&self) -> usize {
+        self.problem.context().nbatch()
+    }
+
     fn check(&self, linear_solver: LinearSolverType) -> Result<(), DiffsolRtError> {
         validate_linear_solver::<M>(linear_solver)
     }
@@ -305,7 +367,7 @@ where
     }
 
     fn atol(&self) -> f64 {
-        self.problem.atol.get_index(0).to_f64().unwrap()
+        first_lane_value(&self.problem.atol).expect("atol has no values")
     }
 
     fn serialized_diffsl(&self) -> Result<Vec<u8>, DiffsolRtError> {
@@ -369,11 +431,7 @@ where
     }
 
     fn sens_atol(&self) -> Option<f64> {
-        // every lane holds the same value unless parameter scales were set, which this API
-        // cannot express, so reporting the first is exact for anything it can have set
-        self.problem.sens_atol.as_ref().and_then(|value| {
-            (value.len() > 0).then(|| value.get_batch(0).get_index(0).to_f64().unwrap())
-        })
+        self.problem.sens_atol.as_ref().and_then(first_lane_value)
     }
 
     fn set_out_rtol(&mut self, out_rtol: Option<f64>) {
@@ -391,15 +449,16 @@ where
             } else {
                 self.problem.eqn.nstates()
             };
-            M::V::from_element(len, M::T::from_f64(value).unwrap(), M::C::default())
+            M::V::from_element(
+                len,
+                M::T::from_f64(value).unwrap(),
+                self.problem.context().clone(),
+            )
         });
     }
 
     fn out_atol(&self) -> Option<f64> {
-        self.problem
-            .out_atol
-            .as_ref()
-            .and_then(|value| (value.len() > 0).then(|| value.get_index(0).to_f64().unwrap()))
+        self.problem.out_atol.as_ref().and_then(first_lane_value)
     }
 
     fn set_param_rtol(&mut self, param_rtol: Option<f64>) {
@@ -415,16 +474,13 @@ where
             M::V::from_element(
                 self.problem.eqn.nparams(),
                 M::T::from_f64(value).unwrap(),
-                M::C::default(),
+                self.problem.context().clone(),
             )
         });
     }
 
     fn param_atol(&self) -> Option<f64> {
-        self.problem
-            .param_atol
-            .as_ref()
-            .and_then(|value| (value.len() > 0).then(|| value.get_index(0).to_f64().unwrap()))
+        self.problem.param_atol.as_ref().and_then(first_lane_value)
     }
 
     generate_ic_option_accessors! {
@@ -449,75 +505,64 @@ where
         derivative_solve_max_iter: usize
     }
 
-    fn y0(&mut self, params: &[f64]) -> Result<HostArray, DiffsolRtError> {
+    fn y0(&mut self, params: &HostArray) -> Result<HostArray, DiffsolRtError> {
         self.setup_problem(params)?;
         let n = self.problem.eqn.nstates();
-        let mut y0 = M::V::zeros(n, M::C::default());
+        let mut y0 = M::V::zeros(n, self.problem.context().clone());
         let t0 = self.problem.t0;
         self.problem.eqn.init().call_inplace(t0, &mut y0);
         self.take_eqn_error()?;
-        Ok(y0.clone_as_vec().to_host_array())
+        Ok(y0.to_host_array())
     }
 
-    fn rhs(&mut self, params: &[f64], t: f64, y: &[f64]) -> Result<HostArray, DiffsolRtError> {
-        self.check_state_len("y", y)?;
-        self.setup_problem(params)?;
+    fn rhs(
+        &mut self,
+        params: &HostArray,
+        t: f64,
+        y: &HostArray,
+    ) -> Result<HostArray, DiffsolRtError> {
         let n = self.problem.eqn.nstates();
-        let y = y
-            .iter()
-            .map(|&x| M::T::from_f64(x).unwrap())
-            .collect::<Vec<_>>();
-        let y_vec = M::V::from_slice(&y, M::C::default());
-        let mut dydt = M::V::zeros(n, M::C::default());
+        let y = self.read_input(y, &[n], "y")?;
+        self.setup_problem(params)?;
+        let mut dydt = M::V::zeros(n, self.problem.context().clone());
         self.problem
             .eqn
             .rhs()
-            .call_inplace(&y_vec, M::T::from_f64(t).unwrap(), &mut dydt);
+            .call_inplace(&y, M::T::from_f64(t).unwrap(), &mut dydt);
         self.take_eqn_error()?;
-        Ok(dydt.clone_as_vec().to_host_array())
+        Ok(dydt.to_host_array())
     }
 
     fn rhs_jac_mul(
         &mut self,
-
-        params: &[f64],
+        params: &HostArray,
         t: f64,
-        y: &[f64],
-        v: &[f64],
+        y: &HostArray,
+        v: &HostArray,
     ) -> Result<HostArray, DiffsolRtError> {
-        self.check_state_len("y", y)?;
-        self.check_state_len("v", v)?;
-        self.setup_problem(params)?;
         let n = self.problem.eqn.nstates();
-        let y = y
-            .iter()
-            .map(|&x| M::T::from_f64(x).unwrap())
-            .collect::<Vec<_>>();
-        let v = v
-            .iter()
-            .map(|&x| M::T::from_f64(x).unwrap())
-            .collect::<Vec<_>>();
-        let y_vec = M::V::from_slice(&y, M::C::default());
-        let v_vec = M::V::from_slice(&v, M::C::default());
-        let mut dydt = M::V::zeros(n, M::C::default());
-        self.problem.eqn.rhs().jac_mul_inplace(
-            &y_vec,
-            M::T::from_f64(t).unwrap(),
-            &v_vec,
-            &mut dydt,
-        );
+        let y = self.read_input(y, &[n], "y")?;
+        let v = self.read_input(v, &[n], "v")?;
+        self.setup_problem(params)?;
+        let mut dydt = M::V::zeros(n, self.problem.context().clone());
+        self.problem
+            .eqn
+            .rhs()
+            .jac_mul_inplace(&y, M::T::from_f64(t).unwrap(), &v, &mut dydt);
         self.take_eqn_error()?;
-        Ok(dydt.clone_as_vec().to_host_array())
+        Ok(dydt.to_host_array())
     }
 
     fn solve(
         &mut self,
         method: OdeSolverType,
         linear_solver: LinearSolverType,
-        params: &[f64],
+        params: &HostArray,
         final_time: f64,
     ) -> SolveResult {
-        self.precheck(linear_solver, EqnRequirement::Solve(method))?;
+        self.problem
+            .eqn
+            .check_requirement(EqnRequirement::Solve(method))?;
         self.setup_problem(params)?;
         let final_time = M::T::from_f64(final_time).unwrap();
         let soln = match linear_solver {
@@ -538,13 +583,15 @@ where
         &mut self,
         method: OdeSolverType,
         linear_solver: LinearSolverType,
-        params: &[f64],
-        t_eval: &[f64],
+        params: &HostArray,
+        t_eval: &HostArray,
     ) -> SolveResult {
-        self.precheck(linear_solver, EqnRequirement::Solve(method))?;
+        self.problem
+            .eqn
+            .check_requirement(EqnRequirement::Solve(method))?;
         self.setup_problem(params)?;
 
-        let t_eval: Vec<M::T> = t_eval.iter().map(|&x| M::T::from_f64(x).unwrap()).collect();
+        let t_eval: Vec<M::T> = read_times(t_eval)?;
         let soln =
             match linear_solver {
                 LinearSolverType::Default => method
@@ -561,13 +608,15 @@ where
         &mut self,
         method: OdeSolverType,
         linear_solver: LinearSolverType,
-        params: &[f64],
-        t_eval: &[f64],
+        params: &HostArray,
+        t_eval: &HostArray,
     ) -> SolveResult {
-        self.precheck(linear_solver, EqnRequirement::FwdSens)?;
+        self.problem
+            .eqn
+            .check_requirement(EqnRequirement::FwdSens)?;
         self.setup_problem(params)?;
 
-        let t_eval: Vec<M::T> = t_eval.iter().map(|&x| M::T::from_f64(x).unwrap()).collect();
+        let t_eval: Vec<M::T> = read_times(t_eval)?;
         let soln = match linear_solver {
             LinearSolverType::Default => method
                 .solve_fwd_sens::<M, Eqn, <M as DefaultSolver>::LS>(&mut self.problem, &t_eval),
@@ -583,10 +632,12 @@ where
         &mut self,
         method: OdeSolverType,
         linear_solver: LinearSolverType,
-        params: &[f64],
+        params: &HostArray,
         final_time: f64,
     ) -> Result<(HostArray, HostArray), DiffsolRtError> {
-        self.precheck(linear_solver, EqnRequirement::Adjoint(method))?;
+        self.problem
+            .eqn
+            .check_requirement(EqnRequirement::Adjoint(method))?;
         self.setup_problem(params)?;
 
         let final_time = M::T::from_f64(final_time).unwrap();
@@ -612,8 +663,8 @@ where
         self.problem.integrate_out = integrate_out;
         let (integral, gradient) = self.finish(result)?;
         Ok((
-            integral.clone_as_vec().to_host_array(),
-            gradient.to_host_array(),
+            integral.to_host_array(),
+            self.gradient_to_host_array(gradient),
         ))
     }
 
@@ -621,32 +672,31 @@ where
         &mut self,
         method: OdeSolverType,
         linear_solver: LinearSolverType,
-        params: &[f64],
-        t_eval: &[f64],
+        params: &HostArray,
+        t_eval: &HostArray,
     ) -> Result<(Box<dyn Solution>, AdjointCheckpointWrapper), DiffsolRtError> {
-        self.precheck(linear_solver, EqnRequirement::Adjoint(method))?;
+        self.problem
+            .eqn
+            .check_requirement(EqnRequirement::Adjoint(method))?;
         self.setup_problem(params)?;
 
-        let t_eval: Vec<M::T> = t_eval.iter().map(|&x| M::T::from_f64(x).unwrap()).collect();
+        let t_eval: Vec<M::T> = read_times(t_eval)?;
         let result = match linear_solver {
             LinearSolverType::Default => method
                 .solve_adjoint_fwd::<M, Eqn, <M as DefaultSolver>::LS>(
                     &mut self.problem,
                     &t_eval,
-                    params,
                     linear_solver,
                 ),
             LinearSolverType::Lu => method.solve_adjoint_fwd::<M, Eqn, <M as LuValidator<M>>::LS>(
                 &mut self.problem,
                 &t_eval,
-                params,
                 linear_solver,
             ),
             LinearSolverType::Klu => method
                 .solve_adjoint_fwd::<M, Eqn, <M as KluValidator<M>>::LS>(
                     &mut self.problem,
                     &t_eval,
-                    params,
                     linear_solver,
                 ),
         };
@@ -659,31 +709,20 @@ where
         method: OdeSolverType,
         linear_solver: LinearSolverType,
         checkpoint: &AdjointCheckpointWrapper,
-        t_eval: &[f64],
-        dgdu_eval: HostArray,
+        t_eval: &HostArray,
+        dgdu_eval: &HostArray,
     ) -> Result<HostArray, DiffsolRtError> {
-        self.precheck(linear_solver, EqnRequirement::Adjoint(method))?;
+        self.problem
+            .eqn
+            .check_requirement(EqnRequirement::Adjoint(method))?;
         let checkpoint = checkpoint.guard()?;
-        self.setup_problem(checkpoint.params())?;
+        // the backward pass sets the parameters that the checkpoint holds
+        self.reset_eval_state();
 
-        let t_eval: Vec<M::T> = t_eval.iter().map(|&x| M::T::from_f64(x).unwrap()).collect();
-        let dgdu_eval = host_array_to_dense_matrix::<M>(dgdu_eval)?;
-        if dgdu_eval.nrows() != self.problem.eqn.nout() {
-            return Err(DiffsolError::Other(format!(
-                "Expected dgdu_eval to have {} rows, got {}",
-                self.problem.eqn.nout(),
-                dgdu_eval.nrows()
-            ))
-            .into());
-        }
-        if dgdu_eval.ncols() != t_eval.len() {
-            return Err(DiffsolError::Other(format!(
-                "Expected dgdu_eval to have {} columns, got {}",
-                t_eval.len(),
-                dgdu_eval.ncols()
-            ))
-            .into());
-        }
+        let t_eval: Vec<M::T> = read_times(t_eval)?;
+        let lane_shape = [self.problem.eqn.nout(), t_eval.len()];
+        let dgdu_eval: <M::V as DefaultDenseMatrix>::M =
+            self.read_input(dgdu_eval, &lane_shape, "dgdu_eval")?;
 
         let result = match linear_solver {
             LinearSolverType::Default => method
@@ -708,28 +747,6 @@ where
                 ),
         };
         let gradient = self.finish(result)?;
-        Ok(gradient.to_host_array())
+        Ok(self.gradient_to_host_array(gradient))
     }
-}
-
-fn host_array_to_dense_matrix<M>(
-    array: HostArray,
-) -> Result<<M::V as DefaultDenseMatrix>::M, DiffsolRtError>
-where
-    M: Matrix<T: Scalar>,
-    M::V: DefaultDenseMatrix,
-{
-    let view = array.as_array::<M::T>()?;
-    let mut values = Vec::with_capacity(view.nrows() * view.ncols());
-    for col in 0..view.ncols() {
-        for row in 0..view.nrows() {
-            values.push(view[(row, col)]);
-        }
-    }
-    Ok(<M::V as DefaultDenseMatrix>::M::from_vec(
-        view.nrows(),
-        view.ncols(),
-        values,
-        M::C::default(),
-    ))
 }

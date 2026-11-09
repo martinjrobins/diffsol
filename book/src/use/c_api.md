@@ -135,6 +135,15 @@ All C API functions use the same rules:
   `DIFFSOL_ODE_SOLVER_TYPE_BDF` and `DIFFSOL_JIT_BACKEND_TYPE_CRANELIFT`.
 - A solution array (`HostArray`) gives a pointer to its data, its dimensions and its strides.
   The strides are in bytes.
+- The arrays use the column-major order of diffsol: the first axis changes fastest.
+- An ODE has `nbatch` lanes. The last axis of an array of lanes is
+  always the lane, also when `nbatch` is 1. A state or a parameter vector is an `n x nbatch`
+  array. The solution values `ys` are an `nout x nt x nbatch` array. The times `ts` are an `nt`
+  array, because all the lanes use the same times.
+- A function that takes lanes of values (for example `params`) takes a pointer, the number of
+  values in each lane and the number of lanes. The values are a column-major `len x lanes`
+  array: lane `b`, value `k` is at index `b * len + k`. The number of lanes is the `nbatch` of
+  the ODE, or 1. One lane is used for all the lanes of the ODE.
 
 The functions are in these modules of the crate documentation:
 

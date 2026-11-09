@@ -17,6 +17,7 @@ unsafe fn new_callbacks<T: CallbackScalar>(
     matrix_type: i32,
     linear_solver: i32,
     ode_solver: i32,
+    nbatch: usize,
 ) -> *mut OdeWrapper {
     if callbacks.is_null() {
         crate::c_invalid_arg!("callbacks is null");
@@ -32,10 +33,17 @@ unsafe fn new_callbacks<T: CallbackScalar>(
         unsafe { callbacks.free_user_data() };
         return ptr::null_mut();
     };
+    if let Err(message) = callbacks.check_nbatch(nbatch) {
+        crate::c_invalid_arg!(&message);
+        // SAFETY: nothing else has taken ownership of `user_data` yet
+        unsafe { callbacks.free_user_data() };
+        return ptr::null_mut();
+    }
     // from here on `OdeCallbacks` owns `user_data`, and frees it if construction fails
     // SAFETY: the caller guarantees the conditions of `OdeCallbacks::new`
-    let ode =
-        unsafe { OdeWrapper::new_callbacks(callbacks, matrix_type, linear_solver, ode_solver) };
+    let ode = unsafe {
+        OdeWrapper::new_callbacks(callbacks, matrix_type, linear_solver, ode_solver, nbatch)
+    };
     match ode {
         Ok(ode) => Box::into_raw(Box::new(ode)),
         Err(err) => {
@@ -50,6 +58,11 @@ unsafe fn new_callbacks<T: CallbackScalar>(
 /// The `ode_callbacks` module documentation gives the meaning and the array lengths of each
 /// callback. Only `rhs` and `init` are necessary. The other callbacks can be `NULL`. If a solve
 /// needs a callback that is `NULL`, the solve fails. The error gives the name of the callback.
+///
+/// The ODE has `nbatch` lanes: independent copies of the system, each with its own parameters
+/// and state, that the solver integrates together. `nbatch` must be at least 1. The library
+/// calls each callback one time for each lane. The `root` and `reset` callbacks are not
+/// available when `nbatch > 1`.
 ///
 /// The library takes ownership of `callbacks->user_data`. If `callbacks->free_user_data` is not
 /// `NULL`, the library calls it one time. It calls it when `diffsol_ode_free` frees the wrapper.
@@ -67,8 +80,9 @@ pub unsafe extern "C" fn diffsol_ode_new_callbacks_f64(
     matrix_type: i32,
     linear_solver: i32,
     ode_solver: i32,
+    nbatch: usize,
 ) -> *mut OdeWrapper {
-    unsafe { new_callbacks(callbacks, matrix_type, linear_solver, ode_solver) }
+    unsafe { new_callbacks(callbacks, matrix_type, linear_solver, ode_solver, nbatch) }
 }
 
 /// Construct an ODE wrapper from equations that `float` precision C callbacks give.
@@ -85,6 +99,7 @@ pub unsafe extern "C" fn diffsol_ode_new_callbacks_f32(
     matrix_type: i32,
     linear_solver: i32,
     ode_solver: i32,
+    nbatch: usize,
 ) -> *mut OdeWrapper {
-    unsafe { new_callbacks(callbacks, matrix_type, linear_solver, ode_solver) }
+    unsafe { new_callbacks(callbacks, matrix_type, linear_solver, ode_solver, nbatch) }
 }

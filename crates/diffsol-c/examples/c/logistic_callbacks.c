@@ -76,9 +76,10 @@ int main(void) {
     callbacks.rhs_jac = rhs_jac;
     callbacks.init = init;
 
+    /* The last argument is nbatch, the number of lanes (copies of the system) to solve. */
     OdeWrapper *ode = diffsol_ode_new_callbacks_f64(&callbacks, DIFFSOL_MATRIX_TYPE_NALGEBRA_DENSE,
                                                     DIFFSOL_LINEAR_SOLVER_TYPE_DEFAULT,
-                                                    DIFFSOL_ODE_SOLVER_TYPE_BDF);
+                                                    DIFFSOL_ODE_SOLVER_TYPE_BDF, 1);
     if (ode == NULL) {
         return fail("diffsol_ode_new_callbacks_f64");
     }
@@ -91,13 +92,14 @@ int main(void) {
     const double t_eval[] = {0.0, 0.5, 1.0, 2.0, 4.0};
     const size_t n_eval = sizeof(t_eval) / sizeof(t_eval[0]);
 
+    /* params has 1 lane of 1 value. All the lanes of the ODE use a single lane of params. */
     SolutionWrapper *solution = NULL;
-    if (diffsol_ode_solve_dense(ode, params, 1, t_eval, n_eval, &solution) != DIFFSOL_OK) {
+    if (diffsol_ode_solve_dense(ode, params, 1, 1, t_eval, n_eval, &solution) != DIFFSOL_OK) {
         diffsol_ode_free(ode);
         return fail("diffsol_ode_solve_dense");
     }
 
-    /* ys is an (nout x n_eval) array. Read it with its strides, which are in bytes. */
+    /* ys is an (nout x n_eval x nbatch) array. Read it with its strides, which are in bytes. */
     HostArray *ys = NULL;
     if (diffsol_solution_wrapper_get_ys(solution, &ys) != DIFFSOL_OK) {
         diffsol_solution_wrapper_free(solution);
