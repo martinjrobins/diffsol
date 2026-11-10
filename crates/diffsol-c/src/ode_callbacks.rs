@@ -34,6 +34,11 @@
 //! `J` is the Jacobian of the function with respect to the state `x`. `J_p` is the Jacobian
 //! with respect to the parameters `p`.
 //!
+//! When the equations have more than one lane (`nbatch > 1`), the library calls each callback
+//! one time for each lane, with the arrays of that lane. Thus a callback always sees the
+//! lengths of the table above. The `root` and `reset` callbacks are not available with more
+//! than one lane.
+//!
 //! Each `*_adjoint` and `*_sens_adjoint` callback calculates the *negative* transposed product.
 //! For example, `out_adjoint` calculates `y = -J^T v`, and `init_sens_adjoint` calculates
 //! `y = -(dy0/dp)^T v`. `mass_adjoint` is the only exception: it calculates `y = M^T v + beta y`.
@@ -106,9 +111,9 @@ use diffsol::{
     },
     matrix::sparsity::MatrixSparsity,
     op::OpStatistics,
-    ConstantOp, ConstantOpSens, ConstantOpSensAdjoint, LinearOp, LinearOpTranspose, Matrix,
-    NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint,
-    OdeEquations, OdeEquationsRef, Op, Scalar, Vector,
+    ConstantOp, ConstantOpSens, ConstantOpSensAdjoint, Context, LinearOp, LinearOpTranspose,
+    Matrix, NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens,
+    NonLinearOpSensAdjoint, OdeEquations, OdeEquationsRef, Op, Scalar, Vector,
 };
 
 use num_traits::Zero;
@@ -235,6 +240,23 @@ pub type DiffsolOdeCallbacksF64 = OdeCallbacksDesc<f64>;
 pub type DiffsolOdeCallbacksF32 = OdeCallbacksDesc<f32>;
 
 impl<T> OdeCallbacksDesc<T> {
+    /// Check that `nbatch` is at least 1, and that the largest buffer of the solver (one
+    /// vector for each lane and each parameter) has a size that does not overflow.
+    pub(crate) fn check_nbatch(&self, nbatch: usize) -> Result<(), String> {
+        if nbatch == 0 {
+            return Err("nbatch must be greater than 0".to_string());
+        }
+        let len = self.nstates.max(self.nout).max(self.nparams).max(1);
+        let bytes = nbatch
+            .checked_mul(self.nparams.max(1))
+            .and_then(|n| n.checked_mul(len))
+            .and_then(|n| n.checked_mul(std::mem::size_of::<T>()));
+        if bytes.is_none_or(|bytes| bytes > isize::MAX as usize) {
+            return Err(format!("nbatch {nbatch} is too large for this ODE"));
+        }
+        Ok(())
+    }
+
     /// A descriptor with only the required callbacks set, and no `user_data`.
     pub fn new(
         nstates: usize,
@@ -391,33 +413,44 @@ mod sealed {
             matrix_type: MatrixType,
             linear_solver: LinearSolverType,
             ode_solver: OdeSolverType,
+            nbatch: usize,
         ) -> Result<OdeWrapper, DiffsolRtError>;
     }
 }
 
-/// Build a [Solve] for the matrix type `matrix_type` and the scalar type `$t` from `callbacks`.
+/// Return the default context of `C` with `nbatch` lanes.
+fn batch_context<C: Context>(nbatch: usize) -> Result<C, DiffsolError> {
+    Ok(C::default().clone_with_nbatch(nbatch)?)
+}
+
+/// Build a [Solve] for the matrix type `matrix_type` and the scalar type `$t` from `callbacks`
+/// with `nbatch` lanes.
 ///
 /// The caller must satisfy the safety conditions of [OdeCallbacks::new].
 macro_rules! solve_for_matrix_type {
-    ($t:ty, $callbacks:expr, $matrix_type:expr) => {{
+    ($t:ty, $callbacks:expr, $matrix_type:expr, $nbatch:expr) => {{
         let callbacks = $callbacks;
+        let nbatch = $nbatch;
         // SAFETY: the caller guarantees the conditions of `OdeCallbacks::new`
         match $matrix_type {
             MatrixType::NalgebraDense => {
                 let eqn = unsafe {
-                    OdeCallbacks::<diffsol::NalgebraMat<$t>>::new(callbacks, Default::default())
+                    OdeCallbacks::<diffsol::NalgebraMat<$t>>::new(callbacks, batch_context(nbatch)?)
                 };
                 Box::new(GenericSolve::from_eqn(eqn?)?) as Box<dyn Solve>
             }
             MatrixType::FaerDense => {
                 let eqn = unsafe {
-                    OdeCallbacks::<diffsol::FaerMat<$t>>::new(callbacks, Default::default())
+                    OdeCallbacks::<diffsol::FaerMat<$t>>::new(callbacks, batch_context(nbatch)?)
                 };
                 Box::new(GenericSolve::from_eqn(eqn?)?)
             }
             MatrixType::FaerSparse => {
                 let eqn = unsafe {
-                    OdeCallbacks::<diffsol::FaerSparseMat<$t>>::new(callbacks, Default::default())
+                    OdeCallbacks::<diffsol::FaerSparseMat<$t>>::new(
+                        callbacks,
+                        batch_context(nbatch)?,
+                    )
                 };
                 Box::new(GenericSolve::from_eqn(eqn?)?)
             }
@@ -433,8 +466,9 @@ macro_rules! impl_callback_scalar {
                 matrix_type: MatrixType,
                 linear_solver: LinearSolverType,
                 ode_solver: OdeSolverType,
+                nbatch: usize,
             ) -> Result<OdeWrapper, DiffsolRtError> {
-                let solve = solve_for_matrix_type!($t, callbacks, matrix_type);
+                let solve = solve_for_matrix_type!($t, callbacks, matrix_type, nbatch);
                 OdeWrapper::build(
                     String::new(),
                     <$t as ToScalarType>::scalar_type(),
@@ -459,6 +493,9 @@ impl OdeWrapper {
     /// The scalar type `T` (`f64` or `f32`) of the callbacks is also the scalar type of the
     /// solver. [crate::ode_callbacks] gives the callback conventions.
     ///
+    /// The solver integrates `nbatch` lanes (independent copies of the system, each with its
+    /// own parameters and state) together. `nbatch` must be at least 1.
+    ///
     /// The solver takes ownership of `callbacks.user_data`. If `callbacks.free_user_data` is
     /// set, the solver calls it one time. It calls it when the solver is dropped. If this
     /// function fails, it calls it before it returns.
@@ -470,9 +507,16 @@ impl OdeWrapper {
         matrix_type: MatrixType,
         linear_solver: LinearSolverType,
         ode_solver: OdeSolverType,
+        nbatch: usize,
     ) -> Result<Self, DiffsolRtError> {
+        if let Err(message) = callbacks.check_nbatch(nbatch) {
+            // ownership of `user_data` has passed to us, so free it on every failure path
+            // SAFETY: nothing else has taken ownership of `user_data` yet
+            unsafe { callbacks.free_user_data() };
+            return Err(DiffsolError::Other(message).into());
+        }
         // SAFETY: the caller guarantees the conditions of `OdeCallbacks::new`
-        unsafe { T::new_ode(callbacks, matrix_type, linear_solver, ode_solver) }
+        unsafe { T::new_ode(callbacks, matrix_type, linear_solver, ode_solver, nbatch) }
     }
 }
 
@@ -614,6 +658,15 @@ impl<M: Matrix> OdeCallbacks<M> {
         eqn.callbacks
             .validate()
             .map_err(|msg| DiffsolError::Other(format!("Invalid ODE callbacks: {msg}")))?;
+        // the solver needs all lanes to find the same root at the same time, and it cannot
+        // report an error if they do not
+        if eqn.ctx.nbatch() > 1 && (eqn.callbacks.root.is_some() || eqn.callbacks.reset.is_some()) {
+            return Err(DiffsolError::Other(
+                "Invalid ODE callbacks: the 'root' and 'reset' callbacks are not available with \
+                 more than one lane (nbatch > 1)"
+                    .to_string(),
+            ));
+        }
         if M::is_sparse() {
             eqn.patterns = eqn.find_patterns();
             if let Some(err) = eqn.take_callback_error() {

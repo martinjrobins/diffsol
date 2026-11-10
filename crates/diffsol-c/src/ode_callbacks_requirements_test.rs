@@ -317,7 +317,6 @@ fn run(
             let fwd = method.solve_adjoint_fwd::<M, Eqn, LS>(
                 &mut problem,
                 &T_EVAL,
-                &[2.0],
                 LinearSolverType::Default,
             );
             let error = problem.eqn.take_callback_error();

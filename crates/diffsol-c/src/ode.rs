@@ -6,7 +6,7 @@ use crate::jit::JitBackendType;
 use crate::{
     adjoint_checkpoint::AdjointCheckpointWrapper,
     error::DiffsolRtError,
-    host_array::{FromHostArray, HostArray},
+    host_array::HostArray,
     initial_condition_options::{
         InitialConditionSolverOptions, InitialConditionSolverOptionsSnapshot,
     },
@@ -172,6 +172,12 @@ impl OdeWrapper {
         Ok(self.guard()?.solve.nout())
     }
 
+    /// The number of lanes (independent copies of the system) that the solver integrates
+    /// together. This is fixed after construction.
+    pub fn get_nbatch(&self) -> Result<usize, DiffsolRtError> {
+        Ok(self.guard()?.solve.nbatch())
+    }
+
     pub fn has_stop(&self) -> Result<bool, DiffsolRtError> {
         Ok(self.guard()?.solve.has_stop())
     }
@@ -193,8 +199,10 @@ impl OdeWrapper {
     }
 
     pub fn set_linear_solver(&self, value: LinearSolverType) -> Result<(), DiffsolRtError> {
-        self.guard()?.solve.check(value)?;
-        self.guard()?.linear_solver = value;
+        // one lock for the check and the change, so no other thread can come between them
+        let mut guard = self.guard()?;
+        guard.solve.check(value)?;
+        guard.linear_solver = value;
         Ok(())
     }
 
@@ -328,35 +336,43 @@ impl OdeWrapper {
         OdeSolverOptions::new(self.0.clone())
     }
 
-    /// Get the initial condition vector y0 as a 1D numpy array.
-    pub fn y0(&self, params: HostArray) -> Result<HostArray, DiffsolRtError> {
+    /// Get the initial condition `y0` as a `[nstates, nbatch]` array.
+    ///
+    /// `params` is a `[nparams, nlanes]` array, with `nlanes` equal to `nbatch` or 1. One lane
+    /// of parameters is used for all the lanes. This is the same for all the functions that
+    /// take `params`.
+    pub fn y0(&self, params: &HostArray) -> Result<HostArray, DiffsolRtError> {
         let mut self_guard = self.guard()?;
-        self_guard.solve.y0(params.as_slice()?)
+        self_guard.solve.y0(params)
     }
 
-    /// evaluate the right-hand side function at time `t` and state `y`.
+    /// Evaluate the right-hand side function at time `t` and state `y`.
+    ///
+    /// `y` is a `[nstates, nlanes]` array, with `nlanes` equal to `nbatch` or 1. The result is a
+    /// `[nstates, nbatch]` array.
     pub fn rhs(
         &self,
-        params: HostArray,
+        params: &HostArray,
         t: f64,
-        y: HostArray,
+        y: &HostArray,
     ) -> Result<HostArray, DiffsolRtError> {
         let mut self_guard = self.guard()?;
-        self_guard.solve.rhs(params.as_slice()?, t, y.as_slice()?)
+        self_guard.solve.rhs(params, t, y)
     }
 
-    /// evaluate the right-hand side Jacobian-vector product `Jv`` at time `t` and state `y`.
+    /// Evaluate the right-hand side Jacobian-vector product `Jv` at time `t` and state `y`.
+    ///
+    /// `y` and `v` are `[nstates, nlanes]` arrays, with `nlanes` equal to `nbatch` or 1. The
+    /// result is a `[nstates, nbatch]` array.
     pub fn rhs_jac_mul(
         &self,
-        params: HostArray,
+        params: &HostArray,
         t: f64,
-        y: HostArray,
-        v: HostArray,
+        y: &HostArray,
+        v: &HostArray,
     ) -> Result<HostArray, DiffsolRtError> {
         let mut self_guard = self.guard()?;
-        self_guard
-            .solve
-            .rhs_jac_mul(params.as_slice()?, t, y.as_slice()?, v.as_slice()?)
+        self_guard.solve.rhs_jac_mul(params, t, y, v)
     }
 
     /// Using the provided state, solve the problem up to time `final_time`.
@@ -366,11 +382,11 @@ impl OdeWrapper {
     /// (Bdf by default) and SolverType (Lu by default) along with other solver
     /// params like `rtol`.
     ///
-    /// :param params: 1D array of solver parameters
+    /// :param params: `[nparams, nlanes]` array of solver parameters
     /// :type params: numpy.ndarray
     /// :param final_time: end time of solver
     /// :type final_time: float
-    /// :return: `(ys, ts)` tuple where `ys` is a 2D array of values at times
+    /// :return: `(ys, ts)` tuple where `ys` is a `[nout, nt, nbatch]` array of values at times
     ///     `ts` chosen by the solver
     /// :rtype: Tuple[numpy.ndarray, numpy.ndarray]
     ///
@@ -379,11 +395,10 @@ impl OdeWrapper {
     #[allow(clippy::type_complexity)]
     pub fn solve(
         &self,
-        params: HostArray,
+        params: &HostArray,
         final_time: f64,
     ) -> Result<SolutionWrapper, DiffsolRtError> {
         let mut self_guard = self.guard()?;
-        let params = params.as_slice()?;
         let linear_solver = self_guard.linear_solver;
         let method = self_guard.ode_solver;
         let solution = self_guard
@@ -393,26 +408,24 @@ impl OdeWrapper {
     }
 
     /// Using the provided state, solve the problem up to time
-    /// `t_eval[t_eval.len()-1]`. Returns 2D array of solution values at
+    /// `t_eval[t_eval.len()-1]`. Returns a `[nout, nt, nbatch]` array of solution values at
     /// timepoints given by `t_eval`.
     ///
     /// The number of params must match the expected params in the diffsl code.
     /// The config may be optionally specified to override solver settings.
     ///
-    /// :param params: 1D array of solver parameters
+    /// :param params: `[nparams, nlanes]` array of solver parameters
     /// :type params: numpy.ndarray
-    /// :param t_eval: 1D array of solver times
+    /// :param t_eval: `[nt]` or `[nt, 1]` array of solver times
     /// :type params: numpy.ndarray
-    /// :return: 2D array of values at times `t_eval`
+    /// :return: `[nout, nt, nbatch]` array of values at times `t_eval`
     /// :rtype: numpy.ndarray
     pub fn solve_dense(
         &self,
-        params: HostArray,
-        t_eval: HostArray,
+        params: &HostArray,
+        t_eval: &HostArray,
     ) -> Result<SolutionWrapper, DiffsolRtError> {
         let mut self_guard = self.guard()?;
-        let params = params.as_slice()?;
-        let t_eval = t_eval.as_slice()?;
         let linear_solver = self_guard.linear_solver;
         let method = self_guard.ode_solver;
         let solution = self_guard
@@ -422,26 +435,24 @@ impl OdeWrapper {
     }
 
     /// Using the provided state, solve the problem up to time `t_eval[t_eval.len()-1]`.
-    /// Returns 2D array of solution values at timepoints given by `t_eval`.
-    /// Also returns a list of 2D arrays of sensitivities at the same timepoints
-    /// as the solution.
+    /// Returns a `[nout, nt, nbatch]` array of solution values at timepoints given by `t_eval`.
+    /// Also returns a list of `nparams` arrays of sensitivities, each `[nout, nt, nbatch]`, at the
+    /// same timepoints as the solution.
     /// The number of params must match the expected params in the diffsl code.
     /// The config may be optionally specified to override solver settings.
-    /// :param params: 1D array of solver parameters
+    /// :param params: `[nparams, nlanes]` array of solver parameters
     /// :type params: numpy.ndarray
-    /// :param t_eval: 1D array of solver times
+    /// :param t_eval: `[nt]` or `[nt, 1]` array of solver times
     /// :type params: numpy.ndarray
-    /// :return: 2D array of values at times `t_eval` and a list of 2D arrays of sensitivities at the same timepoints
+    /// :return: `[nout, nt, nbatch]` array of values at times `t_eval` and a list of `[nout, nt, nbatch]` arrays of sensitivities at the same timepoints
     /// :rtype: (numpy.ndarray, List[numpy.ndarray])
     #[allow(clippy::type_complexity)]
     pub fn solve_fwd_sens(
         &self,
-        params: HostArray,
-        t_eval: HostArray,
+        params: &HostArray,
+        t_eval: &HostArray,
     ) -> Result<SolutionWrapper, DiffsolRtError> {
         let mut self_guard = self.guard()?;
-        let params = params.as_slice()?;
-        let t_eval = t_eval.as_slice()?;
         let linear_solver = self_guard.linear_solver;
         let method = self_guard.ode_solver;
         let solution = self_guard
@@ -453,34 +464,29 @@ impl OdeWrapper {
     /// Solve the continuous adjoint problem for the integral of the model output
     /// from the initial time to `final_time`.
     ///
-    /// Returns `(integral, gradient)`, where `integral` is a vector of length
-    /// `nout` and `gradient` is an `(nparams, nout)` matrix.
+    /// Returns `(integral, gradient)`, where `integral` is a `[nout, nbatch]` array and
+    /// `gradient` is a `[nparams, nout, nbatch]` array.
     pub fn solve_continuous_adjoint(
         &self,
-        params: HostArray,
+        params: &HostArray,
         final_time: f64,
     ) -> Result<(HostArray, HostArray), DiffsolRtError> {
         let mut self_guard = self.guard()?;
         let linear_solver = self_guard.linear_solver;
         let ode_solver = self_guard.ode_solver;
-        self_guard.solve.solve_continuous_adjoint(
-            ode_solver,
-            linear_solver,
-            params.as_slice()?,
-            final_time,
-        )
+        self_guard
+            .solve
+            .solve_continuous_adjoint(ode_solver, linear_solver, params, final_time)
     }
 
     /// Solve the forward problem at `t_eval` and retain checkpoint data for a
     /// later discrete adjoint backward pass.
     pub fn solve_adjoint_fwd(
         &self,
-        params: HostArray,
-        t_eval: HostArray,
+        params: &HostArray,
+        t_eval: &HostArray,
     ) -> Result<(SolutionWrapper, AdjointCheckpointWrapper), DiffsolRtError> {
         let mut self_guard = self.guard()?;
-        let params = params.as_slice()?;
-        let t_eval = t_eval.as_slice()?;
         let linear_solver = self_guard.linear_solver;
         let method = self_guard.ode_solver;
         let (solution, checkpoint) =
@@ -494,15 +500,15 @@ impl OdeWrapper {
     /// checkpoint and the gradient of a scalar objective with respect to model
     /// outputs at each saved evaluation time.
     ///
-    /// Returns an `(nparams, 1)` gradient matrix.
+    /// `dgdu_eval` is a `[nout, nt, nlanes]` array, with `nlanes` equal to `nbatch` or 1.
+    /// Returns a `[nparams, 1, nbatch]` gradient array.
     pub fn solve_adjoint_bkwd(
         &self,
         solution: &SolutionWrapper,
         checkpoint: &AdjointCheckpointWrapper,
-        dgdu_eval: HostArray,
+        dgdu_eval: &HostArray,
     ) -> Result<HostArray, DiffsolRtError> {
-        let t_eval_host = solution.get_ts()?;
-        let t_eval = Vec::<f64>::from_host_array(t_eval_host)?;
+        let t_eval = solution.get_ts()?;
         let mut self_guard = self.guard()?;
         let linear_solver = self_guard.linear_solver;
         let method = self_guard.ode_solver;
@@ -536,12 +542,12 @@ impl<'de> Deserialize<'de> for OdeWrapper {
 #[cfg(all(test, feature = "diffsl-external-f64"))]
 mod tests {
     use super::*;
-    use crate::host_array::FromHostArray;
     use crate::linear_solver_type::LinearSolverType;
     use crate::scalar_type::ScalarType;
     use crate::test_support::{
-        assert_close, assert_solution_tail, logistic_state, logistic_state_dr, mass_state_deps,
-        rhs_input_deps, rhs_state_deps, vector_host, ASSERT_TOL, LOGISTIC_X0,
+        assert_close, assert_solution_tail, lane_f64, lane_matrix, logistic_state,
+        logistic_state_dr, mass_state_deps, rhs_input_deps, rhs_state_deps, vector_host,
+        ASSERT_TOL, LOGISTIC_X0,
     };
 
     fn all_ode_solvers() -> [OdeSolverType; 4] {
@@ -574,29 +580,24 @@ mod tests {
         assert_eq!(ode.get_nout().unwrap(), 1);
         assert!(ode.has_stop().unwrap());
 
-        let y0 = ode.y0(vector_host(&[2.0])).unwrap();
-        assert_eq!(Vec::<f64>::from_host_array(y0).unwrap(), vec![LOGISTIC_X0]);
+        let y0 = ode.y0(&vector_host(&[2.0])).unwrap();
+        assert_eq!(lane_f64(&y0, 0), vec![LOGISTIC_X0]);
 
         let rhs = ode
-            .rhs(vector_host(&[2.0]), 0.0, vector_host(&[0.25]))
+            .rhs(&vector_host(&[2.0]), 0.0, &vector_host(&[0.25]))
             .unwrap();
-        assert_close(
-            Vec::<f64>::from_host_array(rhs).unwrap()[0],
-            0.375,
-            ASSERT_TOL,
-            "rhs(0.25)",
-        );
+        assert_close(lane_f64(&rhs, 0)[0], 0.375, ASSERT_TOL, "rhs(0.25)");
 
         let rhs_jac_mul = ode
             .rhs_jac_mul(
-                vector_host(&[2.0]),
+                &vector_host(&[2.0]),
                 0.0,
-                vector_host(&[0.25]),
-                vector_host(&[3.0]),
+                &vector_host(&[0.25]),
+                &vector_host(&[3.0]),
             )
             .unwrap();
         assert_close(
-            Vec::<f64>::from_host_array(rhs_jac_mul).unwrap()[0],
+            lane_f64(&rhs_jac_mul, 0)[0],
             3.0,
             ASSERT_TOL,
             "rhs_jac_mul(0.25, 3.0)",
@@ -610,7 +611,7 @@ mod tests {
 
         let t_eval = [0.25, 0.5, 1.0];
         let solution = ode
-            .solve_dense(vector_host(&[2.0]), vector_host(&t_eval))
+            .solve_dense(&vector_host(&[2.0]), &vector_host(&t_eval))
             .unwrap();
 
         assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);
@@ -626,10 +627,10 @@ mod tests {
         ode.set_atol(1e-8).unwrap();
 
         let final_time = 2.0;
-        let solution = ode.solve(vector_host(&[2.0]), final_time).unwrap();
+        let solution = ode.solve(&vector_host(&[2.0]), final_time).unwrap();
         let ys = solution.get_ys().unwrap();
-        let ys = ys.as_array::<f64>().unwrap();
-        let ts = Vec::<f64>::from_host_array(solution.get_ts().unwrap()).unwrap();
+        let ys = lane_matrix(&ys, 0);
+        let ts = lane_f64(&solution.get_ts().unwrap(), 0);
         let root_time = hybrid_root_time();
 
         assert_eq!(ys.nrows(), 1);
@@ -659,10 +660,10 @@ mod tests {
 
         let t_eval = [0.5, 1.0, 1.25, 1.5, 2.0];
         let solution = ode
-            .solve_dense(vector_host(&[2.0]), vector_host(&t_eval))
+            .solve_dense(&vector_host(&[2.0]), &vector_host(&t_eval))
             .unwrap();
         let ys = solution.get_ys().unwrap();
-        let ys = ys.as_array::<f64>().unwrap();
+        let ys = lane_matrix(&ys, 0);
 
         assert_eq!(ys.nrows(), 1);
         assert_eq!(ys.ncols(), t_eval.len());
@@ -690,16 +691,16 @@ mod tests {
 
         let t_eval = [0.5, 1.0, 1.25, 1.5, 2.0];
         let solution = ode
-            .solve_fwd_sens(vector_host(&[2.0]), vector_host(&t_eval))
+            .solve_fwd_sens(&vector_host(&[2.0]), &vector_host(&t_eval))
             .unwrap();
         let ys = solution.get_ys().unwrap();
-        let ys = ys.as_array::<f64>().unwrap();
+        let ys = lane_matrix(&ys, 0);
         let sens = solution.get_sens().unwrap();
 
         assert_eq!(ys.nrows(), 1);
         assert_eq!(ys.ncols(), t_eval.len());
         assert_eq!(sens.len(), 1);
-        let sens_values = sens[0].as_array::<f64>().unwrap();
+        let sens_values = lane_matrix(&sens[0], 0);
         assert_eq!(sens_values.nrows(), 1);
         assert_eq!(sens_values.ncols(), t_eval.len());
         assert_close(
@@ -736,7 +737,7 @@ mod tests {
 
         let t_eval = [0.25, 0.5, 1.0];
         let solution = ode
-            .solve_dense(vector_host(&[2.0]), vector_host(&t_eval))
+            .solve_dense(&vector_host(&[2.0]), &vector_host(&t_eval))
             .unwrap();
 
         assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);
@@ -767,13 +768,13 @@ mod tests {
 
         let t_eval = [0.25, 0.5, 1.0];
         let solution = ode
-            .solve_fwd_sens(vector_host(&[2.0]), vector_host(&t_eval))
+            .solve_fwd_sens(&vector_host(&[2.0]), &vector_host(&t_eval))
             .unwrap();
 
         assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);
         let sens = solution.get_sens().unwrap();
         assert_eq!(sens.len(), 1);
-        let sens_values = sens[0].as_array::<f64>().unwrap();
+        let sens_values = lane_matrix(&sens[0], 0);
         assert_eq!(sens_values.nrows(), 1);
         assert_eq!(sens_values.ncols(), t_eval.len());
         for (i, &t) in t_eval.iter().enumerate() {
@@ -810,12 +811,11 @@ mod tests {
 
 #[cfg(all(test, feature = "diffsl-external-dynamic"))]
 mod dynamic_tests {
-    use crate::host_array::FromHostArray;
     use crate::linear_solver_type::LinearSolverType;
     use crate::scalar_type::ScalarType;
     use crate::test_support::{
-        assert_close, assert_solution_tail, external_dynamic_fixture_path, mass_state_deps,
-        rhs_input_deps, rhs_state_deps, vector_host, ASSERT_TOL, LOGISTIC_X0,
+        assert_close, assert_solution_tail, external_dynamic_fixture_path, lane_f64,
+        mass_state_deps, rhs_input_deps, rhs_state_deps, vector_host, ASSERT_TOL, LOGISTIC_X0,
     };
 
     use super::*;
@@ -850,29 +850,24 @@ mod dynamic_tests {
             assert_eq!(ode.get_nout().unwrap(), 1);
             assert!(ode.has_stop().unwrap());
 
-            let y0 = ode.y0(vector_host(&[2.0])).unwrap();
-            assert_eq!(Vec::<f64>::from_host_array(y0).unwrap(), vec![LOGISTIC_X0]);
+            let y0 = ode.y0(&vector_host(&[2.0])).unwrap();
+            assert_eq!(lane_f64(&y0, 0), vec![LOGISTIC_X0]);
 
             let rhs = ode
-                .rhs(vector_host(&[2.0]), 0.0, vector_host(&[0.25]))
+                .rhs(&vector_host(&[2.0]), 0.0, &vector_host(&[0.25]))
                 .unwrap();
-            assert_close(
-                Vec::<f64>::from_host_array(rhs).unwrap()[0],
-                0.375,
-                ASSERT_TOL,
-                "rhs(0.25)",
-            );
+            assert_close(lane_f64(&rhs, 0)[0], 0.375, ASSERT_TOL, "rhs(0.25)");
 
             let rhs_jac_mul = ode
                 .rhs_jac_mul(
-                    vector_host(&[2.0]),
+                    &vector_host(&[2.0]),
                     0.0,
-                    vector_host(&[0.25]),
-                    vector_host(&[3.0]),
+                    &vector_host(&[0.25]),
+                    &vector_host(&[3.0]),
                 )
                 .unwrap();
             assert_close(
-                Vec::<f64>::from_host_array(rhs_jac_mul).unwrap()[0],
+                lane_f64(&rhs_jac_mul, 0)[0],
                 3.0,
                 ASSERT_TOL,
                 "rhs_jac_mul(0.25, 3.0)",
@@ -888,7 +883,7 @@ mod dynamic_tests {
 
         let t_eval = [0.25, 0.5, 1.0];
         let solution = ode
-            .solve_dense(vector_host(&[2.0]), vector_host(&t_eval))
+            .solve_dense(&vector_host(&[2.0]), &vector_host(&t_eval))
             .unwrap();
 
         assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);

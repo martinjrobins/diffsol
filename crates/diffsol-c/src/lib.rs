@@ -242,21 +242,24 @@ pub mod error_c;
 /// [SolutionWrapper::get_ts], and
 /// [SolutionWrapper::get_sens].
 ///
-/// # Conversion traits
-/// - [ToHostArray] — convert owned Rust types (e.g. `Vec<T>`,
-///   `nalgebra::DMatrix<T>`, `faer::Mat<T>`) into a `HostArray`.
-/// - [FromHostArray] — convert a `HostArray` back into a Rust type (e.g.
-///   `Vec<f64>`, `Vec<Vec<f64>>`, `ndarray::ArrayView2`).
+/// # Batches
+/// A diffsol vector or dense matrix can have more than one lane (`nbatch`). The arrays use the
+/// column-major order of diffsol, and the last axis of a `HostArray` of lanes is always the lane,
+/// also when `nbatch` is 1. For a diffsol vector, the
+/// shape is `[n, nbatch]`. For a dense matrix, the shape is `[nrows, ncols, nbatch]`. If an input
+/// array has one lane, all the lanes get its values.
 ///
 /// # Key methods
-/// - [HostArray::new], [HostArray::new_vector],
-///   [HostArray::alloc_vector],
-///   [HostArray::new_col_major] — constructors.
-/// - [HostArray::as_array] — view as `ndarray::ArrayView2`.
-/// - [HostArray::as_slice] — view as `&[T]`.
-/// - `HostArray::data_ptr`, `HostArray::ndim`,
-///   `HostArray::dim`, `HostArray::stride`,
-///   `HostArray::dtype` — metadata accessors.
+/// - [HostArray::new] — wrap data that the caller owns (`unsafe`: the caller keeps the data valid
+///   while the array exists).
+/// - [HostArray::from_vec] — make an array that owns its data, in column-major order.
+/// - [HostArray::index] — a reference to the value at an index, with one value for each axis.
+/// - [HostArray::offset] — the index of a value in the slice of [HostArray::as_slice].
+/// - [HostArray::as_slice] — view the data as `&[T]`, with no copy. The [HostArray] docs give
+///   the data layout.
+/// - [HostArray::shape], [HostArray::strides], [HostArray::dtype], [HostArray::data_ptr] — the
+///   metadata. With these, a host language can show the data with no copy, for example as a
+///   NumPy array with the same shape and strides.
 pub mod host_array;
 /// C FFI functions for inspecting and freeing [HostArray] objects.
 ///
@@ -552,7 +555,7 @@ mod ode_callbacks_requirements_test;
 
 pub use adjoint_checkpoint::AdjointCheckpointWrapper;
 pub use error::DiffsolRtError;
-pub use host_array::{FromHostArray, HostArray, ToHostArray};
+pub use host_array::HostArray;
 pub use initial_condition_options::{
     InitialConditionSolverOptions, InitialConditionSolverOptionsSnapshot,
 };

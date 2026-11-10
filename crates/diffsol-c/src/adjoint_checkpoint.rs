@@ -14,7 +14,6 @@ pub(crate) trait AdjointCheckpoint: Any + Send {
     fn as_any(&self) -> &dyn Any;
     fn method(&self) -> OdeSolverType;
     fn linear_solver(&self) -> LinearSolverType;
-    fn params(&self) -> &[f64];
 }
 
 impl dyn AdjointCheckpoint + '_ {
@@ -43,7 +42,7 @@ where
     Tag: OdeSolverMethodTag<M, Eqn>,
 {
     pub(crate) checkpointing: CheckpointingPath<Eqn, Tag::State>,
-    params: Vec<f64>,
+    pub(crate) params: M::V,
     method: OdeSolverType,
     linear_solver: LinearSolverType,
 }
@@ -56,7 +55,7 @@ where
 {
     pub(crate) fn new(
         checkpointing: CheckpointingPath<Eqn, Tag::State>,
-        params: Vec<f64>,
+        params: M::V,
         method: OdeSolverType,
         linear_solver: LinearSolverType,
     ) -> Self {
@@ -85,10 +84,6 @@ where
 
     fn linear_solver(&self) -> LinearSolverType {
         self.linear_solver
-    }
-
-    fn params(&self) -> &[f64] {
-        &self.params
     }
 }
 

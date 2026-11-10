@@ -13,16 +13,13 @@ use std::process::Command;
 #[cfg(feature = "diffsl-external-dynamic")]
 use std::sync::OnceLock;
 
-#[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-llvm"))]
-use nalgebra::DMatrix;
-
 use crate::error_c::diffsol_clear_last_error;
 #[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-external-dynamic"))]
 use crate::error_c::{
     diffsol_error_code, diffsol_last_error_file, diffsol_last_error_line,
     diffsol_last_error_message,
 };
-use crate::host_array::{FromHostArray, HostArray, ToHostArray};
+use crate::host_array::HostArray;
 use crate::host_array_c::{
     diffsol_host_array_dim, diffsol_host_array_dtype, diffsol_host_array_free,
     diffsol_host_array_ndim, diffsol_host_array_ptr,
@@ -170,13 +167,51 @@ pub(crate) fn available_jit_backends() -> Vec<crate::jit::JitBackendType> {
     .collect()
 }
 
+/// An `[n, 1]` array: one lane of values, for example `params`, `y` or `t_eval`.
 pub(crate) fn vector_host(values: &[f64]) -> HostArray {
-    values.to_vec().to_host_array()
+    batched_vector_host(&[values])
+}
+
+/// An `[n, nlanes]` array from `nlanes` lanes of `n` values.
+pub(crate) fn batched_vector_host(lanes: &[&[f64]]) -> HostArray {
+    let n = lanes.first().map_or(0, |lane| lane.len());
+    assert!(
+        lanes.iter().all(|lane| lane.len() == n),
+        "lanes must have the same length"
+    );
+    HostArray::from_vec(lanes.concat(), vec![n, lanes.len()])
 }
 
 #[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-llvm"))]
 pub(crate) fn matrix_host(rows: usize, cols: usize, values_col_major: &[f64]) -> HostArray {
-    DMatrix::from_column_slice(rows, cols, values_col_major).to_host_array()
+    // one lane: `[rows, cols, 1]`, in the column-major order of the values
+    HostArray::from_vec(values_col_major.to_vec(), vec![rows, cols, 1])
+}
+
+/// The value of `array` at `index` as `f64`. The array has the scalar type of the solver, `f32`
+/// or `f64`.
+pub(crate) fn value_f64(array: &HostArray, index: &[usize]) -> f64 {
+    match array.index::<f64>(index) {
+        Ok(&value) => value,
+        Err(_) => *array.index::<f32>(index).unwrap() as f64,
+    }
+}
+
+/// Lane `lane` of a `[n, nlanes]` array, or the values of a 1D array (lane 0), as `f64` values.
+pub(crate) fn lane_f64(array: &HostArray, lane: usize) -> Vec<f64> {
+    match array.shape() {
+        [n] => (0..*n).map(|i| value_f64(array, &[i])).collect(),
+        [n, _] => (0..*n).map(|i| value_f64(array, &[i, lane])).collect(),
+        shape => panic!("expected a 1D or 2D array, got the shape {shape:?}"),
+    }
+}
+
+/// Lane `lane` of a `[nrows, ncols, nlanes]` array as an `f64` matrix.
+pub(crate) fn lane_matrix(array: &HostArray, lane: usize) -> ndarray::Array2<f64> {
+    let shape = array.shape();
+    ndarray::Array2::from_shape_fn((shape[0], shape[1]), |(i, j)| {
+        value_f64(array, &[i, j, lane])
+    })
 }
 
 pub(crate) fn logistic_state(x0: f64, r: f64, t: f64) -> f64 {
@@ -260,15 +295,15 @@ pub(crate) fn assert_solution_tail(
     tol: f64,
 ) {
     let ys_array = solution.get_ys().unwrap();
-    let ys = Vec::<Vec<f64>>::from_host_array(ys_array).unwrap();
-    let ts = Vec::<f64>::from_host_array(solution.get_ts().unwrap()).unwrap();
+    let ys = lane_matrix(&ys_array, 0);
+    let ts = lane_f64(&solution.get_ts().unwrap(), 0);
 
-    assert_eq!(ys.len(), 1, "expected a single state/output row");
+    assert_eq!(ys.nrows(), 1, "expected a single state/output row");
     assert!(
-        ys[0].len() >= expected_ts.len(),
+        ys.ncols() >= expected_ts.len(),
         "expected at least {} columns, got {}",
         expected_ts.len(),
-        ys[0].len()
+        ys.ncols()
     );
     assert!(
         ts.len() >= expected_ts.len(),
@@ -281,7 +316,7 @@ pub(crate) fn assert_solution_tail(
     for (i, &t) in expected_ts.iter().enumerate() {
         assert_close(ts[start + i], t, tol, "solution time");
         assert_close(
-            ys[0][start + i],
+            ys[(0, start + i)],
             logistic_state(x0, r, t),
             tol,
             "solution value",
@@ -302,16 +337,42 @@ pub(crate) unsafe fn ffi_free_solution(ptr: *mut SolutionWrapper) {
     }
 }
 
+/// Read a 1D array, for example the times of a solution, and free it.
+#[cfg(any(
+    feature = "diffsl-external-f64",
+    feature = "diffsl-cranelift",
+    feature = "diffsl-llvm"
+))]
+pub(crate) unsafe fn ffi_read_host_array_1d(ptr: *mut HostArray) -> Vec<f64> {
+    unsafe { ffi_read_first_axis(ptr, 1) }
+}
+
+/// Read a `[n, 1]` array (one lane) and free it.
 pub(crate) unsafe fn ffi_read_host_array_vector(ptr: *mut HostArray) -> Vec<f64> {
+    unsafe { ffi_read_first_axis(ptr, 2) }
+}
+
+/// Read an `ndim` array with length 1 on each axis but the first, and free it.
+unsafe fn ffi_read_first_axis(ptr: *mut HostArray, ndim: usize) -> Vec<f64> {
     assert!(!ptr.is_null(), "host array pointer must not be null");
-    assert_eq!(unsafe { diffsol_host_array_ndim(ptr) }, 1);
+    assert_eq!(unsafe { diffsol_host_array_ndim(ptr) }, ndim);
+    for axis in 1..ndim {
+        assert_eq!(
+            unsafe { diffsol_host_array_dim(ptr, axis) },
+            1,
+            "expected one lane"
+        );
+    }
     assert_eq!(
         unsafe { diffsol_host_array_dtype(ptr) },
         scalar_type_to_i32(ScalarType::F64)
     );
     let len = unsafe { diffsol_host_array_dim(ptr, 0) };
-    let data_ptr = unsafe { diffsol_host_array_ptr(ptr) } as *const f64;
-    let values = unsafe { std::slice::from_raw_parts(data_ptr, len) }.to_vec();
+    let stride = unsafe { crate::host_array_c::diffsol_host_array_stride(ptr, 0) };
+    let base_ptr = unsafe { diffsol_host_array_ptr(ptr) };
+    let values = (0..len)
+        .map(|i| unsafe { *(base_ptr.add(i * stride) as *const f64) })
+        .collect();
     unsafe {
         diffsol_host_array_free(ptr);
     }
@@ -323,9 +384,15 @@ pub(crate) unsafe fn ffi_read_host_array_vector(ptr: *mut HostArray) -> Vec<f64>
     feature = "diffsl-cranelift",
     feature = "diffsl-llvm"
 ))]
+/// Read a `[rows, cols, 1]` array (one lane) and free it. The values are in column-major order.
 pub(crate) unsafe fn ffi_read_host_array_matrix(ptr: *mut HostArray) -> (usize, usize, Vec<f64>) {
     assert!(!ptr.is_null(), "host array pointer must not be null");
-    assert_eq!(unsafe { diffsol_host_array_ndim(ptr) }, 2);
+    assert_eq!(unsafe { diffsol_host_array_ndim(ptr) }, 3);
+    assert_eq!(
+        unsafe { diffsol_host_array_dim(ptr, 2) },
+        1,
+        "expected one lane"
+    );
     assert_eq!(
         unsafe { diffsol_host_array_dtype(ptr) },
         scalar_type_to_i32(ScalarType::F64)

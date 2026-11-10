@@ -37,6 +37,10 @@ From it, you can get the time points, the state values and the sensitivities as
 objects. A `HostArray` is a read-only view of data that Rust owns. You can read it without a
 copy.
 
+The arrays use the column-major order of diffsol, and the last axis of an array of lanes is the
+lane. For example, the parameters are an `nparams x nlanes`
+array, and the state values of a solution are an `nout x nt x nbatch` array.
+
 You can give the equations as DiffSL code (`OdeWrapper::new_jit`, `new_external` and
 `new_external_dynamic`), or as C callbacks (`OdeWrapper::new_callbacks`, see
 [The C API](./c_api.md)).

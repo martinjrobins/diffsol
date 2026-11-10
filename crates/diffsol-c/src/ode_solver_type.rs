@@ -4,8 +4,8 @@
 use diffsol::error::DiffsolError;
 use diffsol::ode_equations::{OdeEquationsImplicit, OdeEquationsImplicitSens};
 use diffsol::{
-    matrix::MatrixRef, Context, DefaultDenseMatrix, DenseMatrix, LinearSolver, Matrix,
-    OdeSolverProblem, OdeSolverState, Vector, VectorRef, VectorView,
+    matrix::MatrixRef, DefaultDenseMatrix, DenseMatrix, LinearSolver, Matrix, OdeSolverProblem,
+    OdeSolverState, VectorRef, VectorView,
 };
 use diffsol::{
     ode_solver_error, AdjointOdeSolverMethod, CheckpointingPath, DefaultSolver, OdeSolverMethod,
@@ -21,6 +21,7 @@ use crate::{
     linear_solver_type::LinearSolverType,
     valid_linear_solver::{KluValidator, LuValidator},
 };
+use diffsol::Vector;
 
 /// Enumerates the possible ODE solver methods for diffsol. See the solver descriptions in the diffsol documentation (<https://github.com/martinjrobins/diffsol>) for more details.
 ///
@@ -155,7 +156,6 @@ where
 fn solve_adjoint_fwd_with_tag<M, Eqn, LS, Tag>(
     problem: &mut OdeSolverProblem<Eqn>,
     t_eval: &[M::T],
-    params: &[f64],
     method: OdeSolverType,
     linear_solver: LinearSolverType,
 ) -> Result<(Solution<M::V>, Box<dyn AdjointCheckpoint>), DiffsolError>
@@ -168,6 +168,9 @@ where
     for<'b> &'b M::V: VectorRef<M::V>,
     for<'b> &'b M: MatrixRef<M>,
 {
+    // keep the parameters of all the lanes, so the backward pass can use them again
+    let mut params = M::V::zeros(problem.eqn.nparams(), problem.context().clone());
+    problem.eqn.get_params(&mut params);
     let soln = Solution::new_dense(t_eval.to_vec())?;
     let (soln, checkpointing) =
         solve_with_checkpointing_with_tag::<M, Eqn, LS, Tag>(problem, soln)?;
@@ -175,7 +178,7 @@ where
         soln,
         Box::new(AdjointCheckpointData::<M, Eqn, Tag>::new(
             checkpointing,
-            params.to_vec(),
+            params,
             method,
             linear_solver,
         )),
@@ -186,7 +189,7 @@ fn solve_continuous_adjoint_with_tag<M, Eqn, LS, Tag>(
     problem: &mut OdeSolverProblem<Eqn>,
     final_time: M::T,
     method: OdeSolverType,
-) -> Result<(M::V, Vec<M::V>), DiffsolError>
+) -> Result<(M::V, M::V), DiffsolError>
 where
     M: Matrix<T: Scalar> + DefaultSolver + 'static,
     M::V: DefaultDenseMatrix,
@@ -244,7 +247,7 @@ fn solve_adjoint_bkwds_with_fwd_tag<M, Eqn, FwdLS, BwdLS, Tag>(
     backwards_method: OdeSolverType,
     dgdu_eval: &<M::V as DefaultDenseMatrix>::M,
     t_eval: &[M::T],
-) -> Result<Vec<M::V>, DiffsolError>
+) -> Result<M::V, DiffsolError>
 where
     M: Matrix<T: Scalar> + DefaultSolver + 'static,
     M::V: DefaultDenseMatrix,
@@ -257,6 +260,8 @@ where
     for<'b> &'b M::V: VectorRef<M::V>,
     for<'b> &'b M: MatrixRef<M>,
 {
+    // use the parameters of the forward pass
+    problem.eqn.set_params(&checkpoint.params);
     // TODO: can we avoid cloning here? Adjoint equations require ownership of the checkpointing segments so maybe not
     // unless we can change the adjoint equations to take references to the checkpointing segments instead
     let checkpointing = checkpoint.checkpointing.clone();
@@ -306,7 +311,7 @@ fn solve_adjoint_bkwds_with_fwd_bkwd_tag<'solver, M, Eqn, FwdLS, BwdLS, FwdTag, 
     mut checkpointing: CheckpointingPath<Eqn, FwdTag::State>,
     dgdu_eval: &[&<M::V as DefaultDenseMatrix>::M],
     nout_override: Option<usize>,
-) -> Result<Vec<M::V>, DiffsolError>
+) -> Result<M::V, DiffsolError>
 where
     M: Matrix<T: Scalar> + DefaultSolver + 'solver,
     M::V: DefaultDenseMatrix,
@@ -357,13 +362,8 @@ where
         let (mut state, adjoint_checkpointing) =
             adjoint.solve_adjoint_backwards_pass(t_eval, dgdu_eval)?;
         let Some(previous_checkpointing) = checkpointing.pop() else {
-            // the adjoint state holds one output channel per batch lane; the C API returns one
-            // gradient vector per channel
-            let sg = state.into_common().sg;
-            let nchannels = sg.context().nbatch();
-            return Ok((0..nchannels)
-                .map(|i| sg.get_batch(i).into_owned())
-                .collect());
+            // the gradient has one lane for each (batch lane, output channel) pair
+            return Ok(state.into_common().sg);
         };
         let model_index = checkpointing
             .last()
@@ -495,7 +495,6 @@ impl OdeSolverType {
         &self,
         problem: &mut OdeSolverProblem<Eqn>,
         t_eval: &[M::T],
-        params: &[f64],
         linear_solver: LinearSolverType,
     ) -> Result<(Solution<M::V>, Box<dyn AdjointCheckpoint>), DiffsolError>
     where
@@ -510,28 +509,24 @@ impl OdeSolverType {
             OdeSolverType::Bdf => solve_adjoint_fwd_with_tag::<M, Eqn, LS, BdfTag>(
                 problem,
                 t_eval,
-                params,
                 *self,
                 linear_solver,
             ),
             OdeSolverType::Esdirk34 => solve_adjoint_fwd_with_tag::<M, Eqn, LS, Esdirk34Tag>(
                 problem,
                 t_eval,
-                params,
                 *self,
                 linear_solver,
             ),
             OdeSolverType::TrBdf2 => solve_adjoint_fwd_with_tag::<M, Eqn, LS, TrBdf2Tag>(
                 problem,
                 t_eval,
-                params,
                 *self,
                 linear_solver,
             ),
             OdeSolverType::Tsit45 => solve_adjoint_fwd_with_tag::<M, Eqn, LS, Tsit45Tag>(
                 problem,
                 t_eval,
-                params,
                 *self,
                 linear_solver,
             ),
@@ -542,7 +537,7 @@ impl OdeSolverType {
         &self,
         problem: &mut OdeSolverProblem<Eqn>,
         final_time: M::T,
-    ) -> Result<(M::V, Vec<M::V>), DiffsolError>
+    ) -> Result<(M::V, M::V), DiffsolError>
     where
         M: Matrix<T: Scalar> + DefaultSolver + 'static,
         M::V: DefaultDenseMatrix,
@@ -577,7 +572,7 @@ impl OdeSolverType {
         checkpoint: &dyn AdjointCheckpoint,
         dgdu_eval: &<M::V as DefaultDenseMatrix>::M,
         t_eval: &[M::T],
-    ) -> Result<Vec<M::V>, DiffsolError>
+    ) -> Result<M::V, DiffsolError>
     where
         M: Matrix<T: Scalar> + DefaultSolver + LuValidator<M> + KluValidator<M> + 'static,
         M::V: DefaultDenseMatrix,
@@ -1014,7 +1009,6 @@ mod tests {
             .solve_adjoint_fwd::<M, diffsol::DiffSl<M, diffsol::LlvmModule>, <M as LuValidator<M>>::LS>(
                 &mut problem,
                 &adjoint_t_eval,
-                &[2.0],
                 LinearSolverType::Lu,
             )
             .unwrap();
@@ -1032,7 +1026,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(gradient.len(), 1);
-        assert!(gradient[0].get_index(0).is_finite());
+        assert!(gradient.get_index(0).is_finite());
     }
 
     #[cfg(feature = "diffsl-llvm")]
@@ -1076,8 +1070,7 @@ mod tests {
                 .solve_adjoint_fwd::<M, diffsol::DiffSl<M, diffsol::LlvmModule>, <M as DefaultSolver>::LS>(
                     &mut problem,
                     &t_eval,
-                    &[2.0],
-                    LinearSolverType::Default,
+                        LinearSolverType::Default,
                 )
                 .unwrap();
             let dgdu = <<M as MatrixCommon>::V as DefaultDenseMatrix>::M::zeros(
@@ -1094,7 +1087,7 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(gradient.len(), 1);
-            assert!(gradient[0].get_index(0).is_finite());
+            assert!(gradient.get_index(0).is_finite());
         }
 
         let mut problem = build_problem::<diffsol::LlvmModule>(logistic_diffsl_code());
@@ -1103,7 +1096,6 @@ mod tests {
             .solve_adjoint_fwd::<M, diffsol::DiffSl<M, diffsol::LlvmModule>, <M as DefaultSolver>::LS>(
                 &mut problem,
                 &t_eval,
-                &[2.0],
                 LinearSolverType::Default,
             )
             .unwrap();
@@ -1121,7 +1113,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(gradient.len(), 1);
-        assert!(gradient[0].get_index(0).is_finite());
+        assert!(gradient.get_index(0).is_finite());
     }
 
     #[cfg(feature = "diffsl-llvm")]
@@ -1137,8 +1129,7 @@ mod tests {
                 .solve_adjoint_fwd::<M, diffsol::DiffSl<M, diffsol::LlvmModule>, <M as DefaultSolver>::LS>(
                     &mut problem,
                     &t_eval,
-                    &[2.0],
-                    LinearSolverType::Default,
+                        LinearSolverType::Default,
                 )
                 .unwrap();
             let dgdu = <<M as MatrixCommon>::V as DefaultDenseMatrix>::M::zeros(
@@ -1155,7 +1146,7 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(gradient.len(), 1);
-            assert!(gradient[0].get_index(0).is_finite());
+            assert!(gradient.get_index(0).is_finite());
         }
     }
 

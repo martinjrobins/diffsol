@@ -1,4 +1,4 @@
-use diffsol_c::host_array::{FromHostArray, ToHostArray};
+use diffsol_c::host_array::HostArray;
 use diffsol_c::{
     JitBackendType, LinearSolverType, MatrixType, OdeSolverType, OdeWrapper, ScalarType,
 };
@@ -33,24 +33,27 @@ fn main() {
 
     // ANCHOR: solve_dense
     let t_eval = vec![0.0, 0.25, 0.5, 0.75, 1.0];
-    let params = vec![2.0f64];
-    let solution = ode
-        .solve_dense(params.to_host_array(), t_eval.to_host_array())
-        .unwrap();
+    // params is a `[nparams, nlanes]` array: here one lane with one parameter
+    let params = HostArray::from_vec(vec![2.0], vec![1, 1]);
+    // t_eval is a `[nt]` array that owns the times
+    let t_eval = HostArray::from_vec(t_eval.clone(), vec![t_eval.len()]);
+    let solution = ode.solve_dense(&params, &t_eval).unwrap();
     // ANCHOR_END: solve_dense
 
     // ANCHOR: extract
-    let ys = Vec::<Vec<f64>>::from_host_array(solution.get_ys().unwrap()).unwrap();
-    let ts = Vec::<f64>::from_host_array(solution.get_ts().unwrap()).unwrap();
+    // ys is a `[nout, nt, nbatch]` array; ts is a `[nt]` array that all lanes share.
+    let ys = solution.get_ys().unwrap();
+    let ts = solution.get_ts().unwrap();
     // ANCHOR_END: extract
 
     // ANCHOR: check
     let r = 2.0f64;
     let y0 = 0.1f64;
     let tol = 1e-5;
-    for i in 0..ts.len() {
-        let t = ts[i];
-        let y_computed = ys[0][i];
+    for i in 0..ts.shape()[0] {
+        // `index` gives a reference to the value at an index, with one value for each axis
+        let t = *ts.index::<f64>([i]).unwrap();
+        let y_computed = *ys.index::<f64>([0, i, 0]).unwrap();
         let y_analytical = y0 * (r * t).exp() / (1.0 - y0 + y0 * (r * t).exp());
         assert!(
             (y_computed - y_analytical).abs() < tol,

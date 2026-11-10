@@ -2,25 +2,7 @@ use std::ptr;
 
 use crate::c_invalid_arg;
 use crate::host_array::HostArray;
-use crate::scalar_type_c::{scalar_type_from_i32, scalar_type_to_i32};
-
-/// Allocate a one-dimensional host array of the requested length and scalar type.
-///
-/// # Safety
-/// The returned pointer must be freed with `diffsol_host_array_free`. `dtype`
-/// must be a valid scalar type enum defined by this library.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn diffsol_host_array_alloc_vector(len: usize, dtype: i32) -> *mut HostArray {
-    let dtype = match scalar_type_from_i32(dtype) {
-        Some(value) => value,
-        None => {
-            c_invalid_arg!("invalid dtype");
-            return ptr::null_mut();
-        }
-    };
-    let array = HostArray::alloc_vector(len, dtype);
-    Box::into_raw(Box::new(array))
-}
+use crate::scalar_type_c::scalar_type_to_i32;
 
 /// Free a host array previously returned by this library.
 ///
@@ -64,14 +46,14 @@ pub unsafe extern "C" fn diffsol_host_array_ndim(array: *const HostArray) -> usi
         return 0;
     }
     let array = unsafe { &*array };
-    array.ndim()
+    array.shape().len()
 }
 
 /// Return the size of a single dimension in a host array.
 ///
 /// # Safety
-/// `array` must be a valid pointer to a `HostArray` created by this library.
-/// `index` must be in bounds for the array shape.
+/// `array` must be a valid pointer to a `HostArray` created by this library. If `index` is not
+/// less than the number of axes, the result is 0.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_host_array_dim(array: *const HostArray, index: usize) -> usize {
     if array.is_null() {
@@ -79,14 +61,15 @@ pub unsafe extern "C" fn diffsol_host_array_dim(array: *const HostArray, index: 
         return 0;
     }
     let array = unsafe { &*array };
-    array.dim(index)
+    // an index out of range gives 0, because a panic must not cross the C boundary
+    array.shape().get(index).copied().unwrap_or(0)
 }
 
 /// Return the stride, in bytes, for a single dimension in a host array.
 ///
 /// # Safety
-/// `array` must be a valid pointer to a `HostArray` created by this library.
-/// `index` must be in bounds for the array shape.
+/// `array` must be a valid pointer to a `HostArray` created by this library. If `index` is not
+/// less than the number of axes, the result is 0.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_host_array_stride(array: *const HostArray, index: usize) -> usize {
     if array.is_null() {
@@ -94,7 +77,8 @@ pub unsafe extern "C" fn diffsol_host_array_stride(array: *const HostArray, inde
         return 0;
     }
     let array = unsafe { &*array };
-    array.stride(index)
+    // an index out of range gives 0, because a panic must not cross the C boundary
+    array.strides().get(index).copied().unwrap_or(0)
 }
 
 /// Return the scalar type enum stored by a host array.

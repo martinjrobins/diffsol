@@ -1,15 +1,16 @@
 #![cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
 
 mod common;
+use common::lane_matrix;
 
 #[cfg(feature = "diffsl-llvm")]
 use common::matrix_host;
 use common::{
-    assert_close, available_jit_backends, logistic_state, vector_host, ASSERT_TOL, LOGISTIC_X0,
+    assert_close, available_jit_backends, lane_f64, logistic_state, vector_host, ASSERT_TOL,
+    LOGISTIC_X0,
 };
 #[cfg(feature = "diffsl-llvm")]
 use common::{logistic_integral, logistic_integral_dr, logistic_state_dr};
-use diffsol_c::host_array::FromHostArray;
 use diffsol_c::{
     JitBackendType, LinearSolverType, MatrixType, OdeSolverType, OdeWrapper, ScalarType,
 };
@@ -203,17 +204,17 @@ fn hybrid_integral_dr(r: f64, final_time: f64) -> f64 {
 
 fn assert_hybrid_dense_solution(ode: &OdeWrapper, r: f64, t_eval: &[f64]) {
     let solution = ode
-        .solve_dense(vector_host(&[r]), vector_host(t_eval))
+        .solve_dense(&vector_host(&[r]), &vector_host(t_eval))
         .unwrap();
-    let ys = Vec::<Vec<f64>>::from_host_array(solution.get_ys().unwrap()).unwrap();
-    let ts = Vec::<f64>::from_host_array(solution.get_ts().unwrap()).unwrap();
+    let ys = lane_matrix(&solution.get_ys().unwrap(), 0);
+    let ts = lane_f64(&solution.get_ts().unwrap(), 0);
 
-    assert_eq!(ys.len(), 1);
-    assert_eq!(ys[0].len(), t_eval.len());
+    assert_eq!(ys.nrows(), 1);
+    assert_eq!(ys.ncols(), t_eval.len());
     assert_eq!(ts, t_eval);
     for (col, &t) in t_eval.iter().enumerate() {
         assert_close(
-            ys[0][col],
+            ys[(0, col)],
             hybrid_state(r, t),
             5e-4,
             &format!("hybrid dense value[{col}]"),
@@ -240,12 +241,12 @@ fn logistic_hybrid_solve_matches_piecewise_solution() {
                 assert_eq!(ode.get_nout().unwrap(), 1);
                 assert!(ode.has_stop().unwrap());
 
-                let solution = ode.solve(vector_host(&[r]), final_time).unwrap();
-                let ys = Vec::<Vec<f64>>::from_host_array(solution.get_ys().unwrap()).unwrap();
-                let ts = Vec::<f64>::from_host_array(solution.get_ts().unwrap()).unwrap();
+                let solution = ode.solve(&vector_host(&[r]), final_time).unwrap();
+                let ys = lane_matrix(&solution.get_ys().unwrap(), 0);
+                let ts = lane_f64(&solution.get_ts().unwrap(), 0);
 
-                assert_eq!(ys.len(), 1);
-                assert_eq!(ys[0].len(), ts.len());
+                assert_eq!(ys.nrows(), 1);
+                assert_eq!(ys.ncols(), ts.len());
                 assert!(!ts.is_empty(), "expected solve() to record output");
                 assert_close(
                     *ts.last().unwrap(),
@@ -268,7 +269,7 @@ fn logistic_hybrid_solve_matches_piecewise_solution() {
                         continue;
                     }
                     assert_close(
-                        ys[0][col],
+                        ys[(0, col)],
                         hybrid_state(r, t),
                         5e-4,
                         &format!("hybrid solve value[{col}]"),
@@ -318,13 +319,13 @@ fn logistic_hybrid_forward_sensitivities_match_piecewise_solution() {
             );
 
             let solution = ode
-                .solve_fwd_sens(vector_host(&[r]), vector_host(&t_eval))
+                .solve_fwd_sens(&vector_host(&[r]), &vector_host(&t_eval))
                 .unwrap();
             let ys = solution.get_ys().unwrap();
-            let ys = ys.as_array::<f64>().unwrap();
+            let ys = lane_matrix(&ys, 0);
             let sens = solution.get_sens().unwrap();
             assert_eq!(sens.len(), 1);
-            let sens_r = sens[0].as_array::<f64>().unwrap();
+            let sens_r = lane_matrix(&sens[0], 0);
 
             assert_eq!(ys.nrows(), 1);
             assert_eq!(ys.ncols(), t_eval.len());
@@ -367,10 +368,10 @@ fn logistic_hybrid_continuous_adjoint_matches_piecewise_integral() {
             );
 
             let (integral, gradient) = ode
-                .solve_continuous_adjoint(vector_host(&[r]), final_time)
+                .solve_continuous_adjoint(&vector_host(&[r]), final_time)
                 .unwrap();
-            let integral = Vec::<f64>::from_host_array(integral).unwrap();
-            let gradient = gradient.as_array::<f64>().unwrap();
+            let integral = lane_f64(&integral, 0);
+            let gradient = lane_matrix(&gradient, 0);
 
             assert_eq!(integral.len(), 1);
             assert_close(
@@ -412,12 +413,12 @@ fn logistic_hybrid_split_adjoint_matches_analytical_gradient() {
             );
 
             let (solution, checkpoint) = ode
-                .solve_adjoint_fwd(vector_host(&[fit_r]), vector_host(&t_eval))
+                .solve_adjoint_fwd(&vector_host(&[fit_r]), &vector_host(&t_eval))
                 .unwrap();
-            let ts = Vec::<f64>::from_host_array(solution.get_ts().unwrap()).unwrap();
+            let ts = lane_f64(&solution.get_ts().unwrap(), 0);
             assert_eq!(ts, t_eval);
             let ys = solution.get_ys().unwrap();
-            let ys = ys.as_array::<f64>().unwrap();
+            let ys = lane_matrix(&ys, 0);
 
             let dgdu_values: Vec<f64> = (0..t_eval.len())
                 .map(|col| 2.0 * (ys[(0, col)] - data_values[col]))
@@ -426,10 +427,10 @@ fn logistic_hybrid_split_adjoint_matches_analytical_gradient() {
                 .solve_adjoint_bkwd(
                     &solution,
                     &checkpoint,
-                    matrix_host(1, t_eval.len(), &dgdu_values),
+                    &matrix_host(1, t_eval.len(), &dgdu_values),
                 )
                 .unwrap();
-            let split_gradient = split_gradient.as_array::<f64>().unwrap();
+            let split_gradient = lane_matrix(&split_gradient, 0);
 
             let expected_gradient: f64 = t_eval
                 .iter()
