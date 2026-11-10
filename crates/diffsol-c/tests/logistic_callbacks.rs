@@ -2,7 +2,7 @@
 //! (see `diffsol_c::ode_callbacks`) rather than DiffSL, solved through the runtime API.
 
 mod common;
-use common::{batched_vector_host, lane_matrix, value_f64};
+use common::{batched_vector_tensor, lane_matrix, value_f64};
 
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -10,12 +10,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use common::{
     all_ode_solvers, assert_close, assert_solution_tail, hybrid_logistic_state,
     hybrid_logistic_state_dr, lane_f64, logistic_integral, logistic_integral_dr, logistic_state,
-    logistic_state_dr, matrix_host, vector_host, ASSERT_TOL, LOGISTIC_X0,
+    logistic_state_dr, matrix_tensor, vector_tensor, ASSERT_TOL, LOGISTIC_X0,
 };
-use diffsol_c::host_array::HostArray;
 use diffsol_c::ode_c::diffsol_ode_free;
 use diffsol_c::ode_callbacks::DiffsolOdeCallbacksF32;
 use diffsol_c::ode_callbacks_c::{diffsol_ode_new_callbacks_f32, diffsol_ode_new_callbacks_f64};
+use diffsol_c::tensor::{Tensor, TensorView};
 use diffsol_c::{
     LinearSolverType, MatrixType, OdeCallbacksDesc, OdeSolverType, OdeWrapper, ScalarType,
 };
@@ -343,20 +343,24 @@ fn runtime_dispatch_matches_requested_matrix_type() {
         assert_eq!(ode.get_nout().unwrap(), 1);
         assert!(!ode.has_stop().unwrap());
 
-        let y0 = ode.y0(&vector_host(&[2.0])).unwrap();
+        let y0 = ode.y0(vector_tensor(&[2.0]).view()).unwrap();
         assert_eq!(lane_f64(&y0, 0), vec![LOGISTIC_X0]);
 
         let rhs = ode
-            .rhs(&vector_host(&[2.0]), 0.0, &vector_host(&[0.25]))
+            .rhs(
+                vector_tensor(&[2.0]).view(),
+                0.0,
+                vector_tensor(&[0.25]).view(),
+            )
             .unwrap();
         assert_close(lane_f64(&rhs, 0)[0], 0.375, ASSERT_TOL, "rhs(0.25)");
 
         let rhs_jac_mul = ode
             .rhs_jac_mul(
-                &vector_host(&[2.0]),
+                vector_tensor(&[2.0]).view(),
                 0.0,
-                &vector_host(&[0.25]),
-                &vector_host(&[3.0]),
+                vector_tensor(&[0.25]).view(),
+                vector_tensor(&[3.0]).view(),
             )
             .unwrap();
         assert_close(
@@ -375,7 +379,7 @@ fn dense_solution_matches_logistic_solution_for_every_solver_and_matrix_type() {
         for ode_solver in all_ode_solvers() {
             let ode = make_ode(matrix_type, ode_solver);
             let solution = ode
-                .solve_dense(&vector_host(&[2.0]), &vector_host(&t_eval))
+                .solve_dense(vector_tensor(&[2.0]).view(), vector_tensor(&t_eval).view())
                 .unwrap();
             assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);
         }
@@ -387,7 +391,7 @@ fn adaptive_solution_matches_logistic_solution() {
     let r = 2.0;
     let final_time = 1.0;
     let ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
-    let solution = ode.solve(&vector_host(&[r]), final_time).unwrap();
+    let solution = ode.solve(vector_tensor(&[r]).view(), final_time).unwrap();
     let ys = solution.get_ys().unwrap();
     let ys = lane_matrix(&ys, 0);
     let ts = lane_f64(&solution.get_ts().unwrap(), 0);
@@ -409,7 +413,7 @@ fn forward_sensitivities_match_analytic_derivative() {
         for ode_solver in all_ode_solvers() {
             let ode = make_ode(matrix_type, ode_solver);
             let solution = ode
-                .solve_fwd_sens(&vector_host(&[2.0]), &vector_host(&t_eval))
+                .solve_fwd_sens(vector_tensor(&[2.0]).view(), vector_tensor(&t_eval).view())
                 .unwrap();
             assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);
             let sens = solution.get_sens().unwrap();
@@ -435,7 +439,7 @@ fn continuous_adjoint_matches_analytic_gradient() {
         for ode_solver in [OdeSolverType::Bdf, OdeSolverType::Esdirk34] {
             let ode = make_ode(matrix_type, ode_solver);
             let (integral, gradient) = ode
-                .solve_continuous_adjoint(&vector_host(&[r]), final_time)
+                .solve_continuous_adjoint(vector_tensor(&[r]).view(), final_time)
                 .unwrap();
             let integral = lane_f64(&integral, 0);
             let gradient = lane_matrix(&gradient, 0);
@@ -471,7 +475,7 @@ fn split_adjoint_matches_analytic_gradient() {
     for matrix_type in ALL_MATRIX_TYPES {
         let ode = make_ode(matrix_type, OdeSolverType::Bdf);
         let (solution, checkpoint) = ode
-            .solve_adjoint_fwd(&vector_host(&[r]), &vector_host(&t_eval))
+            .solve_adjoint_fwd(vector_tensor(&[r]).view(), vector_tensor(&t_eval).view())
             .unwrap();
         let ys = solution.get_ys().unwrap();
         let ys = lane_matrix(&ys, 0);
@@ -479,7 +483,11 @@ fn split_adjoint_matches_analytic_gradient() {
             .map(|i| 2.0 * (ys[(0, i)] - data[i]))
             .collect();
         let gradient = ode
-            .solve_adjoint_bkwd(&solution, &checkpoint, &matrix_host(1, t_eval.len(), &dgdu))
+            .solve_adjoint_bkwd(
+                &solution,
+                &checkpoint,
+                matrix_tensor(1, t_eval.len(), &dgdu).view(),
+            )
             .unwrap();
         let gradient = lane_matrix(&gradient, 0);
         assert_close(
@@ -509,7 +517,7 @@ fn root_and_reset_callbacks_drive_hybrid_solve_and_sensitivities() {
         assert!(ode.has_stop().unwrap());
 
         let solution = ode
-            .solve_dense(&vector_host(&[r]), &vector_host(&t_eval))
+            .solve_dense(vector_tensor(&[r]).view(), vector_tensor(&t_eval).view())
             .unwrap();
         let ys = solution.get_ys().unwrap();
         let ys = lane_matrix(&ys, 0);
@@ -523,7 +531,7 @@ fn root_and_reset_callbacks_drive_hybrid_solve_and_sensitivities() {
         }
 
         let solution = ode
-            .solve_fwd_sens(&vector_host(&[r]), &vector_host(&t_eval))
+            .solve_fwd_sens(vector_tensor(&[r]).view(), vector_tensor(&t_eval).view())
             .unwrap();
         let sens = solution.get_sens().unwrap();
         let sens = lane_matrix(&sens[0], 0);
@@ -553,7 +561,7 @@ fn single_precision_callbacks_solve_logistic_model() {
     ode.set_atol(1e-5).unwrap();
     let t_eval = [0.25, 0.5, 1.0];
     let solution = ode
-        .solve_dense(&vector_host(&[2.0]), &vector_host(&t_eval))
+        .solve_dense(vector_tensor(&[2.0]).view(), vector_tensor(&t_eval).view())
         .unwrap();
     assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 1e-3);
     drop(solution);
@@ -577,13 +585,14 @@ fn missing_callbacks_are_reported_before_solving() {
     )
     .unwrap();
     configure(&ode);
-    let err = err_string(ode.solve_dense(&vector_host(&[2.0]), &vector_host(&t_eval)));
+    let err =
+        err_string(ode.solve_dense(vector_tensor(&[2.0]).view(), vector_tensor(&t_eval).view()));
     assert!(err.contains("requires the 'rhs_jac' callback"), "{err}");
     let err = err_string(ode.rhs_jac_mul(
-        &vector_host(&[2.0]),
+        vector_tensor(&[2.0]).view(),
         0.0,
-        &vector_host(&[0.25]),
-        &vector_host(&[1.0]),
+        vector_tensor(&[0.25]).view(),
+        vector_tensor(&[1.0]).view(),
     ));
     assert!(
         err.contains("OdeCallbacks: evaluating the equations requires the 'rhs_jac' callback"),
@@ -591,7 +600,7 @@ fn missing_callbacks_are_reported_before_solving() {
     );
     ode.set_ode_solver(OdeSolverType::Tsit45).unwrap();
     let solution = ode
-        .solve_dense(&vector_host(&[2.0]), &vector_host(&t_eval))
+        .solve_dense(vector_tensor(&[2.0]).view(), vector_tensor(&t_eval).view())
         .unwrap();
     assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);
 
@@ -607,9 +616,10 @@ fn missing_callbacks_are_reported_before_solving() {
     )
     .unwrap();
     configure(&ode);
-    ode.solve_dense(&vector_host(&[2.0]), &vector_host(&t_eval))
+    ode.solve_dense(vector_tensor(&[2.0]).view(), vector_tensor(&t_eval).view())
         .unwrap();
-    let err = err_string(ode.solve_fwd_sens(&vector_host(&[2.0]), &vector_host(&t_eval)));
+    let err =
+        err_string(ode.solve_fwd_sens(vector_tensor(&[2.0]).view(), vector_tensor(&t_eval).view()));
     assert!(err.contains("requires the 'rhs_sens' callback"), "{err}");
 
     // no out_adjoint: adjoint solves are rejected
@@ -624,7 +634,7 @@ fn missing_callbacks_are_reported_before_solving() {
     )
     .unwrap();
     configure(&ode);
-    let err = err_string(ode.solve_continuous_adjoint(&vector_host(&[2.0]), 1.0));
+    let err = err_string(ode.solve_continuous_adjoint(vector_tensor(&[2.0]).view(), 1.0));
     assert!(err.contains("requires the 'out_adjoint' callback"), "{err}");
 }
 
@@ -651,7 +661,7 @@ fn continuous_adjoint_without_out_integrates_the_state() {
         .unwrap();
         configure(&ode);
         let (integral, gradient) = ode
-            .solve_continuous_adjoint(&vector_host(&[r]), final_time)
+            .solve_continuous_adjoint(vector_tensor(&[r]).view(), final_time)
             .unwrap();
         let integral = lane_f64(&integral, 0);
         let gradient = lane_matrix(&gradient, 0);
@@ -693,7 +703,7 @@ fn continuous_adjoint_without_out_matches_identity_out_with_resets() {
         .unwrap();
         configure(&ode);
         let (integral, gradient) = ode
-            .solve_continuous_adjoint(&vector_host(&[r]), final_time)
+            .solve_continuous_adjoint(vector_tensor(&[r]).view(), final_time)
             .unwrap();
         let integral = lane_f64(&integral, 0)[0];
         let gradient = lane_matrix(&gradient, 0)[(0, 0)];
@@ -718,12 +728,19 @@ fn callback_error_codes_fail_the_solve() {
     )
     .unwrap();
     // the solver's error, with the callback failure as context
-    let err = err_string(ode.solve_dense(&vector_host(&[2.0]), &vector_host(&[0.5, 1.0])));
+    let err = err_string(ode.solve_dense(
+        vector_tensor(&[2.0]).view(),
+        vector_tensor(&[0.5, 1.0]).view(),
+    ));
     assert!(
         err.contains("(a callback failed during the solve: callback 'rhs' returned error code 7)"),
         "{err}"
     );
-    let err = err_string(ode.rhs(&vector_host(&[2.0]), 0.0, &vector_host(&[0.25])));
+    let err = err_string(ode.rhs(
+        vector_tensor(&[2.0]).view(),
+        0.0,
+        vector_tensor(&[0.25]).view(),
+    ));
     assert!(
         err.contains("callback 'rhs' returned error code 7"),
         "{err}"
@@ -749,7 +766,7 @@ fn solver_recovers_from_a_callback_failure() {
         .unwrap();
         configure(&ode);
         let solution = ode
-            .solve_dense(&vector_host(&[r]), &vector_host(&t_eval))
+            .solve_dense(vector_tensor(&[r]).view(), vector_tensor(&t_eval).view())
             .unwrap_or_else(|err| panic!("failure at rhs call {fail_call}: {err}"));
         assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, r, 1e-5);
     }
@@ -758,16 +775,20 @@ fn solver_recovers_from_a_callback_failure() {
 #[test]
 fn rhs_rejects_arguments_of_the_wrong_length() {
     let ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
-    let err = err_string(ode.rhs(&vector_host(&[2.0]), 0.0, &vector_host(&[0.25, 0.5])));
+    let err = err_string(ode.rhs(
+        vector_tensor(&[2.0]).view(),
+        0.0,
+        vector_tensor(&[0.25, 0.5]).view(),
+    ));
     assert!(
         err.contains("y: Expected 1 values in each lane, got 2"),
         "{err}"
     );
     let err = err_string(ode.rhs_jac_mul(
-        &vector_host(&[2.0]),
+        vector_tensor(&[2.0]).view(),
         0.0,
-        &vector_host(&[0.25]),
-        &vector_host(&[]),
+        vector_tensor(&[0.25]).view(),
+        vector_tensor(&[]).view(),
     ));
     assert!(
         err.contains("v: Expected 1 values in each lane, got 0"),
@@ -806,7 +827,7 @@ fn c_api_constructs_solves_and_frees_user_data_once() {
         configure(ode);
         let t_eval = [0.25, 0.5, 1.0];
         let solution = ode
-            .solve_dense(&vector_host(&[2.0]), &vector_host(&t_eval))
+            .solve_dense(vector_tensor(&[2.0]).view(), vector_tensor(&t_eval).view())
             .unwrap();
         assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);
     }
@@ -861,9 +882,9 @@ fn make_batched_ode(
 }
 
 /// The batch rates as a `[1, nbatch]` params array.
-fn batch_params() -> diffsol_c::host_array::HostArray {
+fn batch_params() -> Tensor {
     let lanes: Vec<&[f64]> = BATCH_RATES.iter().map(std::slice::from_ref).collect();
-    batched_vector_host(&lanes)
+    batched_vector_tensor(&lanes)
 }
 
 #[test]
@@ -876,7 +897,7 @@ fn batched_dense_solution_matches_each_lane() {
             let ode = make_batched_ode(matrix_type, ode_solver, nbatch);
             assert_eq!(ode.get_nbatch().unwrap(), nbatch);
             let solution = ode
-                .solve_dense(&batch_params(), &vector_host(&t_eval))
+                .solve_dense(batch_params().view(), vector_tensor(&t_eval).view())
                 .unwrap();
             let ts = lane_f64(&solution.get_ts().unwrap(), 0);
             assert_eq!(ts, t_eval.to_vec());
@@ -901,7 +922,7 @@ fn batched_adaptive_solution_shares_the_time_points() {
     let nbatch = BATCH_RATES.len();
     for matrix_type in ALL_MATRIX_TYPES {
         let ode = make_batched_ode(matrix_type, OdeSolverType::Bdf, nbatch);
-        let solution = ode.solve(&batch_params(), 1.0).unwrap();
+        let solution = ode.solve(batch_params().view(), 1.0).unwrap();
         let ts = lane_f64(&solution.get_ts().unwrap(), 0);
         let ys = solution.get_ys().unwrap();
         assert_eq!(ys.shape(), &[1, ts.len(), nbatch]);
@@ -920,6 +941,54 @@ fn batched_adaptive_solution_shares_the_time_points() {
 }
 
 #[test]
+fn solution_tensors_share_the_solution_and_outlive_it() {
+    let t_eval = [0.25, 0.5, 1.0];
+    let nbatch = BATCH_RATES.len();
+    for matrix_type in ALL_MATRIX_TYPES {
+        let ode = make_batched_ode(matrix_type, OdeSolverType::Bdf, nbatch);
+        // a solve to a final time, which grows `ys` with spare columns
+        let adaptive = ode.solve(batch_params().view(), 1.0).unwrap();
+        let sens_solution = ode
+            .solve_fwd_sens(batch_params().view(), vector_tensor(&t_eval).view())
+            .unwrap();
+        let (ts, ys) = (adaptive.get_ts().unwrap(), adaptive.get_ys().unwrap());
+        let sens = sens_solution.get_sens().unwrap();
+
+        // the tensors show the data of the solution, with no copy
+        assert_eq!(adaptive.get_ts().unwrap().data_ptr(), ts.data_ptr());
+        assert_eq!(adaptive.get_ys().unwrap().data_ptr(), ys.data_ptr());
+        assert_eq!(
+            sens_solution.get_sens().unwrap()[0].data_ptr(),
+            sens[0].data_ptr()
+        );
+
+        // the tensors keep the solution alive after the solution and the ODE are dropped
+        drop((adaptive, sens_solution, ode));
+        let ts = lane_f64(&ts, 0);
+        assert_eq!(ys.shape(), &[1, ts.len(), nbatch]);
+        assert_eq!(sens[0].shape(), &[1, t_eval.len(), nbatch]);
+        for (b, &r) in BATCH_RATES.iter().enumerate() {
+            for (i, &t) in ts.iter().enumerate() {
+                assert_close(
+                    value_f64(&ys, &[0, i, b]),
+                    logistic_state(LOGISTIC_X0, r, t),
+                    5e-4,
+                    &format!("{matrix_type:?} lane {b} y(t = {t})"),
+                );
+            }
+            for (i, &t) in t_eval.iter().enumerate() {
+                assert_close(
+                    value_f64(&sens[0], &[0, i, b]),
+                    logistic_state_dr(LOGISTIC_X0, r, t),
+                    5e-3,
+                    &format!("{matrix_type:?} lane {b} dy/dr(t = {t})"),
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn batched_forward_sensitivities_match_each_lane() {
     let t_eval = [0.25, 0.5, 1.0];
     let nbatch = BATCH_RATES.len();
@@ -928,7 +997,7 @@ fn batched_forward_sensitivities_match_each_lane() {
             let label = format!("{matrix_type:?}/{ode_solver:?}");
             let ode = make_batched_ode(matrix_type, ode_solver, nbatch);
             let solution = ode
-                .solve_fwd_sens(&batch_params(), &vector_host(&t_eval))
+                .solve_fwd_sens(batch_params().view(), vector_tensor(&t_eval).view())
                 .unwrap();
             let sens = solution.get_sens().unwrap();
             assert_eq!(sens.len(), 1);
@@ -957,7 +1026,7 @@ fn batched_continuous_adjoint_matches_each_lane() {
             let label = format!("{matrix_type:?}/{ode_solver:?}");
             let ode = make_batched_ode(matrix_type, ode_solver, nbatch);
             let (integral, gradient) = ode
-                .solve_continuous_adjoint(&batch_params(), final_time)
+                .solve_continuous_adjoint(batch_params().view(), final_time)
                 .unwrap();
             assert_eq!(integral.shape(), &[1, nbatch], "{label}");
             assert_eq!(gradient.shape(), &[1, 1, nbatch], "{label}");
@@ -988,7 +1057,7 @@ fn batched_split_adjoint_matches_each_lane() {
     for matrix_type in ALL_MATRIX_TYPES {
         let ode = make_batched_ode(matrix_type, OdeSolverType::Bdf, nbatch);
         let (solution, checkpoint) = ode
-            .solve_adjoint_fwd(&batch_params(), &vector_host(&t_eval))
+            .solve_adjoint_fwd(batch_params().view(), vector_tensor(&t_eval).view())
             .unwrap();
         let ys = solution.get_ys().unwrap();
         // dgdu as `[1, nt, nbatch]`, in column-major order
@@ -996,9 +1065,9 @@ fn batched_split_adjoint_matches_each_lane() {
             .flat_map(|b| (0..t_eval.len()).map(move |i| (b, i)))
             .map(|(b, i)| 2.0 * (value_f64(&ys, &[0, i, b]) - data[i]))
             .collect();
-        let dgdu = diffsol_c::host_array::HostArray::from_vec(dgdu, vec![1, t_eval.len(), nbatch]);
+        let dgdu = Tensor::from_vec(dgdu, &[1, t_eval.len(), nbatch]);
         let gradient = ode
-            .solve_adjoint_bkwd(&solution, &checkpoint, &dgdu)
+            .solve_adjoint_bkwd(&solution, &checkpoint, dgdu.view())
             .unwrap();
         assert_eq!(gradient.shape(), &[1, 1, nbatch]);
         for (b, &r) in BATCH_RATES.iter().enumerate() {
@@ -1028,11 +1097,11 @@ fn batched_split_adjoint_copies_a_one_lane_dgdu_to_each_lane() {
     for matrix_type in ALL_MATRIX_TYPES {
         let ode = make_batched_ode(matrix_type, OdeSolverType::Bdf, nbatch);
         let (solution, checkpoint) = ode
-            .solve_adjoint_fwd(&batch_params(), &vector_host(&t_eval))
+            .solve_adjoint_fwd(batch_params().view(), vector_tensor(&t_eval).view())
             .unwrap();
-        let dgdu = matrix_host(1, t_eval.len(), &[1.0; 4]);
+        let dgdu = matrix_tensor(1, t_eval.len(), &[1.0; 4]);
         let gradient = ode
-            .solve_adjoint_bkwd(&solution, &checkpoint, &dgdu)
+            .solve_adjoint_bkwd(&solution, &checkpoint, dgdu.view())
             .unwrap();
         assert_eq!(gradient.shape(), &[1, 1, nbatch]);
         for (b, &r) in BATCH_RATES.iter().enumerate() {
@@ -1058,7 +1127,7 @@ fn batched_evaluations_use_each_lane() {
     for matrix_type in ALL_MATRIX_TYPES {
         let ode = make_batched_ode(matrix_type, OdeSolverType::Bdf, nbatch);
 
-        let y0 = ode.y0(&batch_params()).unwrap();
+        let y0 = ode.y0(batch_params().view()).unwrap();
         assert_eq!(y0.shape(), &[1, nbatch]);
         for b in 0..nbatch {
             assert_eq!(lane_f64(&y0, b), vec![LOGISTIC_X0]);
@@ -1067,14 +1136,18 @@ fn batched_evaluations_use_each_lane() {
         let y_lanes: Vec<&[f64]> = ys.iter().map(std::slice::from_ref).collect();
         let v_lanes: Vec<&[f64]> = vs.iter().map(std::slice::from_ref).collect();
         let rhs = ode
-            .rhs(&batch_params(), 0.0, &batched_vector_host(&y_lanes))
+            .rhs(
+                batch_params().view(),
+                0.0,
+                batched_vector_tensor(&y_lanes).view(),
+            )
             .unwrap();
         let jac_mul = ode
             .rhs_jac_mul(
-                &batch_params(),
+                batch_params().view(),
                 0.0,
-                &batched_vector_host(&y_lanes),
-                &batched_vector_host(&v_lanes),
+                batched_vector_tensor(&y_lanes).view(),
+                batched_vector_tensor(&v_lanes).view(),
             )
             .unwrap();
         for (b, &r) in BATCH_RATES.iter().enumerate() {
@@ -1094,7 +1167,9 @@ fn batched_evaluations_use_each_lane() {
         }
 
         // one lane of `y` broadcasts to all lanes
-        let rhs = ode.rhs(&batch_params(), 0.0, &vector_host(&[0.5])).unwrap();
+        let rhs = ode
+            .rhs(batch_params().view(), 0.0, vector_tensor(&[0.5]).view())
+            .unwrap();
         for (b, &r) in BATCH_RATES.iter().enumerate() {
             assert_close(
                 lane_f64(&rhs, b)[0],
@@ -1124,7 +1199,7 @@ fn one_lane_of_params_broadcasts_to_all_lanes() {
     let nbatch = 3;
     let ode = make_batched_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf, nbatch);
     let solution = ode
-        .solve_dense(&vector_host(&[2.0]), &vector_host(&t_eval))
+        .solve_dense(vector_tensor(&[2.0]).view(), vector_tensor(&t_eval).view())
         .unwrap();
     let ys = solution.get_ys().unwrap();
     assert_eq!(ys.shape(), &[1, t_eval.len(), nbatch]);
@@ -1143,15 +1218,15 @@ fn one_lane_of_params_broadcasts_to_all_lanes() {
 #[test]
 fn batched_inputs_with_the_wrong_number_of_lanes_are_rejected() {
     let ode = make_batched_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf, 3);
-    let err = err_string(ode.solve(&batched_vector_host(&[&[1.0], &[2.0]]), 1.0));
+    let err = err_string(ode.solve(batched_vector_tensor(&[&[1.0], &[2.0]]).view(), 1.0));
     assert!(
         err.contains("params: Expected 1 or 3 lanes, got 2"),
         "{err}"
     );
     let err = err_string(ode.rhs(
-        &batch_params(),
+        batch_params().view(),
         0.0,
-        &batched_vector_host(&[&[0.1], &[0.2]]),
+        batched_vector_tensor(&[&[0.1], &[0.2]]).view(),
     ));
     assert!(err.contains("y: Expected 1 or 3 lanes, got 2"), "{err}");
 }
@@ -1162,17 +1237,17 @@ fn t_eval_is_a_1d_array_or_one_lane() {
     let times = [0.5, 1.0];
     // all the lanes use the same times, so `[nt]` and `[nt, 1]` give the same solution
     let one_lane = ode
-        .solve_dense(&batch_params(), &vector_host(&times))
+        .solve_dense(batch_params().view(), vector_tensor(&times).view())
         .unwrap();
-    let flat = HostArray::from_vec(times.to_vec(), vec![times.len()]);
-    let flat = ode.solve_dense(&batch_params(), &flat).unwrap();
+    let flat = TensorView::from_slice(&times, &[times.len()]);
+    let flat = ode.solve_dense(batch_params().view(), flat).unwrap();
     assert_eq!(
         lane_f64(&one_lane.get_ts().unwrap(), 0),
         lane_f64(&flat.get_ts().unwrap(), 0)
     );
     // more than one lane of times is an error
-    let two_lanes = batched_vector_host(&[&times, &times]);
-    let err = err_string(ode.solve_dense(&batch_params(), &two_lanes));
+    let two_lanes = batched_vector_tensor(&[&times, &times]);
+    let err = err_string(ode.solve_dense(batch_params().view(), two_lanes.view()));
     assert!(
         err.contains("t_eval: Expected an [nt] or an [nt, 1] array, got the shape [2, 2]"),
         "{err}"

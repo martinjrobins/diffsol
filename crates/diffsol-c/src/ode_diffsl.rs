@@ -487,7 +487,7 @@ mod tests {
         test_support::{
             assert_close, hybrid_logistic_diffsl_code, hybrid_logistic_state, lane_f64,
             lane_matrix, logistic_diffsl_code, logistic_state, two_param_logistic_diffsl_code,
-            vector_host, LOGISTIC_X0,
+            vector_tensor, LOGISTIC_X0,
         },
     };
 
@@ -594,13 +594,17 @@ mod tests {
         assert_eq!(solve.param_rtol(), None);
         assert_eq!(solve.param_atol(), None);
 
-        let y0 = lane_f64(&solve.y0(&vector_host(&[2.0])).unwrap(), 0);
+        let y0 = lane_f64(&solve.y0(vector_tensor(&[2.0]).view()).unwrap(), 0);
         assert_eq!(y0.len(), 1);
         assert_close(y0[0], LOGISTIC_X0, tol, "y0[0]");
 
         let rhs = lane_f64(
             &solve
-                .rhs(&vector_host(&[2.0]), 0.0, &vector_host(&[0.25]))
+                .rhs(
+                    vector_tensor(&[2.0]).view(),
+                    0.0,
+                    vector_tensor(&[0.25]).view(),
+                )
                 .unwrap(),
             0,
         );
@@ -610,10 +614,10 @@ mod tests {
         let jac_mul = lane_f64(
             &solve
                 .rhs_jac_mul(
-                    &vector_host(&[2.0]),
+                    vector_tensor(&[2.0]).view(),
                     0.0,
-                    &vector_host(&[0.25]),
-                    &vector_host(&[3.0]),
+                    vector_tensor(&[0.25]).view(),
+                    vector_tensor(&[3.0]).view(),
                 )
                 .unwrap(),
             0,
@@ -637,12 +641,12 @@ mod tests {
             .solve(
                 OdeSolverType::Bdf,
                 LinearSolverType::Lu,
-                &vector_host(&[2.0]),
+                vector_tensor(&[2.0]).view(),
                 1.0,
             )
             .unwrap();
-        let ts = lane_f64(&soln.get_ts(), 0);
-        let ys = lane_matrix(&soln.get_ys(), 0);
+        let ts = lane_f64(&soln.clone().get_ts(), 0);
+        let ys = lane_matrix(&soln.clone().get_ys(), 0);
         assert_close(*ts.last().unwrap(), 1.0, tol, "solve final time");
         assert_close(
             ys[(0, ts.len() - 1)],
@@ -656,12 +660,12 @@ mod tests {
             .solve_dense(
                 OdeSolverType::Tsit45,
                 LinearSolverType::Lu,
-                &vector_host(&[2.0]),
-                &vector_host(&[0.25, 0.5, 1.0]),
+                vector_tensor(&[2.0]).view(),
+                vector_tensor(&[0.25, 0.5, 1.0]).view(),
             )
             .unwrap();
-        let ts = lane_f64(&dense.get_ts(), 0);
-        let ys = lane_matrix(&dense.get_ys(), 0);
+        let ts = lane_f64(&dense.clone().get_ts(), 0);
+        let ys = lane_matrix(&dense.clone().get_ys(), 0);
         assert_eq!(ts, vec![0.25, 0.5, 1.0]);
         for (i, &t) in ts.iter().enumerate() {
             assert_close(
@@ -676,7 +680,7 @@ mod tests {
         let err = match solve.solve(
             OdeSolverType::Bdf,
             LinearSolverType::Default,
-            &vector_host(&[]),
+            vector_tensor(&[]).view(),
             1.0,
         ) {
             Ok(_) => panic!("expected parameter count mismatch"),
@@ -696,12 +700,12 @@ mod tests {
             .solve(
                 OdeSolverType::Bdf,
                 LinearSolverType::Lu,
-                &vector_host(&[2.0]),
+                vector_tensor(&[2.0]).view(),
                 2.0,
             )
             .unwrap();
-        let hybrid_ts = lane_f64(&hybrid.get_ts(), 0);
-        let hybrid_ys = lane_matrix(&hybrid.get_ys(), 0);
+        let hybrid_ts = lane_f64(&hybrid.clone().get_ts(), 0);
+        let hybrid_ys = lane_matrix(&hybrid.clone().get_ys(), 0);
         assert_close(*hybrid_ts.last().unwrap(), 2.0, tol, "solve final time");
         assert_close(
             hybrid_ys[(0, hybrid_ts.len() - 1)],
@@ -720,12 +724,12 @@ mod tests {
             .solve_dense(
                 OdeSolverType::Tsit45,
                 LinearSolverType::Lu,
-                &vector_host(&[2.0]),
-                &vector_host(&[0.5, 1.0, 1.5, 2.0]),
+                vector_tensor(&[2.0]).view(),
+                vector_tensor(&[0.5, 1.0, 1.5, 2.0]).view(),
             )
             .unwrap();
-        let hybrid_dense_ts = lane_f64(&hybrid_dense.get_ts(), 0);
-        let hybrid_dense_ys = lane_matrix(&hybrid_dense.get_ys(), 0);
+        let hybrid_dense_ts = lane_f64(&hybrid_dense.clone().get_ts(), 0);
+        let hybrid_dense_ys = lane_matrix(&hybrid_dense.clone().get_ys(), 0);
         assert_eq!(hybrid_dense_ts, vec![0.5, 1.0, 1.5, 2.0]);
         for (i, &t) in hybrid_dense_ts.iter().enumerate() {
             assert_close(
@@ -746,11 +750,11 @@ mod tests {
             .solve_fwd_sens(
                 OdeSolverType::Bdf,
                 LinearSolverType::Lu,
-                &vector_host(&[2.0]),
-                &vector_host(&t_eval),
+                vector_tensor(&[2.0]).view(),
+                vector_tensor(&t_eval).view(),
             )
             .unwrap();
-        let sens_values = sens.get_sens();
+        let sens_values = sens.clone().get_sens();
         assert_eq!(sens_values.len(), 1);
         let sens_matrix = lane_matrix(&sens_values.into_iter().next().unwrap(), 0);
         for (i, &t) in t_eval.iter().enumerate() {
@@ -772,11 +776,11 @@ mod tests {
             .solve_fwd_sens(
                 OdeSolverType::Bdf,
                 LinearSolverType::Lu,
-                &vector_host(&[2.0]),
-                &vector_host(&t_eval),
+                vector_tensor(&[2.0]).view(),
+                vector_tensor(&t_eval).view(),
             )
             .unwrap();
-        let sens_values = hybrid_sens.get_sens();
+        let sens_values = hybrid_sens.clone().get_sens();
         let sens_matrix = lane_matrix(&sens_values.into_iter().next().unwrap(), 0);
         for (i, &t) in t_eval.iter().enumerate() {
             assert_close(
@@ -844,12 +848,12 @@ mod tests {
     #[test]
     fn setup_problem_validates_parameter_count_for_cranelift() {
         let mut solve = make_generic_solve::<f64, diffsol::CraneliftJitModule>();
-        let err = solve.setup_problem(&vector_host(&[])).unwrap_err();
+        let err = solve.setup_problem(vector_tensor(&[]).view()).unwrap_err();
         assert!(err
             .to_string()
             .contains("params: Expected 1 values in each lane, got 0"));
 
-        solve.setup_problem(&vector_host(&[2.0])).unwrap();
+        solve.setup_problem(vector_tensor(&[2.0]).view()).unwrap();
         let mut params = solve.problem.context().vector_zeros(1);
         solve.problem.eqn.get_params(&mut params);
         assert_eq!(params.get_index(0), 2.0);
@@ -859,12 +863,12 @@ mod tests {
     #[test]
     fn setup_problem_validates_parameter_count_for_llvm() {
         let mut solve = make_generic_solve::<f64, diffsol::LlvmModule>();
-        let err = solve.setup_problem(&vector_host(&[])).unwrap_err();
+        let err = solve.setup_problem(vector_tensor(&[]).view()).unwrap_err();
         assert!(err
             .to_string()
             .contains("params: Expected 1 values in each lane, got 0"));
 
-        solve.setup_problem(&vector_host(&[2.0])).unwrap();
+        solve.setup_problem(vector_tensor(&[2.0]).view()).unwrap();
         let mut params = solve.problem.context().vector_zeros(1);
         solve.problem.eqn.get_params(&mut params);
         assert_eq!(params.get_index(0), 2.0);

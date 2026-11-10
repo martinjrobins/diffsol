@@ -33,9 +33,20 @@ You configure the solver with these runtime enum types:
 A solve returns a
 [SolutionWrapper](https://docs.rs/diffsol-c/latest/diffsol_c/solution_wrapper/struct.SolutionWrapper.html).
 From it, you can get the time points, the state values and the sensitivities as
-[HostArray](https://docs.rs/diffsol-c/latest/diffsol_c/host_array/struct.HostArray.html)
-objects. A `HostArray` is a read-only view of data that Rust owns. You can read it without a
-copy.
+[Tensor](https://docs.rs/diffsol-c/latest/diffsol_c/tensor/struct.Tensor.html)
+objects. A `Tensor` shares the data of the solution, with no copy, and keeps the solution alive,
+so it stays valid after the `SolutionWrapper` is dropped.
+
+The inputs of the solve methods, for example the parameters and the times `t_eval`, are
+[TensorView](https://docs.rs/diffsol-c/latest/diffsol_c/tensor/struct.TensorView.html) objects.
+A `TensorView` borrows the data of the caller, with no copy. It is small and only on the stack,
+and it has at most 3 axes. Make one from a slice with `TensorView::from_slice`, or from a
+`Tensor` with `Tensor::view`.
+
+The values on the first axis of a tensor or a view are always adjacent (column-major, or Fortran,
+order), so each column `[:, j, k]` is one slice: `column` and `columns` give these slices with no
+copy. A view of a row-major array is not possible: make a column-major copy first, for example
+with `numpy.asfortranarray`.
 
 The arrays use the column-major order of diffsol, and the last axis of an array of lanes is the
 lane. For example, the parameters are an `nparams x nlanes`

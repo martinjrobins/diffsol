@@ -1,4 +1,4 @@
-use diffsol_c::host_array::HostArray;
+use diffsol_c::tensor::TensorView;
 use diffsol_c::{
     JitBackendType, LinearSolverType, MatrixType, OdeSolverType, OdeWrapper, ScalarType,
 };
@@ -32,12 +32,13 @@ fn main() {
     // ANCHOR_END: configure
 
     // ANCHOR: solve_dense
-    let t_eval = vec![0.0, 0.25, 0.5, 0.75, 1.0];
+    let times = vec![0.0, 0.25, 0.5, 0.75, 1.0];
+    // the inputs are views of Rust slices, with no copy
     // params is a `[nparams, nlanes]` array: here one lane with one parameter
-    let params = HostArray::from_vec(vec![2.0], vec![1, 1]);
-    // t_eval is a `[nt]` array that owns the times
-    let t_eval = HostArray::from_vec(t_eval.clone(), vec![t_eval.len()]);
-    let solution = ode.solve_dense(&params, &t_eval).unwrap();
+    let params = TensorView::from_slice(&[2.0], &[1, 1]);
+    // t_eval is a `[nt]` array
+    let t_eval = TensorView::from_slice(&times, &[times.len()]);
+    let solution = ode.solve_dense(params, t_eval).unwrap();
     // ANCHOR_END: solve_dense
 
     // ANCHOR: extract

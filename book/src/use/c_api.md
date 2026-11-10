@@ -128,13 +128,14 @@ All C API functions use the same rules:
 - After a failure, `diffsol_last_error_message()` gives a description of the error. The error is
   kept for each thread.
 - The library owns each object that it returns, for example an `OdeWrapper`, a
-  `SolutionWrapper` or a `HostArray`. Free each object with its free function, for example
+  `SolutionWrapper` or a `Tensor`. Free each object with its free function, for example
   `diffsol_ode_free`.
 - The enum values are `int32_t` constants in the header, for example
   `DIFFSOL_MATRIX_TYPE_NALGEBRA_DENSE`, `DIFFSOL_LINEAR_SOLVER_TYPE_DEFAULT`,
   `DIFFSOL_ODE_SOLVER_TYPE_BDF` and `DIFFSOL_JIT_BACKEND_TYPE_CRANELIFT`.
-- A solution array (`HostArray`) gives a pointer to its data, its dimensions and its strides.
-  The strides are in bytes.
+- A solution array (`Tensor`) gives a pointer to its data, its dimensions and its strides.
+  The strides are in bytes. A `Tensor` shares the data of the solution, with no copy, and stays
+  valid after you free the `SolutionWrapper`.
 - The arrays use the column-major order of diffsol: the first axis changes fastest.
 - An ODE has `nbatch` lanes. The last axis of an array of lanes is
   always the lane, also when `nbatch` is 1. A state or a parameter vector is an `n x nbatch`
@@ -164,8 +165,8 @@ The functions are in these modules of the crate documentation:
   [ode_solver_type_c](https://docs.rs/diffsol-c/latest/diffsol_c/ode_solver_type_c/index.html)
   and [jit_c](https://docs.rs/diffsol-c/latest/diffsol_c/jit_c/index.html): the enum values,
   their names, and their checks.
-- [host_array_c](https://docs.rs/diffsol-c/latest/diffsol_c/host_array_c/index.html): read and
-  free `HostArray` data.
+- [tensor_c](https://docs.rs/diffsol-c/latest/diffsol_c/tensor_c/index.html): read and
+  free `Tensor` data.
 - [error_c](https://docs.rs/diffsol-c/latest/diffsol_c/error_c/index.html): get and clear the
   error of the thread.
 - [string_c](https://docs.rs/diffsol-c/latest/diffsol_c/string_c/index.html): allocate and free

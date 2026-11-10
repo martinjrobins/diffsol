@@ -100,18 +100,18 @@ int main(void) {
     }
 
     /* ys is an (nout x n_eval x nbatch) array. Read it with its strides, which are in bytes. */
-    HostArray *ys = NULL;
+    Tensor *ys = NULL;
     if (diffsol_solution_wrapper_get_ys(solution, &ys) != DIFFSOL_OK) {
         diffsol_solution_wrapper_free(solution);
         diffsol_ode_free(ode);
         return fail("diffsol_solution_wrapper_get_ys");
     }
-    const uint8_t *data_ptr = diffsol_host_array_ptr(ys);
-    const size_t col_stride = diffsol_host_array_stride(ys, 1);
+    const uint8_t *data_ptr = diffsol_tensor_ptr(ys);
+    const size_t col_stride = diffsol_tensor_stride(ys, 1);
 
     int status = 0;
     printf("%8s %14s %14s\n", "t", "y", "exact");
-    for (size_t j = 0; j < diffsol_host_array_dim(ys, 1); j++) {
+    for (size_t j = 0; j < diffsol_tensor_dim(ys, 1); j++) {
         const double y = *(const double *)(data_ptr + j * col_stride);
         const double expected = exact(params[0], t_eval[j]);
         printf("%8.3f %14.8f %14.8f\n", t_eval[j], y, expected);
@@ -121,7 +121,7 @@ int main(void) {
     }
     printf("rhs was called %d times\n", data.rhs_calls);
 
-    diffsol_host_array_free(ys);
+    diffsol_tensor_free(ys);
     diffsol_solution_wrapper_free(solution);
     diffsol_ode_free(ode);
     /* ANCHOR_END: solve */

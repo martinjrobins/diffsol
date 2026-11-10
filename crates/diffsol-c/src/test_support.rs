@@ -19,13 +19,8 @@ use crate::error_c::{
     diffsol_error_code, diffsol_last_error_file, diffsol_last_error_line,
     diffsol_last_error_message,
 };
-use crate::host_array::HostArray;
-use crate::host_array_c::{
-    diffsol_host_array_dim, diffsol_host_array_dtype, diffsol_host_array_free,
-    diffsol_host_array_ndim, diffsol_host_array_ptr,
-};
 #[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-llvm"))]
-use crate::ode_c::diffsol_host_array_list_free;
+use crate::ode_c::diffsol_tensor_list_free;
 use crate::scalar_type::ScalarType;
 use crate::scalar_type_c::scalar_type_to_i32;
 use crate::solution_wrapper::SolutionWrapper;
@@ -35,6 +30,11 @@ use crate::solution_wrapper::SolutionWrapper;
     feature = "diffsl-llvm"
 ))]
 use crate::solution_wrapper_c::diffsol_solution_wrapper_free;
+use crate::tensor::Tensor;
+use crate::tensor_c::{
+    diffsol_tensor_dim, diffsol_tensor_dtype, diffsol_tensor_free, diffsol_tensor_ndim,
+    diffsol_tensor_ptr,
+};
 
 pub(crate) const ASSERT_TOL: f64 = 1e-5;
 #[cfg(any(
@@ -168,49 +168,49 @@ pub(crate) fn available_jit_backends() -> Vec<crate::jit::JitBackendType> {
 }
 
 /// An `[n, 1]` array: one lane of values, for example `params`, `y` or `t_eval`.
-pub(crate) fn vector_host(values: &[f64]) -> HostArray {
-    batched_vector_host(&[values])
+pub(crate) fn vector_tensor(values: &[f64]) -> Tensor {
+    batched_vector_tensor(&[values])
 }
 
 /// An `[n, nlanes]` array from `nlanes` lanes of `n` values.
-pub(crate) fn batched_vector_host(lanes: &[&[f64]]) -> HostArray {
+pub(crate) fn batched_vector_tensor(lanes: &[&[f64]]) -> Tensor {
     let n = lanes.first().map_or(0, |lane| lane.len());
     assert!(
         lanes.iter().all(|lane| lane.len() == n),
         "lanes must have the same length"
     );
-    HostArray::from_vec(lanes.concat(), vec![n, lanes.len()])
+    Tensor::from_vec(lanes.concat(), &[n, lanes.len()])
 }
 
 #[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-llvm"))]
-pub(crate) fn matrix_host(rows: usize, cols: usize, values_col_major: &[f64]) -> HostArray {
+pub(crate) fn matrix_tensor(rows: usize, cols: usize, values_col_major: &[f64]) -> Tensor {
     // one lane: `[rows, cols, 1]`, in the column-major order of the values
-    HostArray::from_vec(values_col_major.to_vec(), vec![rows, cols, 1])
+    Tensor::from_vec(values_col_major.to_vec(), &[rows, cols, 1])
 }
 
-/// The value of `array` at `index` as `f64`. The array has the scalar type of the solver, `f32`
+/// The value of `tensor` at `index` as `f64`. The array has the scalar type of the solver, `f32`
 /// or `f64`.
-pub(crate) fn value_f64(array: &HostArray, index: &[usize]) -> f64 {
-    match array.index::<f64>(index) {
+pub(crate) fn value_f64(tensor: &Tensor, index: &[usize]) -> f64 {
+    match tensor.index::<f64>(index) {
         Ok(&value) => value,
-        Err(_) => *array.index::<f32>(index).unwrap() as f64,
+        Err(_) => *tensor.index::<f32>(index).unwrap() as f64,
     }
 }
 
 /// Lane `lane` of a `[n, nlanes]` array, or the values of a 1D array (lane 0), as `f64` values.
-pub(crate) fn lane_f64(array: &HostArray, lane: usize) -> Vec<f64> {
-    match array.shape() {
-        [n] => (0..*n).map(|i| value_f64(array, &[i])).collect(),
-        [n, _] => (0..*n).map(|i| value_f64(array, &[i, lane])).collect(),
+pub(crate) fn lane_f64(tensor: &Tensor, lane: usize) -> Vec<f64> {
+    match tensor.shape() {
+        [n] => (0..*n).map(|i| value_f64(tensor, &[i])).collect(),
+        [n, _] => (0..*n).map(|i| value_f64(tensor, &[i, lane])).collect(),
         shape => panic!("expected a 1D or 2D array, got the shape {shape:?}"),
     }
 }
 
 /// Lane `lane` of a `[nrows, ncols, nlanes]` array as an `f64` matrix.
-pub(crate) fn lane_matrix(array: &HostArray, lane: usize) -> ndarray::Array2<f64> {
-    let shape = array.shape();
+pub(crate) fn lane_matrix(tensor: &Tensor, lane: usize) -> ndarray::Array2<f64> {
+    let shape = tensor.shape();
     ndarray::Array2::from_shape_fn((shape[0], shape[1]), |(i, j)| {
-        value_f64(array, &[i, j, lane])
+        value_f64(tensor, &[i, j, lane])
     })
 }
 
@@ -294,8 +294,8 @@ pub(crate) fn assert_solution_tail(
     r: f64,
     tol: f64,
 ) {
-    let ys_array = solution.get_ys().unwrap();
-    let ys = lane_matrix(&ys_array, 0);
+    let ys_tensor = solution.get_ys().unwrap();
+    let ys = lane_matrix(&ys_tensor, 0);
     let ts = lane_f64(&solution.get_ts().unwrap(), 0);
 
     assert_eq!(ys.nrows(), 1, "expected a single state/output row");
@@ -343,38 +343,38 @@ pub(crate) unsafe fn ffi_free_solution(ptr: *mut SolutionWrapper) {
     feature = "diffsl-cranelift",
     feature = "diffsl-llvm"
 ))]
-pub(crate) unsafe fn ffi_read_host_array_1d(ptr: *mut HostArray) -> Vec<f64> {
+pub(crate) unsafe fn ffi_read_tensor_1d(ptr: *mut Tensor) -> Vec<f64> {
     unsafe { ffi_read_first_axis(ptr, 1) }
 }
 
 /// Read a `[n, 1]` array (one lane) and free it.
-pub(crate) unsafe fn ffi_read_host_array_vector(ptr: *mut HostArray) -> Vec<f64> {
+pub(crate) unsafe fn ffi_read_tensor_vector(ptr: *mut Tensor) -> Vec<f64> {
     unsafe { ffi_read_first_axis(ptr, 2) }
 }
 
 /// Read an `ndim` array with length 1 on each axis but the first, and free it.
-unsafe fn ffi_read_first_axis(ptr: *mut HostArray, ndim: usize) -> Vec<f64> {
-    assert!(!ptr.is_null(), "host array pointer must not be null");
-    assert_eq!(unsafe { diffsol_host_array_ndim(ptr) }, ndim);
+unsafe fn ffi_read_first_axis(ptr: *mut Tensor, ndim: usize) -> Vec<f64> {
+    assert!(!ptr.is_null(), "tensor pointer must not be null");
+    assert_eq!(unsafe { diffsol_tensor_ndim(ptr) }, ndim);
     for axis in 1..ndim {
         assert_eq!(
-            unsafe { diffsol_host_array_dim(ptr, axis) },
+            unsafe { diffsol_tensor_dim(ptr, axis) },
             1,
             "expected one lane"
         );
     }
     assert_eq!(
-        unsafe { diffsol_host_array_dtype(ptr) },
+        unsafe { diffsol_tensor_dtype(ptr) },
         scalar_type_to_i32(ScalarType::F64)
     );
-    let len = unsafe { diffsol_host_array_dim(ptr, 0) };
-    let stride = unsafe { crate::host_array_c::diffsol_host_array_stride(ptr, 0) };
-    let base_ptr = unsafe { diffsol_host_array_ptr(ptr) };
+    let len = unsafe { diffsol_tensor_dim(ptr, 0) };
+    let stride = unsafe { crate::tensor_c::diffsol_tensor_stride(ptr, 0) };
+    let base_ptr = unsafe { diffsol_tensor_ptr(ptr) };
     let values = (0..len)
         .map(|i| unsafe { *(base_ptr.add(i * stride) as *const f64) })
         .collect();
     unsafe {
-        diffsol_host_array_free(ptr);
+        diffsol_tensor_free(ptr);
     }
     values
 }
@@ -385,23 +385,23 @@ unsafe fn ffi_read_first_axis(ptr: *mut HostArray, ndim: usize) -> Vec<f64> {
     feature = "diffsl-llvm"
 ))]
 /// Read a `[rows, cols, 1]` array (one lane) and free it. The values are in column-major order.
-pub(crate) unsafe fn ffi_read_host_array_matrix(ptr: *mut HostArray) -> (usize, usize, Vec<f64>) {
-    assert!(!ptr.is_null(), "host array pointer must not be null");
-    assert_eq!(unsafe { diffsol_host_array_ndim(ptr) }, 3);
+pub(crate) unsafe fn ffi_read_tensor_matrix(ptr: *mut Tensor) -> (usize, usize, Vec<f64>) {
+    assert!(!ptr.is_null(), "tensor pointer must not be null");
+    assert_eq!(unsafe { diffsol_tensor_ndim(ptr) }, 3);
     assert_eq!(
-        unsafe { diffsol_host_array_dim(ptr, 2) },
+        unsafe { diffsol_tensor_dim(ptr, 2) },
         1,
         "expected one lane"
     );
     assert_eq!(
-        unsafe { diffsol_host_array_dtype(ptr) },
+        unsafe { diffsol_tensor_dtype(ptr) },
         scalar_type_to_i32(ScalarType::F64)
     );
-    let rows = unsafe { diffsol_host_array_dim(ptr, 0) };
-    let cols = unsafe { diffsol_host_array_dim(ptr, 1) };
-    let row_stride = unsafe { crate::host_array_c::diffsol_host_array_stride(ptr, 0) };
-    let col_stride = unsafe { crate::host_array_c::diffsol_host_array_stride(ptr, 1) };
-    let base_ptr = unsafe { diffsol_host_array_ptr(ptr) };
+    let rows = unsafe { diffsol_tensor_dim(ptr, 0) };
+    let cols = unsafe { diffsol_tensor_dim(ptr, 1) };
+    let row_stride = unsafe { crate::tensor_c::diffsol_tensor_stride(ptr, 0) };
+    let col_stride = unsafe { crate::tensor_c::diffsol_tensor_stride(ptr, 1) };
+    let base_ptr = unsafe { diffsol_tensor_ptr(ptr) };
     let mut values = Vec::with_capacity(rows * cols);
     for col in 0..cols {
         for row in 0..rows {
@@ -411,26 +411,26 @@ pub(crate) unsafe fn ffi_read_host_array_matrix(ptr: *mut HostArray) -> (usize, 
         }
     }
     unsafe {
-        diffsol_host_array_free(ptr);
+        diffsol_tensor_free(ptr);
     }
     (rows, cols, values)
 }
 
 #[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-llvm"))]
-pub(crate) unsafe fn ffi_read_host_array_list_matrices(
-    list: *mut *mut HostArray,
+pub(crate) unsafe fn ffi_read_tensor_list_matrices(
+    list: *mut *mut Tensor,
     len: usize,
 ) -> Vec<(usize, usize, Vec<f64>)> {
-    assert!(!list.is_null(), "host array list pointer must not be null");
-    let mut arrays = Vec::with_capacity(len);
+    assert!(!list.is_null(), "tensor list pointer must not be null");
+    let mut tensors = Vec::with_capacity(len);
     for index in 0..len {
-        let array_ptr = unsafe { *list.add(index) };
-        arrays.push(unsafe { ffi_read_host_array_matrix(array_ptr) });
+        let tensor_ptr = unsafe { *list.add(index) };
+        tensors.push(unsafe { ffi_read_tensor_matrix(tensor_ptr) });
     }
     unsafe {
-        diffsol_host_array_list_free(list, len);
+        diffsol_tensor_list_free(list, len);
     }
-    arrays
+    tensors
 }
 
 #[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-external-dynamic"))]

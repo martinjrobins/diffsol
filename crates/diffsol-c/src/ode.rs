@@ -6,7 +6,6 @@ use crate::jit::JitBackendType;
 use crate::{
     adjoint_checkpoint::AdjointCheckpointWrapper,
     error::DiffsolRtError,
-    host_array::HostArray,
     initial_condition_options::{
         InitialConditionSolverOptions, InitialConditionSolverOptionsSnapshot,
     },
@@ -17,6 +16,7 @@ use crate::{
     scalar_type::ScalarType,
     solution_wrapper::SolutionWrapper,
     solve::Solve,
+    tensor::{Tensor, TensorView},
 };
 
 pub struct Ode {
@@ -341,7 +341,7 @@ impl OdeWrapper {
     /// `params` is a `[nparams, nlanes]` array, with `nlanes` equal to `nbatch` or 1. One lane
     /// of parameters is used for all the lanes. This is the same for all the functions that
     /// take `params`.
-    pub fn y0(&self, params: &HostArray) -> Result<HostArray, DiffsolRtError> {
+    pub fn y0(&self, params: TensorView<'_>) -> Result<Tensor, DiffsolRtError> {
         let mut self_guard = self.guard()?;
         self_guard.solve.y0(params)
     }
@@ -352,10 +352,10 @@ impl OdeWrapper {
     /// `[nstates, nbatch]` array.
     pub fn rhs(
         &self,
-        params: &HostArray,
+        params: TensorView<'_>,
         t: f64,
-        y: &HostArray,
-    ) -> Result<HostArray, DiffsolRtError> {
+        y: TensorView<'_>,
+    ) -> Result<Tensor, DiffsolRtError> {
         let mut self_guard = self.guard()?;
         self_guard.solve.rhs(params, t, y)
     }
@@ -366,11 +366,11 @@ impl OdeWrapper {
     /// result is a `[nstates, nbatch]` array.
     pub fn rhs_jac_mul(
         &self,
-        params: &HostArray,
+        params: TensorView<'_>,
         t: f64,
-        y: &HostArray,
-        v: &HostArray,
-    ) -> Result<HostArray, DiffsolRtError> {
+        y: TensorView<'_>,
+        v: TensorView<'_>,
+    ) -> Result<Tensor, DiffsolRtError> {
         let mut self_guard = self.guard()?;
         self_guard.solve.rhs_jac_mul(params, t, y, v)
     }
@@ -395,7 +395,7 @@ impl OdeWrapper {
     #[allow(clippy::type_complexity)]
     pub fn solve(
         &self,
-        params: &HostArray,
+        params: TensorView<'_>,
         final_time: f64,
     ) -> Result<SolutionWrapper, DiffsolRtError> {
         let mut self_guard = self.guard()?;
@@ -422,8 +422,8 @@ impl OdeWrapper {
     /// :rtype: numpy.ndarray
     pub fn solve_dense(
         &self,
-        params: &HostArray,
-        t_eval: &HostArray,
+        params: TensorView<'_>,
+        t_eval: TensorView<'_>,
     ) -> Result<SolutionWrapper, DiffsolRtError> {
         let mut self_guard = self.guard()?;
         let linear_solver = self_guard.linear_solver;
@@ -449,8 +449,8 @@ impl OdeWrapper {
     #[allow(clippy::type_complexity)]
     pub fn solve_fwd_sens(
         &self,
-        params: &HostArray,
-        t_eval: &HostArray,
+        params: TensorView<'_>,
+        t_eval: TensorView<'_>,
     ) -> Result<SolutionWrapper, DiffsolRtError> {
         let mut self_guard = self.guard()?;
         let linear_solver = self_guard.linear_solver;
@@ -468,9 +468,9 @@ impl OdeWrapper {
     /// `gradient` is a `[nparams, nout, nbatch]` array.
     pub fn solve_continuous_adjoint(
         &self,
-        params: &HostArray,
+        params: TensorView<'_>,
         final_time: f64,
-    ) -> Result<(HostArray, HostArray), DiffsolRtError> {
+    ) -> Result<(Tensor, Tensor), DiffsolRtError> {
         let mut self_guard = self.guard()?;
         let linear_solver = self_guard.linear_solver;
         let ode_solver = self_guard.ode_solver;
@@ -483,8 +483,8 @@ impl OdeWrapper {
     /// later discrete adjoint backward pass.
     pub fn solve_adjoint_fwd(
         &self,
-        params: &HostArray,
-        t_eval: &HostArray,
+        params: TensorView<'_>,
+        t_eval: TensorView<'_>,
     ) -> Result<(SolutionWrapper, AdjointCheckpointWrapper), DiffsolRtError> {
         let mut self_guard = self.guard()?;
         let linear_solver = self_guard.linear_solver;
@@ -506,15 +506,19 @@ impl OdeWrapper {
         &self,
         solution: &SolutionWrapper,
         checkpoint: &AdjointCheckpointWrapper,
-        dgdu_eval: &HostArray,
-    ) -> Result<HostArray, DiffsolRtError> {
+        dgdu_eval: TensorView<'_>,
+    ) -> Result<Tensor, DiffsolRtError> {
         let t_eval = solution.get_ts()?;
         let mut self_guard = self.guard()?;
         let linear_solver = self_guard.linear_solver;
         let method = self_guard.ode_solver;
-        self_guard
-            .solve
-            .solve_adjoint_bkwd(method, linear_solver, checkpoint, &t_eval, dgdu_eval)
+        self_guard.solve.solve_adjoint_bkwd(
+            method,
+            linear_solver,
+            checkpoint,
+            t_eval.view(),
+            dgdu_eval,
+        )
     }
 }
 
@@ -546,7 +550,7 @@ mod tests {
     use crate::scalar_type::ScalarType;
     use crate::test_support::{
         assert_close, assert_solution_tail, lane_f64, lane_matrix, logistic_state,
-        logistic_state_dr, mass_state_deps, rhs_input_deps, rhs_state_deps, vector_host,
+        logistic_state_dr, mass_state_deps, rhs_input_deps, rhs_state_deps, vector_tensor,
         ASSERT_TOL, LOGISTIC_X0,
     };
 
@@ -580,20 +584,24 @@ mod tests {
         assert_eq!(ode.get_nout().unwrap(), 1);
         assert!(ode.has_stop().unwrap());
 
-        let y0 = ode.y0(&vector_host(&[2.0])).unwrap();
+        let y0 = ode.y0(vector_tensor(&[2.0]).view()).unwrap();
         assert_eq!(lane_f64(&y0, 0), vec![LOGISTIC_X0]);
 
         let rhs = ode
-            .rhs(&vector_host(&[2.0]), 0.0, &vector_host(&[0.25]))
+            .rhs(
+                vector_tensor(&[2.0]).view(),
+                0.0,
+                vector_tensor(&[0.25]).view(),
+            )
             .unwrap();
         assert_close(lane_f64(&rhs, 0)[0], 0.375, ASSERT_TOL, "rhs(0.25)");
 
         let rhs_jac_mul = ode
             .rhs_jac_mul(
-                &vector_host(&[2.0]),
+                vector_tensor(&[2.0]).view(),
                 0.0,
-                &vector_host(&[0.25]),
-                &vector_host(&[3.0]),
+                vector_tensor(&[0.25]).view(),
+                vector_tensor(&[3.0]).view(),
             )
             .unwrap();
         assert_close(
@@ -611,7 +619,7 @@ mod tests {
 
         let t_eval = [0.25, 0.5, 1.0];
         let solution = ode
-            .solve_dense(&vector_host(&[2.0]), &vector_host(&t_eval))
+            .solve_dense(vector_tensor(&[2.0]).view(), vector_tensor(&t_eval).view())
             .unwrap();
 
         assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);
@@ -627,7 +635,7 @@ mod tests {
         ode.set_atol(1e-8).unwrap();
 
         let final_time = 2.0;
-        let solution = ode.solve(&vector_host(&[2.0]), final_time).unwrap();
+        let solution = ode.solve(vector_tensor(&[2.0]).view(), final_time).unwrap();
         let ys = solution.get_ys().unwrap();
         let ys = lane_matrix(&ys, 0);
         let ts = lane_f64(&solution.get_ts().unwrap(), 0);
@@ -660,7 +668,7 @@ mod tests {
 
         let t_eval = [0.5, 1.0, 1.25, 1.5, 2.0];
         let solution = ode
-            .solve_dense(&vector_host(&[2.0]), &vector_host(&t_eval))
+            .solve_dense(vector_tensor(&[2.0]).view(), vector_tensor(&t_eval).view())
             .unwrap();
         let ys = solution.get_ys().unwrap();
         let ys = lane_matrix(&ys, 0);
@@ -691,7 +699,7 @@ mod tests {
 
         let t_eval = [0.5, 1.0, 1.25, 1.5, 2.0];
         let solution = ode
-            .solve_fwd_sens(&vector_host(&[2.0]), &vector_host(&t_eval))
+            .solve_fwd_sens(vector_tensor(&[2.0]).view(), vector_tensor(&t_eval).view())
             .unwrap();
         let ys = solution.get_ys().unwrap();
         let ys = lane_matrix(&ys, 0);
@@ -737,7 +745,7 @@ mod tests {
 
         let t_eval = [0.25, 0.5, 1.0];
         let solution = ode
-            .solve_dense(&vector_host(&[2.0]), &vector_host(&t_eval))
+            .solve_dense(vector_tensor(&[2.0]).view(), vector_tensor(&t_eval).view())
             .unwrap();
 
         assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);
@@ -768,7 +776,7 @@ mod tests {
 
         let t_eval = [0.25, 0.5, 1.0];
         let solution = ode
-            .solve_fwd_sens(&vector_host(&[2.0]), &vector_host(&t_eval))
+            .solve_fwd_sens(vector_tensor(&[2.0]).view(), vector_tensor(&t_eval).view())
             .unwrap();
 
         assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);
@@ -815,7 +823,7 @@ mod dynamic_tests {
     use crate::scalar_type::ScalarType;
     use crate::test_support::{
         assert_close, assert_solution_tail, external_dynamic_fixture_path, lane_f64,
-        mass_state_deps, rhs_input_deps, rhs_state_deps, vector_host, ASSERT_TOL, LOGISTIC_X0,
+        mass_state_deps, rhs_input_deps, rhs_state_deps, vector_tensor, ASSERT_TOL, LOGISTIC_X0,
     };
 
     use super::*;
@@ -850,20 +858,24 @@ mod dynamic_tests {
             assert_eq!(ode.get_nout().unwrap(), 1);
             assert!(ode.has_stop().unwrap());
 
-            let y0 = ode.y0(&vector_host(&[2.0])).unwrap();
+            let y0 = ode.y0(vector_tensor(&[2.0]).view()).unwrap();
             assert_eq!(lane_f64(&y0, 0), vec![LOGISTIC_X0]);
 
             let rhs = ode
-                .rhs(&vector_host(&[2.0]), 0.0, &vector_host(&[0.25]))
+                .rhs(
+                    vector_tensor(&[2.0]).view(),
+                    0.0,
+                    vector_tensor(&[0.25]).view(),
+                )
                 .unwrap();
             assert_close(lane_f64(&rhs, 0)[0], 0.375, ASSERT_TOL, "rhs(0.25)");
 
             let rhs_jac_mul = ode
                 .rhs_jac_mul(
-                    &vector_host(&[2.0]),
+                    vector_tensor(&[2.0]).view(),
                     0.0,
-                    &vector_host(&[0.25]),
-                    &vector_host(&[3.0]),
+                    vector_tensor(&[0.25]).view(),
+                    vector_tensor(&[3.0]).view(),
                 )
                 .unwrap();
             assert_close(
@@ -883,7 +895,7 @@ mod dynamic_tests {
 
         let t_eval = [0.25, 0.5, 1.0];
         let solution = ode
-            .solve_dense(&vector_host(&[2.0]), &vector_host(&t_eval))
+            .solve_dense(vector_tensor(&[2.0]).view(), vector_tensor(&t_eval).view())
             .unwrap();
 
         assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);
