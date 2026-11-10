@@ -179,13 +179,13 @@ pub(crate) fn batched_vector_tensor(lanes: &[&[f64]]) -> Tensor {
         lanes.iter().all(|lane| lane.len() == n),
         "lanes must have the same length"
     );
-    Tensor::from_vec(lanes.concat(), vec![n, lanes.len()])
+    Tensor::from_vec(lanes.concat(), &[n, lanes.len()])
 }
 
 #[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-llvm"))]
 pub(crate) fn matrix_tensor(rows: usize, cols: usize, values_col_major: &[f64]) -> Tensor {
     // one lane: `[rows, cols, 1]`, in the column-major order of the values
-    Tensor::from_vec(values_col_major.to_vec(), vec![rows, cols, 1])
+    Tensor::from_vec(values_col_major.to_vec(), &[rows, cols, 1])
 }
 
 /// The value of `tensor` at `index` as `f64`. The array has the scalar type of the solver, `f32`

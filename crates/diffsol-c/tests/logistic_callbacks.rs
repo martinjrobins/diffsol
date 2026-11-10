@@ -1065,7 +1065,7 @@ fn batched_split_adjoint_matches_each_lane() {
             .flat_map(|b| (0..t_eval.len()).map(move |i| (b, i)))
             .map(|(b, i)| 2.0 * (value_f64(&ys, &[0, i, b]) - data[i]))
             .collect();
-        let dgdu = Tensor::from_vec(dgdu, vec![1, t_eval.len(), nbatch]);
+        let dgdu = Tensor::from_vec(dgdu, &[1, t_eval.len(), nbatch]);
         let gradient = ode
             .solve_adjoint_bkwd(&solution, &checkpoint, dgdu.view())
             .unwrap();

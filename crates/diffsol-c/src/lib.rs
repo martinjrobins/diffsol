@@ -452,7 +452,8 @@ pub mod solution;
 /// - [SolutionWrapper::get_ts] — the time points (returns [Tensor]).
 /// - [SolutionWrapper::get_sens] — the sensitivity matrices (returns `Vec<Tensor>`).
 ///
-/// `SolutionWrapper` implements `Serialize`, serializing as `{ts, ys, sensitivities}`.
+/// `SolutionWrapper` implements `Serialize`, serializing as `{dtype, ts, ys, sensitivities}`, with
+/// the values in the scalar type of the solver (`dtype`).
 pub mod solution_wrapper;
 /// C FFI functions for extracting data from and freeing [SolutionWrapper] objects.
 ///
@@ -519,14 +520,18 @@ pub mod string_c;
 /// - [Tensor::from_vec] — make an array that owns a `Vec`, in column-major order.
 /// - [Tensor::new] — make an array that owns any value that holds the data on the heap
 ///   (`unsafe`).
-/// - [Tensor::view] — an [TensorView] of an array, with no copy.
+/// - [Tensor::view] — a [TensorView] of an array, with no copy.
 /// - [TensorView::from_slice] — view a slice, in column-major order.
-/// - [TensorView::new] — view data with any strides (`unsafe`: the caller keeps the data valid
-///   while the view exists).
-/// - `index`, `offset`, `as_slice` — read the values, with no copy. The [Tensor] docs give the
-///   data layout.
-/// - `shape`, `strides`, `dtype`, `data_ptr` — the metadata. With these, a host language can
-///   show the data with no copy, for example as a NumPy array with the same shape and strides.
+/// - [TensorView::new] — view data with strides that obey the layout rules (`unsafe`: the caller
+///   keeps the data valid while the view exists). It gives an error for other layouts, for
+///   example a row-major array.
+/// - [Tensor::column], [Tensor::columns] ([TensorView::column], [TensorView::columns]) — the
+///   columns `[:, j, k]` as slices, with no copy. Each column is contiguous, by the layout rules.
+/// - [Tensor::index] ([TensorView::index]) — a reference to one value. The [Tensor] docs give
+///   the data layout and the layout rules.
+/// - [Tensor::shape], [Tensor::strides], [Tensor::dtype], [Tensor::data_ptr] (and the same
+///   methods of [TensorView]) — the metadata. With these, a host language can show the data with
+///   no copy, for example as a NumPy array with the same shape and strides.
 pub mod tensor;
 /// C FFI functions for inspecting and freeing [Tensor] objects.
 ///

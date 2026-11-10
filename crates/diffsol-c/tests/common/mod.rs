@@ -36,13 +36,13 @@ pub fn batched_vector_tensor(lanes: &[&[f64]]) -> Tensor {
         lanes.iter().all(|lane| lane.len() == n),
         "lanes must have the same length"
     );
-    Tensor::from_vec(lanes.concat(), vec![n, lanes.len()])
+    Tensor::from_vec(lanes.concat(), &[n, lanes.len()])
 }
 
 /// A `[rows, cols, 1]` array (one lane) from column-major values.
 pub fn matrix_tensor(rows: usize, cols: usize, values_col_major: &[f64]) -> Tensor {
     // one lane: `[rows, cols, 1]`, in the column-major order of the values
-    Tensor::from_vec(values_col_major.to_vec(), vec![rows, cols, 1])
+    Tensor::from_vec(values_col_major.to_vec(), &[rows, cols, 1])
 }
 
 pub fn assert_close(actual: f64, expected: f64, tol: f64, label: &str) {

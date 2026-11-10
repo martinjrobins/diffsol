@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::adjoint_checkpoint::AdjointCheckpointWrapper;
 use crate::error::DiffsolRtError;
 use crate::scalar_type::Scalar;
-use crate::tensor::{FromTensor, Tensor, TensorLayout, TensorView, ToTensor};
+use crate::tensor::{column_major_values, FromTensor, Tensor, TensorLayout, TensorView, ToTensor};
 use crate::{
     generate_ic_option_accessors, generate_ode_option_accessors, generate_option_accessors,
     option_value_from_store, option_value_to_store,
@@ -172,25 +172,13 @@ where
 /// Read the times `t_eval` as `T` values. All the lanes use the same times, so `t_eval` is a 1D
 /// `[nt]` array, or a 2D `[nt, 1]` array with one lane.
 fn read_times<T: Scalar>(times: TensorView<'_>) -> Result<Vec<T>, DiffsolRtError> {
-    let (nt, has_lane_axis) = match times.shape() {
-        [nt] => (*nt, false),
-        [nt, 1] => (*nt, true),
+    match times.shape() {
+        [_] | [_, 1] => column_major_values(times).map_err(|e| e.named("t_eval")),
         shape => {
             let message = format!("Expected an [nt] or an [nt, 1] array, got the shape {shape:?}");
-            return Err(DiffsolRtError::from(DiffsolError::Other(message)).named("t_eval"));
+            Err(DiffsolRtError::from(DiffsolError::Other(message)).named("t_eval"))
         }
-    };
-    let data = times.as_slice::<f64>()?;
-    Ok((0..nt)
-        .map(|i| {
-            let offset = if has_lane_axis {
-                times.offset(&[i, 0])
-            } else {
-                times.offset(&[i])
-            };
-            T::from_f64(data[offset]).unwrap()
-        })
-        .collect())
+    }
 }
 
 /// The first value of lane 0 of a tolerance vector, or `None` if it has no values.
@@ -280,13 +268,13 @@ where
         let tensor = gradient.to_tensor();
         let nbatch = self.problem.context().nbatch();
         let nchannels = tensor.shape()[1] / nbatch;
-        let shape = vec![tensor.shape()[0], nchannels, nbatch];
-        let strides = vec![
+        let shape = [tensor.shape()[0], nchannels, nbatch];
+        let strides = [
             tensor.strides()[0],
             tensor.strides()[1],
             nchannels * tensor.strides()[1],
         ];
-        tensor.with_layout(shape, strides)
+        tensor.with_layout(&shape, &strides)
     }
 
     /// Return the error recorded by the equations during the last evaluation, if any.
