@@ -1868,6 +1868,8 @@ where
             derivative_solve_max_iter: ode_options.derivative_solve_max_iter,
             pi_control_proportional: T::from_f64(ode_options.pi_control_proportional).unwrap(),
             pi_control_integral: T::from_f64(ode_options.pi_control_integral).unwrap(),
+            fixed_step: ode_options.fixed_step,
+            fixed_step_max_order: ode_options.fixed_step_max_order,
         }
     }
 

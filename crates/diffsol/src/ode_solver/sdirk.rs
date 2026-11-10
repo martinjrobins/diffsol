@@ -534,8 +534,15 @@ where
             self.rk.state().h
         );
         let mut h = self.rk.start_step()?;
+        let fixed_step = self.problem().ode_options.fixed_step;
+        // a fixed step size is never too small, as it is never reduced
+        let min_timestep = if fixed_step {
+            Eqn::T::zero()
+        } else {
+            self.config.minimum_timestep
+        };
 
-        if h.abs() < self.config.minimum_timestep {
+        if h.abs() < min_timestep {
             return Err(DiffsolError::from(OdeSolverError::StepSizeTooSmall {
                 time: self.rk.state().t.to_f64().unwrap(),
             }));
@@ -583,6 +590,9 @@ where
                         debug!("First convergence failure, updating Jacobian and trying again",);
                         updated_jacobian = true;
                         self.jacobian_updates_at(h, SolverState::FirstConvergenceFail, None);
+                    } else if fixed_step {
+                        // the step size is fixed, so there is no retry once the Jacobian is updated
+                        return Err(self.rk.last_solve_fail(nonlinear_failures + 1));
                     } else {
                         // newton iteration did not converge and jacobian has been updated, so we reduce step size and try again
                         h *= Eqn::T::from_f64(0.3).unwrap();
@@ -599,12 +609,16 @@ where
                     self.rk.solve_fail(
                         h,
                         nonlinear_failures,
-                        self.config.minimum_timestep,
+                        min_timestep,
                         self.config.maximum_newton_fails,
                     )?;
                     // try again....
                     continue 'step;
                 }
+            }
+            if fixed_step {
+                // no error control: accept the step
+                break 'step (Eqn::T::one(), Eqn::T::zero());
             }
             let error_norm = if self.problem().eqn().mass().is_some() && self.op.is_some() {
                 let linear_solver = |x: &mut Eqn::V| {

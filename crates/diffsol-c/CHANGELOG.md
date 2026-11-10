@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0](https://github.com/martinjrobins/diffsol/compare/diffsol-c-v0.7.0...diffsol-c-v0.8.0) - 2026-11-07
+
+### Added
+
+- *(diffsol-c)* add callback equations ([#443](https://github.com/martinjrobins/diffsol/pull/443))
+- *(diffsol-c)* expose nonlinear solver failure limit ([#420](https://github.com/martinjrobins/diffsol/pull/420))
+
+### Fixed
+
+- default to batch 0 in sens_atol ([#433](https://github.com/martinjrobins/diffsol/pull/433))
+
 ## [0.7.0](https://github.com/martinjrobins/diffsol/compare/diffsol-c-v0.6.1...diffsol-c-v0.7.0) - 2026-10-20
 
 ### Added
