@@ -13,9 +13,11 @@ use common::{
     logistic_state_dr, matrix_tensor, vector_tensor, ASSERT_TOL, LOGISTIC_X0,
 };
 use diffsol_c::ode_c::diffsol_ode_free;
+use diffsol_c::ode_callbacks::for_each_batch;
 use diffsol_c::ode_callbacks::DiffsolOdeCallbacksF32;
 use diffsol_c::ode_callbacks_c::{diffsol_ode_new_callbacks_f32, diffsol_ode_new_callbacks_f64};
-use diffsol_c::tensor::{Tensor, TensorView};
+use diffsol_c::scalar_type::Scalar;
+use diffsol_c::tensor::{Tensor, TensorView, TensorViewMut};
 use diffsol_c::{
     LinearSolverType, MatrixType, OdeCallbacksDesc, OdeSolverType, OdeWrapper, ScalarType,
 };
@@ -42,12 +44,27 @@ fn user_data<'a>(ud: *mut c_void) -> &'a UserData {
     unsafe { &*(ud as *const UserData) }
 }
 
-unsafe fn slice<'a, T>(ptr: *const T, len: usize) -> &'a [T] {
-    unsafe { std::slice::from_raw_parts(ptr, len) }
+type View<'a> = *const TensorView<'a>;
+type ViewMut<'a> = *mut TensorViewMut<'a>;
+
+/// Set `y[0] = f(inputs[0][0], ...)` in each lane, and return success.
+unsafe fn set<T: Scalar, const N: usize>(
+    inputs: [View<'_>; N],
+    y: ViewMut<'_>,
+    f: impl Fn([T; N]) -> T,
+) -> i32 {
+    unsafe {
+        for_each_batch(inputs, y, |ins: [&[T]; N], y: &mut [T], _| {
+            y[0] = f(ins.map(|v| v[0]))
+        })
+    };
+    0
 }
 
-unsafe fn slice_mut<'a, T>(ptr: *mut T, len: usize) -> &'a mut [T] {
-    unsafe { std::slice::from_raw_parts_mut(ptr, len) }
+/// Set all the values of `y` to zero, and return success.
+unsafe fn zero<T: Scalar>(y: ViewMut<'_>) -> i32 {
+    unsafe { for_each_batch([], y, |_, y: &mut [T], _| y.fill(T::zero())) };
+    0
 }
 
 /// Define the logistic callbacks for scalar type `$t` in a module `$m`.
@@ -59,10 +76,10 @@ macro_rules! logistic_callbacks {
             type T = $t;
 
             pub unsafe extern "C" fn rhs(
-                x: *const T,
-                p: *const T,
+                x: View<'_>,
+                p: View<'_>,
                 _t: T,
-                y: *mut T,
+                y: ViewMut<'_>,
                 ud: *mut c_void,
             ) -> i32 {
                 let ud = user_data(ud);
@@ -73,150 +90,136 @@ macro_rules! logistic_callbacks {
                 if call == ud.rhs_fail_call {
                     return 1;
                 }
-                let (x, p, y) = unsafe { (slice(x, 1), slice(p, 1), slice_mut(y, 1)) };
-                y[0] = p[0] * x[0] * (1.0 - x[0]);
-                0
+                unsafe { set([x, p], y, |[x, p]: [T; 2]| p * x * (1.0 - x)) }
             }
 
             pub unsafe extern "C" fn rhs_jac(
-                x: *const T,
-                p: *const T,
+                x: View<'_>,
+                p: View<'_>,
                 _t: T,
-                v: *const T,
-                y: *mut T,
+                v: View<'_>,
+                y: ViewMut<'_>,
                 _ud: *mut c_void,
             ) -> i32 {
-                let (x, p, v, y) =
-                    unsafe { (slice(x, 1), slice(p, 1), slice(v, 1), slice_mut(y, 1)) };
-                y[0] = p[0] * (1.0 - 2.0 * x[0]) * v[0];
-                0
+                unsafe { set([x, p, v], y, |[x, p, v]: [T; 3]| p * (1.0 - 2.0 * x) * v) }
             }
 
             pub unsafe extern "C" fn rhs_sens(
-                x: *const T,
-                _p: *const T,
+                x: View<'_>,
+                _p: View<'_>,
                 _t: T,
-                v: *const T,
-                y: *mut T,
+                v: View<'_>,
+                y: ViewMut<'_>,
                 _ud: *mut c_void,
             ) -> i32 {
-                let (x, v, y) = unsafe { (slice(x, 1), slice(v, 1), slice_mut(y, 1)) };
-                y[0] = x[0] * (1.0 - x[0]) * v[0];
-                0
+                unsafe { set([x, v], y, |[x, v]: [T; 2]| x * (1.0 - x) * v) }
             }
 
             pub unsafe extern "C" fn rhs_adjoint(
-                x: *const T,
-                p: *const T,
-                t: T,
-                v: *const T,
-                y: *mut T,
-                ud: *mut c_void,
+                x: View<'_>,
+                p: View<'_>,
+                _t: T,
+                v: View<'_>,
+                y: ViewMut<'_>,
+                _ud: *mut c_void,
             ) -> i32 {
                 // the Jacobian is 1x1, so it is its own transpose
-                let status = unsafe { rhs_jac(x, p, t, v, y, ud) };
-                unsafe { *y = -*y };
-                status
+                unsafe { set([x, p, v], y, |[x, p, v]: [T; 3]| -p * (1.0 - 2.0 * x) * v) }
             }
 
             pub unsafe extern "C" fn rhs_sens_adjoint(
-                x: *const T,
-                p: *const T,
-                t: T,
-                v: *const T,
-                y: *mut T,
-                ud: *mut c_void,
+                x: View<'_>,
+                _p: View<'_>,
+                _t: T,
+                v: View<'_>,
+                y: ViewMut<'_>,
+                _ud: *mut c_void,
             ) -> i32 {
-                let status = unsafe { rhs_sens(x, p, t, v, y, ud) };
-                unsafe { *y = -*y };
-                status
+                unsafe { set([x, v], y, |[x, v]: [T; 2]| -x * (1.0 - x) * v) }
             }
 
-            pub unsafe extern "C" fn init(_p: *const T, _t: T, y: *mut T, _ud: *mut c_void) -> i32 {
-                unsafe { *y = LOGISTIC_X0 as T };
-                0
+            pub unsafe extern "C" fn init(
+                _p: View<'_>,
+                _t: T,
+                y: ViewMut<'_>,
+                _ud: *mut c_void,
+            ) -> i32 {
+                unsafe { set([], y, |[]: [T; 0]| LOGISTIC_X0 as T) }
             }
 
             pub unsafe extern "C" fn init_zero_mul(
-                _p: *const T,
+                _p: View<'_>,
                 _t: T,
-                _v: *const T,
-                y: *mut T,
+                _v: View<'_>,
+                y: ViewMut<'_>,
                 _ud: *mut c_void,
             ) -> i32 {
-                unsafe { *y = 0.0 };
-                0
+                unsafe { zero::<T>(y) }
             }
 
             pub unsafe extern "C" fn identity(
-                x: *const T,
-                _p: *const T,
+                x: View<'_>,
+                _p: View<'_>,
                 _t: T,
-                y: *mut T,
+                y: ViewMut<'_>,
                 _ud: *mut c_void,
             ) -> i32 {
-                unsafe { *y = *x };
-                0
+                unsafe { set([x], y, |[x]: [T; 1]| x) }
             }
 
             pub unsafe extern "C" fn identity_mul(
-                _x: *const T,
-                _p: *const T,
+                _x: View<'_>,
+                _p: View<'_>,
                 _t: T,
-                v: *const T,
-                y: *mut T,
+                v: View<'_>,
+                y: ViewMut<'_>,
                 _ud: *mut c_void,
             ) -> i32 {
-                unsafe { *y = *v };
-                0
+                unsafe { set([v], y, |[v]: [T; 1]| v) }
             }
 
             pub unsafe extern "C" fn neg_identity_mul(
-                _x: *const T,
-                _p: *const T,
+                _x: View<'_>,
+                _p: View<'_>,
                 _t: T,
-                v: *const T,
-                y: *mut T,
+                v: View<'_>,
+                y: ViewMut<'_>,
                 _ud: *mut c_void,
             ) -> i32 {
-                unsafe { *y = -*v };
-                0
+                unsafe { set([v], y, |[v]: [T; 1]| -v) }
             }
 
             pub unsafe extern "C" fn zero_mul(
-                _x: *const T,
-                _p: *const T,
+                _x: View<'_>,
+                _p: View<'_>,
                 _t: T,
-                _v: *const T,
-                y: *mut T,
+                _v: View<'_>,
+                y: ViewMut<'_>,
                 _ud: *mut c_void,
             ) -> i32 {
-                unsafe { *y = 0.0 };
-                0
+                unsafe { zero::<T>(y) }
             }
 
             /// root: `y - 0.9`
             pub unsafe extern "C" fn root(
-                x: *const T,
-                _p: *const T,
+                x: View<'_>,
+                _p: View<'_>,
                 _t: T,
-                y: *mut T,
+                y: ViewMut<'_>,
                 _ud: *mut c_void,
             ) -> i32 {
-                unsafe { *y = *x - 0.9 };
-                0
+                unsafe { set([x], y, |[x]: [T; 1]| x - 0.9) }
             }
 
             /// reset: `y = 0.1`
             pub unsafe extern "C" fn reset(
-                _x: *const T,
-                _p: *const T,
+                _x: View<'_>,
+                _p: View<'_>,
                 _t: T,
-                y: *mut T,
+                y: ViewMut<'_>,
                 _ud: *mut c_void,
             ) -> i32 {
-                unsafe { *y = 0.1 };
-                0
+                unsafe { set([], y, |[]: [T; 0]| 0.1) }
             }
 
             /// The logistic model with every callback needed for forward sensitivities and
@@ -1012,6 +1015,180 @@ fn batched_forward_sensitivities_match_each_lane() {
                         &format!("{label} lane {b} sensitivity[{i}]"),
                     );
                 }
+            }
+        }
+    }
+}
+
+/// The logistic model with the rate `r = p[0] + p[1]`. In a sensitivity solve with more than
+/// one batch lane, the callbacks get the state and the parameters with one lane for each batch
+/// lane, and `v` and `y` with one lane for each batch lane and each parameter (`P = 2`).
+mod two_param_callbacks {
+    use super::*;
+    type T = f64;
+
+    unsafe extern "C" fn rhs(
+        x: View<'_>,
+        p: View<'_>,
+        _t: T,
+        y: ViewMut<'_>,
+        _ud: *mut c_void,
+    ) -> i32 {
+        unsafe {
+            for_each_batch([x, p], y, |[x, p]: [&[T]; 2], y: &mut [T], _| {
+                y[0] = (p[0] + p[1]) * x[0] * (1.0 - x[0])
+            })
+        };
+        0
+    }
+
+    unsafe extern "C" fn rhs_jac(
+        x: View<'_>,
+        p: View<'_>,
+        _t: T,
+        v: View<'_>,
+        y: ViewMut<'_>,
+        _ud: *mut c_void,
+    ) -> i32 {
+        unsafe {
+            for_each_batch([x, p, v], y, |[x, p, v]: [&[T]; 3], y: &mut [T], _| {
+                y[0] = (p[0] + p[1]) * (1.0 - 2.0 * x[0]) * v[0]
+            })
+        };
+        0
+    }
+
+    unsafe extern "C" fn rhs_sens(
+        x: View<'_>,
+        _p: View<'_>,
+        _t: T,
+        v: View<'_>,
+        y: ViewMut<'_>,
+        _ud: *mut c_void,
+    ) -> i32 {
+        unsafe {
+            for_each_batch([x, v], y, |[x, v]: [&[T]; 2], y: &mut [T], _| {
+                y[0] = x[0] * (1.0 - x[0]) * (v[0] + v[1])
+            })
+        };
+        0
+    }
+
+    unsafe extern "C" fn rhs_adjoint(
+        x: View<'_>,
+        p: View<'_>,
+        _t: T,
+        v: View<'_>,
+        y: ViewMut<'_>,
+        _ud: *mut c_void,
+    ) -> i32 {
+        unsafe {
+            for_each_batch([x, p, v], y, |[x, p, v]: [&[T]; 3], y: &mut [T], _| {
+                y[0] = -(p[0] + p[1]) * (1.0 - 2.0 * x[0]) * v[0]
+            })
+        };
+        0
+    }
+
+    unsafe extern "C" fn rhs_sens_adjoint(
+        x: View<'_>,
+        _p: View<'_>,
+        _t: T,
+        v: View<'_>,
+        y: ViewMut<'_>,
+        _ud: *mut c_void,
+    ) -> i32 {
+        unsafe {
+            for_each_batch([x, v], y, |[x, v]: [&[T]; 2], y: &mut [T], _| {
+                y.fill(-x[0] * (1.0 - x[0]) * v[0])
+            })
+        };
+        0
+    }
+
+    pub fn desc() -> OdeCallbacksDesc<T> {
+        use f64_callbacks as base;
+        let mut desc = OdeCallbacksDesc::new(1, 2, rhs, base::init);
+        desc.rhs_jac = Some(rhs_jac);
+        desc.rhs_sens = Some(rhs_sens);
+        desc.rhs_adjoint = Some(rhs_adjoint);
+        desc.rhs_sens_adjoint = Some(rhs_sens_adjoint);
+        desc.init_sens = Some(base::init_zero_mul);
+        desc.init_sens_adjoint = Some(base::init_zero_mul);
+        desc.out = Some(base::identity);
+        desc.nout = 1;
+        desc.out_jac = Some(base::identity_mul);
+        desc.out_sens = Some(base::zero_mul);
+        desc.out_adjoint = Some(base::neg_identity_mul);
+        desc.out_sens_adjoint = Some(base::zero_mul);
+        desc
+    }
+}
+
+#[test]
+fn batched_sensitivities_with_two_parameters_match_each_lane() {
+    let t_eval = [0.25, 0.5, 1.0];
+    let final_time = 1.0;
+    let nbatch = BATCH_RATES.len();
+    // lane `b` has the parameters `[r_b - 0.5, 0.5]`, so its rate is `r_b`
+    let lanes: Vec<[f64; 2]> = BATCH_RATES.iter().map(|&r| [r - 0.5, 0.5]).collect();
+    let lanes: Vec<&[f64]> = lanes.iter().map(|lane| &lane[..]).collect();
+    let params = batched_vector_tensor(&lanes);
+    let make_ode = |matrix_type, ode_solver| {
+        let ode = new_callbacks_batched(
+            two_param_callbacks::desc(),
+            matrix_type,
+            LinearSolverType::Default,
+            ode_solver,
+            nbatch,
+        )
+        .unwrap();
+        configure(&ode);
+        ode
+    };
+    for matrix_type in ALL_MATRIX_TYPES {
+        for ode_solver in all_ode_solvers() {
+            let label = format!("{matrix_type:?}/{ode_solver:?}");
+            let ode = make_ode(matrix_type, ode_solver);
+            let solution = ode
+                .solve_fwd_sens(params.view(), vector_tensor(&t_eval).view())
+                .unwrap();
+            let sens = solution.get_sens().unwrap();
+            assert_eq!(sens.len(), 2, "{label}");
+            // dy/dp_j = dy/dr for both parameters
+            for (j, sens) in sens.iter().enumerate() {
+                for (b, &r) in BATCH_RATES.iter().enumerate() {
+                    for (i, &t) in t_eval.iter().enumerate() {
+                        assert_close(
+                            value_f64(sens, &[0, i, b]),
+                            logistic_state_dr(LOGISTIC_X0, r, t),
+                            1e-4,
+                            &format!("{label} lane {b} dy/dp{j}[{i}]"),
+                        );
+                    }
+                }
+            }
+        }
+
+        let ode = make_ode(matrix_type, OdeSolverType::Bdf);
+        let (integral, gradient) = ode
+            .solve_continuous_adjoint(params.view(), final_time)
+            .unwrap();
+        assert_eq!(gradient.shape(), &[2, 1, nbatch], "{matrix_type:?}");
+        for (b, &r) in BATCH_RATES.iter().enumerate() {
+            assert_close(
+                lane_f64(&integral, b)[0],
+                logistic_integral(LOGISTIC_X0, r, final_time),
+                5e-5,
+                &format!("{matrix_type:?} lane {b} integral"),
+            );
+            for j in 0..2 {
+                assert_close(
+                    value_f64(&gradient, &[j, 0, b]),
+                    logistic_integral_dr(LOGISTIC_X0, r, final_time),
+                    5e-4,
+                    &format!("{matrix_type:?} lane {b} gradient {j}"),
+                );
             }
         }
     }

@@ -12,6 +12,12 @@ pub const DIFFSOL_SCALAR_TYPE_F32: i32 = 0;
 /// The C value of `ScalarType::F64`.
 pub const DIFFSOL_SCALAR_TYPE_F64: i32 = 1;
 
+// the `dtype` field of a `TensorView` is a `ScalarType`, so its values must be the C values
+const _: () = assert!(
+    ScalarType::F32 as i32 == DIFFSOL_SCALAR_TYPE_F32
+        && ScalarType::F64 as i32 == DIFFSOL_SCALAR_TYPE_F64
+);
+
 pub(crate) fn scalar_type_from_i32(value: i32) -> Option<ScalarType> {
     match value {
         DIFFSOL_SCALAR_TYPE_F32 => Some(ScalarType::F32),

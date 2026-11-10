@@ -7,10 +7,11 @@
  * Cranelift if the library has it, otherwise LLVM. To select the backend, set the environment
  * variable DIFFSOL_JIT_BACKEND to "cranelift" or "llvm".
  *
+ * Build diffsol-c, then compile and link this file. From the root of the workspace:
  *
  *   cargo build -p diffsol-c --release --features diffsl-cranelift
- *   cc logistic_diffsl_jit.c -I target/release/include -L target/release -ldiffsol_c -lm \
- *      -Wl,-rpath,target/release -o logistic_diffsl_jit
+ *   cc examples/diffsol-c-logistic/c/logistic_diffsl_jit.c -I target/release/include \
+ *      -L target/release -ldiffsol_c -lm -Wl,-rpath,target/release -o logistic_diffsl_jit
  */
 #include <math.h>
 #include <stdio.h>
