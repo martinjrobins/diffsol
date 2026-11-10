@@ -4,7 +4,7 @@ mod common;
 use common::lane_matrix;
 
 use common::{
-    assert_close, lane_f64, logistic_integral, logistic_state_dr, matrix_host, vector_host,
+    assert_close, lane_f64, logistic_integral, logistic_state_dr, matrix_tensor, vector_tensor,
     ASSERT_TOL, LOGISTIC_X0,
 };
 use diffsol_c::{
@@ -54,7 +54,9 @@ fn bdf_no_reset_stop_terminates_forward_solves_at_first_root() {
     let t_eval = [0.5, 1.0, 1.5, final_time];
 
     let ode = make_no_reset_stop_ode(OdeSolverType::Bdf);
-    let solution = ode.solve(&vector_host(&params), final_time).unwrap();
+    let solution = ode
+        .solve(vector_tensor(&params).view(), final_time)
+        .unwrap();
     let ts = lane_f64(&solution.get_ts().unwrap(), 0);
     let ys = solution.get_ys().unwrap();
     let ys = lane_matrix(&ys, 0);
@@ -68,7 +70,7 @@ fn bdf_no_reset_stop_terminates_forward_solves_at_first_root() {
     assert!(*ts.last().unwrap() < final_time);
 
     let dense_solution = ode
-        .solve_dense(&vector_host(&params), &vector_host(&t_eval))
+        .solve_dense(vector_tensor(&params).view(), vector_tensor(&t_eval).view())
         .unwrap();
     let dense_ts = lane_f64(&dense_solution.get_ts().unwrap(), 0);
     let dense_ys = dense_solution.get_ys().unwrap();
@@ -86,7 +88,7 @@ fn bdf_no_reset_stop_terminates_forward_solves_at_first_root() {
     );
 
     let sens_solution = ode
-        .solve_fwd_sens(&vector_host(&params), &vector_host(&t_eval))
+        .solve_fwd_sens(vector_tensor(&params).view(), vector_tensor(&t_eval).view())
         .unwrap();
     let sens_ts = lane_f64(&sens_solution.get_ts().unwrap(), 0);
     let sens_ys = sens_solution.get_ys().unwrap();
@@ -111,7 +113,7 @@ fn bdf_no_reset_stop_terminates_forward_solves_at_first_root() {
     }
 
     let (integral, gradient) = ode
-        .solve_continuous_adjoint(&vector_host(&params), final_time)
+        .solve_continuous_adjoint(vector_tensor(&params).view(), final_time)
         .unwrap();
     let integral = lane_f64(&integral, 0);
     let gradient = lane_matrix(&gradient, 0);
@@ -124,7 +126,7 @@ fn bdf_no_reset_stop_terminates_forward_solves_at_first_root() {
     assert_eq!(gradient.shape(), &[params.len(), 1]);
 
     let (adjoint_solution, checkpoint) = ode
-        .solve_adjoint_fwd(&vector_host(&params), &vector_host(&t_eval))
+        .solve_adjoint_fwd(vector_tensor(&params).view(), vector_tensor(&t_eval).view())
         .unwrap();
     let adjoint_ts = lane_f64(&adjoint_solution.get_ts().unwrap(), 0);
     let adjoint_ys = adjoint_solution.get_ys().unwrap();
@@ -139,7 +141,7 @@ fn bdf_no_reset_stop_terminates_forward_solves_at_first_root() {
         .solve_adjoint_bkwd(
             &adjoint_solution,
             &checkpoint,
-            &matrix_host(1, adjoint_ts.len(), &vec![0.0; adjoint_ts.len()]),
+            matrix_tensor(1, adjoint_ts.len(), &vec![0.0; adjoint_ts.len()]).view(),
         )
         .unwrap();
     assert_eq!(lane_matrix(&gradient, 0).shape(), &[params.len(), 1]);

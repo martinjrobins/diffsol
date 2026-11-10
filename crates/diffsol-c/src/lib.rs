@@ -45,9 +45,9 @@
 //!
 //! Each solve method returns a [SolutionWrapper], from which you can extract the solution
 //! values via [SolutionWrapper::get_ys], [SolutionWrapper::get_ts], and
-//! [SolutionWrapper::get_sens]. These methods return [HostArray] objects, which are
-//! read-only views of the Rust-allocated data that can be safely accessed from the host
-//! language without copying.
+//! [SolutionWrapper::get_sens]. These methods return [Tensor] objects, which own the
+//! Rust-allocated data, and which the host language can read without copying. The inputs, for
+//! example `params` and `t_eval`, are [TensorView] objects, which borrow the data of the caller.
 //!
 //! The adoint solve methods involve an [AdjointCheckpointWrapper] that stores forward-pass
 //! checkpoint data required for the backward pass.
@@ -85,7 +85,7 @@
 //! - [initial_condition_options_c] — get/set initial condition solver options.
 //! - [matrix_type_c], [scalar_type_c], [linear_solver_type_c],
 //!   [ode_solver_type_c], [jit_c] — query and convert enum values.
-//! - [host_array_c] — inspect and free [HostArray] data.
+//! - [tensor_c] — inspect and free [Tensor] data.
 //! - [error_c] — retrieve and clear thread-local error messages.
 //! - [string_c] — allocate and free Rust-owned strings from C.
 //!
@@ -230,43 +230,6 @@ pub mod error;
 /// - `diffsol_clear_last_error` — clears the thread-local error state.
 #[path = "error_c.rs"]
 pub mod error_c;
-/// Read-only array allocated in Rust, safe to access from the host language without copying.
-///
-/// This module defines [HostArray], a bridge between Rust-owned numeric arrays
-/// and the host language (Python, C, Wasm/JS). A `HostArray` stores a raw data pointer together
-/// with shape, strides, and scalar type metadata. It optionally owns the underlying allocation
-/// via a `Box<dyn Any>`, ensuring the data remains valid for as long as the `HostArray` exists.
-///
-/// `HostArray` is the return type of
-/// [SolutionWrapper::get_ys],
-/// [SolutionWrapper::get_ts], and
-/// [SolutionWrapper::get_sens].
-///
-/// # Batches
-/// A diffsol vector or dense matrix can have more than one lane (`nbatch`). The arrays use the
-/// column-major order of diffsol, and the last axis of a `HostArray` of lanes is always the lane,
-/// also when `nbatch` is 1. For a diffsol vector, the
-/// shape is `[n, nbatch]`. For a dense matrix, the shape is `[nrows, ncols, nbatch]`. If an input
-/// array has one lane, all the lanes get its values.
-///
-/// # Key methods
-/// - [HostArray::new] — wrap data that the caller owns (`unsafe`: the caller keeps the data valid
-///   while the array exists).
-/// - [HostArray::from_vec] — make an array that owns its data, in column-major order.
-/// - [HostArray::index] — a reference to the value at an index, with one value for each axis.
-/// - [HostArray::offset] — the index of a value in the slice of [HostArray::as_slice].
-/// - [HostArray::as_slice] — view the data as `&[T]`, with no copy. The [HostArray] docs give
-///   the data layout.
-/// - [HostArray::shape], [HostArray::strides], [HostArray::dtype], [HostArray::data_ptr] — the
-///   metadata. With these, a host language can show the data with no copy, for example as a
-///   NumPy array with the same shape and strides.
-pub mod host_array;
-/// C FFI functions for inspecting and freeing [HostArray] objects.
-///
-/// Provides `extern "C"` functions for querying `HostArray` metadata (dimensions, strides,
-/// data type, raw pointer) and for freeing a `HostArray` previously returned by this library.
-#[path = "host_array_c.rs"]
-pub mod host_array_c;
 /// Options for the initial condition solver used before integration.
 ///
 /// This module defines [InitialConditionSolverOptions], a handle obtained via
@@ -485,9 +448,9 @@ pub mod solution;
 /// This module defines [SolutionWrapper], a thread-safe handle around a type-erased ODE
 /// solution. Returned by all solve methods on [OdeWrapper], it
 /// provides methods to extract the solution data:
-/// - [SolutionWrapper::get_ys] — the state values at each time point (returns [HostArray]).
-/// - [SolutionWrapper::get_ts] — the time points (returns [HostArray]).
-/// - [SolutionWrapper::get_sens] — the sensitivity matrices (returns `Vec<HostArray>`).
+/// - [SolutionWrapper::get_ys] — the state values at each time point (returns [Tensor]).
+/// - [SolutionWrapper::get_ts] — the time points (returns [Tensor]).
+/// - [SolutionWrapper::get_sens] — the sensitivity matrices (returns `Vec<Tensor>`).
 ///
 /// `SolutionWrapper` implements `Serialize`, serializing as `{ts, ys, sensitivities}`.
 pub mod solution_wrapper;
@@ -532,6 +495,46 @@ pub mod solve_macros;
 /// serialized equation blobs) to C callers.
 #[path = "string_c.rs"]
 pub mod string_c;
+/// Arrays that Rust and the host language share without a copy.
+///
+/// This module defines two types, a bridge between numeric arrays in Rust and in the host
+/// language (Python, C, Wasm/JS). Both store a raw data pointer together with shape, strides
+/// (in bytes) and scalar type metadata.
+/// - [Tensor] is an output. It always owns the value that holds its data (a `Box<dyn Any>`), so
+///   the data stays valid while the `Tensor` exists. It is the return type of
+///   [SolutionWrapper::get_ys], [SolutionWrapper::get_ts], [SolutionWrapper::get_sens] and of the
+///   [OdeWrapper] methods that give values.
+/// - [TensorView] is an input, for example `params` and `t_eval` of the [OdeWrapper] solve
+///   methods. It does not own its data, and the lifetime of the view is that of the data. It is
+///   small, `Copy`, only on the stack, and has at most [tensor::MAX_NDIM] (3) axes.
+///
+/// # Batches
+/// A diffsol vector or dense matrix can have more than one lane (`nbatch`). The arrays use the
+/// column-major order of diffsol, and the last axis of an array of lanes is always the lane,
+/// also when `nbatch` is 1. For a diffsol vector, the
+/// shape is `[n, nbatch]`. For a dense matrix, the shape is `[nrows, ncols, nbatch]`. If an input
+/// array has one lane, all the lanes get its values.
+///
+/// # Key methods
+/// - [Tensor::from_vec] — make an array that owns a `Vec`, in column-major order.
+/// - [Tensor::new] — make an array that owns any value that holds the data on the heap
+///   (`unsafe`).
+/// - [Tensor::view] — an [TensorView] of an array, with no copy.
+/// - [TensorView::from_slice] — view a slice, in column-major order.
+/// - [TensorView::new] — view data with any strides (`unsafe`: the caller keeps the data valid
+///   while the view exists).
+/// - `index`, `offset`, `as_slice` — read the values, with no copy. The [Tensor] docs give the
+///   data layout.
+/// - `shape`, `strides`, `dtype`, `data_ptr` — the metadata. With these, a host language can
+///   show the data with no copy, for example as a NumPy array with the same shape and strides.
+pub mod tensor;
+/// C FFI functions for inspecting and freeing [Tensor] objects.
+///
+/// Provides `extern "C"` functions for querying `Tensor` metadata (dimensions, strides,
+/// data type, raw pointer) and for freeing a `Tensor` previously returned by this library. The C
+/// header uses the same name, `Tensor`.
+#[path = "tensor_c.rs"]
+pub mod tensor_c;
 /// Utility functions for querying library capabilities.
 ///
 /// Provides standalone functions useful for runtime capability checks:
@@ -555,7 +558,6 @@ mod ode_callbacks_requirements_test;
 
 pub use adjoint_checkpoint::AdjointCheckpointWrapper;
 pub use error::DiffsolRtError;
-pub use host_array::HostArray;
 pub use initial_condition_options::{
     InitialConditionSolverOptions, InitialConditionSolverOptionsSnapshot,
 };
@@ -568,4 +570,5 @@ pub use ode_options::{OdeSolverOptions, OdeSolverOptionsSnapshot};
 pub use ode_solver_type::OdeSolverType;
 pub use scalar_type::{Scalar, ScalarType, ToScalarType};
 pub use solution_wrapper::SolutionWrapper;
+pub use tensor::{Tensor, TensorView};
 pub use utils::{is_klu_available, version};

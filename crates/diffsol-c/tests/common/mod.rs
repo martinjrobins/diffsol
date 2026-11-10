@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use diffsol_c::{host_array::HostArray, JitBackendType, OdeSolverType, SolutionWrapper};
+use diffsol_c::{tensor::Tensor, JitBackendType, OdeSolverType, SolutionWrapper};
 
 pub const ASSERT_TOL: f64 = 1e-5;
 pub const LOGISTIC_X0: f64 = 0.1;
@@ -25,24 +25,24 @@ pub fn available_jit_backends() -> Vec<JitBackendType> {
 }
 
 /// An `[n, 1]` array: one lane of values, for example `params`, `y` or `t_eval`.
-pub fn vector_host(values: &[f64]) -> HostArray {
-    batched_vector_host(&[values])
+pub fn vector_tensor(values: &[f64]) -> Tensor {
+    batched_vector_tensor(&[values])
 }
 
 /// An `[n, nlanes]` array from `nlanes` lanes of `n` values.
-pub fn batched_vector_host(lanes: &[&[f64]]) -> HostArray {
+pub fn batched_vector_tensor(lanes: &[&[f64]]) -> Tensor {
     let n = lanes.first().map_or(0, |lane| lane.len());
     assert!(
         lanes.iter().all(|lane| lane.len() == n),
         "lanes must have the same length"
     );
-    HostArray::from_vec(lanes.concat(), vec![n, lanes.len()])
+    Tensor::from_vec(lanes.concat(), vec![n, lanes.len()])
 }
 
 /// A `[rows, cols, 1]` array (one lane) from column-major values.
-pub fn matrix_host(rows: usize, cols: usize, values_col_major: &[f64]) -> HostArray {
+pub fn matrix_tensor(rows: usize, cols: usize, values_col_major: &[f64]) -> Tensor {
     // one lane: `[rows, cols, 1]`, in the column-major order of the values
-    HostArray::from_vec(values_col_major.to_vec(), vec![rows, cols, 1])
+    Tensor::from_vec(values_col_major.to_vec(), vec![rows, cols, 1])
 }
 
 pub fn assert_close(actual: f64, expected: f64, tol: f64, label: &str) {
@@ -95,29 +95,29 @@ pub fn hybrid_logistic_state_dr(r: f64, t: f64) -> f64 {
     (local_t + cycles * tau) * x * (1.0 - x)
 }
 
-/// The value of `array` at `index` as `f64`. The array has the scalar type of the solver, `f32`
+/// The value of `tensor` at `index` as `f64`. The array has the scalar type of the solver, `f32`
 /// or `f64`.
-pub fn value_f64(array: &HostArray, index: &[usize]) -> f64 {
-    match array.index::<f64>(index) {
+pub fn value_f64(tensor: &Tensor, index: &[usize]) -> f64 {
+    match tensor.index::<f64>(index) {
         Ok(&value) => value,
-        Err(_) => *array.index::<f32>(index).unwrap() as f64,
+        Err(_) => *tensor.index::<f32>(index).unwrap() as f64,
     }
 }
 
 /// Lane `lane` of a `[n, nlanes]` array, or the values of a 1D array (lane 0), as `f64` values.
-pub fn lane_f64(array: &HostArray, lane: usize) -> Vec<f64> {
-    match array.shape() {
-        [n] => (0..*n).map(|i| value_f64(array, &[i])).collect(),
-        [n, _] => (0..*n).map(|i| value_f64(array, &[i, lane])).collect(),
+pub fn lane_f64(tensor: &Tensor, lane: usize) -> Vec<f64> {
+    match tensor.shape() {
+        [n] => (0..*n).map(|i| value_f64(tensor, &[i])).collect(),
+        [n, _] => (0..*n).map(|i| value_f64(tensor, &[i, lane])).collect(),
         shape => panic!("expected a 1D or 2D array, got the shape {shape:?}"),
     }
 }
 
 /// Lane `lane` of a `[nrows, ncols, nlanes]` array as an `f64` matrix.
-pub fn lane_matrix(array: &HostArray, lane: usize) -> ndarray::Array2<f64> {
-    let shape = array.shape();
+pub fn lane_matrix(tensor: &Tensor, lane: usize) -> ndarray::Array2<f64> {
+    let shape = tensor.shape();
     ndarray::Array2::from_shape_fn((shape[0], shape[1]), |(i, j)| {
-        value_f64(array, &[i, j, lane])
+        value_f64(tensor, &[i, j, lane])
     })
 }
 
@@ -128,8 +128,8 @@ pub fn assert_solution_tail(
     r: f64,
     tol: f64,
 ) {
-    let ys_array = solution.get_ys().unwrap();
-    let ys = lane_matrix(&ys_array, 0);
+    let ys_tensor = solution.get_ys().unwrap();
+    let ys = lane_matrix(&ys_tensor, 0);
     let ts = lane_f64(&solution.get_ts().unwrap(), 0);
 
     assert_eq!(ys.nrows(), 1, "expected a single state/output row");

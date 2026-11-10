@@ -1,10 +1,12 @@
 // Delegate solver types selected at runtime in Host to concrete solver types
 // in Rust.
 
+use std::sync::Arc;
+
 use crate::adjoint_checkpoint::AdjointCheckpointWrapper;
 use crate::error::DiffsolRtError;
-use crate::host_array::{FromHostArray, HostArray, ToHostArray};
 use crate::scalar_type::Scalar;
+use crate::tensor::{FromTensor, Tensor, TensorLayout, TensorView, ToTensor};
 use crate::{
     generate_ic_option_accessors, generate_ode_option_accessors, generate_option_accessors,
     option_value_from_store, option_value_to_store,
@@ -33,7 +35,7 @@ use crate::{
 // Each matrix type implements PySolve as bridge between diffsol and Host
 
 use crate::solution::Solution;
-pub(crate) type SolveResult = Result<Box<dyn Solution>, DiffsolRtError>;
+pub(crate) type SolveResult = Result<Arc<dyn Solution>, DiffsolRtError>;
 
 pub(crate) trait Solve: Send {
     fn matrix_type(&self) -> MatrixType;
@@ -47,20 +49,20 @@ pub(crate) trait Solve: Send {
 
     fn rhs(
         &mut self,
-        params: &HostArray,
+        params: TensorView<'_>,
         t: f64,
-        y: &HostArray,
-    ) -> Result<HostArray, DiffsolRtError>;
+        y: TensorView<'_>,
+    ) -> Result<Tensor, DiffsolRtError>;
 
     fn rhs_jac_mul(
         &mut self,
-        params: &HostArray,
+        params: TensorView<'_>,
         t: f64,
-        y: &HostArray,
-        v: &HostArray,
-    ) -> Result<HostArray, DiffsolRtError>;
+        y: TensorView<'_>,
+        v: TensorView<'_>,
+    ) -> Result<Tensor, DiffsolRtError>;
 
-    fn y0(&mut self, params: &HostArray) -> Result<HostArray, DiffsolRtError>;
+    fn y0(&mut self, params: TensorView<'_>) -> Result<Tensor, DiffsolRtError>;
 
     fn check(&self, linear_solver: LinearSolverType) -> Result<(), DiffsolRtError>;
     fn set_rtol(&mut self, rtol: f64);
@@ -92,7 +94,7 @@ pub(crate) trait Solve: Send {
         &mut self,
         method: OdeSolverType,
         linear_solver: LinearSolverType,
-        params: &HostArray,
+        params: TensorView<'_>,
         final_time: f64,
     ) -> SolveResult;
 
@@ -100,42 +102,42 @@ pub(crate) trait Solve: Send {
         &mut self,
         method: OdeSolverType,
         linear_solver: LinearSolverType,
-        params: &HostArray,
-        t_eval: &HostArray,
+        params: TensorView<'_>,
+        t_eval: TensorView<'_>,
     ) -> SolveResult;
 
     fn solve_fwd_sens(
         &mut self,
         method: OdeSolverType,
         linear_solver: LinearSolverType,
-        params: &HostArray,
-        t_eval: &HostArray,
+        params: TensorView<'_>,
+        t_eval: TensorView<'_>,
     ) -> SolveResult;
 
     fn solve_continuous_adjoint(
         &mut self,
         method: OdeSolverType,
         linear_solver: LinearSolverType,
-        params: &HostArray,
+        params: TensorView<'_>,
         final_time: f64,
-    ) -> Result<(HostArray, HostArray), DiffsolRtError>;
+    ) -> Result<(Tensor, Tensor), DiffsolRtError>;
 
     fn solve_adjoint_fwd(
         &mut self,
         method: OdeSolverType,
         linear_solver: LinearSolverType,
-        params: &HostArray,
-        t_eval: &HostArray,
-    ) -> Result<(Box<dyn Solution>, AdjointCheckpointWrapper), DiffsolRtError>;
+        params: TensorView<'_>,
+        t_eval: TensorView<'_>,
+    ) -> Result<(Arc<dyn Solution>, AdjointCheckpointWrapper), DiffsolRtError>;
 
     fn solve_adjoint_bkwd(
         &mut self,
         method: OdeSolverType,
         linear_solver: LinearSolverType,
         checkpoint: &AdjointCheckpointWrapper,
-        t_eval: &HostArray,
-        dgdu_eval: &HostArray,
-    ) -> Result<HostArray, DiffsolRtError>;
+        t_eval: TensorView<'_>,
+        dgdu_eval: TensorView<'_>,
+    ) -> Result<Tensor, DiffsolRtError>;
 
     generate_trait_ic_option_accessors! {
         use_linesearch: bool,
@@ -169,7 +171,7 @@ where
 
 /// Read the times `t_eval` as `T` values. All the lanes use the same times, so `t_eval` is a 1D
 /// `[nt]` array, or a 2D `[nt, 1]` array with one lane.
-fn read_times<T: Scalar>(times: &HostArray) -> Result<Vec<T>, DiffsolRtError> {
+fn read_times<T: Scalar>(times: TensorView<'_>) -> Result<Vec<T>, DiffsolRtError> {
     let (nt, has_lane_axis) = match times.shape() {
         [nt] => (*nt, false),
         [nt, 1] => (*nt, true),
@@ -241,18 +243,18 @@ where
         })
     }
 
-    /// Convert `array` (the argument `name`) to a diffsol value with the lanes of the problem.
+    /// Convert `tensor` (the argument `name`) to a diffsol value with the lanes of the problem.
     /// Each lane must have the shape `lane_shape`. The errors start with `name`.
-    fn read_input<T: FromHostArray<Context = M::C>>(
+    fn read_input<T: FromTensor<Context = M::C>>(
         &self,
-        array: &HostArray,
+        tensor: TensorView<'_>,
         lane_shape: &[usize],
         name: &str,
     ) -> Result<T, DiffsolRtError> {
         // the conversion checks the number of axes and the number of lanes
-        let value = T::from_host_array(array, self.problem.context()).map_err(|e| e.named(name))?;
+        let value = T::from_tensor(tensor, self.problem.context()).map_err(|e| e.named(name))?;
         // the last axis is the lane axis
-        let got = &array.shape()[..array.shape().len() - 1];
+        let got = &tensor.shape()[..tensor.shape().len() - 1];
         if got != lane_shape {
             let message = match (lane_shape, got) {
                 ([n], [m]) => format!("Expected {n} values in each lane, got {m}"),
@@ -266,25 +268,25 @@ where
         Ok(value)
     }
 
-    /// Convert an adjoint gradient to a HostArray with the shape `[nparams, nchannels, nbatch]`.
+    /// Convert an adjoint gradient to a Tensor with the shape `[nparams, nchannels, nbatch]`.
     ///
     /// The gradient has one lane for each (batch lane, output channel) pair, with lane
     /// `b * nchannels + j` for batch lane `b` and channel `j`.
-    fn gradient_to_host_array(&self, gradient: M::V) -> HostArray
+    fn gradient_to_tensor(&self, gradient: M::V) -> Tensor
     where
-        M::V: ToHostArray,
+        M::V: ToTensor,
     {
         // `[nparams, nbatch * nchannels]`, with the lane axis split into `[nchannels, nbatch]`
-        let array = gradient.to_host_array();
+        let tensor = gradient.to_tensor();
         let nbatch = self.problem.context().nbatch();
-        let nchannels = array.shape()[1] / nbatch;
-        let shape = vec![array.shape()[0], nchannels, nbatch];
+        let nchannels = tensor.shape()[1] / nbatch;
+        let shape = vec![tensor.shape()[0], nchannels, nbatch];
         let strides = vec![
-            array.strides()[0],
-            array.strides()[1],
-            nchannels * array.strides()[1],
+            tensor.strides()[0],
+            tensor.strides()[1],
+            nchannels * tensor.strides()[1],
         ];
-        array.with_layout(shape, strides)
+        tensor.with_layout(shape, strides)
     }
 
     /// Return the error recorded by the equations during the last evaluation, if any.
@@ -295,9 +297,9 @@ where
         }
     }
 
-    pub(crate) fn setup_problem(&mut self, params: &HostArray) -> Result<(), DiffsolRtError>
+    pub(crate) fn setup_problem(&mut self, params: TensorView<'_>) -> Result<(), DiffsolRtError>
     where
-        M::V: FromHostArray<Context = M::C>,
+        M::V: FromTensor<Context = M::C>,
     {
         self.reset_eval_state();
         let nparams = self.problem.eqn.nparams();
@@ -327,8 +329,8 @@ where
         + SolveEqn
         + Send
         + 'static,
-    <M::V as DefaultDenseMatrix>::M: ToHostArray + FromHostArray<Context = M::C>,
-    M::V: ToHostArray + FromHostArray<Context = M::C>,
+    <M::V as DefaultDenseMatrix>::M: TensorLayout + FromTensor<Context = M::C>,
+    M::V: TensorLayout + FromTensor<Context = M::C>,
     M::V: DefaultDenseMatrix + Send + Sync + 'static,
     <M::V as DefaultDenseMatrix>::M: Send + Sync,
     for<'b> &'b M::V: VectorRef<M::V>,
@@ -505,22 +507,22 @@ where
         derivative_solve_max_iter: usize
     }
 
-    fn y0(&mut self, params: &HostArray) -> Result<HostArray, DiffsolRtError> {
+    fn y0(&mut self, params: TensorView<'_>) -> Result<Tensor, DiffsolRtError> {
         self.setup_problem(params)?;
         let n = self.problem.eqn.nstates();
         let mut y0 = M::V::zeros(n, self.problem.context().clone());
         let t0 = self.problem.t0;
         self.problem.eqn.init().call_inplace(t0, &mut y0);
         self.take_eqn_error()?;
-        Ok(y0.to_host_array())
+        Ok(y0.to_tensor())
     }
 
     fn rhs(
         &mut self,
-        params: &HostArray,
+        params: TensorView<'_>,
         t: f64,
-        y: &HostArray,
-    ) -> Result<HostArray, DiffsolRtError> {
+        y: TensorView<'_>,
+    ) -> Result<Tensor, DiffsolRtError> {
         let n = self.problem.eqn.nstates();
         let y = self.read_input(y, &[n], "y")?;
         self.setup_problem(params)?;
@@ -530,16 +532,16 @@ where
             .rhs()
             .call_inplace(&y, M::T::from_f64(t).unwrap(), &mut dydt);
         self.take_eqn_error()?;
-        Ok(dydt.to_host_array())
+        Ok(dydt.to_tensor())
     }
 
     fn rhs_jac_mul(
         &mut self,
-        params: &HostArray,
+        params: TensorView<'_>,
         t: f64,
-        y: &HostArray,
-        v: &HostArray,
-    ) -> Result<HostArray, DiffsolRtError> {
+        y: TensorView<'_>,
+        v: TensorView<'_>,
+    ) -> Result<Tensor, DiffsolRtError> {
         let n = self.problem.eqn.nstates();
         let y = self.read_input(y, &[n], "y")?;
         let v = self.read_input(v, &[n], "v")?;
@@ -550,14 +552,14 @@ where
             .rhs()
             .jac_mul_inplace(&y, M::T::from_f64(t).unwrap(), &v, &mut dydt);
         self.take_eqn_error()?;
-        Ok(dydt.to_host_array())
+        Ok(dydt.to_tensor())
     }
 
     fn solve(
         &mut self,
         method: OdeSolverType,
         linear_solver: LinearSolverType,
-        params: &HostArray,
+        params: TensorView<'_>,
         final_time: f64,
     ) -> SolveResult {
         self.problem
@@ -576,15 +578,15 @@ where
                 method.solve::<M, Eqn, <M as KluValidator<M>>::LS>(&mut self.problem, final_time)
             }
         };
-        Ok(Box::new(self.finish(soln)?))
+        Ok(Arc::new(self.finish(soln)?))
     }
 
     fn solve_dense(
         &mut self,
         method: OdeSolverType,
         linear_solver: LinearSolverType,
-        params: &HostArray,
-        t_eval: &HostArray,
+        params: TensorView<'_>,
+        t_eval: TensorView<'_>,
     ) -> SolveResult {
         self.problem
             .eqn
@@ -601,15 +603,15 @@ where
                 LinearSolverType::Klu => method
                     .solve_dense::<M, Eqn, <M as KluValidator<M>>::LS>(&mut self.problem, &t_eval),
             };
-        Ok(Box::new(self.finish(soln)?))
+        Ok(Arc::new(self.finish(soln)?))
     }
 
     fn solve_fwd_sens(
         &mut self,
         method: OdeSolverType,
         linear_solver: LinearSolverType,
-        params: &HostArray,
-        t_eval: &HostArray,
+        params: TensorView<'_>,
+        t_eval: TensorView<'_>,
     ) -> SolveResult {
         self.problem
             .eqn
@@ -625,16 +627,16 @@ where
             LinearSolverType::Klu => method
                 .solve_fwd_sens::<M, Eqn, <M as KluValidator<M>>::LS>(&mut self.problem, &t_eval),
         };
-        Ok(Box::new(self.finish(soln)?))
+        Ok(Arc::new(self.finish(soln)?))
     }
 
     fn solve_continuous_adjoint(
         &mut self,
         method: OdeSolverType,
         linear_solver: LinearSolverType,
-        params: &HostArray,
+        params: TensorView<'_>,
         final_time: f64,
-    ) -> Result<(HostArray, HostArray), DiffsolRtError> {
+    ) -> Result<(Tensor, Tensor), DiffsolRtError> {
         self.problem
             .eqn
             .check_requirement(EqnRequirement::Adjoint(method))?;
@@ -662,19 +664,16 @@ where
         };
         self.problem.integrate_out = integrate_out;
         let (integral, gradient) = self.finish(result)?;
-        Ok((
-            integral.to_host_array(),
-            self.gradient_to_host_array(gradient),
-        ))
+        Ok((integral.to_tensor(), self.gradient_to_tensor(gradient)))
     }
 
     fn solve_adjoint_fwd(
         &mut self,
         method: OdeSolverType,
         linear_solver: LinearSolverType,
-        params: &HostArray,
-        t_eval: &HostArray,
-    ) -> Result<(Box<dyn Solution>, AdjointCheckpointWrapper), DiffsolRtError> {
+        params: TensorView<'_>,
+        t_eval: TensorView<'_>,
+    ) -> Result<(Arc<dyn Solution>, AdjointCheckpointWrapper), DiffsolRtError> {
         self.problem
             .eqn
             .check_requirement(EqnRequirement::Adjoint(method))?;
@@ -701,7 +700,7 @@ where
                 ),
         };
         let (soln, checkpoint) = self.finish(result)?;
-        Ok((Box::new(soln), AdjointCheckpointWrapper::new(checkpoint)))
+        Ok((Arc::new(soln), AdjointCheckpointWrapper::new(checkpoint)))
     }
 
     fn solve_adjoint_bkwd(
@@ -709,9 +708,9 @@ where
         method: OdeSolverType,
         linear_solver: LinearSolverType,
         checkpoint: &AdjointCheckpointWrapper,
-        t_eval: &HostArray,
-        dgdu_eval: &HostArray,
-    ) -> Result<HostArray, DiffsolRtError> {
+        t_eval: TensorView<'_>,
+        dgdu_eval: TensorView<'_>,
+    ) -> Result<Tensor, DiffsolRtError> {
         self.problem
             .eqn
             .check_requirement(EqnRequirement::Adjoint(method))?;
@@ -747,6 +746,6 @@ where
                 ),
         };
         let gradient = self.finish(result)?;
-        Ok(self.gradient_to_host_array(gradient))
+        Ok(self.gradient_to_tensor(gradient))
     }
 }

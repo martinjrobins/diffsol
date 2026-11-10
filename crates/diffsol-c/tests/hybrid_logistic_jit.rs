@@ -7,7 +7,7 @@ use common::lane_matrix;
 use common::hybrid_logistic_state_dr;
 use common::{
     all_ode_solvers, assert_close, available_jit_backends, hybrid_logistic_period,
-    hybrid_logistic_state, lane_f64, vector_host, ASSERT_TOL,
+    hybrid_logistic_state, lane_f64, vector_tensor, ASSERT_TOL,
 };
 use diffsol_c::{
     JitBackendType, LinearSolverType, MatrixType, OdeSolverType, OdeWrapper, ScalarType,
@@ -60,7 +60,7 @@ fn assert_hybrid_solution_matches_piecewise_logistic_diffsl_model(
     assert_eq!(ode.get_nout().unwrap(), 1);
     assert!(ode.has_stop().unwrap());
 
-    let solution = ode.solve(&vector_host(&[r]), final_time).unwrap();
+    let solution = ode.solve(vector_tensor(&[r]).view(), final_time).unwrap();
     let ys = solution.get_ys().unwrap();
     let ys = lane_matrix(&ys, 0);
     let ts = lane_f64(&solution.get_ts().unwrap(), 0);
@@ -106,7 +106,7 @@ fn assert_hybrid_dense_solution_matches_piecewise_logistic_diffsl_model(
     ode.set_atol(1e-8).unwrap();
 
     let solution = ode
-        .solve_dense(&vector_host(&[r]), &vector_host(&t_eval))
+        .solve_dense(vector_tensor(&[r]).view(), vector_tensor(&t_eval).view())
         .unwrap();
     let ys = solution.get_ys().unwrap();
     let ys = lane_matrix(&ys, 0);
@@ -138,7 +138,7 @@ fn assert_hybrid_forward_sensitivities_match_piecewise_logistic_diffsl_model(
     ode.set_sens_atol(Some(1e-6)).unwrap();
 
     let solution = ode
-        .solve_fwd_sens(&vector_host(&[r]), &vector_host(&t_eval))
+        .solve_fwd_sens(vector_tensor(&[r]).view(), vector_tensor(&t_eval).view())
         .unwrap();
     let ys = solution.get_ys().unwrap();
     let ys = lane_matrix(&ys, 0);

@@ -4,9 +4,9 @@ mod common;
 use common::lane_matrix;
 
 #[cfg(feature = "diffsl-llvm")]
-use common::matrix_host;
+use common::matrix_tensor;
 use common::{
-    assert_close, available_jit_backends, lane_f64, logistic_state, vector_host, ASSERT_TOL,
+    assert_close, available_jit_backends, lane_f64, logistic_state, vector_tensor, ASSERT_TOL,
 };
 #[cfg(feature = "diffsl-llvm")]
 use common::{logistic_integral, logistic_integral_dr, logistic_state_dr};
@@ -145,7 +145,7 @@ fn time_reset_integral_dr(r: f64, final_time: f64) -> f64 {
 
 fn assert_time_reset_dense_solution(ode: &OdeWrapper, r: f64, t_eval: &[f64]) {
     let solution = ode
-        .solve_dense(&vector_host(&[r]), &vector_host(t_eval))
+        .solve_dense(vector_tensor(&[r]).view(), vector_tensor(t_eval).view())
         .unwrap();
     let ys = lane_matrix(&solution.get_ys().unwrap(), 0);
     let ts = lane_f64(&solution.get_ts().unwrap(), 0);
@@ -182,7 +182,7 @@ fn logistic_time_reset_solve_matches_piecewise_solution() {
                 assert_eq!(ode.get_nout().unwrap(), 1);
                 assert!(ode.has_stop().unwrap());
 
-                let solution = ode.solve(&vector_host(&[r]), final_time).unwrap();
+                let solution = ode.solve(vector_tensor(&[r]).view(), final_time).unwrap();
                 let ys = lane_matrix(&solution.get_ys().unwrap(), 0);
                 let ts = lane_f64(&solution.get_ts().unwrap(), 0);
 
@@ -276,7 +276,7 @@ fn logistic_time_reset_forward_sensitivities_match_piecewise_solution() {
             );
 
             let solution = ode
-                .solve_fwd_sens(&vector_host(&[r]), &vector_host(&t_eval))
+                .solve_fwd_sens(vector_tensor(&[r]).view(), vector_tensor(&t_eval).view())
                 .unwrap();
             let ys = solution.get_ys().unwrap();
             let ys = lane_matrix(&ys, 0);
@@ -325,7 +325,7 @@ fn logistic_time_reset_continuous_adjoint_matches_piecewise_integral() {
             );
 
             let (integral, gradient) = ode
-                .solve_continuous_adjoint(&vector_host(&[r]), final_time)
+                .solve_continuous_adjoint(vector_tensor(&[r]).view(), final_time)
                 .unwrap();
             let integral = lane_f64(&integral, 0);
             let gradient = lane_matrix(&gradient, 0);
@@ -373,7 +373,10 @@ fn logistic_time_reset_split_adjoint_matches_analytical_gradient() {
             );
 
             let (solution, checkpoint) = ode
-                .solve_adjoint_fwd(&vector_host(&[fit_r]), &vector_host(&t_eval))
+                .solve_adjoint_fwd(
+                    vector_tensor(&[fit_r]).view(),
+                    vector_tensor(&t_eval).view(),
+                )
                 .unwrap();
             let ts = lane_f64(&solution.get_ts().unwrap(), 0);
             assert_eq!(ts, t_eval);
@@ -387,7 +390,7 @@ fn logistic_time_reset_split_adjoint_matches_analytical_gradient() {
                 .solve_adjoint_bkwd(
                     &solution,
                     &checkpoint,
-                    &matrix_host(1, t_eval.len(), &dgdu_values),
+                    matrix_tensor(1, t_eval.len(), &dgdu_values).view(),
                 )
                 .unwrap();
             let split_gradient = lane_matrix(&split_gradient, 0);

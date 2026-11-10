@@ -1,5 +1,4 @@
 use crate::c_api_utils::{valid_f64_ptr, DIFFSOL_BAD_ARG, DIFFSOL_ERR, DIFFSOL_OK};
-use crate::host_array::HostArray;
 use crate::linear_solver_type_c::{linear_solver_from_i32, linear_solver_to_i32};
 use crate::matrix_type_c::matrix_type_from_i32;
 use crate::matrix_type_c::matrix_type_to_i32;
@@ -7,10 +6,11 @@ use crate::ode::OdeWrapper;
 use crate::ode_solver_type_c::{ode_solver_from_i32, ode_solver_to_i32};
 use crate::scalar_type::ScalarType;
 use crate::solution_wrapper::SolutionWrapper;
+use crate::tensor::{Tensor, TensorView};
 use crate::{c_error, c_invalid_arg};
 
-fn boxed_host_array(array: HostArray) -> *mut HostArray {
-    Box::into_raw(Box::new(array))
+fn boxed_tensor(tensor: Tensor) -> *mut Tensor {
+    Box::into_raw(Box::new(tensor))
 }
 
 /// Return true if `ptr` can point to `len * nlanes` `f64` values: the count does not overflow,
@@ -21,12 +21,25 @@ fn valid_lanes_ptr(ptr: *const f64, len: usize, nlanes: usize) -> bool {
         .is_some_and(|count| valid_f64_ptr(ptr, count))
 }
 
-/// Wrap `len * nlanes` `f64` values at `ptr` as a column-major `[len, nlanes]` array: lane `b`,
-/// value `k` is at index `b * len + k`. The array does not own the values.
-fn lanes_host_array(ptr: *const f64, len: usize, nlanes: usize) -> HostArray {
-    // SAFETY: the C caller guarantees `len * nlanes` values at `ptr` (see `valid_lanes_ptr`),
-    // and the array lives only during the call
-    unsafe { HostArray::new_col_major(ptr as *mut u8, vec![len, nlanes], ScalarType::F64) }
+/// View `len * nlanes` `f64` values at `ptr` as a column-major `[len, nlanes]` array: lane `b`,
+/// value `k` is at index `b * len + k`.
+///
+/// # Safety
+/// `ptr` must point to `len * nlanes` valid `f64` values (see `valid_lanes_ptr`), which stay
+/// valid and do not change during `'a`.
+unsafe fn lanes_view<'a>(ptr: *const f64, len: usize, nlanes: usize) -> TensorView<'a> {
+    // SAFETY: the caller guarantees the values
+    unsafe { TensorView::new_col_major(ptr as *const u8, &[len, nlanes], ScalarType::F64) }
+}
+
+/// View `len` `f64` values at `ptr` as a `[len]` array.
+///
+/// # Safety
+/// `ptr` must point to `len` valid `f64` values (see `valid_f64_ptr`), which stay valid and do
+/// not change during `'a`.
+unsafe fn times_view<'a>(ptr: *const f64, len: usize) -> TensorView<'a> {
+    // SAFETY: the caller guarantees the values
+    unsafe { TensorView::new_col_major(ptr as *const u8, &[len], ScalarType::F64) }
 }
 
 pub(crate) fn parse_ode_new_common_args(
@@ -62,15 +75,15 @@ pub(crate) fn parse_ode_new_common_args(
     Some((matrix_type, linear_solver, ode_solver))
 }
 
-/// Free a list of host arrays previously returned by this library.
+/// Free a list of arrays previously returned by this library.
 ///
 /// # Safety
 /// `list` must be either null or a pointer returned by this library for a list
 /// of length `len`. Each pointed-to element remains owned separately.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn diffsol_host_array_list_free(list: *mut *mut HostArray, len: usize) {
+pub unsafe extern "C" fn diffsol_tensor_list_free(list: *mut *mut Tensor, len: usize) {
     if list.is_null() {
-        c_invalid_arg!("host array list is null");
+        c_invalid_arg!("tensor list is null");
         return;
     }
     unsafe {
@@ -153,7 +166,7 @@ pub unsafe extern "C" fn diffsol_ode_get_options(
 /// # Safety
 /// `ode` must be a valid mutable pointer created by this library. `params_ptr`
 /// must be either null with `params_len * params_lanes == 0` or point to
-/// `params_len * params_lanes` readable `f64` values. `out_array` must be a valid,
+/// `params_len * params_lanes` readable `f64` values. `out_tensor` must be a valid,
 /// writable pointer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_ode_y0(
@@ -161,22 +174,23 @@ pub unsafe extern "C" fn diffsol_ode_y0(
     params_ptr: *const f64,
     params_len: usize,
     params_lanes: usize,
-    out_array: *mut *mut HostArray,
+    out_tensor: *mut *mut Tensor,
 ) -> i32 {
     if ode.is_null()
-        || out_array.is_null()
+        || out_tensor.is_null()
         || !valid_lanes_ptr(params_ptr, params_len, params_lanes)
     {
         c_invalid_arg!("invalid arguments to diffsol_ode_y0");
         return DIFFSOL_BAD_ARG;
     }
-    let params = lanes_host_array(params_ptr, params_len, params_lanes);
+    // SAFETY: the C caller guarantees the values, and the view lives only during the call
+    let params = unsafe { lanes_view(params_ptr, params_len, params_lanes) };
     let ode = unsafe { &mut *ode };
-    match ode.y0(&params) {
-        Ok(array) => {
-            let boxed = boxed_host_array(array);
+    match ode.y0(params) {
+        Ok(tensor) => {
+            let boxed = boxed_tensor(tensor);
             unsafe {
-                *out_array = boxed;
+                *out_tensor = boxed;
             }
             DIFFSOL_OK
         }
@@ -195,7 +209,7 @@ pub unsafe extern "C" fn diffsol_ode_y0(
 /// # Safety
 /// `ode` must be a valid mutable pointer created by this library. `params_ptr`
 /// and `y_ptr` must point to readable `f64` buffers of `len * lanes` values,
-/// unless that count is zero. `out_array` must be writable.
+/// unless that count is zero. `out_tensor` must be writable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_ode_rhs(
     ode: *mut OdeWrapper,
@@ -206,24 +220,30 @@ pub unsafe extern "C" fn diffsol_ode_rhs(
     y_ptr: *const f64,
     y_len: usize,
     y_lanes: usize,
-    out_array: *mut *mut HostArray,
+    out_tensor: *mut *mut Tensor,
 ) -> i32 {
     if ode.is_null()
-        || out_array.is_null()
+        || out_tensor.is_null()
         || !valid_lanes_ptr(params_ptr, params_len, params_lanes)
         || !valid_lanes_ptr(y_ptr, y_len, y_lanes)
     {
         c_invalid_arg!("invalid arguments to diffsol_ode_rhs");
         return DIFFSOL_BAD_ARG;
     }
-    let params = lanes_host_array(params_ptr, params_len, params_lanes);
-    let y = lanes_host_array(y_ptr, y_len, y_lanes);
+    // SAFETY: the C caller guarantees the values of each input, and the views live only during
+    // the call
+    let (params, y) = unsafe {
+        (
+            lanes_view(params_ptr, params_len, params_lanes),
+            lanes_view(y_ptr, y_len, y_lanes),
+        )
+    };
     let ode = unsafe { &mut *ode };
-    match ode.rhs(&params, t, &y) {
-        Ok(array) => {
-            let boxed = boxed_host_array(array);
+    match ode.rhs(params, t, y) {
+        Ok(tensor) => {
+            let boxed = boxed_tensor(tensor);
             unsafe {
-                *out_array = boxed;
+                *out_tensor = boxed;
             }
             DIFFSOL_OK
         }
@@ -242,7 +262,7 @@ pub unsafe extern "C" fn diffsol_ode_rhs(
 /// # Safety
 /// `ode` must be a valid mutable pointer created by this library. `params_ptr`,
 /// `y_ptr`, and `v_ptr` must point to readable `f64` buffers of `len * lanes`
-/// values, unless that count is zero. `out_array` must be writable.
+/// values, unless that count is zero. `out_tensor` must be writable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_ode_rhs_jac_mul(
     ode: *mut OdeWrapper,
@@ -256,10 +276,10 @@ pub unsafe extern "C" fn diffsol_ode_rhs_jac_mul(
     v_ptr: *const f64,
     v_len: usize,
     v_lanes: usize,
-    out_array: *mut *mut HostArray,
+    out_tensor: *mut *mut Tensor,
 ) -> i32 {
     if ode.is_null()
-        || out_array.is_null()
+        || out_tensor.is_null()
         || !valid_lanes_ptr(params_ptr, params_len, params_lanes)
         || !valid_lanes_ptr(y_ptr, y_len, y_lanes)
         || !valid_lanes_ptr(v_ptr, v_len, v_lanes)
@@ -267,15 +287,21 @@ pub unsafe extern "C" fn diffsol_ode_rhs_jac_mul(
         c_invalid_arg!("invalid arguments to diffsol_ode_rhs_jac_mul");
         return DIFFSOL_BAD_ARG;
     }
-    let params = lanes_host_array(params_ptr, params_len, params_lanes);
-    let y = lanes_host_array(y_ptr, y_len, y_lanes);
-    let v = lanes_host_array(v_ptr, v_len, v_lanes);
+    // SAFETY: the C caller guarantees the values of each input, and the views live only during
+    // the call
+    let (params, y, v) = unsafe {
+        (
+            lanes_view(params_ptr, params_len, params_lanes),
+            lanes_view(y_ptr, y_len, y_lanes),
+            lanes_view(v_ptr, v_len, v_lanes),
+        )
+    };
     let ode = unsafe { &mut *ode };
-    match ode.rhs_jac_mul(&params, t, &y, &v) {
-        Ok(array) => {
-            let boxed = boxed_host_array(array);
+    match ode.rhs_jac_mul(params, t, y, v) {
+        Ok(tensor) => {
+            let boxed = boxed_tensor(tensor);
             unsafe {
-                *out_array = boxed;
+                *out_tensor = boxed;
             }
             DIFFSOL_OK
         }
@@ -310,9 +336,10 @@ pub unsafe extern "C" fn diffsol_ode_solve(
         c_invalid_arg!("invalid arguments to diffsol_ode_solve");
         return DIFFSOL_BAD_ARG;
     }
-    let params = lanes_host_array(params_ptr, params_len, params_lanes);
+    // SAFETY: the C caller guarantees the values, and the view lives only during the call
+    let params = unsafe { lanes_view(params_ptr, params_len, params_lanes) };
     let ode = unsafe { &mut *ode };
-    match ode.solve(&params, final_time) {
+    match ode.solve(params, final_time) {
         Ok(new_solution) => {
             unsafe {
                 *out_solution = Box::into_raw(Box::new(new_solution));
@@ -354,14 +381,16 @@ pub unsafe extern "C" fn diffsol_ode_solve_dense(
         c_invalid_arg!("invalid arguments to diffsol_ode_solve_dense");
         return DIFFSOL_BAD_ARG;
     }
-    let params = lanes_host_array(params_ptr, params_len, params_lanes);
-    // SAFETY: the C caller guarantees `t_eval_len` values at `t_eval_ptr`, and the array lives
-    // only during the call
-    let t_eval = unsafe {
-        HostArray::new_col_major(t_eval_ptr as *mut u8, vec![t_eval_len], ScalarType::F64)
+    // SAFETY: the C caller guarantees the values of each input, and the views live only during
+    // the call
+    let (params, t_eval) = unsafe {
+        (
+            lanes_view(params_ptr, params_len, params_lanes),
+            times_view(t_eval_ptr, t_eval_len),
+        )
     };
     let ode = unsafe { &mut *ode };
-    match ode.solve_dense(&params, &t_eval) {
+    match ode.solve_dense(params, t_eval) {
         Ok(new_solution) => {
             unsafe {
                 *out_solution = Box::into_raw(Box::new(new_solution));
@@ -403,14 +432,16 @@ pub unsafe extern "C" fn diffsol_ode_solve_fwd_sens(
         c_invalid_arg!("invalid arguments to diffsol_ode_solve_fwd_sens");
         return DIFFSOL_BAD_ARG;
     }
-    let params = lanes_host_array(params_ptr, params_len, params_lanes);
-    // SAFETY: the C caller guarantees `t_eval_len` values at `t_eval_ptr`, and the array lives
-    // only during the call
-    let t_eval = unsafe {
-        HostArray::new_col_major(t_eval_ptr as *mut u8, vec![t_eval_len], ScalarType::F64)
+    // SAFETY: the C caller guarantees the values of each input, and the views live only during
+    // the call
+    let (params, t_eval) = unsafe {
+        (
+            lanes_view(params_ptr, params_len, params_lanes),
+            times_view(t_eval_ptr, t_eval_len),
+        )
     };
     let ode = unsafe { &mut *ode };
-    match ode.solve_fwd_sens(&params, &t_eval) {
+    match ode.solve_fwd_sens(params, t_eval) {
         Ok(new_solution) => {
             unsafe {
                 *out_solution = Box::into_raw(Box::new(new_solution));
@@ -1115,8 +1146,8 @@ mod tests {
     use crate::test_support::clear_last_error;
     #[cfg(feature = "diffsl-external-f64")]
     use crate::test_support::{
-        assert_close, ffi_free_solution, ffi_read_host_array_1d, ffi_read_host_array_list_matrices,
-        ffi_read_host_array_matrix, ffi_read_host_array_vector, find_time_window, logistic_state,
+        assert_close, ffi_free_solution, ffi_read_tensor_1d, ffi_read_tensor_list_matrices,
+        ffi_read_tensor_matrix, ffi_read_tensor_vector, find_time_window, logistic_state,
         logistic_state_dr, mass_state_deps, rhs_input_deps, rhs_state_deps, ASSERT_TOL,
         LOGISTIC_X0,
     };
@@ -1269,10 +1300,10 @@ mod tests {
     fn c_api_rejects_invalid_ode_arguments() {
         clear_last_error();
         unsafe {
-            let mut out_array = ptr::null_mut();
-            let status = diffsol_ode_y0(ptr::null_mut(), ptr::null(), 0, 1, &mut out_array);
+            let mut out_tensor = ptr::null_mut();
+            let status = diffsol_ode_y0(ptr::null_mut(), ptr::null(), 0, 1, &mut out_tensor);
             assert_eq!(status, DIFFSOL_BAD_ARG);
-            assert!(out_array.is_null());
+            assert!(out_tensor.is_null());
             assert_last_error_contains("invalid arguments to diffsol_ode_y0");
         }
     }
@@ -1412,7 +1443,7 @@ mod tests {
                 diffsol_ode_y0(ode, params.as_ptr(), params.len(), 1, &mut y0_ptr),
                 DIFFSOL_OK
             );
-            assert_eq!(ffi_read_host_array_vector(y0_ptr), vec![LOGISTIC_X0]);
+            assert_eq!(ffi_read_tensor_vector(y0_ptr), vec![LOGISTIC_X0]);
 
             let mut rhs_ptr = ptr::null_mut();
             assert_eq!(
@@ -1430,7 +1461,7 @@ mod tests {
                 DIFFSOL_OK
             );
             assert_close(
-                ffi_read_host_array_vector(rhs_ptr)[0],
+                ffi_read_tensor_vector(rhs_ptr)[0],
                 0.375,
                 ASSERT_TOL,
                 "ffi rhs",
@@ -1455,7 +1486,7 @@ mod tests {
                 DIFFSOL_OK
             );
             assert_close(
-                ffi_read_host_array_vector(rhs_jac_mul_ptr)[0],
+                ffi_read_tensor_vector(rhs_jac_mul_ptr)[0],
                 3.0,
                 ASSERT_TOL,
                 "ffi rhs_jac_mul",
@@ -1485,8 +1516,8 @@ mod tests {
                 diffsol_solution_wrapper_get_ts(solve_solution_ptr, &mut solve_ts_ptr),
                 DIFFSOL_OK
             );
-            let (solve_rows, solve_cols, solve_ys) = ffi_read_host_array_matrix(solve_ys_ptr);
-            let solve_ts = ffi_read_host_array_1d(solve_ts_ptr);
+            let (solve_rows, solve_cols, solve_ys) = ffi_read_tensor_matrix(solve_ys_ptr);
+            let solve_ts = ffi_read_tensor_1d(solve_ts_ptr);
             assert_eq!(solve_rows, 1);
             assert_eq!(solve_cols, solve_ts.len());
             assert!(!solve_ts.is_empty());
@@ -1533,8 +1564,8 @@ mod tests {
                 diffsol_solution_wrapper_get_ts(solution_ptr, &mut ts_ptr),
                 DIFFSOL_OK
             );
-            let (rows, cols, ys) = ffi_read_host_array_matrix(ys_ptr);
-            let ts = ffi_read_host_array_1d(ts_ptr);
+            let (rows, cols, ys) = ffi_read_tensor_matrix(ys_ptr);
+            let ts = ffi_read_tensor_1d(ts_ptr);
             assert_eq!(rows, 1);
             assert_eq!(cols, ts.len());
             let start = find_time_window(&ts, &t_eval, ASSERT_TOL);
@@ -1582,8 +1613,8 @@ mod tests {
                 diffsol_solution_wrapper_get_ts(hybrid_solution_ptr, &mut hybrid_ts_ptr),
                 DIFFSOL_OK
             );
-            let (hybrid_rows, hybrid_cols, hybrid_ys) = ffi_read_host_array_matrix(hybrid_ys_ptr);
-            let hybrid_ts = ffi_read_host_array_1d(hybrid_ts_ptr);
+            let (hybrid_rows, hybrid_cols, hybrid_ys) = ffi_read_tensor_matrix(hybrid_ys_ptr);
+            let hybrid_ts = ffi_read_tensor_1d(hybrid_ts_ptr);
             assert_eq!(hybrid_rows, 1);
             assert_eq!(hybrid_cols, hybrid_t_eval.len());
             assert_eq!(hybrid_ts, hybrid_t_eval);
@@ -1639,7 +1670,7 @@ mod tests {
                 diffsol_solution_wrapper_get_sens(sens_solution_ptr, &mut sens_list, &mut sens_len),
                 DIFFSOL_OK
             );
-            let sens_values = ffi_read_host_array_list_matrices(sens_list, sens_len);
+            let sens_values = ffi_read_tensor_list_matrices(sens_list, sens_len);
             assert_eq!(sens_values.len(), 1);
             assert_eq!(sens_values[0].0, 1);
             assert_eq!(sens_values[0].1, t_eval.len());
@@ -1674,7 +1705,7 @@ mod external_dynamic_tests {
     use crate::ode_solver_type_c::ode_solver_to_i32;
     use crate::test_support::{
         assert_last_error_contains, assert_last_error_set, clear_last_error,
-        external_dynamic_fixture_path, ffi_read_host_array_vector, mass_state_deps, rhs_input_deps,
+        external_dynamic_fixture_path, ffi_read_tensor_vector, mass_state_deps, rhs_input_deps,
         rhs_state_deps, LOGISTIC_X0,
     };
 
@@ -1738,7 +1769,7 @@ mod external_dynamic_tests {
                 diffsol_ode_y0(ode, params.as_ptr(), params.len(), 1, &mut y0_ptr),
                 DIFFSOL_OK
             );
-            assert_eq!(ffi_read_host_array_vector(y0_ptr), vec![LOGISTIC_X0]);
+            assert_eq!(ffi_read_tensor_vector(y0_ptr), vec![LOGISTIC_X0]);
             diffsol_ode_free(ode);
         }
     }
@@ -1832,12 +1863,12 @@ mod jit_tests {
         diffsol_solution_wrapper_get_ts, diffsol_solution_wrapper_get_ys,
     };
     #[cfg(feature = "diffsl-llvm")]
-    use crate::test_support::ffi_read_host_array_list_matrices;
+    use crate::test_support::ffi_read_tensor_list_matrices;
     use crate::test_support::{
         assert_close, available_jit_backends, clear_last_error, ffi_free_solution,
-        ffi_read_host_array_1d, ffi_read_host_array_matrix, ffi_read_host_array_vector,
-        find_time_window, hybrid_logistic_diffsl_code, hybrid_logistic_state,
-        logistic_diffsl_code_cstring, logistic_state, ASSERT_TOL, LOGISTIC_X0,
+        ffi_read_tensor_1d, ffi_read_tensor_matrix, ffi_read_tensor_vector, find_time_window,
+        hybrid_logistic_diffsl_code, hybrid_logistic_state, logistic_diffsl_code_cstring,
+        logistic_state, ASSERT_TOL, LOGISTIC_X0,
     };
     #[cfg(feature = "diffsl-llvm")]
     use crate::test_support::{hybrid_logistic_state_dr, logistic_state_dr};
@@ -2015,7 +2046,7 @@ mod jit_tests {
                     diffsol_ode_y0(ode, params.as_ptr(), params.len(), 1, &mut y0_ptr),
                     DIFFSOL_OK
                 );
-                assert_eq!(ffi_read_host_array_vector(y0_ptr), vec![LOGISTIC_X0]);
+                assert_eq!(ffi_read_tensor_vector(y0_ptr), vec![LOGISTIC_X0]);
 
                 let mut rhs_ptr = ptr::null_mut();
                 assert_eq!(
@@ -2033,7 +2064,7 @@ mod jit_tests {
                     DIFFSOL_OK
                 );
                 assert_close(
-                    ffi_read_host_array_vector(rhs_ptr)[0],
+                    ffi_read_tensor_vector(rhs_ptr)[0],
                     0.375,
                     ASSERT_TOL,
                     "jit ffi rhs",
@@ -2058,7 +2089,7 @@ mod jit_tests {
                     DIFFSOL_OK
                 );
                 assert_close(
-                    ffi_read_host_array_vector(rhs_jac_mul_ptr)[0],
+                    ffi_read_tensor_vector(rhs_jac_mul_ptr)[0],
                     3.0,
                     ASSERT_TOL,
                     "jit ffi rhs_jac_mul",
@@ -2092,8 +2123,8 @@ mod jit_tests {
                     diffsol_solution_wrapper_get_ts(solution_ptr, &mut ts_ptr),
                     DIFFSOL_OK
                 );
-                let (rows, cols, ys) = ffi_read_host_array_matrix(ys_ptr);
-                let ts = ffi_read_host_array_1d(ts_ptr);
+                let (rows, cols, ys) = ffi_read_tensor_matrix(ys_ptr);
+                let ts = ffi_read_tensor_1d(ts_ptr);
                 assert_eq!(rows, 1);
                 assert_eq!(cols, ts.len());
                 let start = find_time_window(&ts, &t_eval, ASSERT_TOL);
@@ -2149,7 +2180,7 @@ mod jit_tests {
                         ),
                         DIFFSOL_OK
                     );
-                    let sens_values = ffi_read_host_array_list_matrices(sens_list, sens_len);
+                    let sens_values = ffi_read_tensor_list_matrices(sens_list, sens_len);
                     assert_eq!(sens_values.len(), 1);
                     assert_eq!(sens_values[0].0, 1);
                     assert_eq!(sens_values[0].1, t_eval.len());
@@ -2266,9 +2297,9 @@ mod jit_tests {
                 DIFFSOL_BAD_ARG
             );
 
-            let mut out_array = ptr::null_mut();
+            let mut out_tensor = ptr::null_mut();
             assert_eq!(
-                diffsol_ode_y0(ptr::null_mut(), ptr::null(), 0, 1, &mut out_array),
+                diffsol_ode_y0(ptr::null_mut(), ptr::null(), 0, 1, &mut out_tensor),
                 DIFFSOL_BAD_ARG
             );
             assert_eq!(
@@ -2281,7 +2312,7 @@ mod jit_tests {
                     ptr::null(),
                     0,
                     1,
-                    &mut out_array,
+                    &mut out_tensor,
                 ),
                 DIFFSOL_BAD_ARG
             );
@@ -2298,7 +2329,7 @@ mod jit_tests {
                     ptr::null(),
                     0,
                     1,
-                    &mut out_array,
+                    &mut out_tensor,
                 ),
                 DIFFSOL_BAD_ARG
             );
@@ -2308,8 +2339,8 @@ mod jit_tests {
             assert!(last_error_message().contains("ode is null"));
 
             clear_last_error();
-            diffsol_host_array_list_free(ptr::null_mut(), 0);
-            assert!(last_error_message().contains("host array list is null"));
+            diffsol_tensor_list_free(ptr::null_mut(), 0);
+            assert!(last_error_message().contains("tensor list is null"));
         }
     }
 
@@ -2400,9 +2431,9 @@ mod jit_tests {
                 let no_params: [f64; 0] = [];
                 let y = [0.25f64];
                 let v = [3.0f64];
-                let mut out_array = ptr::null_mut();
+                let mut out_tensor = ptr::null_mut();
                 assert_eq!(
-                    diffsol_ode_y0(ode, no_params.as_ptr(), no_params.len(), 1, &mut out_array),
+                    diffsol_ode_y0(ode, no_params.as_ptr(), no_params.len(), 1, &mut out_tensor),
                     DIFFSOL_ERR
                 );
                 assert_eq!(
@@ -2415,7 +2446,7 @@ mod jit_tests {
                         y.as_ptr(),
                         y.len(),
                         1,
-                        &mut out_array,
+                        &mut out_tensor,
                     ),
                     DIFFSOL_ERR
                 );
@@ -2432,7 +2463,7 @@ mod jit_tests {
                         v.as_ptr(),
                         v.len(),
                         1,
-                        &mut out_array,
+                        &mut out_tensor,
                     ),
                     DIFFSOL_ERR
                 );
@@ -2722,8 +2753,8 @@ mod jit_tests {
                     diffsol_solution_wrapper_get_ts(solution_ptr, &mut ts_ptr),
                     DIFFSOL_OK
                 );
-                let (_rows, cols, ys) = ffi_read_host_array_matrix(ys_ptr);
-                let ts = ffi_read_host_array_1d(ts_ptr);
+                let (_rows, cols, ys) = ffi_read_tensor_matrix(ys_ptr);
+                let ts = ffi_read_tensor_1d(ts_ptr);
                 assert!(cols >= 1);
                 assert_close(*ts.last().unwrap(), 2.0, 5e-4, "jit hybrid solve time");
                 assert_close(
@@ -2760,7 +2791,7 @@ mod jit_tests {
                         ),
                         DIFFSOL_OK
                     );
-                    let sens_values = ffi_read_host_array_list_matrices(sens_list, sens_len);
+                    let sens_values = ffi_read_tensor_list_matrices(sens_list, sens_len);
                     for (i, (&value, &t)) in sens_values[0].2.iter().zip(t_eval.iter()).enumerate()
                     {
                         assert_close(
