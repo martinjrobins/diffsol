@@ -6,6 +6,7 @@ use common::{batched_vector_tensor, lane_matrix, value_f64};
 
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use common::{
     all_ode_solvers, assert_close, assert_solution_tail, hybrid_logistic_state,
@@ -36,8 +37,9 @@ struct UserData {
     rhs_fail_call: usize,
     /// Counts the calls to `rhs`.
     rhs_calls: AtomicUsize,
-    /// Counts the calls to `free_user_data`.
-    frees: &'static AtomicUsize,
+    /// Counts the calls to `free_user_data`. The test keeps a clone, so that it can read the
+    /// count after the library frees `user_data`.
+    frees: Arc<AtomicUsize>,
 }
 
 fn user_data<'a>(ud: *mut c_void) -> &'a UserData {
@@ -268,13 +270,13 @@ unsafe extern "C" fn free_user_data(ud: *mut c_void) {
 }
 
 /// A fresh `user_data`, owned by whoever it is passed to, and its free counter.
-fn new_user_data(rhs_status: i32) -> (*mut UserData, &'static AtomicUsize) {
-    let frees: &'static AtomicUsize = Box::leak(Box::new(AtomicUsize::new(0)));
+fn new_user_data(rhs_status: i32) -> (*mut UserData, Arc<AtomicUsize>) {
+    let frees = Arc::new(AtomicUsize::new(0));
     let ud = Box::into_raw(Box::new(UserData {
         rhs_status,
         rhs_fail_call: 0,
         rhs_calls: AtomicUsize::new(0),
-        frees,
+        frees: frees.clone(),
     }));
     (ud, frees)
 }
