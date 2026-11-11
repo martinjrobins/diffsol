@@ -69,10 +69,11 @@ cc main.c -I target/release/include target/release/libdiffsol_c.a -lc++ -liconv 
 ```
 
 The book chapter [The C API](https://martinjrobins.github.io/diffsol/use/c_api.html) gives
-more details. The directory `examples/c` has two examples, and the script
-`examples/c/run_examples.sh`, which compiles and runs them against a Cargo build. From the root
-of the workspace: `crates/diffsol-c/examples/c/run_examples.sh target/debug`. The CI runs it on
-Linux, macOS and Windows.
+more details. The directory `examples/diffsol-c-logistic/c` of the workspace has two
+examples, and the script `run_examples.sh`, which compiles and runs them against a Cargo
+build. From the root of the workspace:
+`examples/diffsol-c-logistic/c/run_examples.sh target/debug`. The CI runs it on Linux, macOS
+and Windows.
 
 - `logistic_callbacks.c`: give the equations as C callbacks (`diffsol_ode_new_callbacks_f64`).
 - `logistic_diffsl_jit.c`: give the equations as DiffSL code, which the library compiles at run
