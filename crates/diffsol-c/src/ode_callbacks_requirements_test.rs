@@ -15,9 +15,10 @@ use diffsol::{
 };
 
 use crate::linear_solver_type::LinearSolverType;
-use crate::ode_callbacks::{OdeCallbackError, OdeCallbacks, OdeCallbacksDesc};
+use crate::ode_callbacks::{for_each_batch, OdeCallbackError, OdeCallbacks, OdeCallbacksDesc};
 use crate::ode_solver_type::OdeSolverType;
 use crate::solve_eqn::{EqnRequirement, SolveEqn};
+use crate::tensor::{TensorView, TensorViewMut};
 
 type M = NalgebraMat<f64>;
 type LS = <M as DefaultSolver>::LS;
@@ -27,149 +28,153 @@ type Eqn = OdeCallbacks<M>;
 // that resets the state to `y = 0.1`, and an identity mass matrix. Every adjoint callback
 // computes the negative transpose product.
 
-unsafe fn get(ptr: *const f64) -> f64 {
-    unsafe { *ptr }
-}
+type View<'a> = *const TensorView<'a>;
+type ViewMut<'a> = *mut TensorViewMut<'a>;
 
-unsafe fn set(ptr: *mut f64, value: f64) -> i32 {
-    unsafe { *ptr = value };
+/// Set `y[0] = f(inputs[0][0], ...)` in each lane.
+unsafe fn set<const N: usize>(
+    inputs: [View<'_>; N],
+    y: ViewMut<'_>,
+    f: impl Fn([f64; N]) -> f64,
+) -> i32 {
+    unsafe {
+        for_each_batch(inputs, y, |ins: [&[f64]; N], y: &mut [f64], _| {
+            y[0] = f(ins.map(|v| v[0]))
+        })
+    };
     0
 }
 
-unsafe extern "C" fn rhs(x: *const f64, p: *const f64, _: f64, y: *mut f64, _: *mut c_void) -> i32 {
-    unsafe { set(y, get(p) * get(x) * (1.0 - get(x))) }
+unsafe extern "C" fn rhs(x: View<'_>, p: View<'_>, _: f64, y: ViewMut<'_>, _: *mut c_void) -> i32 {
+    unsafe { set([x, p], y, |[x, p]| p * x * (1.0 - x)) }
 }
 
 unsafe extern "C" fn rhs_jac(
-    x: *const f64,
-    p: *const f64,
+    x: View<'_>,
+    p: View<'_>,
     _: f64,
-    v: *const f64,
-    y: *mut f64,
+    v: View<'_>,
+    y: ViewMut<'_>,
     _: *mut c_void,
 ) -> i32 {
-    unsafe { set(y, get(p) * (1.0 - 2.0 * get(x)) * get(v)) }
+    unsafe { set([x, p, v], y, |[x, p, v]| p * (1.0 - 2.0 * x) * v) }
 }
 
 unsafe extern "C" fn rhs_sens(
-    x: *const f64,
-    _: *const f64,
+    x: View<'_>,
+    _: View<'_>,
     _: f64,
-    v: *const f64,
-    y: *mut f64,
+    v: View<'_>,
+    y: ViewMut<'_>,
     _: *mut c_void,
 ) -> i32 {
-    unsafe { set(y, get(x) * (1.0 - get(x)) * get(v)) }
+    unsafe { set([x, v], y, |[x, v]| x * (1.0 - x) * v) }
 }
 
 unsafe extern "C" fn rhs_adjoint(
-    x: *const f64,
-    p: *const f64,
+    x: View<'_>,
+    p: View<'_>,
     _: f64,
-    v: *const f64,
-    y: *mut f64,
+    v: View<'_>,
+    y: ViewMut<'_>,
     _: *mut c_void,
 ) -> i32 {
-    unsafe { set(y, -get(p) * (1.0 - 2.0 * get(x)) * get(v)) }
+    unsafe { set([x, p, v], y, |[x, p, v]| -p * (1.0 - 2.0 * x) * v) }
 }
 
 unsafe extern "C" fn rhs_sens_adjoint(
-    x: *const f64,
-    _: *const f64,
+    x: View<'_>,
+    _: View<'_>,
     _: f64,
-    v: *const f64,
-    y: *mut f64,
+    v: View<'_>,
+    y: ViewMut<'_>,
     _: *mut c_void,
 ) -> i32 {
-    unsafe { set(y, -get(x) * (1.0 - get(x)) * get(v)) }
+    unsafe { set([x, v], y, |[x, v]| -x * (1.0 - x) * v) }
 }
 
-unsafe extern "C" fn init(_: *const f64, _: f64, y: *mut f64, _: *mut c_void) -> i32 {
-    unsafe { set(y, 0.1) }
+unsafe extern "C" fn init(_: View<'_>, _: f64, y: ViewMut<'_>, _: *mut c_void) -> i32 {
+    unsafe { set([], y, |[]| 0.1) }
 }
 
 unsafe extern "C" fn init_zero(
-    _: *const f64,
+    _: View<'_>,
     _: f64,
-    _: *const f64,
-    y: *mut f64,
+    _: View<'_>,
+    y: ViewMut<'_>,
     _: *mut c_void,
 ) -> i32 {
-    unsafe { set(y, 0.0) }
+    unsafe { set([], y, |[]| 0.0) }
 }
 
 unsafe extern "C" fn identity(
-    x: *const f64,
-    _: *const f64,
+    x: View<'_>,
+    _: View<'_>,
     _: f64,
-    y: *mut f64,
+    y: ViewMut<'_>,
     _: *mut c_void,
 ) -> i32 {
-    unsafe { set(y, get(x)) }
+    unsafe { set([x], y, |[x]| x) }
 }
 
-unsafe extern "C" fn root(
-    x: *const f64,
-    _: *const f64,
-    _: f64,
-    y: *mut f64,
-    _: *mut c_void,
-) -> i32 {
-    unsafe { set(y, get(x) - 0.9) }
+unsafe extern "C" fn root(x: View<'_>, _: View<'_>, _: f64, y: ViewMut<'_>, _: *mut c_void) -> i32 {
+    unsafe { set([x], y, |[x]| x - 0.9) }
 }
 
 unsafe extern "C" fn reset(
-    _: *const f64,
-    _: *const f64,
+    _: View<'_>,
+    _: View<'_>,
     _: f64,
-    y: *mut f64,
+    y: ViewMut<'_>,
     _: *mut c_void,
 ) -> i32 {
-    unsafe { set(y, 0.1) }
+    unsafe { set([], y, |[]| 0.1) }
 }
 
 unsafe extern "C" fn identity_mul(
-    _: *const f64,
-    _: *const f64,
+    _: View<'_>,
+    _: View<'_>,
     _: f64,
-    v: *const f64,
-    y: *mut f64,
+    v: View<'_>,
+    y: ViewMut<'_>,
     _: *mut c_void,
 ) -> i32 {
-    unsafe { set(y, get(v)) }
+    unsafe { set([v], y, |[v]| v) }
 }
 
 unsafe extern "C" fn neg_identity_mul(
-    _: *const f64,
-    _: *const f64,
+    _: View<'_>,
+    _: View<'_>,
     _: f64,
-    v: *const f64,
-    y: *mut f64,
+    v: View<'_>,
+    y: ViewMut<'_>,
     _: *mut c_void,
 ) -> i32 {
-    unsafe { set(y, -get(v)) }
+    unsafe { set([v], y, |[v]| -v) }
 }
 
 unsafe extern "C" fn zero_mul(
-    _: *const f64,
-    _: *const f64,
+    _: View<'_>,
+    _: View<'_>,
     _: f64,
-    _: *const f64,
-    y: *mut f64,
+    _: View<'_>,
+    y: ViewMut<'_>,
     _: *mut c_void,
 ) -> i32 {
-    unsafe { set(y, 0.0) }
+    unsafe { set([], y, |[]| 0.0) }
 }
 
 unsafe extern "C" fn mass(
-    v: *const f64,
-    _: *const f64,
+    v: View<'_>,
+    _: View<'_>,
     _: f64,
     beta: f64,
-    y: *mut f64,
+    y: ViewMut<'_>,
     _: *mut c_void,
 ) -> i32 {
-    unsafe { set(y, get(v) + beta * get(y)) }
+    // `y` is also an input: `y = v + beta y`
+    unsafe { for_each_batch([v], y, |[v], y: &mut [f64], _| y[0] = v[0] + beta * y[0]) };
+    0
 }
 
 /// The logistic model with every derivative callback. `out`, `hybrid` (root and reset) and

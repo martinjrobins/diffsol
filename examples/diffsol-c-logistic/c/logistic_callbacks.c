@@ -4,11 +4,11 @@
  * code if they do not agree.
  *
  * Build diffsol-c, then compile and link this file against the library and the generated
- * header in target/<profile>/include:
+ * header in target/<profile>/include. From the root of the workspace:
  *
  *   cargo build -p diffsol-c --release
- *   cc logistic_callbacks.c -I target/release/include -L target/release -ldiffsol_c -lm \
- *      -Wl,-rpath,target/release -o logistic_callbacks
+ *   cc examples/diffsol-c-logistic/c/logistic_callbacks.c -I target/release/include \
+ *      -L target/release -ldiffsol_c -lm -Wl,-rpath,target/release -o logistic_callbacks
  */
 #include <math.h>
 #include <stdio.h>
@@ -22,30 +22,56 @@ typedef struct {
 } UserData;
 
 /* ANCHOR: callbacks */
-/* rhs: y = r x (1 - x). The arrays have the lengths that the header gives: x and y have
- * nstates values, p has nparams values. */
-static int32_t rhs(const double *x, const double *p, double t, double *y, void *user_data) {
+/* The library calls each callback one time for all the lanes. Each vector is a view with the
+ * shape [n, P, B]: element i of lane (k, b) is at ptr + i * strides[0] + k * strides[1]
+ * + b * strides[2], in bytes. B is the number of lanes of the ODE (nbatch). P is 1, except in
+ * sensitivity and adjoint solves. A stride can be 0: then the lanes on that axis share their
+ * values. These two functions give the address of a value. */
+static const double *at(const TensorView *v, size_t i, size_t k, size_t b) {
+    return (const double *)(v->ptr + i * v->strides[0] + k * v->strides[1] + b * v->strides[2]);
+}
+
+static double *at_mut(TensorViewMut *v, size_t i, size_t k, size_t b) {
+    return (double *)(v->ptr + i * v->strides[0] + k * v->strides[1] + b * v->strides[2]);
+}
+
+/* rhs: y = r x (1 - x). x and y have nstates values in each lane, p has nparams values. */
+static int32_t rhs(const TensorView *x, const TensorView *p, double t, TensorViewMut *y,
+                   void *user_data) {
     (void)t;
     ((UserData *)user_data)->rhs_calls += 1;
-    y[0] = p[0] * x[0] * (1.0 - x[0]);
+    for (size_t b = 0; b < y->shape[2]; b++) {
+        for (size_t k = 0; k < y->shape[1]; k++) {
+            double xi = *at(x, 0, k, b);
+            *at_mut(y, 0, k, b) = *at(p, 0, k, b) * xi * (1.0 - xi);
+        }
+    }
     return 0; /* 0 is success; a different value tells the solver that the callback failed */
 }
 
 /* rhs_jac: y = J v, with J = dF/dx = r (1 - 2 x). The implicit solvers (for example BDF) need it. */
-static int32_t rhs_jac(const double *x, const double *p, double t, const double *v, double *y,
-                       void *user_data) {
+static int32_t rhs_jac(const TensorView *x, const TensorView *p, double t, const TensorView *v,
+                       TensorViewMut *y, void *user_data) {
     (void)t;
     (void)user_data;
-    y[0] = p[0] * (1.0 - 2.0 * x[0]) * v[0];
+    for (size_t b = 0; b < y->shape[2]; b++) {
+        for (size_t k = 0; k < y->shape[1]; k++) {
+            *at_mut(y, 0, k, b) = *at(p, 0, k, b) * (1.0 - 2.0 * *at(x, 0, k, b)) * *at(v, 0, k, b);
+        }
+    }
     return 0;
 }
 
 /* init: the initial state y0(p, t). */
-static int32_t init(const double *p, double t, double *y, void *user_data) {
+static int32_t init(const TensorView *p, double t, TensorViewMut *y, void *user_data) {
     (void)p;
     (void)t;
     (void)user_data;
-    y[0] = 0.1;
+    for (size_t b = 0; b < y->shape[2]; b++) {
+        for (size_t k = 0; k < y->shape[1]; k++) {
+            *at_mut(y, 0, k, b) = 0.1;
+        }
+    }
     return 0;
 }
 /* ANCHOR_END: callbacks */

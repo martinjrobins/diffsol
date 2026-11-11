@@ -61,8 +61,11 @@ unsafe fn new_callbacks<T: CallbackScalar>(
 ///
 /// The ODE has `nbatch` lanes: independent copies of the system, each with its own parameters
 /// and state, that the solver integrates together. `nbatch` must be at least 1. The library
-/// calls each callback one time for each lane. The `root` and `reset` callbacks are not
-/// available when `nbatch > 1`.
+/// calls each callback one time for all the lanes. Each vector argument is a `TensorView`
+/// (an input) or a `TensorViewMut` (the output `y`) with the shape `[n, P, B]`: element `i` of
+/// lane `(k, b)` is at `ptr + i * strides[0] + k * strides[1] + b * strides[2]` (in bytes).
+/// `B` is `nbatch`, and `P` is 1 except in sensitivity and adjoint solves. A broadcast input has
+/// a stride of 0. The `root` and `reset` callbacks are not available when `nbatch > 1`.
 ///
 /// The library takes ownership of `callbacks->user_data`. If `callbacks->free_user_data` is not
 /// `NULL`, the library calls it one time. It calls it when `diffsol_ode_free` frees the wrapper.
@@ -72,7 +75,8 @@ unsafe fn new_callbacks<T: CallbackScalar>(
 /// - `callbacks` must be null, or it must point to a valid `DiffsolOdeCallbacksF64`.
 /// - Each function pointer must be null or a valid function with the documented signature.
 /// - Each function must stay valid until the wrapper is freed.
-/// - Each function must read and write only the documented array lengths.
+/// - Each function must read and write only the values that the views show, and must not
+///   write to an input view.
 /// - Do not give the same `user_data` with a `free_user_data` to two wrappers.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_ode_new_callbacks_f64(

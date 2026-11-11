@@ -213,7 +213,7 @@ jobs:
     - name: C examples
       if: matrix.tests == true && matrix.toolchain != 'nightly'
       shell: bash
-      run: crates/diffsol-c/examples/c/run_examples.sh target/debug
+      run: examples/diffsol-c-logistic/c/run_examples.sh target/debug
     - name: Clippy - all features
       if: matrix.clippy == true
       run: cargo clippy --verbose ${{ env.ADDITIONAL_FEATURES_FLAGS || ''}} --workspace

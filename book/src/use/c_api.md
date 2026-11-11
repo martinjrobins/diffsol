@@ -175,50 +175,61 @@ The functions are in these modules of the crate documentation:
 ## Example: equations from C callbacks
 
 The example
-[logistic_callbacks.c](https://github.com/martinjrobins/diffsol/blob/main/crates/diffsol-c/examples/c/logistic_callbacks.c)
+[logistic_callbacks.c](https://github.com/martinjrobins/diffsol/blob/main/examples/diffsol-c-logistic/c/logistic_callbacks.c)
 solves the logistic equation \\(dy/dt = r \cdot y \cdot (1 - y)\\), with equations that C
 functions give. It does not need DiffSL.
 
-Each callback gets its inputs as arrays, writes its output to `y`, and returns `0` on success.
-Its last argument is the `user_data` pointer of the descriptor. The
+The library calls each callback one time for all the lanes of the ODE. Each callback gets its
+inputs as `const TensorView *` views, writes its output through a `TensorViewMut *` view `y`,
+and returns `0` on success. Its last argument is the `user_data` pointer of the descriptor.
+
+Each view has the fields `ptr`, `dtype`, `ndim`, `shape` and `strides` (in bytes), and the shape
+`[n, P, B]`. Element `i` of lane `(k, b)` is at `ptr + i * strides[0] + k * strides[1] +
+b * strides[2]`. `B` is the number of lanes of the ODE (`nbatch`). `P` is 1, except in
+sensitivity and adjoint solves, where the solver can calculate more than one product for each
+lane in one call. An input that has the same values for all `k` (or all lanes) has a stride of
+0 on that axis, so a callback that uses the strides does not need to know which inputs are
+broadcast. The views show the data of the solver with no copy.
+
+The
 [ode_callbacks module](https://docs.rs/diffsol-c/latest/diffsol_c/ode_callbacks/index.html)
-gives the array lengths of each callback, the sign conventions of the adjoint callbacks, and the
-ownership rules of `user_data`.
+gives the value of `n` for each argument of each callback, the sign conventions of the adjoint
+callbacks, and the ownership rules of `user_data`.
 
 ```c
-{{#include ../../../crates/diffsol-c/examples/c/logistic_callbacks.c:callbacks}}
+{{#include ../../../examples/diffsol-c-logistic/c/logistic_callbacks.c:callbacks}}
 ```
 
 Put the callbacks in a `DiffsolOdeCallbacksF64` descriptor, and create the solver. Only `rhs`
-and `init` are necessary. A `NULL` callback is not given. If a solve needs a callback that is
+and `init` are necessary for an explict solver like Tsit45. A `NULL` callback is not given. If a solve needs a callback that is
 not given, the solve returns an error that gives the name of the callback. For example, the
 implicit methods (such as BDF) need `rhs_jac`.
 
 ```c
-{{#include ../../../crates/diffsol-c/examples/c/logistic_callbacks.c:create}}
+{{#include ../../../examples/diffsol-c-logistic/c/logistic_callbacks.c:create}}
 ```
 
 Solve, and read the solution:
 
 ```c
-{{#include ../../../crates/diffsol-c/examples/c/logistic_callbacks.c:solve}}
+{{#include ../../../examples/diffsol-c-logistic/c/logistic_callbacks.c:solve}}
 ```
 
 ## Example: DiffSL code with the JIT
 
 The example
-[logistic_diffsl_jit.c](https://github.com/martinjrobins/diffsol/blob/main/crates/diffsol-c/examples/c/logistic_diffsl_jit.c)
+[logistic_diffsl_jit.c](https://github.com/martinjrobins/diffsol/blob/main/examples/diffsol-c-logistic/c/logistic_diffsl_jit.c)
 solves the same equation from DiffSL code. The library compiles the code at runtime. Thus the
 library must have a JIT backend (`diffsl-cranelift` or `diffsl-llvm*`).
 
 ```c
-{{#include ../../../crates/diffsol-c/examples/c/logistic_diffsl_jit.c:code}}
+{{#include ../../../examples/diffsol-c-logistic/c/logistic_diffsl_jit.c:code}}
 ```
 
 Select a JIT backend that the library has, and create the solver:
 
 ```c
-{{#include ../../../crates/diffsol-c/examples/c/logistic_diffsl_jit.c:create}}
+{{#include ../../../examples/diffsol-c-logistic/c/logistic_diffsl_jit.c:create}}
 ```
 
 The solve is the same as in the callbacks example.
@@ -229,19 +240,19 @@ Build the library, then compile and run an example. On Linux and macOS:
 
 ```sh
 cargo build -p diffsol-c --features diffsl-cranelift
-cc crates/diffsol-c/examples/c/logistic_diffsl_jit.c -I target/debug/include \
+cc examples/diffsol-c-logistic/c/logistic_diffsl_jit.c -I target/debug/include \
    -L target/debug -ldiffsol_c -lm -Wl,-rpath,$PWD/target/debug -o logistic_diffsl_jit
 ./logistic_diffsl_jit
 ```
 
-The script `crates/diffsol-c/examples/c/run_examples.sh` compiles and runs the examples against
-a Cargo build. It runs the JIT example only if the library has a JIT backend, and also runs it
-with LLVM if the library has LLVM. The CI runs it on Linux, macOS and Windows (in Git Bash, with
-MSVC).
+The script `examples/diffsol-c-logistic/c/run_examples.sh` compiles and runs the examples
+against a Cargo build. It runs the JIT example only if the library has a JIT backend, and also
+runs it with LLVM if the library has LLVM. The CI runs it on Linux, macOS and Windows (in Git
+Bash, with MSVC).
 
 ```sh
 cargo build -p diffsol-c --features diffsl-cranelift
-crates/diffsol-c/examples/c/run_examples.sh target/debug
+examples/diffsol-c-logistic/c/run_examples.sh target/debug
 ```
 
 The JIT example uses Cranelift if the library has it. To select the backend, set the environment

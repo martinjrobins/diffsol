@@ -11,8 +11,14 @@
 //!
 //! # Callback conventions
 //!
-//! Each pointer points to a contiguous array of the scalar type `T` (`double` or `float`). The
-//! table gives the array lengths. The counts are fields of [`OdeCallbacksDesc`].
+//! The library calls a callback **one time for all the lanes** of the equations. Each vector
+//! argument is a pointer to a [`TensorView`] (an input) or a [`TensorViewMut`] (the output `y`).
+//! The views show the data of the solver with no copy. Each view has the C layout of
+//! [`RawLayout`](crate::tensor::RawLayout): the fields `ptr`, `dtype`, `ndim`, `shape` and
+//! `strides` (in bytes). `dtype` is the scalar type of the descriptor (`double` or `float`).
+//!
+//! Each view has 3 axes, `[n, P, B]`. The table gives `n`. The counts are fields of
+//! [`OdeCallbacksDesc`].
 //!
 //! | callback | `x` | `p` | `v` | `y` (output) |
 //! |---|---|---|---|---|
@@ -34,10 +40,29 @@
 //! `J` is the Jacobian of the function with respect to the state `x`. `J_p` is the Jacobian
 //! with respect to the parameters `p`.
 //!
-//! When the equations have more than one lane (`nbatch > 1`), the library calls each callback
-//! one time for each lane, with the arrays of that lane. Thus a callback always sees the
-//! lengths of the table above. The `root` and `reset` callbacks are not available with more
-//! than one lane.
+//! # Lanes
+//!
+//! The output `y` has `P * B` lanes, as the grid `[P, B]`. Lane `(k, b)` of each argument has
+//! the values that the callback uses to calculate lane `(k, b)` of `y`. Element `i` of lane
+//! `(k, b)` is at the byte offset `i * strides[0] + k * strides[1] + b * strides[2]` from `ptr`.
+//! The values of one lane are contiguous in memory: `strides[0]` is the size of one value.
+//!
+//! - `B` is `nbatch`, the number of lanes of the equations (independent copies of the system,
+//!   each with its own parameters and state).
+//! - `P` is 1 in a normal solve. In a sensitivity or an adjoint solve, the solver can calculate
+//!   more than one product for each lane `b` in one call (for example one product for each
+//!   parameter). Then `P > 1`.
+//!
+//! An argument that has the same values for each `k` (for example `x` and `p` in a forward
+//! sensitivity solve) has `strides[1] == 0`. An argument that has the same values for all lanes
+//! has `strides[1] == strides[2] == 0`. Thus the callback does not need to know which arguments
+//! are broadcast: it uses the strides. The output `y` never has a stride of 0. Do not write to
+//! an input.
+//!
+//! A simple callback loops over `b`, `k` and `i`. A callback for a GPU can calculate all the
+//! lanes in one kernel.
+//!
+//! The `root` and `reset` callbacks are not available with more than one lane (`nbatch > 1`).
 //!
 //! Each `*_adjoint` and `*_sens_adjoint` callback calculates the *negative* transposed product.
 //! For example, `out_adjoint` calculates `y = -J^T v`, and `init_sens_adjoint` calculates
@@ -50,7 +75,7 @@
 //! # Return codes
 //!
 //! Each callback returns an `int`. The value `0` means success. A different value means
-//! failure. When a callback fails, its output is filled with NaN.
+//! failure. When a callback fails, all the lanes of its output are filled with NaN.
 //!
 //! The solver can recover from a failure. For example, it can reject a step and try a smaller
 //! step. Thus `rhs` can return an error for a state that is not in its domain.
@@ -127,46 +152,67 @@ use crate::{
     scalar_type::ToScalarType,
     solve::{GenericSolve, Solve},
     solve_eqn::{EqnRequirement, SolveEqn},
+    tensor::{TensorLayout, TensorLayoutMut, TensorView, TensorViewMut},
 };
 
 // Each callback type is a nullable function pointer, the same as a function pointer type in C:
-// `None` is `NULL`, and means that the callback is not given.
+// `None` is `NULL`, and means that the callback is not given. Each vector argument is a view of
+// all the lanes; the module documentation gives the layout.
 
 /// `y = F(x, p, t)`: used for `rhs`, `root`, `out` and `reset`.
 pub type OdeCallbackFn<T> = Option<
-    unsafe extern "C" fn(x: *const T, p: *const T, t: T, y: *mut T, user_data: *mut c_void) -> i32,
+    unsafe extern "C" fn(
+        x: *const TensorView<'_>,
+        p: *const TensorView<'_>,
+        t: T,
+        y: *mut TensorViewMut<'_>,
+        user_data: *mut c_void,
+    ) -> i32,
 >;
 
 /// `y = A(x, p, t) v`: used for every `*_jac`, `*_sens`, `*_adjoint` and `*_sens_adjoint`
 /// callback of `rhs`, `root`, `out` and `reset`.
 pub type OdeCallbackMulFn<T> = Option<
     unsafe extern "C" fn(
-        x: *const T,
-        p: *const T,
+        x: *const TensorView<'_>,
+        p: *const TensorView<'_>,
         t: T,
-        v: *const T,
-        y: *mut T,
+        v: *const TensorView<'_>,
+        y: *mut TensorViewMut<'_>,
         user_data: *mut c_void,
     ) -> i32,
 >;
 
 /// `y = y0(p, t)`: the initial state.
-pub type OdeCallbackInitFn<T> =
-    Option<unsafe extern "C" fn(p: *const T, t: T, y: *mut T, user_data: *mut c_void) -> i32>;
+pub type OdeCallbackInitFn<T> = Option<
+    unsafe extern "C" fn(
+        p: *const TensorView<'_>,
+        t: T,
+        y: *mut TensorViewMut<'_>,
+        user_data: *mut c_void,
+    ) -> i32,
+>;
 
 /// `y = A(p, t) v`: used for `init_sens` and `init_sens_adjoint`.
 pub type OdeCallbackInitMulFn<T> = Option<
-    unsafe extern "C" fn(p: *const T, t: T, v: *const T, y: *mut T, user_data: *mut c_void) -> i32,
+    unsafe extern "C" fn(
+        p: *const TensorView<'_>,
+        t: T,
+        v: *const TensorView<'_>,
+        y: *mut TensorViewMut<'_>,
+        user_data: *mut c_void,
+    ) -> i32,
 >;
 
-/// `y = M(p, t) v + beta y`: used for `mass` (and `mass_adjoint`, with `M^T`).
+/// `y = M(p, t) v + beta y`: used for `mass` (and `mass_adjoint`, with `M^T`). `y` is an input
+/// and the output.
 pub type OdeCallbackMassFn<T> = Option<
     unsafe extern "C" fn(
-        v: *const T,
-        p: *const T,
+        v: *const TensorView<'_>,
+        p: *const TensorView<'_>,
         t: T,
         beta: T,
-        y: *mut T,
+        y: *mut TensorViewMut<'_>,
         user_data: *mut c_void,
     ) -> i32,
 >;
@@ -262,13 +308,18 @@ impl<T> OdeCallbacksDesc<T> {
         nstates: usize,
         nparams: usize,
         rhs: unsafe extern "C" fn(
-            x: *const T,
-            p: *const T,
+            x: *const TensorView<'_>,
+            p: *const TensorView<'_>,
             t: T,
-            y: *mut T,
+            y: *mut TensorViewMut<'_>,
             user_data: *mut c_void,
         ) -> i32,
-        init: unsafe extern "C" fn(p: *const T, t: T, y: *mut T, user_data: *mut c_void) -> i32,
+        init: unsafe extern "C" fn(
+            p: *const TensorView<'_>,
+            t: T,
+            y: *mut TensorViewMut<'_>,
+            user_data: *mut c_void,
+        ) -> i32,
     ) -> Self {
         Self {
             nstates,
@@ -548,6 +599,12 @@ fn missing_message(operation: &str, name: &str) -> String {
     format!("OdeCallbacks: {operation} requires the '{name}' callback")
 }
 
+/// A matrix type that [`OdeCallbacks`] can use: its vectors give views of their data
+/// ([`TensorLayoutMut`]), so the callbacks can read and write all the lanes with no copy.
+pub trait CallbackMatrix: Matrix<V: TensorLayoutMut> {}
+
+impl<M: Matrix<V: TensorLayoutMut>> CallbackMatrix for M {}
+
 /// A sparsity pattern together with the coloring used to evaluate a matrix with that pattern.
 struct Pattern<M: Matrix> {
     sparsity: M::Sparsity,
@@ -626,7 +683,7 @@ impl<M: Matrix> Drop for OdeCallbacks<M> {
     }
 }
 
-impl<M: Matrix> OdeCallbacks<M> {
+impl<M: CallbackMatrix> OdeCallbacks<M> {
     /// Create the equations from `callbacks`. All parameters are zero at the start.
     ///
     /// This function takes ownership of `callbacks.user_data`, also if it returns an error. See
@@ -640,7 +697,8 @@ impl<M: Matrix> OdeCallbacks<M> {
     /// - Each function pointer in `callbacks` must be null or a valid function with the
     ///   signature that the [module documentation](self) gives.
     /// - Each function must stay valid until the equations are dropped.
-    /// - Each function must read and write only the array lengths in the table.
+    /// - Each function must read and write only the values that the views show, and must not
+    ///   write to an input view.
     /// - If `free_user_data` is set, the equations own `user_data`. Do not free `user_data`
     ///   yourself, and do not give it to other equations.
     /// - If `free_user_data` is not set, `user_data` must stay valid until the equations are
@@ -683,51 +741,72 @@ impl<M: Matrix> OdeCallbacks<M> {
         self.error.take()
     }
 
-    fn record(&self, err: OdeCallbackError, y: &mut [M::T]) {
+    /// Record `err` (if it is the first error) and fill all the lanes of `y` with NaN.
+    fn record(&self, err: OdeCallbackError, y: &mut M::V) {
         if self.error.get().is_none() {
             self.error.set(Some(err));
         }
         y.fill(M::T::NAN);
     }
 
-    fn check_code(&self, callback: &'static str, code: i32, y: &mut [M::T]) {
-        if code != 0 {
-            self.record(OdeCallbackError::Failed { callback, code }, y);
-        }
-    }
-
-    /// Call the callback `f` on one batch lane `y` with `call`. If `f` is missing or fails, record
-    /// the error and fill `y` with NaN.
-    fn run<F>(
+    /// Call the callback `f` one time for all the lanes of `y`, with `call`. `call` gets a view
+    /// of each vector of `inputs` and a view of `y`, all with the `[n, P, B]` layout of the module
+    /// documentation. If `f` is missing or fails, record the error and fill `y` with NaN.
+    fn eval_lanes<F, const N: usize>(
         &self,
         name: &'static str,
         f: Option<F>,
-        y: &mut [M::T],
-        call: impl FnOnce(F, &mut [M::T]) -> i32,
+        inputs: [&M::V; N],
+        y: &mut M::V,
+        call: impl FnOnce(F, [*const TensorView<'_>; N], *mut TensorViewMut<'_>) -> i32,
     ) {
-        match f {
-            Some(f) => {
-                let code = call(f, y);
-                self.check_code(name, code, y);
-            }
-            None => self.record(OdeCallbackError::Missing { callback: name }, y),
+        let Some(f) = f else {
+            return self.record(OdeCallbackError::Missing { callback: name }, y);
+        };
+        // `y` has `P * B` lanes. The inputs have `P * B`, `B` or 1 lanes, and diffsol repeats
+        // each lane of an input with `B` lanes over `P` adjacent lanes of `y`
+        let nlanes = y.context().nbatch();
+        let nbatch = self.ctx.nbatch();
+        let (ninner, nouter) = if nlanes.is_multiple_of(nbatch) {
+            (nlanes / nbatch, nbatch)
+        } else {
+            (nlanes, 1)
+        };
+        // SAFETY: each layout shows the data of a vector that stays borrowed until the callback
+        // returns. The inputs are only read, and `y` is mutably borrowed, so nothing else reads
+        // or writes its data during the call
+        let views = inputs.map(|v| unsafe {
+            TensorView::from_layout(v.tensor_layout().batch_lanes(ninner, nouter))
+        });
+        let code = {
+            let y_layout = y.tensor_layout_mut().batch_lanes(ninner, nouter);
+            let mut y_view = unsafe { TensorViewMut::from_layout(y_layout) };
+            // the view goes out of scope before `y` is used again
+            call(f, views.each_ref().map(|v| v as *const _), &mut y_view)
+        };
+        if code != 0 {
+            self.record(
+                OdeCallbackError::Failed {
+                    callback: name,
+                    code,
+                },
+                y,
+            );
         }
     }
 
-    // SAFETY (for each `unsafe` call below): the slices have the lengths documented for the
-    // callback, and `user_data` is the pointer the caller gave with the callbacks.
+    // SAFETY (for each `unsafe` call below): the views have the layouts in the module
+    // documentation, and `user_data` is the pointer the caller gave with the callbacks.
 
-    /// Evaluate `y = f(x, p, t)` for each batch lane.
+    /// Evaluate `y = f(x, p, t)` for all the lanes.
     fn eval(&self, name: &'static str, f: OdeCallbackFn<M::T>, x: &M::V, t: M::T, y: &mut M::V) {
         let ud = self.callbacks.user_data;
-        y.for_each_batch_host([x, &self.p], |y, [x, p], _| {
-            self.run(name, f, y, |f, y| unsafe {
-                f(x.as_ptr(), p.as_ptr(), t, y.as_mut_ptr(), ud)
-            })
+        self.eval_lanes(name, f, [x, &self.p], y, |f, [x, p], y| unsafe {
+            f(x, p, t, y, ud)
         });
     }
 
-    /// Evaluate `y = f(x, p, t, v)` for each batch lane.
+    /// Evaluate `y = f(x, p, t, v)` for all the lanes.
     fn eval_mul(
         &self,
         name: &'static str,
@@ -738,24 +817,18 @@ impl<M: Matrix> OdeCallbacks<M> {
         y: &mut M::V,
     ) {
         let ud = self.callbacks.user_data;
-        y.for_each_batch_host([x, &self.p, v], |y, [x, p, v], _| {
-            self.run(name, f, y, |f, y| unsafe {
-                f(x.as_ptr(), p.as_ptr(), t, v.as_ptr(), y.as_mut_ptr(), ud)
-            })
+        self.eval_lanes(name, f, [x, &self.p, v], y, |f, [x, p, v], y| unsafe {
+            f(x, p, t, v, y, ud)
         });
     }
 
-    /// Evaluate `y = f(p, t)` for each batch lane.
+    /// Evaluate `y = f(p, t)` for all the lanes.
     fn eval_init(&self, name: &'static str, f: OdeCallbackInitFn<M::T>, t: M::T, y: &mut M::V) {
         let ud = self.callbacks.user_data;
-        y.for_each_batch_host([&self.p], |y, [p], _| {
-            self.run(name, f, y, |f, y| unsafe {
-                f(p.as_ptr(), t, y.as_mut_ptr(), ud)
-            })
-        });
+        self.eval_lanes(name, f, [&self.p], y, |f, [p], y| unsafe { f(p, t, y, ud) });
     }
 
-    /// Evaluate `y = f(p, t, v)` for each batch lane.
+    /// Evaluate `y = f(p, t, v)` for all the lanes.
     fn eval_init_mul(
         &self,
         name: &'static str,
@@ -765,14 +838,12 @@ impl<M: Matrix> OdeCallbacks<M> {
         y: &mut M::V,
     ) {
         let ud = self.callbacks.user_data;
-        y.for_each_batch_host([&self.p, v], |y, [p, v], _| {
-            self.run(name, f, y, |f, y| unsafe {
-                f(p.as_ptr(), t, v.as_ptr(), y.as_mut_ptr(), ud)
-            })
+        self.eval_lanes(name, f, [&self.p, v], y, |f, [p, v], y| unsafe {
+            f(p, t, v, y, ud)
         });
     }
 
-    /// Evaluate `y = f(v, p, t, beta, y)` for each batch lane.
+    /// Evaluate `y = f(v, p, t, beta, y)` for all the lanes.
     fn eval_mass(
         &self,
         name: &'static str,
@@ -783,10 +854,8 @@ impl<M: Matrix> OdeCallbacks<M> {
         y: &mut M::V,
     ) {
         let ud = self.callbacks.user_data;
-        y.for_each_batch_host([v, &self.p], |y, [v, p], _| {
-            self.run(name, f, y, |f, y| unsafe {
-                f(v.as_ptr(), p.as_ptr(), t, beta, y.as_mut_ptr(), ud)
-            })
+        self.eval_lanes(name, f, [v, &self.p], y, |f, [v, p], y| unsafe {
+            f(v, p, t, beta, y, ud)
         });
     }
 
@@ -1034,7 +1103,7 @@ impl_op_for_view!(OdeCallbacksMass, |cb| cb.nstates);
 macro_rules! impl_nonlinear_view {
     ($view:ident, $f:ident, $stats:literal) => {
         paste::paste! {
-        impl<M: Matrix> NonLinearOp for $view<'_, M> {
+        impl<M: CallbackMatrix> NonLinearOp for $view<'_, M> {
             fn call_inplace(&self, x: &M::V, t: M::T, y: &mut M::V) {
                 if $stats {
                     self.0.statistics.borrow_mut().increment_call();
@@ -1043,7 +1112,7 @@ macro_rules! impl_nonlinear_view {
             }
         }
 
-        impl<M: Matrix> NonLinearOpJacobian for $view<'_, M> {
+        impl<M: CallbackMatrix> NonLinearOpJacobian for $view<'_, M> {
             fn jac_mul_inplace(&self, x: &M::V, t: M::T, v: &M::V, y: &mut M::V) {
                 if $stats {
                     self.0.statistics.borrow_mut().increment_jac_mul();
@@ -1070,7 +1139,7 @@ macro_rules! impl_nonlinear_view {
             }
         }
 
-        impl<M: Matrix> NonLinearOpSens for $view<'_, M> {
+        impl<M: CallbackMatrix> NonLinearOpSens for $view<'_, M> {
             fn sens_mul_inplace(&self, x: &M::V, t: M::T, v: &M::V, y: &mut M::V) {
                 self.0
                     .eval_mul(stringify!([<$f _sens>]), self.0.callbacks.[<$f _sens>], x, t, v, y);
@@ -1091,7 +1160,7 @@ macro_rules! impl_nonlinear_view {
             }
         }
 
-        impl<M: Matrix> NonLinearOpAdjoint for $view<'_, M> {
+        impl<M: CallbackMatrix> NonLinearOpAdjoint for $view<'_, M> {
             fn jac_transpose_mul_inplace(&self, x: &M::V, t: M::T, v: &M::V, y: &mut M::V) {
                 if $stats {
                     self.0.statistics.borrow_mut().increment_jac_adj_mul();
@@ -1115,7 +1184,7 @@ macro_rules! impl_nonlinear_view {
             }
         }
 
-        impl<M: Matrix> NonLinearOpSensAdjoint for $view<'_, M> {
+        impl<M: CallbackMatrix> NonLinearOpSensAdjoint for $view<'_, M> {
             fn sens_transpose_mul_inplace(&self, x: &M::V, t: M::T, v: &M::V, y: &mut M::V) {
                 self.0.eval_mul(
                     stringify!([<$f _sens_adjoint>]),
@@ -1150,13 +1219,13 @@ impl_nonlinear_view!(OdeCallbacksRoot, root, false);
 impl_nonlinear_view!(OdeCallbacksOut, out, false);
 impl_nonlinear_view!(OdeCallbacksReset, reset, false);
 
-impl<M: Matrix> ConstantOp for OdeCallbacksInit<'_, M> {
+impl<M: CallbackMatrix> ConstantOp for OdeCallbacksInit<'_, M> {
     fn call_inplace(&self, t: M::T, y: &mut M::V) {
         self.0.eval_init("init", self.0.callbacks.init, t, y);
     }
 }
 
-impl<M: Matrix> ConstantOpSens for OdeCallbacksInit<'_, M> {
+impl<M: CallbackMatrix> ConstantOpSens for OdeCallbacksInit<'_, M> {
     fn sens_mul_inplace(&self, t: M::T, v: &M::V, y: &mut M::V) {
         self.0
             .eval_init_mul("init_sens", self.0.callbacks.init_sens, t, v, y);
@@ -1176,7 +1245,7 @@ impl<M: Matrix> ConstantOpSens for OdeCallbacksInit<'_, M> {
     }
 }
 
-impl<M: Matrix> ConstantOpSensAdjoint for OdeCallbacksInit<'_, M> {
+impl<M: CallbackMatrix> ConstantOpSensAdjoint for OdeCallbacksInit<'_, M> {
     fn sens_transpose_mul_inplace(&self, t: M::T, v: &M::V, y: &mut M::V) {
         self.0.eval_init_mul(
             "init_sens_adjoint",
@@ -1188,7 +1257,7 @@ impl<M: Matrix> ConstantOpSensAdjoint for OdeCallbacksInit<'_, M> {
     }
 }
 
-impl<M: Matrix> LinearOp for OdeCallbacksMass<'_, M> {
+impl<M: CallbackMatrix> LinearOp for OdeCallbacksMass<'_, M> {
     fn gemv_inplace(&self, x: &M::V, t: M::T, beta: M::T, y: &mut M::V) {
         self.0
             .eval_mass("mass", self.0.callbacks.mass, x, t, beta, y);
@@ -1204,7 +1273,7 @@ impl<M: Matrix> LinearOp for OdeCallbacksMass<'_, M> {
     }
 }
 
-impl<M: Matrix> LinearOpTranspose for OdeCallbacksMass<'_, M> {
+impl<M: CallbackMatrix> LinearOpTranspose for OdeCallbacksMass<'_, M> {
     fn gemv_transpose_inplace(&self, x: &M::V, t: M::T, beta: M::T, y: &mut M::V) {
         self.0
             .eval_mass("mass_adjoint", self.0.callbacks.mass_adjoint, x, t, beta, y);
@@ -1224,7 +1293,7 @@ impl<M: Matrix> LinearOpTranspose for OdeCallbacksMass<'_, M> {
     }
 }
 
-impl<'a, M: Matrix> OdeEquationsRef<'a> for OdeCallbacks<M> {
+impl<'a, M: CallbackMatrix> OdeEquationsRef<'a> for OdeCallbacks<M> {
     type Mass = OdeCallbacksMass<'a, M>;
     type Rhs = OdeCallbacksRhs<'a, M>;
     type Root = OdeCallbacksRoot<'a, M>;
@@ -1233,7 +1302,7 @@ impl<'a, M: Matrix> OdeEquationsRef<'a> for OdeCallbacks<M> {
     type Reset = OdeCallbacksReset<'a, M>;
 }
 
-impl<M: Matrix> OdeEquations for OdeCallbacks<M> {
+impl<M: CallbackMatrix> OdeEquations for OdeCallbacks<M> {
     fn rhs(&self) -> OdeCallbacksRhs<'_, M> {
         OdeCallbacksRhs(self)
     }
@@ -1260,7 +1329,7 @@ impl<M: Matrix> OdeEquations for OdeCallbacks<M> {
     }
 }
 
-impl<M: Matrix> SolveEqn for OdeCallbacks<M> {
+impl<M: CallbackMatrix> SolveEqn for OdeCallbacks<M> {
     fn check_requirement(&self, requirement: EqnRequirement) -> Result<(), DiffsolRtError> {
         self.check(requirement)
     }
@@ -1270,8 +1339,69 @@ impl<M: Matrix> SolveEqn for OdeCallbacks<M> {
     }
 }
 
+/// Call `f` one time for each lane of the output `y` of a callback, with the same lane of each
+/// input. This is a simple way to write a callback in Rust: `f` gets one lane of each view as a
+/// slice, so it does not use the strides. It is the equivalent of
+/// [`diffsol::Vector::for_each_batch`] for the views of a callback.
+///
+/// The last argument of `f` is the index of the lane of `y`, `b * P + k` for the lane `(k, b)`
+/// (the lane index of diffsol). The batch lane is `lane / P`, where `P` is `y.shape()[1]`.
+///
+/// ```ignore
+/// unsafe extern "C" fn rhs(
+///     x: *const TensorView<'_>,
+///     p: *const TensorView<'_>,
+///     _t: f64,
+///     y: *mut TensorViewMut<'_>,
+///     _user_data: *mut c_void,
+/// ) -> i32 {
+///     unsafe { for_each_batch([x, p], y, |[x, p], y: &mut [f64], _lane| y[0] = -p[0] * x[0]) };
+///     0
+/// }
+/// ```
+///
+/// # Panics
+/// If a view does not have 3 axes, the scalar type of a view is not `T`, or an input does not
+/// have the lanes `[P, B]` of `y`.
+///
+/// # Safety
+/// The pointers must be the arguments that the library gave to the callback, and the call must
+/// be during the callback.
+pub unsafe fn for_each_batch<T: crate::scalar_type::Scalar, const N: usize>(
+    inputs: [*const TensorView<'_>; N],
+    y: *mut TensorViewMut<'_>,
+    mut f: impl FnMut([&[T]; N], &mut [T], usize),
+) {
+    // SAFETY: the caller gives the views of the callback, which are valid during the call
+    let (inputs, y) = unsafe { (inputs.map(|v| &*v), &mut *y) };
+    let dtype = T::scalar_type();
+    assert!(
+        y.shape().len() == 3 && y.dtype() == dtype,
+        "y must have 3 axes and the scalar type {dtype:?}"
+    );
+    let lanes = [y.shape()[1], y.shape()[2]];
+    for (i, v) in inputs.iter().enumerate() {
+        assert!(
+            v.shape().len() == 3 && v.dtype() == dtype && v.shape()[1..] == lanes,
+            "input {i} must have 3 axes, the scalar type {dtype:?} and the lanes {lanes:?} of y"
+        );
+    }
+    for b in 0..lanes[1] {
+        for k in 0..lanes[0] {
+            // the checks above make the scalar types and the indices correct
+            let lane_inputs = inputs.map(|v| v.column::<T>(&[k, b]).unwrap());
+            f(
+                lane_inputs,
+                y.column_mut::<T>(&[k, b]).unwrap(),
+                b * lanes[0] + k,
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
     use std::ffi::c_void;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -1280,45 +1410,48 @@ mod tests {
         NonLinearOp, NonLinearOpJacobian, OdeEquations, Vector,
     };
 
-    use super::{OdeCallbackError, OdeCallbacks, OdeCallbacksDesc};
+    use super::{for_each_batch, OdeCallbackError, OdeCallbacks, OdeCallbacksDesc};
+    use crate::tensor::{TensorView, TensorViewMut};
 
     type M = NalgebraMat<f64>;
+    type View<'a> = *const TensorView<'a>;
+    type ViewMut<'a> = *mut TensorViewMut<'a>;
 
     unsafe extern "C" fn rhs(
-        x: *const f64,
-        p: *const f64,
+        x: View<'_>,
+        p: View<'_>,
         _t: f64,
-        y: *mut f64,
+        y: ViewMut<'_>,
         _ud: *mut c_void,
     ) -> i32 {
-        unsafe { *y = -*p * *x };
+        unsafe { for_each_batch([x, p], y, |[x, p], y: &mut [f64], _| y[0] = -p[0] * x[0]) };
         0
     }
 
     unsafe extern "C" fn rhs_jac(
-        _x: *const f64,
-        p: *const f64,
+        _x: View<'_>,
+        p: View<'_>,
         _t: f64,
-        v: *const f64,
-        y: *mut f64,
+        v: View<'_>,
+        y: ViewMut<'_>,
         _ud: *mut c_void,
     ) -> i32 {
-        unsafe { *y = -*p * *v };
+        unsafe { for_each_batch([p, v], y, |[p, v], y: &mut [f64], _| y[0] = -p[0] * v[0]) };
         0
     }
 
     unsafe extern "C" fn failing_rhs(
-        _x: *const f64,
-        _p: *const f64,
+        _x: View<'_>,
+        _p: View<'_>,
         _t: f64,
-        _y: *mut f64,
+        _y: ViewMut<'_>,
         _ud: *mut c_void,
     ) -> i32 {
         7
     }
 
-    unsafe extern "C" fn init(_p: *const f64, _t: f64, y: *mut f64, _ud: *mut c_void) -> i32 {
-        unsafe { *y = 1.0 };
+    unsafe extern "C" fn init(p: View<'_>, _t: f64, y: ViewMut<'_>, _ud: *mut c_void) -> i32 {
+        unsafe { for_each_batch([p], y, |_, y: &mut [f64], _| y.fill(1.0)) };
         0
     }
 
@@ -1328,62 +1461,56 @@ mod tests {
 
     // a 2 state system with the non-symmetric mass matrix [[1, 2], [0, 3]]
     unsafe extern "C" fn rhs2(
-        x: *const f64,
-        _p: *const f64,
+        x: View<'_>,
+        _p: View<'_>,
         _t: f64,
-        y: *mut f64,
+        y: ViewMut<'_>,
         _ud: *mut c_void,
     ) -> i32 {
-        let (x, y) = unsafe {
-            (
-                std::slice::from_raw_parts(x, 2),
-                std::slice::from_raw_parts_mut(y, 2),
-            )
+        unsafe {
+            for_each_batch([x], y, |[x], y: &mut [f64], _| {
+                y.copy_from_slice(&[-x[0], -x[1]])
+            })
         };
-        y.copy_from_slice(&[-x[0], -x[1]]);
         0
     }
 
-    unsafe extern "C" fn init2(_p: *const f64, _t: f64, y: *mut f64, _ud: *mut c_void) -> i32 {
-        unsafe { std::slice::from_raw_parts_mut(y, 2) }.copy_from_slice(&[1.0, 1.0]);
+    unsafe extern "C" fn init2(p: View<'_>, _t: f64, y: ViewMut<'_>, _ud: *mut c_void) -> i32 {
+        unsafe { for_each_batch([p], y, |_, y: &mut [f64], _| y.fill(1.0)) };
         0
     }
 
     unsafe extern "C" fn mass2(
-        v: *const f64,
-        _p: *const f64,
+        v: View<'_>,
+        _p: View<'_>,
         _t: f64,
         beta: f64,
-        y: *mut f64,
+        y: ViewMut<'_>,
         _ud: *mut c_void,
     ) -> i32 {
-        let (v, y) = unsafe {
-            (
-                std::slice::from_raw_parts(v, 2),
-                std::slice::from_raw_parts_mut(y, 2),
-            )
+        unsafe {
+            for_each_batch([v], y, |[v], y: &mut [f64], _| {
+                y[0] = v[0] + 2.0 * v[1] + beta * y[0];
+                y[1] = 3.0 * v[1] + beta * y[1];
+            })
         };
-        y[0] = v[0] + 2.0 * v[1] + beta * y[0];
-        y[1] = 3.0 * v[1] + beta * y[1];
         0
     }
 
     unsafe extern "C" fn mass2_adjoint(
-        v: *const f64,
-        _p: *const f64,
+        v: View<'_>,
+        _p: View<'_>,
         _t: f64,
         beta: f64,
-        y: *mut f64,
+        y: ViewMut<'_>,
         _ud: *mut c_void,
     ) -> i32 {
-        let (v, y) = unsafe {
-            (
-                std::slice::from_raw_parts(v, 2),
-                std::slice::from_raw_parts_mut(y, 2),
-            )
+        unsafe {
+            for_each_batch([v], y, |[v], y: &mut [f64], _| {
+                y[0] = v[0] + beta * y[0];
+                y[1] = 2.0 * v[0] + 3.0 * v[1] + beta * y[1];
+            })
         };
-        y[0] = v[0] + beta * y[0];
-        y[1] = 2.0 * v[0] + 3.0 * v[1] + beta * y[1];
         0
     }
 
@@ -1452,6 +1579,99 @@ mod tests {
                 callback: "rhs_jac"
             })
         );
+    }
+
+    /// A failure fills all the lanes of the output with NaN.
+    #[test]
+    fn failures_fill_all_lanes_with_nan() {
+        let mut d = desc();
+        d.rhs = Some(failing_rhs);
+        let ctx = NalgebraContext::default().clone_with_nbatch(3).unwrap();
+        // SAFETY: the test callbacks are valid and use the documented lengths
+        let eqn = unsafe { OdeCallbacks::<M>::new(d, ctx) }.unwrap();
+        let x = ctx.vector_from_vec(vec![1.0, 2.0, 3.0]);
+        let y = eqn.rhs().call(&x, 0.0);
+        assert!(y.clone_as_vec().iter().all(|y| y.is_nan()));
+    }
+
+    /// The layouts that a callback saw: `(shape, strides)` of each argument, `y` last.
+    type Seen = Vec<([usize; 3], [usize; 3])>;
+
+    thread_local! {
+        static SEEN: RefCell<Seen> = const { RefCell::new(Vec::new()) };
+    }
+
+    fn layout(shape: &[usize], strides: &[usize]) -> ([usize; 3], [usize; 3]) {
+        (shape.try_into().unwrap(), strides.try_into().unwrap())
+    }
+
+    /// `y = diag(p) v` with 2 states and 2 parameters, and record the layouts.
+    unsafe extern "C" fn record_jac(
+        x: View<'_>,
+        p: View<'_>,
+        _t: f64,
+        v: View<'_>,
+        y: ViewMut<'_>,
+        _ud: *mut c_void,
+    ) -> i32 {
+        let seen = [x, p, v].map(|v| unsafe { layout((*v).shape(), (*v).strides()) });
+        let y_seen = unsafe { layout((*y).shape(), (*y).strides()) };
+        SEEN.with(|s| *s.borrow_mut() = [&seen[..], &[y_seen]].concat());
+        unsafe {
+            for_each_batch([p, v], y, |[p, v], y: &mut [f64], _| {
+                y[0] = p[0] * v[0];
+                y[1] = p[1] * v[1];
+            })
+        };
+        0
+    }
+
+    /// In a forward sensitivity solve, the state and the parameters have `nbatch` lanes, and
+    /// `v` and `y` have one lane for each batch lane and each parameter. The callback sees the
+    /// state and the parameters with a stride of 0 on the parameter axis.
+    #[test]
+    fn grouped_broadcast_gives_strides_of_zero() {
+        let (nbatch, nparams) = (2, 2);
+        let mut d = OdeCallbacksDesc::new(2, nparams, rhs2, init2);
+        d.rhs_jac = Some(record_jac);
+        let ctx = NalgebraContext::default()
+            .clone_with_nbatch(nbatch)
+            .unwrap();
+        let aug_ctx = ctx.clone_with_nbatch(nbatch * nparams).unwrap();
+        // SAFETY: the test callbacks are valid and use the documented lengths
+        let mut eqn = unsafe { OdeCallbacks::<M>::new(d, ctx) }.unwrap();
+        // lane `b` has the parameters `[10 b + 1, 10 b + 2]`
+        eqn.set_params(&ctx.vector_from_vec(vec![1.0, 2.0, 11.0, 12.0]));
+        let x = ctx.vector_from_vec(vec![0.0; 4]);
+        // lane `b * nparams + k` of `v` is `[b, k]`
+        let v_values: Vec<f64> = (0..nbatch)
+            .flat_map(|b| (0..nparams).flat_map(move |k| [b as f64, k as f64]))
+            .collect();
+        let v = aug_ctx.vector_from_vec(v_values);
+        let mut y = aug_ctx.vector_from_vec(vec![0.0; 8]);
+        eqn.rhs().jac_mul_inplace(&x, 0.0, &v, &mut y);
+        assert!(eqn.take_callback_error().is_none());
+
+        let s = std::mem::size_of::<f64>();
+        let c = 2 * s;
+        let seen = SEEN.with(|s| s.borrow().clone());
+        let shape = [2, nparams, nbatch];
+        assert_eq!(
+            seen,
+            vec![
+                (shape, [s, 0, c]),
+                (shape, [s, 0, c]),
+                (shape, [s, c, nparams * c]),
+                (shape, [s, c, nparams * c]),
+            ]
+        );
+        let expected: Vec<f64> = (0..nbatch)
+            .flat_map(|b| {
+                let p = [10.0 * b as f64 + 1.0, 10.0 * b as f64 + 2.0];
+                (0..nparams).flat_map(move |k| [p[0] * b as f64, p[1] * k as f64])
+            })
+            .collect();
+        assert_eq!(y.clone_as_vec(), expected);
     }
 
     #[test]
