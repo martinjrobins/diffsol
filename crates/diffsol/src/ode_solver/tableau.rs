@@ -53,9 +53,9 @@ impl<T: Scalar> Tableau<T> {
     /// continuous extension from :
     /// from Jørgensen, J. B., Kristensen, M. R., & Thomsen, P. G. (2018). A family of ESDIRK integration methods. arXiv preprint arXiv:1803.01613.
     pub fn tr_bdf2() -> Self {
-        let gamma = T::from_f64(2.0 - 2.0_f64.sqrt()).unwrap();
+        let gamma = T::from_f64(2.0 - libm::sqrt(2.0)).unwrap();
         let d = gamma / T::from_f64(2.0).unwrap();
-        let w = T::from_f64(2.0_f64.sqrt() / 4.0).unwrap();
+        let w = T::from_f64(libm::sqrt(2.0) / 4.0).unwrap();
 
         let a = TableauMat::from_slice(
             3,

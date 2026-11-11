@@ -536,7 +536,7 @@ pub trait Vector:
     fn rand(nstates: usize, seed: f64, ctx: Self::C) -> Self {
         let n = nstates * ctx.nbatch();
         let values = (0..n)
-            .map(|k| num_traits::FromPrimitive::from_f64(((k + 1) as f64 * seed).sin()).unwrap())
+            .map(|k| num_traits::FromPrimitive::from_f64(libm::sin((k + 1) as f64 * seed)).unwrap())
             .collect();
         Self::from_vec(values, ctx)
     }

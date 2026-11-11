@@ -23,16 +23,16 @@ pub(crate) fn pi_controller_raw<T: Scalar>(
     let order_f = T::from_usize(eff_order).unwrap();
     let ki = pi_integral / order_f;
     if pi_proportional == T::zero() {
-        error_norm.pow(-ki)
+        error_norm.powf(-ki)
     } else {
         match &prev_error_norm {
             Some(prev) => {
                 let kp = pi_proportional / order_f;
-                let e_iexp = error_norm.pow(-(ki + kp));
-                let e_pexp = prev.pow(kp);
+                let e_iexp = error_norm.powf(-(ki + kp));
+                let e_pexp = prev.powf(kp);
                 e_iexp * e_pexp
             }
-            None => error_norm.pow(-ki),
+            None => error_norm.powf(-ki),
         }
     }
 }

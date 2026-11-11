@@ -53,6 +53,7 @@ diffsl-llvm21-prefer-dynamic = ["diffsl-llvm21", "diffsl/llvm21-1-prefer-dynamic
 diffsol-la = { workspace = true, features = ["nalgebra", "faer"] }
 diffsol-nl = { workspace = true, features = ["nalgebra", "faer"] }
 num-traits = { workspace = true }
+libm = { workspace = true }
 serde = { workspace = true }
 diffsl = { workspace = true, optional = true }
 petgraph = "0.8.3"

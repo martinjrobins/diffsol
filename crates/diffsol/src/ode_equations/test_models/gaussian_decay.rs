@@ -3,7 +3,7 @@ use crate::OdeSolverProblem;
 use crate::{
     scalar::Scalar, ConstantOp, DenseMatrix, OdeBuilder, OdeEquations, OdeEquationsImplicit, Vector,
 };
-use num_traits::{FromPrimitive, Pow};
+use num_traits::FromPrimitive;
 use num_traits::{One, Zero};
 
 // dy/dt = -aty (p = [a])
@@ -48,7 +48,7 @@ pub fn gaussian_decay_problem<M: DenseMatrix + 'static>(
         let mut y: M::V = problem.eqn.init().call(M::T::zero());
         let px = M::V::from_vec(
             p.iter()
-                .map(|&x| (x * t.pow(2) / M::T::from_f64(-2.0).unwrap()).exp())
+                .map(|&x| (x * t.powi(2) / M::T::from_f64(-2.0).unwrap()).exp())
                 .collect::<Vec<_>>(),
             problem.context().clone(),
         );

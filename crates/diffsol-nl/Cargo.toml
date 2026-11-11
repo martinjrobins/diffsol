@@ -20,6 +20,7 @@ suitesparse = ["diffsol-la/suitesparse"]
 [dependencies]
 diffsol-la = { workspace = true }
 num-traits = { workspace = true }
+libm = { workspace = true }
 thiserror = "2.0"
 log = "0.4"
 

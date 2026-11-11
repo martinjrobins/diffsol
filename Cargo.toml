@@ -42,6 +42,7 @@ ort = "=2.0.0-rc.10"
 ort-sys = { version = "=2.0.0-rc.10", default-features = false }
 paste = "1.0.15"
 num-traits = "0.2.17"
+libm = "0.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 

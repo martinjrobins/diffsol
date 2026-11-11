@@ -254,10 +254,10 @@ where
 
             bcoef[i] = M::T::from_f64(BB).unwrap();
             bcoef[i + NPREY] = M::T::from_f64(-BB).unwrap();
-            cox[i] = M::T::from_f64(DPREY / Self::DX.powi(2)).unwrap();
-            cox[i + NPREY] = M::T::from_f64(DPRED / Self::DX.powi(2)).unwrap();
-            coy[i] = M::T::from_f64(DPREY / Self::DY.powi(2)).unwrap();
-            coy[i + NPREY] = M::T::from_f64(DPRED / Self::DY.powi(2)).unwrap();
+            cox[i] = M::T::from_f64(DPREY / libm::pow(Self::DX, 2.0)).unwrap();
+            cox[i + NPREY] = M::T::from_f64(DPRED / libm::pow(Self::DX, 2.0)).unwrap();
+            coy[i] = M::T::from_f64(DPREY / libm::pow(Self::DY, 2.0)).unwrap();
+            coy[i + NPREY] = M::T::from_f64(DPRED / libm::pow(Self::DY, 2.0)).unwrap();
         }
 
         Self {
@@ -342,8 +342,8 @@ where
             let nsmx: usize = NX;
             let dx = AX / (NX as f64 - 1.0);
             let dy = AY / (NX as f64 - 1.0);
-            let cox = M::T::from_f64(1.0 / dx.powi(2)).unwrap();
-            let coy = M::T::from_f64(1.0 / dy.powi(2)).unwrap();
+            let cox = M::T::from_f64(1.0 / libm::pow(dx, 2.0)).unwrap();
+            let coy = M::T::from_f64(1.0 / libm::pow(dy, 2.0)).unwrap();
 
             /* Loop over grid points, evaluate interaction vector (length ns),
             form diffusion difference terms, and load crate.                    */
@@ -387,8 +387,8 @@ where
             let nsmx: usize = NX;
             let dx = AX / (NX as f64 - 1.0);
             let dy = AY / (NX as f64 - 1.0);
-            let cox = M::T::from_f64(1.0 / dx.powi(2)).unwrap();
-            let coy = M::T::from_f64(1.0 / dy.powi(2)).unwrap();
+            let cox = M::T::from_f64(1.0 / libm::pow(dx, 2.0)).unwrap();
+            let coy = M::T::from_f64(1.0 / libm::pow(dy, 2.0)).unwrap();
 
             /* Loop over grid points, evaluate interaction vector (length ns),
             form diffusion difference terms, and load crate.                    */
@@ -565,8 +565,8 @@ fn foodweb_fac<T: Scalar, const NX: usize>(loc: usize) -> T {
     T::from_f64(
         1.0 + ALPHA * xx * yy
             + BETA
-                * (4.0 * std::f64::consts::PI * xx).sin()
-                * (4.0 * std::f64::consts::PI * yy).sin(),
+                * libm::sin(4.0 * std::f64::consts::PI * xx)
+                * libm::sin(4.0 * std::f64::consts::PI * yy),
     )
     .unwrap()
 }
@@ -624,7 +624,7 @@ fn foodweb_init<T: Scalar, const NX: usize>(y: &mut T, i: usize) {
     let jy = loc / nsmx;
     let xx = jx as f64 * (AX / (NX as f64 - 1.0));
     let yy = jy as f64 * (AY / (NX as f64 - 1.0));
-    let xyfactor = (16.0 * xx * (1.0 - xx) * yy * (1.0 - yy)).powi(2);
+    let xyfactor = libm::pow(16.0 * xx * (1.0 - xx) * yy * (1.0 - yy), 2.0);
     *y = if is < NPREY {
         T::from_f64(10.0 + (is + 1) as f64 * xyfactor).unwrap()
     } else {

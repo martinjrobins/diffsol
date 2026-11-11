@@ -25,8 +25,6 @@ use crate::vector::VectorView;
 /// ```
 pub trait Scalar:
     num_traits::Signed
-    + num_traits::Pow<Self, Output = Self>
-    + num_traits::Pow<i32, Output = Self>
     + num_traits::FromPrimitive
     + num_traits::ToPrimitive
     + Display
@@ -60,6 +58,12 @@ pub trait Scalar:
     fn sin(self) -> Self;
     /// Cosine.
     fn cos(self) -> Self;
+    /// Natural logarithm.
+    fn ln(self) -> Self;
+    /// Raise to a floating-point power.
+    fn powf(self, n: Self) -> Self;
+    /// Raise to an integer power.
+    fn powi(self, n: i32) -> Self;
     /// Maximum of two values, NaN if either is NaN.
     fn max(self, other: Self) -> Self;
 
@@ -100,6 +104,33 @@ pub trait FaerScalar: Scalar + faer::traits::ComplexField + faer::traits::RealFi
 
 impl<T> FaerScalar for T where T: Scalar + faer::traits::ComplexField + faer::traits::RealField {}
 
+/// Integer power by exponentiation by squaring.
+///
+/// This uses a fixed sequence of IEEE multiplications, so the result is the same on all
+/// platforms.
+fn powi_by_squaring<T>(x: T, n: i32) -> T
+where
+    T: Copy + num_traits::One + std::ops::Mul<Output = T> + std::ops::Div<Output = T>,
+{
+    let mut base = x;
+    let mut e = n.unsigned_abs();
+    let mut acc = T::one();
+    while e > 0 {
+        if e & 1 == 1 {
+            acc = acc * base;
+        }
+        e >>= 1;
+        if e > 0 {
+            base = base * base;
+        }
+    }
+    if n < 0 {
+        T::one() / acc
+    } else {
+        acc
+    }
+}
+
 /// The index type used throughout diffsol for indexing vectors and matrices.
 pub type IndexType = usize;
 
@@ -111,19 +142,28 @@ impl Scalar for f64 {
         self.is_nan()
     }
     fn sqrt(self) -> Self {
-        self.sqrt()
+        libm::sqrt(self)
     }
     fn cbrt(self) -> Self {
-        self.cbrt()
+        libm::cbrt(self)
     }
     fn exp(self) -> Self {
-        self.exp()
+        libm::exp(self)
     }
     fn sin(self) -> Self {
-        self.sin()
+        libm::sin(self)
     }
     fn cos(self) -> Self {
-        self.cos()
+        libm::cos(self)
+    }
+    fn ln(self) -> Self {
+        libm::log(self)
+    }
+    fn powf(self, n: Self) -> Self {
+        libm::pow(self, n)
+    }
+    fn powi(self, n: i32) -> Self {
+        powi_by_squaring(self, n)
     }
     fn max(self, other: Self) -> Self {
         // NaN must win so a failed batch lane fails the error test rather than vanishing
@@ -160,19 +200,28 @@ impl Scalar for f32 {
         self.is_nan()
     }
     fn sqrt(self) -> Self {
-        self.sqrt()
+        libm::sqrtf(self)
     }
     fn cbrt(self) -> Self {
-        self.cbrt()
+        libm::cbrtf(self)
     }
     fn exp(self) -> Self {
-        self.exp()
+        libm::expf(self)
     }
     fn sin(self) -> Self {
-        self.sin()
+        libm::sinf(self)
     }
     fn cos(self) -> Self {
-        self.cos()
+        libm::cosf(self)
+    }
+    fn ln(self) -> Self {
+        libm::logf(self)
+    }
+    fn powf(self, n: Self) -> Self {
+        libm::powf(self, n)
+    }
+    fn powi(self, n: i32) -> Self {
+        powi_by_squaring(self, n)
     }
     fn max(self, other: Self) -> Self {
         // NaN must win so a failed batch lane fails the error test rather than vanishing
@@ -287,4 +336,22 @@ impl<V: VectorView<'static, T = E>, E: Scalar> Mul<V> for Scale<E> {
 #[test]
 fn test_scale() {
     assert_eq!(scale(2.0) * scale(3.0), scale(6.0));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Scalar;
+
+    #[test]
+    fn powi_by_squaring_matches_exact_values() {
+        assert_eq!(Scalar::powi(2.0_f64, 0), 1.0);
+        assert_eq!(Scalar::powi(2.0_f64, 1), 2.0);
+        assert_eq!(Scalar::powi(2.0_f64, 10), 1024.0);
+        assert_eq!(Scalar::powi(2.0_f64, -3), 0.125);
+        assert_eq!(Scalar::powi(-3.0_f64, 3), -27.0);
+        assert_eq!(Scalar::powi(1.5_f32, 2), 2.25);
+        assert_eq!(Scalar::powi(2.0_f64, i32::MIN), 0.0);
+        let x = 1.1_f64;
+        assert!((Scalar::powi(x, 9) - x.powi(9)).abs() <= 4.0 * f64::EPSILON * x.powi(9));
+    }
 }

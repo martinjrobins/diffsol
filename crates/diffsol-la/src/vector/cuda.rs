@@ -107,7 +107,7 @@ impl CudaContext {
             let norm = if k == 2 {
                 batch_sum.sqrt()
             } else {
-                batch_sum.pow(T::one() / T::from_f64(k as f64).unwrap())
+                batch_sum.powf(T::one() / T::from_f64(k as f64).unwrap())
             };
             max_norm = max_norm.max(norm);
         }

@@ -1056,9 +1056,9 @@ impl OxideContext {
             }
         });
         let norm = if k == 2 {
-            max_sum.sqrt()
+            libm::sqrt(max_sum)
         } else {
-            max_sum.powf(1.0 / k as f64)
+            libm::pow(max_sum, 1.0 / k as f64)
         };
         T::from_f64(norm).unwrap()
     }

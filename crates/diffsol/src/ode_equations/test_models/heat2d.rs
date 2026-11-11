@@ -85,7 +85,7 @@ pub fn heat2d_diffsl_problem<
         mass_diffsl,
         init_diffsl,
         n = MGRID * MGRID,
-        dx2 = (1.0 / (MGRID as f64 - 1.0)).powi(2),
+        dx2 = libm::pow(1.0 / (MGRID as f64 - 1.0), 2.0),
     );
 
     let problem = crate::OdeBuilder::<M>::new()

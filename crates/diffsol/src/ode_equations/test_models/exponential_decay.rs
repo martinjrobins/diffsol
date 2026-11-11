@@ -98,7 +98,7 @@ pub fn negative_exponential_decay_problem<M: Matrix + 'static>(
 ) {
     let h = -1.0;
     let k = 0.1;
-    let y0 = (-10.0 * k).exp();
+    let y0 = libm::exp(-10.0 * k);
     let problem = OdeBuilder::<M>::new()
         .h0(h)
         .p([k, y0])
@@ -797,10 +797,10 @@ pub fn exponential_decay_with_reset_problem<M: Matrix + 'static>() -> (
         .build()
         .unwrap();
     // Root 0 fires when y.get_index(0) = 0.6: t_root_0 = -ln(0.6)/0.1
-    let t_root_0 = M::T::from_f64(-(0.6_f64.ln()) / 0.1).unwrap();
+    let t_root_0 = M::T::from_f64(-libm::log(0.6) / 0.1).unwrap();
     // After manual reset to y=[0.4, 0.4], root 1 fires when y.get_index(0)=0.3:
     //   t_from_reset = -ln(0.3/0.4)/0.1 = ln(4/3)/0.1
-    let t_from_reset = M::T::from_f64((4.0_f64 / 3.0_f64).ln() / 0.1).unwrap();
+    let t_from_reset = M::T::from_f64(libm::log(4.0_f64 / 3.0_f64) / 0.1).unwrap();
     let t_stop = t_root_0 + t_from_reset;
     let nstates = problem.eqn.nstates();
     let ctx = problem.context().clone();
@@ -836,7 +836,7 @@ pub fn exponential_decay_with_two_roots_problem<M: Matrix + 'static>() -> (
         .build()
         .unwrap();
     // Root 0 fires when y.get_index(0) = 0.6: t = -ln(0.6)/0.1
-    let t_root_0 = M::T::from_f64(0.6_f64.ln().abs() / 0.1).unwrap();
+    let t_root_0 = M::T::from_f64(libm::log(0.6).abs() / 0.1).unwrap();
     let y0: M::V = problem.eqn.init().call(M::T::zero());
     let y_root_0 = y0 * scale(M::T::from_f64(0.6).unwrap());
     let mut soln = OdeSolverSolution {
@@ -981,9 +981,9 @@ pub fn exponential_decay_with_reset_problem_sens<M: Matrix + 'static>() -> (
         .unwrap();
 
     // t_root: y.get_index(0) = exp(-0.1·t) = 0.6  →  t_root = 10·ln(5/3)
-    let t_root = M::T::from_f64(10.0 * (5.0_f64 / 3.0_f64).ln()).unwrap();
+    let t_root = M::T::from_f64(10.0 * libm::log(5.0_f64 / 3.0_f64)).unwrap();
     // dt to stop after reset: 2.6·exp(-0.1·dt) = 2.0  →  dt = 10·ln(1.3)
-    let dt = M::T::from_f64(10.0 * 1.3_f64.ln()).unwrap();
+    let dt = M::T::from_f64(10.0 * libm::log(1.3)).unwrap();
     let t_stop = t_root + dt;
 
     // y at t_stop: both components = 2.0 (by construction of root 1)

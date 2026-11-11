@@ -4,7 +4,7 @@ use faer::reborrow::{Reborrow, ReborrowMut};
 use faer::{unzip, zip, Col, Mat, MatMut, MatRef};
 
 use crate::context::broadcast_batch;
-use crate::{scalar::Scale, Context, FaerContext, FaerScalar, IndexType, Vector};
+use crate::{scalar::Scale, Context, FaerContext, FaerScalar, IndexType, Scalar, Vector};
 
 use crate::{FaerMat, VectorCommon, VectorIndex, VectorView, VectorViewMut};
 
@@ -619,10 +619,12 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
                 match k {
                     1 => column.norm_l1(),
                     2 => column.norm_l2(),
-                    _ => column
-                        .iter()
-                        .fold(T::zero(), |acc, x| acc.algebraic_add(x.abs().pow(k)))
-                        .pow(T::one() / T::from_f64(k as f64).unwrap()),
+                    _ => {
+                        let sum = column.iter().fold(T::zero(), |acc, x| {
+                            acc.algebraic_add(Scalar::powi(x.abs(), k))
+                        });
+                        Scalar::powf(sum, T::one() / T::from_f64(k as f64).unwrap())
+                    }
                 }
             })
             .fold(T::zero(), |a, b| a.max(b))

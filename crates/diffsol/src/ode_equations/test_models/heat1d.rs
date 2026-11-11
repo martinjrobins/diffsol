@@ -80,11 +80,10 @@ fn soln<M: Matrix<T = f64>>(ctx: M::C, mgrid: usize, h: f64) -> OdeSolverSolutio
                 *v = 0.0;
                 for n in 1..100 {
                     let two_n_minus_1: f64 = f64::from(2 * n - 1);
-                    *v += (two_n_minus_1 * PI * x).sin()
-                        * (-two_n_minus_1.powi(2) * PI.powi(2) * t).exp()
-                        / two_n_minus_1.powi(2);
+                    let n_sq = two_n_minus_1 * two_n_minus_1;
+                    *v += libm::sin(two_n_minus_1 * PI * x) * libm::exp(-n_sq * PI * PI * t) / n_sq;
                 }
-                *v *= 8.0 / PI.powi(2);
+                *v *= 8.0 / (PI * PI);
             }
             M::V::from_vec(ret, ctx.clone())
         })

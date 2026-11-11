@@ -5,7 +5,7 @@ use crate::{
 };
 use diffsol_la::{Context, Scalar, Vector};
 use log::warn;
-use num_traits::{FromPrimitive, One, Pow};
+use num_traits::{FromPrimitive, One};
 
 /// Line search trait for nonlinear solvers
 /// The line search is used to find an optimal step size for the Newton iteration.
@@ -97,7 +97,7 @@ impl<V: Vector> Default for BacktrackingLineSearch<V> {
         Self {
             tau: V::T::from_f64(0.5).unwrap(),
             c: V::T::from_f64(1e-4).unwrap(),
-            steptol: V::T::EPSILON.pow(V::T::from_f64(2.0 / 3.0).unwrap()),
+            steptol: V::T::EPSILON.powf(V::T::from_f64(2.0 / 3.0).unwrap()),
             max_iter: 10,
             n_iters: 0,
             delta0: V::zeros(0, Default::default()),

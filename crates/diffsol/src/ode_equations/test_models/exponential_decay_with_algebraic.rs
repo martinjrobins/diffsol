@@ -506,8 +506,8 @@ pub fn exponential_decay_with_algebraic_with_reset_problem_sens<M: Matrix + 'sta
         .build()
         .unwrap();
 
-    let t_root = M::T::from_f64(10.0 * (5.0_f64 / 3.0_f64).ln()).unwrap();
-    let dt = M::T::from_f64(10.0 * 1.3_f64.ln()).unwrap();
+    let t_root = M::T::from_f64(10.0 * libm::log(5.0_f64 / 3.0_f64)).unwrap();
+    let dt = M::T::from_f64(10.0 * libm::log(1.3)).unwrap();
     let t_stop = t_root + dt;
 
     let y0 = problem.eqn.init().call(M::T::zero());

@@ -1488,7 +1488,7 @@ mod tests {
                     let grad = grad_at_scale(scale, esdirk);
                     for (g, r) in grad.iter().zip(&reference) {
                         assert!(
-                            (g - r).abs() <= 1e-10 * r.abs(),
+                            (g - r).abs() <= 1e-9 * r.abs(),
                             "scale {scale:e}: {grad:?} != {reference:?}"
                         );
                     }

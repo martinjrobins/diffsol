@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use log::trace;
-use num_traits::{FromPrimitive, One, Pow, ToPrimitive};
+use num_traits::{FromPrimitive, One, ToPrimitive};
 
 use diffsol_la::{IndexType, Scalar, Vector};
 
@@ -34,7 +34,7 @@ fn root_fast<T: Scalar>(x: T, n: IndexType) -> T {
         2 => x.sqrt(),
         3 => x.cbrt(),
         4 => x.sqrt().sqrt(),
-        _ => x.pow(T::one() / T::from_usize(n).unwrap()),
+        _ => x.powf(T::one() / T::from_usize(n).unwrap()),
     }
 }
 
@@ -71,11 +71,11 @@ impl<'a, V: Vector> Convergence<'a, V> {
         self.eta
     }
     pub fn reset_eta(&mut self) {
-        self.eta = V::T::from_f64(20.0.pow(1.25)).unwrap();
+        self.eta = V::T::from_f64(libm::pow(20.0, 1.25)).unwrap();
     }
 
     pub fn reset_eta_timestep_change(&mut self) {
-        self.eta = V::T::from_f64(100.0.pow(1.25)).unwrap();
+        self.eta = V::T::from_f64(libm::pow(100.0, 1.25)).unwrap();
     }
 
     pub fn new(rtol: V::T, atol: &'a V) -> Self {
@@ -89,7 +89,7 @@ impl<'a, V: Vector> Convergence<'a, V> {
             tol,
             max_iter: 10,
             old_norm: None,
-            eta: V::T::from_f64(20.0.pow(1.25)).unwrap(),
+            eta: V::T::from_f64(libm::pow(20.0, 1.25)).unwrap(),
             niter: 0,
             transient_updates: 0,
         }
@@ -132,7 +132,7 @@ impl<'a, V: Vector> Convergence<'a, V> {
                 if self.eta < min_eta {
                     self.eta = min_eta;
                 }
-                self.eta = self.eta.pow(V::T::from_f64(0.8).unwrap());
+                self.eta = self.eta.powf(V::T::from_f64(0.8).unwrap());
                 trace!(
                     "  No rate measured yet, set eta = {:.3e}",
                     self.eta.to_f64().unwrap()
@@ -161,7 +161,7 @@ impl<'a, V: Vector> Convergence<'a, V> {
 
             // if iteration is not going to converge in max_iter
             // (assuming the current rate), then abort
-            if rate.pow(i32::try_from(self.max_iter - self.niter).unwrap()) / (one - rate) * norm
+            if rate.powi(i32::try_from(self.max_iter - self.niter).unwrap()) / (one - rate) * norm
                 > self.tol
             {
                 trace!(

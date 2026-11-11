@@ -1,5 +1,5 @@
-use crate::{Matrix, OdeBuilder, OdeEquationsImplicit, OdeSolverProblem};
-use num_traits::{FromPrimitive, One, Pow};
+use crate::{scalar::Scalar, Matrix, OdeBuilder, OdeEquationsImplicit, OdeSolverProblem};
+use num_traits::{FromPrimitive, One};
 
 // du/dt = -u + v - 1
 // 0 = u - v - v^3
@@ -78,7 +78,7 @@ pub fn nonlinear_algebraic_time_dependent_mass_problem<M: Matrix + 'static>(
 // 0 = u - v^10
 fn power_algebraic_rhs<M: Matrix>(x: &[M::T], _p: &[M::T], _t: M::T, y: &mut [M::T]) {
     y[0] = -x[0];
-    y[1] = x[0] - x[1].pow(10i32);
+    y[1] = x[0] - x[1].powi(10);
 }
 
 fn power_algebraic_jac_mul<M: Matrix>(
@@ -90,7 +90,7 @@ fn power_algebraic_jac_mul<M: Matrix>(
 ) {
     let ten = M::T::from_f64(10.0).unwrap();
     y[0] = -v[0];
-    y[1] = v[0] - ten * x[1].pow(9i32) * v[1];
+    y[1] = v[0] - ten * x[1].powi(9) * v[1];
 }
 
 fn power_algebraic_init<M: Matrix>(_p: &[M::T], _t: M::T, y: &mut [M::T]) {
