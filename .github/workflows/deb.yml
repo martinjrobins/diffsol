@@ -34,7 +34,7 @@ on:
     paths:
       - "crates/diffsol-c/debian/**"
       - "crates/diffsol-c/build.rs"
-      - "crates/diffsol-c/examples/c/**"
+      - "examples/diffsol-c-logistic/c/**"
       - ".github/workflows/deb.yml"
 
 permissions:
@@ -159,7 +159,7 @@ jobs:
       - name: Compile and run the C examples
         run: |
           for example in logistic_callbacks logistic_diffsl_jit; do
-            cc -std=c11 -Wall -Wextra -Werror "crates/diffsol-c/examples/c/$example.c" \
+            cc -std=c11 -Wall -Wextra -Werror "examples/diffsol-c-logistic/c/$example.c" \
               $(pkg-config --cflags --libs diffsol) -lm -o "$example"
             "./$example"
           done

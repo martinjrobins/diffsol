@@ -126,8 +126,8 @@ impl<T: Scalar + NalgebraScalar> FromTensor for diffsol::NalgebraMat<T> {
     }
 }
 
-/// The layout of a faer matrix.
-fn faer_layout<T: Scalar + FaerScalar>(m: &faer::Mat<T>) -> RawLayout {
+/// The layout of a faer matrix, with the data pointer `ptr` of `m`.
+fn faer_layout<T: Scalar + FaerScalar>(m: &faer::Mat<T>, ptr: *const T) -> RawLayout {
     // faer gives the strides in values; a matrix that owns its data has positive strides
     let size = std::mem::size_of::<T>();
     let strides = [
@@ -135,17 +135,20 @@ fn faer_layout<T: Scalar + FaerScalar>(m: &faer::Mat<T>) -> RawLayout {
         m.col_stride() as usize * size,
     ];
     let shape = [m.nrows(), m.ncols()];
-    RawLayout::valid(m.as_ptr() as *const u8, &shape, &strides, T::scalar_type())
+    RawLayout::valid(ptr as *const u8, &shape, &strides, T::scalar_type())
 }
 
-/// The layout of a nalgebra matrix.
-fn nalgebra_layout<T: Scalar + NalgebraScalar>(m: &nalgebra::DMatrix<T>) -> RawLayout {
+/// The layout of a nalgebra matrix, with the data pointer `ptr` of `m`.
+fn nalgebra_layout<T: Scalar + NalgebraScalar>(
+    m: &nalgebra::DMatrix<T>,
+    ptr: *const T,
+) -> RawLayout {
     // nalgebra gives the strides in values
     let size = std::mem::size_of::<T>();
     let (rs, cs) = m.strides();
     let shape = [m.nrows(), m.ncols()];
     RawLayout::valid(
-        m.as_ptr() as *const u8,
+        ptr as *const u8,
         &shape,
         &[rs * size, cs * size],
         T::scalar_type(),
@@ -174,37 +177,67 @@ fn matrix_lanes(storage: RawLayout, nbatch: usize) -> RawLayout {
 /// [TensorLayout::tensor_layout] must give the layout of data that the value holds on the heap,
 /// so that the data does not move when the value moves. The data must not change while the value
 /// is borrowed (no interior mutability).
-pub(crate) unsafe trait TensorLayout {
+pub unsafe trait TensorLayout {
     /// The layout of the data.
     fn tensor_layout(&self) -> RawLayout;
+}
+
+/// A diffsol vector that a [TensorViewMut] can show, so that a C callback can write its values
+/// with no copy. The layout is `[n, nbatch]`, the same as [TensorLayout::tensor_layout].
+///
+/// # Safety
+/// As for [TensorLayout]. [TensorLayoutMut::tensor_layout_mut] must give the same layout as
+/// [TensorLayout::tensor_layout], with a pointer that allows writes to each value of the layout
+/// while the value is mutably borrowed.
+pub unsafe trait TensorLayoutMut: TensorLayout {
+    /// The layout of the data, with a pointer that allows writes.
+    fn tensor_layout_mut(&mut self) -> RawLayout;
 }
 
 // SAFETY: faer and nalgebra keep the values of a vector or a matrix on the heap, and change them
 // only through `&mut`
 unsafe impl<T: Scalar + FaerScalar> TensorLayout for diffsol::FaerVec<T> {
     fn tensor_layout(&self) -> RawLayout {
-        faer_layout(self.inner())
+        faer_layout(self.inner(), self.inner().as_ptr())
+    }
+}
+
+// SAFETY: the pointer comes from `&mut` of the faer matrix, so writes through it are allowed
+unsafe impl<T: Scalar + FaerScalar> TensorLayoutMut for diffsol::FaerVec<T> {
+    fn tensor_layout_mut(&mut self) -> RawLayout {
+        let ptr = self.inner_mut().as_ptr_mut();
+        faer_layout(self.inner(), ptr)
     }
 }
 
 // SAFETY: as for `FaerVec`
 unsafe impl<T: Scalar + NalgebraScalar> TensorLayout for diffsol::NalgebraVec<T> {
     fn tensor_layout(&self) -> RawLayout {
-        nalgebra_layout(self.inner())
+        nalgebra_layout(self.inner(), self.inner().as_ptr())
+    }
+}
+
+// SAFETY: the pointer comes from `&mut` of the nalgebra matrix, so writes through it are allowed
+unsafe impl<T: Scalar + NalgebraScalar> TensorLayoutMut for diffsol::NalgebraVec<T> {
+    fn tensor_layout_mut(&mut self) -> RawLayout {
+        let ptr = self.inner_mut().as_mut_ptr();
+        nalgebra_layout(self.inner(), ptr)
     }
 }
 
 // SAFETY: as for `FaerVec`
 unsafe impl<T: Scalar + FaerScalar> TensorLayout for diffsol::FaerMat<T> {
     fn tensor_layout(&self) -> RawLayout {
-        matrix_lanes(faer_layout(self.inner()), self.context().nbatch())
+        let layout = faer_layout(self.inner(), self.inner().as_ptr());
+        matrix_lanes(layout, self.context().nbatch())
     }
 }
 
 // SAFETY: as for `FaerVec`
 unsafe impl<T: Scalar + NalgebraScalar> TensorLayout for diffsol::NalgebraMat<T> {
     fn tensor_layout(&self) -> RawLayout {
-        matrix_lanes(nalgebra_layout(self.inner()), self.context().nbatch())
+        let layout = nalgebra_layout(self.inner(), self.inner().as_ptr());
+        matrix_lanes(layout, self.context().nbatch())
     }
 }
 
@@ -316,17 +349,26 @@ fn byte_offset(shape: &[usize], strides: &[usize], index: &[usize]) -> usize {
         .sum()
 }
 
-/// The data pointer, the scalar type, the shape and the byte strides of a [Tensor] or a
-/// [TensorView]. A `RawLayout` always obeys the layout rules (the [Tensor] docs give the rules):
-/// each constructor checks them. It does not own or borrow the data, so the reads are `unsafe`.
+/// The data pointer, the scalar type, the shape and the byte strides of a [Tensor], a
+/// [TensorView] or a [TensorViewMut]. A `RawLayout` always obeys the layout rules (the [Tensor]
+/// docs give the rules): each constructor checks them. It does not own or borrow the data, so the
+/// reads are `unsafe`.
+///
+/// It has the C layout, so a C callback can read the fields of a [TensorView] directly. The value
+/// at the index `(i0, i1, ...)` is at `ptr + i0 * strides[0] + i1 * strides[1] + ...` (in bytes).
+/// Only the first `ndim` values of `shape` and `strides` are used.
+#[repr(C)]
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct RawLayout {
+pub struct RawLayout {
+    /// The pointer to the first value.
     ptr: *const u8,
+    /// The scalar type of the values.
     dtype: ScalarType,
+    /// The number of axes, 1 to [MAX_NDIM].
     ndim: usize,
-    /// Only the first `ndim` values are used.
+    /// The length of each axis. Only the first `ndim` values are used.
     shape: [usize; MAX_NDIM],
-    /// Only the first `ndim` values are used. In bytes.
+    /// The stride of each axis, in bytes. Only the first `ndim` values are used.
     strides: [usize; MAX_NDIM],
 }
 
@@ -410,6 +452,53 @@ impl RawLayout {
         assert!(last_byte(shape, strides) <= last_byte(self.shape(), self.strides()));
         Self::valid(self.ptr, shape, strides, self.dtype)
     }
+    /// The `[n, ninner, nouter]` layout of a diffsol vector with the `[n, nlanes]` layout `self`,
+    /// in an operation that writes `ninner * nouter` lanes.
+    ///
+    /// diffsol broadcasts an operand with fewer lanes in groups: each lane of an operand with
+    /// `nouter` lanes repeats over `ninner` adjacent output lanes. The new layout shows this with
+    /// strides of 0, so lane `(k, b)` of each operand is at `k * strides[1] + b * strides[2]`:
+    /// - `nlanes == ninner * nouter`: the strides `[s, c, ninner * c]`;
+    /// - `nlanes == nouter`: the strides `[s, 0, c]`;
+    /// - `nlanes == 1`: the strides `[s, 0, 0]`.
+    ///
+    /// `s` is the size of one value, and `c` is the column stride of `self`.
+    ///
+    /// # Panics
+    /// If `self` does not have 2 axes, or `nlanes` is not one of the values above.
+    pub(crate) fn batch_lanes(self, ninner: usize, nouter: usize) -> Self {
+        assert_eq!(self.ndim, 2, "a vector layout has 2 axes");
+        let (n, nlanes) = (self.shape[0], self.shape[1]);
+        let (s, c) = (self.strides[0], self.strides[1]);
+        let strides = if nlanes == ninner * nouter {
+            [s, c, ninner * c]
+        } else if nlanes == nouter {
+            [s, 0, c]
+        } else if nlanes == 1 {
+            [s, 0, 0]
+        } else {
+            panic!("cannot broadcast {nlanes} lanes into {ninner} x {nouter} lanes");
+        };
+        // each value of the new layout is a value of `self`, so the reads stay in the data
+        Self::valid(self.ptr, &[n, ninner, nouter], &strides, self.dtype)
+    }
+    /// Check that no two indices of the layout give the same value, so that a mutable view can
+    /// give each value one time. In column-major order, the stride of each axis must be at least
+    /// the extent of the axes before it.
+    fn check_no_overlap(&self) -> Result<(), DiffsolRtError> {
+        let mut extent = scalar_size(self.dtype);
+        for (&n, &stride) in self.shape().iter().zip(self.strides()) {
+            if n > 1 {
+                if stride < extent {
+                    return Err(layout_error(
+                        "The values of a mutable array overlap".to_string(),
+                    ));
+                }
+                extent += (n - 1) * stride;
+            }
+        }
+        Ok(())
+    }
     /// Keep only the first `len` indices of the axis `axis`. The strides do not change, so each
     /// index that stays gives the same value.
     ///
@@ -424,17 +513,38 @@ impl RawLayout {
         self.shape[axis] = len;
         self
     }
+    /// The pointer to the value at `index`, which is aligned (from the layout rules).
+    ///
+    /// # Panics
+    /// If `index` does not have one value for each axis, or a value is out of range.
+    fn index_ptr<T: Scalar>(&self, index: &[usize]) -> Result<*const T, DiffsolRtError> {
+        check_dtype::<T>(self.dtype)?;
+        let offset = byte_offset(self.shape(), self.strides(), index);
+        // the index is in range, so the offset stays in the data of the layout
+        Ok(self.ptr.wrapping_add(offset) as *const T)
+    }
+    /// The pointer to the first value of the column `[:, index...]`, and its length. The layout
+    /// rules make the values of the column adjacent and aligned.
+    ///
+    /// # Panics
+    /// If `index` does not have one value for each axis after the first, or a value is out of
+    /// range.
+    fn column_ptr<T: Scalar>(&self, index: &[usize]) -> Result<(*const T, usize), DiffsolRtError> {
+        check_dtype::<T>(self.dtype)?;
+        let offset = byte_offset(&self.shape()[1..], &self.strides()[1..], index);
+        // the index is in range, so the offset stays in the data of the layout
+        Ok((self.ptr.wrapping_add(offset) as *const T, self.shape[0]))
+    }
     /// A reference to the value at `index`.
     ///
     /// # Safety
     /// For each index in the shape, the data must have a valid value of the type `dtype`, which
     /// stays valid and does not change during `'a`.
     unsafe fn index<'a, T: Scalar>(&self, index: &[usize]) -> Result<&'a T, DiffsolRtError> {
-        check_dtype::<T>(self.dtype)?;
-        let offset = byte_offset(self.shape(), self.strides(), index);
+        let ptr = self.index_ptr::<T>(index)?;
         // SAFETY: the index is in range, so the caller guarantees a valid value of type `T` there
         // during `'a`, and the layout rules make it aligned
-        Ok(unsafe { &*(self.ptr.add(offset) as *const T) })
+        Ok(unsafe { &*ptr })
     }
     /// The column `[:, index...]`, for a scalar type `T` that the caller checked.
     ///
@@ -661,6 +771,10 @@ impl<'a> From<&'a Tensor> for TensorView<'a> {
 /// in bytes, column-major order, lane axis last, adjacent values in each column). So a view of a
 /// row-major array is not possible: make a column-major (Fortran-ordered) copy first. The lifetime
 /// `'a` is the lifetime of the data.
+///
+/// A `TensorView` has the C layout of [RawLayout], so a C callback that gets a
+/// `const TensorView *` can read the fields `ptr`, `dtype`, `ndim`, `shape` and `strides`.
+#[repr(transparent)]
 #[derive(Clone, Copy, Debug)]
 pub struct TensorView<'a> {
     layout: RawLayout,
@@ -771,9 +885,165 @@ impl<'a> TensorView<'a> {
     }
 }
 
+impl TensorView<'_> {
+    /// A view of the layout `layout`.
+    ///
+    /// # Safety
+    /// As for [TensorView::new], for the data of `layout`.
+    pub(crate) unsafe fn from_layout(layout: RawLayout) -> Self {
+        Self {
+            layout,
+            _data: PhantomData,
+        }
+    }
+}
+
+/// A mutable view of an N-D array of `f32` or `f64` values that the view does not own.
+///
+/// It has the same data layout and the same layout rules as [TensorView]. Also, no two indices
+/// give the same value (there is no stride of 0 on an axis with more than one value), so each
+/// value can be changed through the view. The C callbacks of [crate::ode_callbacks] write their
+/// outputs through a `TensorViewMut`.
+///
+/// A `TensorViewMut` has the C layout of [RawLayout]. The C type of `ptr` is `const uint8_t *`:
+/// a C callback casts it to `double *` (or `float *`) to write the values.
+#[repr(transparent)]
+#[derive(Debug)]
+pub struct TensorViewMut<'a> {
+    layout: RawLayout,
+    _data: PhantomData<&'a mut [u8]>,
+}
+
+impl<'a> TensorViewMut<'a> {
+    /// Make a mutable view of data, with a shape and strides (in bytes) that obey the layout
+    /// rules, and no two indices that give the same value.
+    ///
+    /// # Errors
+    /// If the layout does not obey the rules.
+    ///
+    /// # Safety
+    /// For each index in `shape`, `ptr` plus the byte offset from `strides` must point to a valid
+    /// value of the type `dtype`. The data must stay valid during `'a`, and nothing else can read
+    /// or change it during `'a`.
+    pub unsafe fn new(
+        ptr: *mut u8,
+        shape: &[usize],
+        strides: &[usize],
+        dtype: ScalarType,
+    ) -> Result<Self, DiffsolRtError> {
+        let layout = RawLayout::new(ptr, shape, strides, dtype)?;
+        layout.check_no_overlap()?;
+        Ok(Self {
+            layout,
+            _data: PhantomData,
+        })
+    }
+    /// A mutable view of the layout `layout`.
+    ///
+    /// # Panics
+    /// If two indices of `layout` give the same value.
+    ///
+    /// # Safety
+    /// As for [TensorViewMut::new], for the data of `layout`, which must allow writes.
+    pub(crate) unsafe fn from_layout(layout: RawLayout) -> Self {
+        layout
+            .check_no_overlap()
+            .unwrap_or_else(|err| panic!("invalid mutable tensor layout: {err}"));
+        Self {
+            layout,
+            _data: PhantomData,
+        }
+    }
+    /// Make a mutable view of `values`, with the shape `shape` in column-major (Fortran) order.
+    ///
+    /// # Panics
+    /// If the number of values is not the product of `shape`, or `shape` does not have 1 to
+    /// [MAX_NDIM] axes.
+    pub fn from_slice_mut<T: Scalar>(values: &'a mut [T], shape: &[usize]) -> Self {
+        assert_eq!(
+            values.len(),
+            shape.iter().product::<usize>(),
+            "the number of values must be the product of the shape"
+        );
+        let layout =
+            RawLayout::valid_col_major(values.as_mut_ptr() as *const u8, shape, T::scalar_type());
+        // SAFETY: `values` has one aligned value for each index of `shape`, a column-major layout
+        // has no overlap, and the mutable borrow gives the only access during `'a`
+        unsafe { Self::from_layout(layout) }
+    }
+    /// A view of the same data, which borrows `self`.
+    pub fn as_view(&self) -> TensorView<'_> {
+        TensorView {
+            layout: self.layout,
+            _data: PhantomData,
+        }
+    }
+    /// The length of each axis.
+    pub fn shape(&self) -> &[usize] {
+        self.layout.shape()
+    }
+    /// The stride of each axis, in bytes. The [Tensor] docs give the data layout.
+    pub fn strides(&self) -> &[usize] {
+        self.layout.strides()
+    }
+    /// The pointer to the first value. It is valid during `'a`.
+    pub fn data_ptr(&mut self) -> *mut u8 {
+        self.layout.ptr as *mut u8
+    }
+    /// The scalar type of the values.
+    pub fn dtype(&self) -> ScalarType {
+        self.layout.dtype
+    }
+    /// A reference to the value at `index`. [TensorView::index] gives the details.
+    ///
+    /// # Panics
+    /// If `index` does not have one value for each axis, or a value is out of range.
+    pub fn index<T: Scalar>(&self, index: impl AsRef<[usize]>) -> Result<&T, DiffsolRtError> {
+        // SAFETY: the constructor guarantees the data while `self` is borrowed
+        unsafe { self.layout.index(index.as_ref()) }
+    }
+    /// The column at `index`. [Tensor::column] gives the details.
+    ///
+    /// # Panics
+    /// If `index` does not have one value for each axis after the first, or a value is out of
+    /// range.
+    pub fn column<T: Scalar>(&self, index: &[usize]) -> Result<&[T], DiffsolRtError> {
+        // SAFETY: the constructor guarantees the data while `self` is borrowed
+        unsafe { self.layout.column(index) }
+    }
+    /// A mutable reference to the value at `index`, with one value for each axis. The scalar
+    /// type must be `T`.
+    ///
+    /// # Panics
+    /// If `index` does not have one value for each axis, or a value is out of range.
+    pub fn index_mut<T: Scalar>(
+        &mut self,
+        index: impl AsRef<[usize]>,
+    ) -> Result<&mut T, DiffsolRtError> {
+        let ptr = self.layout.index_ptr::<T>(index.as_ref())? as *mut T;
+        // SAFETY: the constructor guarantees a valid value that allows writes, and the only
+        // access during `'a`. The mutable borrow of `self` gives one reference at a time
+        Ok(unsafe { &mut *ptr })
+    }
+    /// The column at `index`, as one mutable slice of `shape[0]` values. [Tensor::column] gives
+    /// the details.
+    ///
+    /// # Panics
+    /// If `index` does not have one value for each axis after the first, or a value is out of
+    /// range.
+    pub fn column_mut<T: Scalar>(&mut self, index: &[usize]) -> Result<&mut [T], DiffsolRtError> {
+        let (ptr, len) = self.layout.column_ptr::<T>(index)?;
+        if len == 0 {
+            return Ok(&mut []);
+        }
+        // SAFETY: as for `index_mut`, for the `len` adjacent, aligned values of the column
+        Ok(unsafe { std::slice::from_raw_parts_mut(ptr as *mut T, len) })
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{FromTensor, Tensor, TensorView, ToTensor};
+    use super::{FromTensor, Tensor, TensorLayout, TensorView, TensorViewMut, ToTensor};
 
     use diffsol::{
         Context, DenseMatrix, FaerContext, FaerMat, FaerVec, NalgebraContext, NalgebraMat,
@@ -1132,6 +1402,109 @@ mod tests {
         // the value at (1, 2) is at the byte offset 1 * s + 2 * 2s from the data pointer
         let value = unsafe { *(tensor.data_ptr().add(s + 4 * s) as *const f64) };
         assert_eq!(value, 5.0);
+    }
+
+    #[test]
+    fn batch_lanes_broadcast_with_strides_of_zero() {
+        let s = std::mem::size_of::<f64>();
+        let ctx = |nbatch| FaerContext::default().clone_with_nbatch(nbatch).unwrap();
+        let lanes = |nbatch: usize| -> Vec<f64> {
+            (0..nbatch)
+                .flat_map(|b| (0..2).map(move |i| vector_value(b, i)))
+                .collect()
+        };
+        // 2 outer lanes with 3 inner lanes each: 6 output lanes
+        let (ninner, nouter) = (3, 2);
+        let full = FaerVec::<f64>::from_vec(lanes(6), ctx(6));
+        let outer = FaerVec::<f64>::from_vec(lanes(2), ctx(2));
+        let one = FaerVec::<f64>::from_vec(lanes(1), ctx(1));
+        for (v, expected_lane) in [
+            (
+                &full,
+                Box::new(|k, b| b * ninner + k) as Box<dyn Fn(usize, usize) -> usize>,
+            ),
+            (&outer, Box::new(|_, b| b)),
+            (&one, Box::new(|_, _| 0)),
+        ] {
+            let layout = v.tensor_layout().batch_lanes(ninner, nouter);
+            // SAFETY: the layout shows the data of `v`, which lives longer than `view`
+            let view = unsafe { TensorView::from_layout(layout) };
+            assert_eq!(view.shape(), &[2, ninner, nouter]);
+            assert_eq!(view.strides()[0], s);
+            for b in 0..nouter {
+                for k in 0..ninner {
+                    let lane = expected_lane(k, b);
+                    let expected = [vector_value(lane, 0), vector_value(lane, 1)];
+                    assert_eq!(view.column::<f64>(&[k, b]).unwrap(), &expected);
+                }
+            }
+        }
+        let c = full.tensor_layout().strides()[1];
+        let strides = |v: &FaerVec<f64>| v.tensor_layout().batch_lanes(ninner, nouter).strides;
+        assert_eq!(strides(&full), [s, c, ninner * c]);
+        assert_eq!(
+            strides(&outer)[1..],
+            [0, outer.tensor_layout().strides()[1]]
+        );
+        assert_eq!(strides(&one)[1..], [0, 0]);
+    }
+
+    #[test]
+    #[should_panic(expected = "cannot broadcast 4 lanes into 3 x 2 lanes")]
+    fn batch_lanes_reject_other_lane_counts() {
+        let ctx = NalgebraContext::default().clone_with_nbatch(4).unwrap();
+        let v = NalgebraVec::<f64>::zeros(2, ctx);
+        v.tensor_layout().batch_lanes(3, 2);
+    }
+
+    #[test]
+    fn mutable_views_write_each_lane_of_a_padded_vector() {
+        use super::TensorLayoutMut;
+        let ctx = FaerContext::default().clone_with_nbatch(4).unwrap();
+        let mut v = FaerVec::<f64>::zeros(3, ctx);
+        let layout = v.tensor_layout_mut().batch_lanes(2, 2);
+        // SAFETY: the layout shows the data of `v`, which is mutably borrowed while `view` lives
+        let mut view = unsafe { TensorViewMut::from_layout(layout) };
+        for b in 0..2 {
+            for k in 0..2 {
+                let lane = (b * 2 + k) as f64;
+                view.column_mut::<f64>(&[k, b]).unwrap().copy_from_slice(&[
+                    lane,
+                    lane + 0.5,
+                    lane + 0.25,
+                ]);
+            }
+        }
+        *view.index_mut::<f64>([2, 1, 1]).unwrap() = -1.0;
+        assert_eq!(*view.as_view().index::<f64>([2, 1, 1]).unwrap(), -1.0);
+        let expected: Vec<f64> = (0..4)
+            .flat_map(|l| [l as f64, l as f64 + 0.5, l as f64 + 0.25])
+            .collect::<Vec<_>>()
+            .into_iter()
+            .enumerate()
+            .map(|(i, x)| if i == 11 { -1.0 } else { x })
+            .collect();
+        assert_eq!(v.clone_as_vec(), expected);
+    }
+
+    #[test]
+    fn mutable_views_reject_overlapping_layouts() {
+        let mut data = [0.0f64; 4];
+        let s = std::mem::size_of::<f64>();
+        let ptr = data.as_mut_ptr() as *mut u8;
+        let f64_type = super::ScalarType::F64;
+        // SAFETY: the layouts are rejected, so no view reads or writes the data
+        let err = unsafe { TensorViewMut::new(ptr, &[2, 2], &[s, 0], f64_type) }.unwrap_err();
+        assert!(err.to_string().contains("overlap"), "{err}");
+        let err = unsafe { TensorViewMut::new(ptr, &[2, 2], &[s, s], f64_type) }.unwrap_err();
+        assert!(err.to_string().contains("overlap"), "{err}");
+        // a stride of 0 on an axis of length 1 is never used
+        // SAFETY: `data` has a value at each index of the layout, and lives longer than `view`
+        let mut view =
+            unsafe { TensorViewMut::new(ptr, &[2, 1, 2], &[s, 0, 2 * s], f64_type) }.unwrap();
+        view.column_mut::<f64>(&[0, 1]).unwrap().fill(3.0);
+        let view = TensorViewMut::from_slice_mut(&mut data, &[4]);
+        assert_eq!(view.column::<f64>(&[]).unwrap(), &[0.0, 0.0, 3.0, 3.0]);
     }
 
     #[test]

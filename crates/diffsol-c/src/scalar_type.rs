@@ -6,11 +6,18 @@ use diffsol::DiffSlScalar;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+/// The scalar type of the values of an array.
+///
+/// The C values are `DIFFSOL_SCALAR_TYPE_F32` (0) and `DIFFSOL_SCALAR_TYPE_F64` (1). A
+/// [crate::tensor::TensorView] keeps this value in its `dtype` field.
+///
+/// cbindgen:prefix-with-name
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
+#[repr(i32)]
 pub enum ScalarType {
-    F32,
-    F64,
+    F32 = 0,
+    F64 = 1,
 }
 
 pub trait Scalar: DiffSlScalar + ToScalarType {}

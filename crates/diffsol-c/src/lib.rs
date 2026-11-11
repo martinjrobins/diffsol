@@ -93,8 +93,8 @@
 //! the C header `target/<profile>/include/diffsol.h`. A static library is made on request, with
 //! `cargo rustc -p diffsol-c --lib --crate-type staticlib`.
 //! The build script makes the header with cbindgen, and the header agrees with the features of
-//! the build. The README and the examples in `examples/c` show how to compile and link a C
-//! program.
+//! the build. The README and the examples in `examples/diffsol-c-logistic/c` of the workspace
+//! show how to compile and link a C program.
 //!
 //! All C FFI functions follow a common pattern:
 //! - Return `i32` (0 = success, negative = error).
@@ -508,6 +508,11 @@ pub mod string_c;
 /// - [TensorView] is an input, for example `params` and `t_eval` of the [OdeWrapper] solve
 ///   methods. It does not own its data, and the lifetime of the view is that of the data. It is
 ///   small, `Copy`, only on the stack, and has at most [tensor::MAX_NDIM] (3) axes.
+/// - [TensorViewMut] is a mutable view, the output `y` of a C callback (see [ode_callbacks]).
+///   No two of its indices give the same value.
+///
+/// [TensorView] and [TensorViewMut] have the C layout of [tensor::RawLayout] (the fields `ptr`,
+/// `dtype`, `ndim`, `shape` and `strides`), so a C callback reads their fields directly.
 ///
 /// # Batches
 /// A diffsol vector or dense matrix can have more than one lane (`nbatch`). The arrays use the
@@ -570,10 +575,13 @@ pub use jit::{default_enabled_jit_backend, JitBackendType};
 pub use linear_solver_type::LinearSolverType;
 pub use matrix_type::MatrixType;
 pub use ode::OdeWrapper;
-pub use ode_callbacks::{CallbackScalar, OdeCallbackError, OdeCallbacks, OdeCallbacksDesc};
+pub use ode_callbacks::{
+    for_each_batch, CallbackMatrix, CallbackScalar, OdeCallbackError, OdeCallbacks,
+    OdeCallbacksDesc,
+};
 pub use ode_options::{OdeSolverOptions, OdeSolverOptionsSnapshot};
 pub use ode_solver_type::OdeSolverType;
 pub use scalar_type::{Scalar, ScalarType, ToScalarType};
 pub use solution_wrapper::SolutionWrapper;
-pub use tensor::{Tensor, TensorView};
+pub use tensor::{Tensor, TensorView, TensorViewMut};
 pub use utils::{is_klu_available, version};

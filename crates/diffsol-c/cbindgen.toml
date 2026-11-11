@@ -25,3 +25,7 @@ include = ["DiffsolOdeCallbacksF64", "DiffsolOdeCallbacksF32"]
 
 [fn]
 args = "Vertical"
+
+[export.rename]
+# a generic name in the global C namespace
+"MAX_NDIM" = "DIFFSOL_TENSOR_MAX_NDIM"
