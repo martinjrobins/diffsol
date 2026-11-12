@@ -42,6 +42,8 @@
 //! - [OdeWrapper::solve_continuous_adjoint] — continuous adjoint sensitivity analysis.
 //! - [OdeWrapper::solve_adjoint_fwd] / [OdeWrapper::solve_adjoint_bkwd] — discrete adjoint
 //!   sensitivity analysis (forward + backward pass).
+//! - [OdeWrapper::solve_vjp_fwd] / [OdeWrapper::solve_vjp_bkwd] — reverse-mode
+//!   differentiation of the solver steps (forward + backward pass).
 //!
 //! Each solve method returns a [SolutionWrapper], from which you can extract the solution
 //! values via [SolutionWrapper::get_ys], [SolutionWrapper::get_ts], and
@@ -50,7 +52,8 @@
 //! example `params` and `t_eval`, are [TensorView] objects, which borrow the data of the caller.
 //!
 //! The adoint solve methods involve an [AdjointCheckpointWrapper] that stores forward-pass
-//! checkpoint data required for the backward pass.
+//! checkpoint data required for the backward pass. The VJP solve methods use a
+//! [VjpCheckpointWrapper] in the same way.
 //!
 //! ### Runtime configuration types
 //!
@@ -81,6 +84,7 @@
 //! - [ode_callbacks_c] — create an [OdeWrapper] from equations given as C callbacks.
 //! - `ode_diffsl_c` — create an [OdeWrapper] from DiffSL equations (JIT or external symbols).
 //! - [solution_wrapper_c] — extract solution data and destroy [SolutionWrapper] handles.
+//! - [vjp_checkpoint_c] — destroy [VjpCheckpointWrapper] handles.
 //! - [ode_options_c] — get/set solver convergence and performance options.
 //! - [initial_condition_options_c] — get/set initial condition solver options.
 //! - [matrix_type_c], [scalar_type_c], [linear_solver_type_c],
@@ -324,6 +328,8 @@ pub mod matrix_type_c;
 /// - [OdeWrapper::solve_fwd_sens] — forward sensitivity analysis.
 /// - [OdeWrapper::solve_continuous_adjoint] — continuous adjoint.
 /// - [OdeWrapper::solve_adjoint_fwd] / [OdeWrapper::solve_adjoint_bkwd] — discrete adjoint.
+/// - [OdeWrapper::solve_vjp_fwd] / [OdeWrapper::solve_vjp_bkwd] — reverse mode
+///   through the solver steps.
 ///
 /// # Low-level evaluation
 /// - [OdeWrapper::y0] — compute initial state.
@@ -345,6 +351,8 @@ pub mod ode;
 ///   `diffsol_ode_wrapper_solve_fwd_sens`, `diffsol_ode_wrapper_solve_continuous_adjoint`,
 ///   `diffsol_ode_wrapper_solve_adjoint_fwd`, `diffsol_ode_wrapper_solve_adjoint_bkwd` —
 ///   solve functions returning [SolutionWrapper] pointers.
+/// - `diffsol_ode_solve_vjp_fwd`, `diffsol_ode_solve_vjp_bkwd` — reverse mode
+///   through the solver steps, with a [VjpCheckpointWrapper] between the two passes.
 /// - `diffsol_ode_wrapper_free` — free an `OdeWrapper`.
 /// - Serialization: `diffsol_ode_wrapper_serialize`, `diffsol_ode_wrapper_deserialize`.
 #[path = "ode_c.rs"]
@@ -389,7 +397,7 @@ pub mod ode_diffsl_c;
 ///   [OdeSolverOptions::get_threshold_to_update_jacobian],
 ///   [OdeSolverOptions::get_threshold_to_update_rhs_jacobian].
 /// - Step size: [OdeSolverOptions::get_min_timestep].
-/// - BDF derivative solves (forward sensitivities, step VJPs):
+/// - BDF derivative solves (forward sensitivities, VJPs):
 ///   [OdeSolverOptions::get_derivative_solve_tolerance],
 ///   [OdeSolverOptions::get_derivative_solve_max_iter].
 ///
@@ -559,6 +567,21 @@ pub mod utils;
 /// `suitesparse` feature is enabled. Uses `LuValidator<M>` and `KluValidator<M>` traits
 /// to associate each matrix type with its valid linear solver implementations.
 pub mod valid_linear_solver;
+/// VJP checkpoint wrapper for keeping the forward pass of a reverse-mode solve.
+///
+/// This module provides [VjpCheckpointWrapper], a thread-safe wrapper around the internal
+/// `VjpCheckpoint` trait object. It is created by the forward pass of a VJP solve (via
+/// [OdeWrapper::solve_vjp_fwd]) and used by one or more backward passes (via
+/// [OdeWrapper::solve_vjp_bkwd]).
+///
+/// It holds a [DenseVjpTape](diffsol::DenseVjpTape): the solver state after each step of the
+/// forward solve. The backward pass must use the solver of the forward pass, so the checkpoint
+/// also keeps the method, the linear solver and the parameters.
+pub mod vjp_checkpoint;
+/// C FFI function for freeing [VjpCheckpointWrapper] objects, which
+/// `diffsol_ode_solve_vjp_fwd` returns.
+#[path = "vjp_checkpoint_c.rs"]
+pub mod vjp_checkpoint_c;
 
 #[cfg(test)]
 mod test_support;
@@ -585,3 +608,4 @@ pub use scalar_type::{Scalar, ScalarType, ToScalarType};
 pub use solution_wrapper::SolutionWrapper;
 pub use tensor::{Tensor, TensorView, TensorViewMut};
 pub use utils::{is_klu_available, version};
+pub use vjp_checkpoint::VjpCheckpointWrapper;

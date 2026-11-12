@@ -7,6 +7,7 @@ use crate::adjoint_checkpoint::AdjointCheckpointWrapper;
 use crate::error::DiffsolRtError;
 use crate::scalar_type::Scalar;
 use crate::tensor::{column_major_values, FromTensor, Tensor, TensorLayout, TensorView, ToTensor};
+use crate::vjp_checkpoint::VjpCheckpointWrapper;
 use crate::{
     generate_ic_option_accessors, generate_ode_option_accessors, generate_option_accessors,
     option_value_from_store, option_value_to_store,
@@ -139,6 +140,20 @@ pub(crate) trait Solve: Send {
         dgdu_eval: TensorView<'_>,
     ) -> Result<Tensor, DiffsolRtError>;
 
+    fn solve_vjp_fwd(
+        &mut self,
+        method: OdeSolverType,
+        linear_solver: LinearSolverType,
+        params: TensorView<'_>,
+        t_eval: TensorView<'_>,
+    ) -> Result<(Arc<dyn Solution>, VjpCheckpointWrapper), DiffsolRtError>;
+
+    fn solve_vjp_bkwd(
+        &mut self,
+        checkpoint: &VjpCheckpointWrapper,
+        dgdu_eval: TensorView<'_>,
+    ) -> Result<Tensor, DiffsolRtError>;
+
     generate_trait_ic_option_accessors! {
         use_linesearch: bool,
         max_linesearch_iterations: usize,
@@ -239,8 +254,19 @@ where
         lane_shape: &[usize],
         name: &str,
     ) -> Result<T, DiffsolRtError> {
+        self.read_input_with_context(tensor, self.problem.context(), lane_shape, name)
+    }
+
+    /// As [Self::read_input], but with the lanes of `ctx`.
+    fn read_input_with_context<T: FromTensor<Context = M::C>>(
+        &self,
+        tensor: TensorView<'_>,
+        ctx: &M::C,
+        lane_shape: &[usize],
+        name: &str,
+    ) -> Result<T, DiffsolRtError> {
         // the conversion checks the number of axes and the number of lanes
-        let value = T::from_tensor(tensor, self.problem.context()).map_err(|e| e.named(name))?;
+        let value = T::from_tensor(tensor, ctx).map_err(|e| e.named(name))?;
         // the last axis is the lane axis
         let got = &tensor.shape()[..tensor.shape().len() - 1];
         if got != lane_shape {
@@ -733,6 +759,91 @@ where
                     &t_eval,
                 ),
         };
+        let gradient = self.finish(result)?;
+        Ok(self.gradient_to_tensor(gradient))
+    }
+
+    fn solve_vjp_fwd(
+        &mut self,
+        method: OdeSolverType,
+        linear_solver: LinearSolverType,
+        params: TensorView<'_>,
+        t_eval: TensorView<'_>,
+    ) -> Result<(Arc<dyn Solution>, VjpCheckpointWrapper), DiffsolRtError> {
+        self.problem
+            .eqn
+            .check_requirement(EqnRequirement::Vjp(method))?;
+        if self.problem.eqn.root().is_some() {
+            return Err(DiffsolError::Other(
+                "A VJP solve does not support models with a stop or reset condition".to_string(),
+            )
+            .into());
+        }
+        if self.problem.integrate_out {
+            return Err(DiffsolError::Other(
+                "A VJP solve does not support integrating the output".to_string(),
+            )
+            .into());
+        }
+        self.setup_problem(params)?;
+
+        let t_eval: Vec<M::T> = read_times(t_eval)?;
+        let result = match linear_solver {
+            LinearSolverType::Default => method.solve_vjp_fwd::<M, Eqn, <M as DefaultSolver>::LS>(
+                &mut self.problem,
+                &t_eval,
+                linear_solver,
+            ),
+            LinearSolverType::Lu => method.solve_vjp_fwd::<M, Eqn, <M as LuValidator<M>>::LS>(
+                &mut self.problem,
+                &t_eval,
+                linear_solver,
+            ),
+            LinearSolverType::Klu => method.solve_vjp_fwd::<M, Eqn, <M as KluValidator<M>>::LS>(
+                &mut self.problem,
+                &t_eval,
+                linear_solver,
+            ),
+        };
+        let (soln, checkpoint) = self.finish(result)?;
+        Ok((Arc::new(soln), VjpCheckpointWrapper::new(checkpoint)))
+    }
+
+    fn solve_vjp_bkwd(
+        &mut self,
+        checkpoint: &VjpCheckpointWrapper,
+        dgdu_eval: TensorView<'_>,
+    ) -> Result<Tensor, DiffsolRtError> {
+        let checkpoint = checkpoint.guard()?;
+        self.problem
+            .eqn
+            .check_requirement(EqnRequirement::Vjp(checkpoint.method()))?;
+        // the backward pass sets the parameters that the checkpoint holds
+        self.reset_eval_state();
+
+        // `nbatch * ndirections` lanes, lane `b * ndirections + k` for direction `k` of batch
+        // lane `b`, or 1 lane for the same values in all the batch lanes
+        let ctx = self.problem.context();
+        let nbatch = ctx.nbatch();
+        let nlanes = dgdu_eval.shape().last().copied().unwrap_or(0);
+        let ctx = if nlanes == 1 {
+            ctx.clone()
+        } else if nlanes > 0 && nlanes.is_multiple_of(nbatch) {
+            ctx.clone_with_nbatch(nlanes).map_err(DiffsolError::from)?
+        } else {
+            return Err(DiffsolRtError::from(DiffsolError::Other(format!(
+                "Expected 1 lane or a multiple of {nbatch} lanes (nbatch * ndirections), got {nlanes}"
+            )))
+            .named("dgdu_eval"));
+        };
+        let lane_shape = [self.problem.eqn.nout(), checkpoint.nt()];
+        let dgdu_eval: <M::V as DefaultDenseMatrix>::M =
+            self.read_input_with_context(dgdu_eval, &ctx, &lane_shape, "dgdu_eval")?;
+        let result = OdeSolverType::solve_vjp_bkwd::<M, Eqn>(
+            &mut self.problem,
+            checkpoint.as_ref(),
+            &dgdu_eval,
+        );
         let gradient = self.finish(result)?;
         Ok(self.gradient_to_tensor(gradient))
     }

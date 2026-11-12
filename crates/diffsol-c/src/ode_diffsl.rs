@@ -416,7 +416,7 @@ fn check_diffsl_requirement(requirement: EqnRequirement) -> Result<(), DiffsolRt
     // sensitivity analysis of DiffSL equations is not supported on Windows
     let needs_sens = matches!(
         requirement,
-        EqnRequirement::FwdSens | EqnRequirement::Adjoint(_)
+        EqnRequirement::FwdSens | EqnRequirement::Adjoint(_) | EqnRequirement::Vjp(_)
     );
     if needs_sens && cfg!(target_os = "windows") {
         return Err(DiffsolError::Other(

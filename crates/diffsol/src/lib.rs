@@ -454,7 +454,7 @@ pub use ode_solver::{
     sensitivities::SensitivitiesOdeSolverMethod,
     solution::Solution,
     state::OdeSolverState,
-    step_ad::StepVjp,
+    step_ad::{DenseVjpTape, StepVjp},
     tableau::Tableau,
     tableau::{TableauMat, TableauVec},
 };

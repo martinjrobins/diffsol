@@ -628,6 +628,147 @@ fn split_adjoint_rejects_invalid_dgdu_shapes() {
 
 #[cfg(feature = "diffsl-llvm")]
 #[test]
+fn vjp_matches_finite_difference_and_forward_sensitivities() {
+    use common::all_ode_solvers;
+    let t_eval = [0.0, 0.25, 0.5, 1.0];
+    let fit_r = 2.0;
+    let data_r = 1.5;
+    let data_values: Vec<f64> = t_eval
+        .iter()
+        .map(|&t| logistic_state(LOGISTIC_X0, data_r, t))
+        .collect();
+    for ode_solver in all_ode_solvers() {
+        let ode = make_ode(
+            JitBackendType::Llvm,
+            ScalarType::F64,
+            MatrixType::NalgebraDense,
+            ode_solver,
+        );
+        ode.set_rtol(1e-8).unwrap();
+        ode.set_atol(1e-8).unwrap();
+
+        let (solution, checkpoint) = ode
+            .solve_vjp_fwd(
+                vector_tensor(&[fit_r]).view(),
+                vector_tensor(&t_eval).view(),
+            )
+            .unwrap();
+        let ys = lane_matrix(&solution.get_ys().unwrap(), 0);
+        let dgdu_values: Vec<f64> = (0..t_eval.len())
+            .map(|col| 2.0 * (ys[(0, col)] - data_values[col]))
+            .collect();
+        let gradient = ode
+            .solve_vjp_bkwd(
+                &checkpoint,
+                matrix_tensor(1, t_eval.len(), &dgdu_values).view(),
+            )
+            .unwrap();
+        let gradient = lane_matrix(&gradient, 0)[(0, 0)];
+
+        // forward sensitivities differentiate the same steps
+        let sens_solution = ode
+            .solve_fwd_sens(
+                vector_tensor(&[fit_r]).view(),
+                vector_tensor(&t_eval).view(),
+            )
+            .unwrap();
+        let sens = lane_matrix(&sens_solution.get_sens().unwrap()[0], 0);
+        let sens_gradient: f64 = (0..t_eval.len())
+            .map(|col| dgdu_values[col] * sens[(0, col)])
+            .sum();
+        assert_close(
+            gradient,
+            sens_gradient,
+            1e-5,
+            &format!("{ode_solver:?} VJP against forward sensitivities"),
+        );
+
+        let objective = |r: f64| -> f64 {
+            let solution = ode
+                .solve_dense(vector_tensor(&[r]).view(), vector_tensor(&t_eval).view())
+                .unwrap();
+            let ys = lane_matrix(&solution.get_ys().unwrap(), 0);
+            (0..t_eval.len())
+                .map(|col| (ys[(0, col)] - data_values[col]).powi(2))
+                .sum()
+        };
+        let step = 1e-6;
+        let finite_difference = (objective(fit_r + step) - objective(fit_r - step)) / (2.0 * step);
+        assert_close(
+            gradient,
+            finite_difference,
+            5e-5,
+            &format!("{ode_solver:?} VJP against finite differences"),
+        );
+    }
+}
+
+/// Two directions in one backward pass agree with one backward pass for each direction. The
+/// initial state and the output of the model depend on the parameters, so that the adjoint
+/// functions of the initial state and of the output get more than one lane for each batch
+/// lane.
+#[cfg(feature = "diffsl-llvm")]
+#[test]
+fn multi_direction_vjp_matches_each_direction() {
+    use common::all_ode_solvers;
+    use common::value_f64;
+    use diffsol_c::tensor::Tensor;
+    let code = r#"
+        in_i { r = 1, k = 1 }
+        u_i { y = 0.1 * k }
+        F_i { (r * y) * (1 - y) }
+        out_i { k * y, y * y }
+    "#;
+    let t_eval = [0.0, 0.25, 0.5, 1.0];
+    let (nout, nt) = (2, t_eval.len());
+    // direction 0, then direction 1, each a [nout, nt] column-major block
+    let direction = |d: usize| -> Vec<f64> {
+        (0..nt * nout)
+            .map(|j| 1.0 + j as f64 * if d == 0 { 0.5 } else { -0.25 })
+            .collect()
+    };
+    for ode_solver in all_ode_solvers() {
+        let ode = OdeWrapper::new_jit(
+            code,
+            JitBackendType::Llvm,
+            ScalarType::F64,
+            MatrixType::NalgebraDense,
+            LinearSolverType::Default,
+            ode_solver,
+        )
+        .unwrap();
+        let (_, checkpoint) = ode
+            .solve_vjp_fwd(
+                vector_tensor(&[2.0, 1.5]).view(),
+                vector_tensor(&t_eval).view(),
+            )
+            .unwrap();
+        let both: Vec<f64> = [direction(0), direction(1)].concat();
+        let gradient = ode
+            .solve_vjp_bkwd(&checkpoint, Tensor::from_vec(both, &[nout, nt, 2]).view())
+            .unwrap();
+        assert_eq!(gradient.shape(), &[2, 2, 1], "{ode_solver:?}");
+        for d in 0..2 {
+            let single = ode
+                .solve_vjp_bkwd(
+                    &checkpoint,
+                    Tensor::from_vec(direction(d), &[nout, nt, 1]).view(),
+                )
+                .unwrap();
+            for p in 0..2 {
+                assert_close(
+                    value_f64(&gradient, &[p, d, 0]),
+                    value_f64(&single, &[p, 0, 0]),
+                    1e-6,
+                    &format!("{ode_solver:?} direction {d} parameter {p}"),
+                );
+            }
+        }
+    }
+}
+
+#[cfg(feature = "diffsl-llvm")]
+#[test]
 fn tsit45_split_adjoint_backward_returns_gradient() {
     let ode = make_ode(
         JitBackendType::Llvm,

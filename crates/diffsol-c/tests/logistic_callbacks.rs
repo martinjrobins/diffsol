@@ -826,9 +826,9 @@ fn c_api_constructs_solves_and_frees_user_data_once() {
     let desc = f64_callbacks::desc(ud);
     let ode =
         unsafe { diffsol_ode_new_callbacks_f64(&desc, matrix_type, linear_solver, ode_solver, 1) };
-    assert!(!ode.is_null());
     {
-        let ode = unsafe { &*ode };
+        // `as_ref` checks for null, so no raw pointer is dereferenced
+        let ode = unsafe { ode.as_ref() }.expect("the ODE is not null");
         configure(ode);
         let t_eval = [0.25, 0.5, 1.0];
         let solution = ode
@@ -852,8 +852,8 @@ fn c_api_constructs_solves_and_frees_user_data_once() {
     let desc: DiffsolOdeCallbacksF32 = f32_callbacks::desc(ud);
     let ode =
         unsafe { diffsol_ode_new_callbacks_f32(&desc, matrix_type, linear_solver, ode_solver, 1) };
-    assert!(!ode.is_null());
-    assert_eq!(unsafe { &*ode }.get_scalar_type().unwrap(), ScalarType::F32);
+    let ode_ref = unsafe { ode.as_ref() }.expect("the ODE is not null");
+    assert_eq!(ode_ref.get_scalar_type().unwrap(), ScalarType::F32);
     unsafe { diffsol_ode_free(ode) };
     assert_eq!(frees.load(Ordering::SeqCst), 1);
 
@@ -1471,5 +1471,395 @@ fn invalid_nbatch_or_batched_root_callbacks_are_rejected_and_user_data_is_freed(
             "{err}"
         );
         assert_eq!(frees.load(Ordering::SeqCst), 1);
+    }
+}
+
+// VJP: reverse mode back through the steps of the solver.
+
+/// The loss `g = sum_i (y(t_i) - data_i)^2` of the VJP tests, and its analytic gradient
+/// with respect to `r`.
+const VJP_T_EVAL: [f64; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];
+const VJP_DATA: [f64; 5] = [0.1, 0.2, 0.3, 0.4, 0.5];
+
+fn vjp_expected_gradient(r: f64) -> f64 {
+    VJP_T_EVAL
+        .iter()
+        .zip(VJP_DATA)
+        .map(|(&t, d)| {
+            2.0 * (logistic_state(LOGISTIC_X0, r, t) - d) * logistic_state_dr(LOGISTIC_X0, r, t)
+        })
+        .sum()
+}
+
+/// `dg/du` of the VJP loss, as a `[1, nt, nbatch]` array, from the `[1, nt, nbatch]`
+/// solution values `ys`.
+fn vjp_dgdu(ys: &Tensor) -> Tensor {
+    let (nt, nbatch) = (ys.shape()[1], ys.shape()[2]);
+    let values: Vec<f64> = (0..nbatch)
+        .flat_map(|b| (0..nt).map(move |i| (b, i)))
+        .map(|(b, i)| 2.0 * (value_f64(ys, &[0, i, b]) - VJP_DATA[i]))
+        .collect();
+    Tensor::from_vec(values, &[1, nt, nbatch])
+}
+
+#[test]
+fn vjp_matches_analytic_gradient() {
+    let r = 2.0;
+    let t_eval = VJP_T_EVAL;
+    for matrix_type in ALL_MATRIX_TYPES {
+        for ode_solver in all_ode_solvers() {
+            let label = format!("{matrix_type:?}/{ode_solver:?}");
+            let ode = make_ode(matrix_type, ode_solver);
+            let (solution, checkpoint) = ode
+                .solve_vjp_fwd(vector_tensor(&[r]).view(), vector_tensor(&t_eval).view())
+                .unwrap();
+            assert_eq!(lane_f64(&solution.get_ts().unwrap(), 0), t_eval.to_vec());
+            let ys = solution.get_ys().unwrap();
+            assert_eq!(ys.shape(), &[1, t_eval.len(), 1], "{label}");
+
+            // the same solution as solve_dense
+            let dense = ode
+                .solve_dense(vector_tensor(&[r]).view(), vector_tensor(&t_eval).view())
+                .unwrap()
+                .get_ys()
+                .unwrap();
+            for i in 0..t_eval.len() {
+                assert_close(
+                    value_f64(&ys, &[0, i, 0]),
+                    value_f64(&dense, &[0, i, 0]),
+                    1e-12,
+                    &format!("{label} y[{i}]"),
+                );
+            }
+
+            let dgdu = vjp_dgdu(&ys);
+            let gradient = ode.solve_vjp_bkwd(&checkpoint, dgdu.view()).unwrap();
+            assert_eq!(gradient.shape(), &[1, 1, 1], "{label}");
+            assert_close(
+                value_f64(&gradient, &[0, 0, 0]),
+                vjp_expected_gradient(r),
+                1e-4,
+                &format!("{label} VJP gradient"),
+            );
+
+            // the checkpoint does not change, so a second backward pass gives the same gradient
+            let again = ode.solve_vjp_bkwd(&checkpoint, dgdu.view()).unwrap();
+            assert_close(
+                value_f64(&again, &[0, 0, 0]),
+                value_f64(&gradient, &[0, 0, 0]),
+                1e-8,
+                &format!("{label} second VJP gradient"),
+            );
+        }
+    }
+}
+
+/// The backward pass uses the method of the forward pass, also if the solver changes between
+/// the two passes.
+#[test]
+fn vjp_backward_uses_the_forward_method() {
+    let r = 2.0;
+    let ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Tsit45);
+    let (solution, checkpoint) = ode
+        .solve_vjp_fwd(
+            vector_tensor(&[r]).view(),
+            vector_tensor(&VJP_T_EVAL).view(),
+        )
+        .unwrap();
+    let dgdu = vjp_dgdu(&solution.get_ys().unwrap());
+    ode.set_ode_solver(OdeSolverType::Bdf).unwrap();
+    let gradient = ode.solve_vjp_bkwd(&checkpoint, dgdu.view()).unwrap();
+    assert_close(
+        value_f64(&gradient, &[0, 0, 0]),
+        vjp_expected_gradient(r),
+        1e-4,
+        "VJP gradient after a change of solver",
+    );
+}
+
+#[test]
+fn batched_vjp_matches_each_lane() {
+    let nbatch = BATCH_RATES.len();
+    for matrix_type in ALL_MATRIX_TYPES {
+        for ode_solver in all_ode_solvers() {
+            let label = format!("{matrix_type:?}/{ode_solver:?}");
+            let ode = make_batched_ode(matrix_type, ode_solver, nbatch);
+            let (solution, checkpoint) = ode
+                .solve_vjp_fwd(batch_params().view(), vector_tensor(&VJP_T_EVAL).view())
+                .unwrap();
+            let ys = solution.get_ys().unwrap();
+            assert_eq!(ys.shape(), &[1, VJP_T_EVAL.len(), nbatch], "{label}");
+            let gradient = ode
+                .solve_vjp_bkwd(&checkpoint, vjp_dgdu(&ys).view())
+                .unwrap();
+            assert_eq!(gradient.shape(), &[1, 1, nbatch], "{label}");
+            for (b, &r) in BATCH_RATES.iter().enumerate() {
+                assert_close(
+                    value_f64(&gradient, &[0, 0, b]),
+                    vjp_expected_gradient(r),
+                    1e-4,
+                    &format!("{label} lane {b} VJP gradient"),
+                );
+            }
+        }
+    }
+}
+
+/// Two directions in one backward pass: direction 0 is the VJP loss, direction 1 is
+/// `g = sum_i y(t_i)`, with the gradient `sum_i dy/dr(t_i)`. The `[1, nt, 2 * nbatch]` input has
+/// lane `b * 2 + k` for direction `k` of batch lane `b`.
+#[test]
+fn multi_direction_vjp_matches_each_direction() {
+    let nbatch = BATCH_RATES.len();
+    let nt = VJP_T_EVAL.len();
+    let sum_gradient = |r: f64| -> f64 {
+        VJP_T_EVAL
+            .iter()
+            .map(|&t| logistic_state_dr(LOGISTIC_X0, r, t))
+            .sum()
+    };
+    for matrix_type in ALL_MATRIX_TYPES {
+        for ode_solver in all_ode_solvers() {
+            let label = format!("{matrix_type:?}/{ode_solver:?}");
+            let ode = make_batched_ode(matrix_type, ode_solver, nbatch);
+            let (solution, checkpoint) = ode
+                .solve_vjp_fwd(batch_params().view(), vector_tensor(&VJP_T_EVAL).view())
+                .unwrap();
+            let ys = solution.get_ys().unwrap();
+            let loss = vjp_dgdu(&ys);
+            let ones = Tensor::from_vec(vec![1.0; nt * nbatch], &[1, nt, nbatch]);
+            let values: Vec<f64> = (0..nbatch)
+                .flat_map(|b| {
+                    let loss = &loss;
+                    (0..nt)
+                        .map(move |i| value_f64(loss, &[0, i, b]))
+                        .chain(std::iter::repeat_n(1.0, nt))
+                })
+                .collect();
+            let dgdu = Tensor::from_vec(values, &[1, nt, 2 * nbatch]);
+
+            let gradient = ode.solve_vjp_bkwd(&checkpoint, dgdu.view()).unwrap();
+            assert_eq!(gradient.shape(), &[1, 2, nbatch], "{label}");
+            let loss_gradient = ode.solve_vjp_bkwd(&checkpoint, loss.view()).unwrap();
+            let sum_gradients = ode.solve_vjp_bkwd(&checkpoint, ones.view()).unwrap();
+            for (b, &r) in BATCH_RATES.iter().enumerate() {
+                for (k, single, expected) in [
+                    (0, &loss_gradient, vjp_expected_gradient(r)),
+                    (1, &sum_gradients, sum_gradient(r)),
+                ] {
+                    let got = value_f64(&gradient, &[0, k, b]);
+                    let label = format!("{label} lane {b} direction {k}");
+                    assert_close(got, expected, 1e-4, &format!("{label} analytic"));
+                    assert_close(
+                        got,
+                        value_f64(single, &[0, 0, b]),
+                        1e-6,
+                        &format!("{label} single direction"),
+                    );
+                }
+            }
+
+            // the lanes must be 1 or a multiple of nbatch
+            let bad = Tensor::from_vec(vec![0.0; nt * (nbatch + 1)], &[1, nt, nbatch + 1]);
+            let err = err_string(ode.solve_vjp_bkwd(&checkpoint, bad.view()));
+            assert!(
+                err.contains(&format!(
+                    "dgdu_eval: Expected 1 lane or a multiple of {nbatch} lanes"
+                )),
+                "{label}: {err}"
+            );
+        }
+    }
+}
+
+#[test]
+fn vjp_rejects_unsupported_models_and_bad_inputs() {
+    let t_eval = [0.5, 1.0];
+
+    // a missing adjoint callback is reported before the solve
+    let (ud, _) = new_user_data(0);
+    let mut desc = f64_callbacks::desc(ud);
+    desc.out_adjoint = None;
+    let ode = new_callbacks(
+        desc,
+        MatrixType::NalgebraDense,
+        LinearSolverType::Default,
+        OdeSolverType::Bdf,
+    )
+    .unwrap();
+    configure(&ode);
+    let err =
+        err_string(ode.solve_vjp_fwd(vector_tensor(&[2.0]).view(), vector_tensor(&t_eval).view()));
+    assert!(
+        err.contains("a VJP solve requires the 'out_adjoint' callback"),
+        "{err}"
+    );
+
+    // roots and resets are not supported
+    let (ud, _) = new_user_data(0);
+    let ode = new_callbacks(
+        f64_callbacks::hybrid_desc(ud),
+        MatrixType::NalgebraDense,
+        LinearSolverType::Default,
+        OdeSolverType::Bdf,
+    )
+    .unwrap();
+    configure(&ode);
+    let err =
+        err_string(ode.solve_vjp_fwd(vector_tensor(&[2.0]).view(), vector_tensor(&t_eval).view()));
+    assert!(err.contains("stop or reset condition"), "{err}");
+
+    // dgdu_eval must have a column for each time of the forward pass
+    let ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
+    let (_, checkpoint) = ode
+        .solve_vjp_fwd(vector_tensor(&[2.0]).view(), vector_tensor(&t_eval).view())
+        .unwrap();
+    let err = err_string(ode.solve_vjp_bkwd(&checkpoint, matrix_tensor(1, 3, &[0.0; 3]).view()));
+    assert!(
+        err.contains("dgdu_eval: Expected 1 rows and 2 columns"),
+        "{err}"
+    );
+
+    // a checkpoint of another matrix type
+    let other = make_ode(MatrixType::FaerDense, OdeSolverType::Bdf);
+    let err = err_string(other.solve_vjp_bkwd(&checkpoint, matrix_tensor(1, 2, &[0.0; 2]).view()));
+    assert!(err.contains("incompatible"), "{err}");
+}
+
+#[test]
+fn c_api_vjp_solves_and_frees() {
+    use diffsol_c::ode_c::{diffsol_ode_solve_vjp_bkwd, diffsol_ode_solve_vjp_fwd};
+    use diffsol_c::solution_wrapper_c::{
+        diffsol_solution_wrapper_free, diffsol_solution_wrapper_get_ys,
+    };
+    use diffsol_c::tensor_c::diffsol_tensor_free;
+    use diffsol_c::vjp_checkpoint_c::diffsol_vjp_checkpoint_free;
+    use std::ptr;
+
+    // the C enum values of MatrixType::NalgebraDense, LinearSolverType::Default and
+    // OdeSolverType::Bdf
+    let (matrix_type, linear_solver, ode_solver) = (0, 0, 0);
+    let (ud, _) = new_user_data(0);
+    let desc = f64_callbacks::desc(ud);
+    let ode =
+        unsafe { diffsol_ode_new_callbacks_f64(&desc, matrix_type, linear_solver, ode_solver, 1) };
+    // `as_ref` checks for null, so no raw pointer is dereferenced
+    configure(unsafe { ode.as_ref() }.expect("the ODE is not null"));
+
+    let r = [2.0];
+    let t_eval = VJP_T_EVAL;
+    let nt = t_eval.len();
+    let mut solution = ptr::null_mut();
+    let mut checkpoint = ptr::null_mut();
+    let status = unsafe {
+        diffsol_ode_solve_vjp_fwd(
+            ode,
+            r.as_ptr(),
+            1,
+            1,
+            t_eval.as_ptr(),
+            nt,
+            &mut solution,
+            &mut checkpoint,
+        )
+    };
+    assert_eq!(status, 0);
+    assert!(!solution.is_null() && !checkpoint.is_null());
+
+    let mut ys = ptr::null_mut();
+    assert_eq!(
+        unsafe { diffsol_solution_wrapper_get_ys(solution, &mut ys) },
+        0
+    );
+    let dgdu = vjp_dgdu(unsafe { ys.as_ref() }.expect("ys is not null"));
+    let dgdu_values: Vec<f64> = (0..nt).map(|i| value_f64(&dgdu, &[0, i, 0])).collect();
+    unsafe { diffsol_tensor_free(ys) };
+
+    let mut gradient = ptr::null_mut();
+    let status = unsafe {
+        diffsol_ode_solve_vjp_bkwd(
+            ode,
+            checkpoint,
+            dgdu_values.as_ptr(),
+            1,
+            nt,
+            1,
+            &mut gradient,
+        )
+    };
+    assert_eq!(status, 0);
+    let gradient_ref = unsafe { gradient.as_ref() }.expect("the gradient is not null");
+    assert_eq!(gradient_ref.shape(), &[1, 1, 1]);
+    assert_close(
+        value_f64(gradient_ref, &[0, 0, 0]),
+        vjp_expected_gradient(r[0]),
+        1e-4,
+        "C API VJP gradient",
+    );
+    unsafe { diffsol_tensor_free(gradient) };
+
+    // null and inconsistent arguments are rejected
+    let mut gradient = ptr::null_mut();
+    let bad = [
+        unsafe {
+            diffsol_ode_solve_vjp_fwd(
+                ode,
+                r.as_ptr(),
+                1,
+                1,
+                t_eval.as_ptr(),
+                nt,
+                &mut solution,
+                ptr::null_mut(),
+            )
+        },
+        unsafe {
+            diffsol_ode_solve_vjp_bkwd(
+                ode,
+                ptr::null(),
+                dgdu_values.as_ptr(),
+                1,
+                nt,
+                1,
+                &mut gradient,
+            )
+        },
+        unsafe {
+            diffsol_ode_solve_vjp_bkwd(ode, checkpoint, ptr::null(), 1, nt, 1, &mut gradient)
+        },
+        unsafe {
+            diffsol_ode_solve_vjp_bkwd(
+                ode,
+                checkpoint,
+                dgdu_values.as_ptr(),
+                usize::MAX,
+                2,
+                1,
+                &mut gradient,
+            )
+        },
+    ];
+    for status in bad {
+        assert_ne!(status, 0);
+    }
+    // a wrong number of times is an error of the solve
+    let status = unsafe {
+        diffsol_ode_solve_vjp_bkwd(
+            ode,
+            checkpoint,
+            dgdu_values.as_ptr(),
+            1,
+            nt - 1,
+            1,
+            &mut gradient,
+        )
+    };
+    assert_ne!(status, 0);
+    assert!(gradient.is_null());
+
+    unsafe {
+        diffsol_vjp_checkpoint_free(checkpoint);
+        diffsol_solution_wrapper_free(solution);
+        diffsol_ode_free(ode);
     }
 }

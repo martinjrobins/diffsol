@@ -15,6 +15,9 @@ pub(crate) enum EqnRequirement {
     FwdSens,
     /// A forward pass followed by an adjoint backward pass, both with the given method.
     Adjoint(OdeSolverType),
+    /// A forward pass followed by a reverse-mode pass back through its steps, with the given
+    /// method (see [`diffsol::StepVjp`]).
+    Vjp(OdeSolverType),
 }
 
 /// The hooks for one equation type.

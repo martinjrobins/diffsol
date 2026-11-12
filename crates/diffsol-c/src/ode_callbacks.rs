@@ -966,6 +966,19 @@ impl<M: CallbackMatrix> OdeCallbacks<M> {
                     ),
                 ],
             ),
+            // roots and resets are not supported, see GenericSolve::solve_vjp_fwd
+            EqnRequirement::Vjp(method) => (
+                "a VJP solve",
+                vec![
+                    (needs_rhs_jac(method), "rhs_jac", cb.rhs_jac.is_some()),
+                    (true, "rhs_adjoint", cb.rhs_adjoint.is_some()),
+                    (true, "rhs_sens_adjoint", cb.rhs_sens_adjoint.is_some()),
+                    (true, "init_sens_adjoint", cb.init_sens_adjoint.is_some()),
+                    (cb.mass.is_some(), "mass_adjoint", cb.mass_adjoint.is_some()),
+                    (has_out, "out_adjoint", cb.out_adjoint.is_some()),
+                    (has_out, "out_sens_adjoint", cb.out_sens_adjoint.is_some()),
+                ],
+            ),
         };
         match rows
             .into_iter()
