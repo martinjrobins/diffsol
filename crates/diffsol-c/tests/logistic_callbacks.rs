@@ -826,9 +826,9 @@ fn c_api_constructs_solves_and_frees_user_data_once() {
     let desc = f64_callbacks::desc(ud);
     let ode =
         unsafe { diffsol_ode_new_callbacks_f64(&desc, matrix_type, linear_solver, ode_solver, 1) };
-    assert!(!ode.is_null());
     {
-        let ode = unsafe { &*ode };
+        // `as_ref` checks for null, so no raw pointer is dereferenced
+        let ode = unsafe { ode.as_ref() }.expect("the ODE is not null");
         configure(ode);
         let t_eval = [0.25, 0.5, 1.0];
         let solution = ode
@@ -852,8 +852,8 @@ fn c_api_constructs_solves_and_frees_user_data_once() {
     let desc: DiffsolOdeCallbacksF32 = f32_callbacks::desc(ud);
     let ode =
         unsafe { diffsol_ode_new_callbacks_f32(&desc, matrix_type, linear_solver, ode_solver, 1) };
-    assert!(!ode.is_null());
-    assert_eq!(unsafe { &*ode }.get_scalar_type().unwrap(), ScalarType::F32);
+    let ode_ref = unsafe { ode.as_ref() }.expect("the ODE is not null");
+    assert_eq!(ode_ref.get_scalar_type().unwrap(), ScalarType::F32);
     unsafe { diffsol_ode_free(ode) };
     assert_eq!(frees.load(Ordering::SeqCst), 1);
 
@@ -1743,8 +1743,8 @@ fn c_api_vjp_solves_and_frees() {
     let desc = f64_callbacks::desc(ud);
     let ode =
         unsafe { diffsol_ode_new_callbacks_f64(&desc, matrix_type, linear_solver, ode_solver, 1) };
-    assert!(!ode.is_null());
-    configure(unsafe { &*ode });
+    // `as_ref` checks for null, so no raw pointer is dereferenced
+    configure(unsafe { ode.as_ref() }.expect("the ODE is not null"));
 
     let r = [2.0];
     let t_eval = VJP_T_EVAL;
@@ -1771,7 +1771,7 @@ fn c_api_vjp_solves_and_frees() {
         unsafe { diffsol_solution_wrapper_get_ys(solution, &mut ys) },
         0
     );
-    let dgdu = vjp_dgdu(unsafe { &*ys });
+    let dgdu = vjp_dgdu(unsafe { ys.as_ref() }.expect("ys is not null"));
     let dgdu_values: Vec<f64> = (0..nt).map(|i| value_f64(&dgdu, &[0, i, 0])).collect();
     unsafe { diffsol_tensor_free(ys) };
 
@@ -1788,7 +1788,7 @@ fn c_api_vjp_solves_and_frees() {
         )
     };
     assert_eq!(status, 0);
-    let gradient_ref = unsafe { &*gradient };
+    let gradient_ref = unsafe { gradient.as_ref() }.expect("the gradient is not null");
     assert_eq!(gradient_ref.shape(), &[1, 1, 1]);
     assert_close(
         value_f64(gradient_ref, &[0, 0, 0]),
