@@ -149,7 +149,7 @@ impl OdeSolverOptions {
         self.guard()?.solve.set_ode_min_timestep(value);
         Ok(())
     }
-    /// The tolerance of the BDF derivative solves (forward sensitivities, step VJPs).
+    /// The tolerance of the BDF derivative solves (forward sensitivities, VJPs).
     pub fn get_derivative_solve_tolerance(&self) -> Result<f64, DiffsolRtError> {
         Ok(self.guard()?.solve.ode_derivative_solve_tolerance())
     }

@@ -39,14 +39,55 @@
 
 use crate::{
     error::{DiffsolError, OdeSolverError},
-    ode_solver_error, ConstantOpSensAdjoint, Context, DefaultSolver, LinearOp, LinearSolver,
-    Matrix, MatrixOp, NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSensAdjoint,
-    OdeEquationsImplicitAdjoint, OdeSolverMethod, OdeSolverState, OdeSolverStopReason, Op, Vector,
-    VectorIndex,
+    ode_solver_error, ConstantOpSensAdjoint, Context, DefaultDenseMatrix, DefaultSolver,
+    DenseMatrix, LinearOp, LinearSolver, Matrix, MatrixCommon, MatrixOp, NonLinearOp,
+    NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSensAdjoint, OdeEquationsImplicitAdjoint,
+    OdeSolverMethod, OdeSolverState, OdeSolverStopReason, Op, Vector, VectorIndex, VectorView,
+    VectorViewMut,
 };
 use diffsol_la::LinearSolver as LaLinearSolver;
 use num_traits::Zero;
 use std::ops::{AddAssign, SubAssign};
+
+/// What [StepVjp::solve_dense_vjp_fwd] keeps for [StepVjp::solve_dense_vjp_bkwd]: the state
+/// the solve started from, the state after every step, and, for each time of `t_eval`, the step
+/// that reached it and (for a model with an output function) the state there.
+///
+/// `S` is the state type of the solver that made it, which must also do the backward pass.
+#[derive(Clone)]
+pub struct DenseVjpTape<V: Vector, S> {
+    start: S,
+    checkpoints: Vec<S>,
+    t_eval: Vec<V::T>,
+    /// for each time of `t_eval`: (the number of checkpoints when it was reached, y(t_i) if the
+    /// model has an output function)
+    records: Vec<(usize, Option<V>)>,
+    starts_at_t0: bool,
+}
+
+impl<V: Vector, S> DenseVjpTape<V, S> {
+    /// The state the forward solve started from.
+    pub fn start(&self) -> &S {
+        &self.start
+    }
+
+    /// The state after the last step of the forward solve, or the start state if it took no
+    /// step. A solver made from this state for [StepVjp::solve_dense_vjp_bkwd] starts with the
+    /// Newton matrix of the end of the solve, where the backward pass starts.
+    pub fn end(&self) -> &S {
+        self.checkpoints.last().unwrap_or(&self.start)
+    }
+
+    /// The times of the forward solve.
+    pub fn t_eval(&self) -> &[V::T] {
+        &self.t_eval
+    }
+
+    /// The number of steps of the forward solve.
+    pub fn nsteps(&self) -> usize {
+        self.checkpoints.len()
+    }
+}
 
 /// Reverse-mode derivative (vector-Jacobian product) of a checkpointed step.
 pub trait StepVjp<'a, Eqn: OdeEquationsImplicitAdjoint + 'a>: OdeSolverMethod<'a, Eqn> {
@@ -104,7 +145,7 @@ pub trait StepVjp<'a, Eqn: OdeEquationsImplicitAdjoint + 'a>: OdeSolverMethod<'a
     /// G = \sum_{i=0}^{n-1} g_i(u(y(t_i)))
     /// $$
     ///
-    /// Both the loss and its gradient are given as closures, called once for each time during
+    /// Both the loss and its gradient are given as closures, called once for each time after
     /// the forward solve as `(i, t_i, u_i, out)`:
     /// - `g` adds `g_i(u_i)` to `out`, the running loss, of length 1 and starting at zero;
     /// - `dgdu` writes the gradient of `g_i` with respect to `u_i` into `out`, of length `nout`
@@ -115,22 +156,10 @@ pub trait StepVjp<'a, Eqn: OdeEquationsImplicitAdjoint + 'a>: OdeSolverMethod<'a
     /// loss `k` of batch `b` (see the [module docs](self)); `u_i` has the lanes of the state. The
     /// returned loss and gradient (of length `nparams`) have the lanes of `out`.
     ///
-    /// The solve starts from the solver's current state, at or before `t_eval[0]`, and takes the
-    /// steps [OdeSolverMethod::solve_dense] takes: it stops only at the last time, and
-    /// interpolates to the others, so the loss is that of the dense solution. The state after
-    /// every step is kept for the backward pass, which pulls each `dg_i/du` back through the
-    /// interpolation with [Self::interpolate_vjp]. If the solve
-    /// starts at the problem's initial time, the dependence of the initial state (and of its
-    /// time derivative, through the consistent initialisation of the solver's constructor) on
-    /// the parameters is included; otherwise the derivative with respect to the starting state
-    /// is not added.
-    ///
-    /// As for [Self::step_vjp], this is the derivative of the steps the solver took, and of the
-    /// interpolation within them, with their step sizes and orders fixed, and a mass matrix that
-    /// depends on the parameters is not differentiated. Roots are not supported: a step that
-    /// finds one is an error. Nor is a problem that integrates its output
-    /// ([crate::OdeSolverProblem::integrate_out]), whose dense solution is the integral of the
-    /// output rather than the output itself.
+    /// This is [Self::solve_dense_vjp_fwd] followed by [Self::solve_dense_vjp_bkwd]; see them
+    /// for the solve and the derivative it calculates. Use the two halves directly to calculate
+    /// `dg_i/du` from the forward solution elsewhere, or to pull several losses back through
+    /// one forward solve.
     fn solve_dense_vjp<G, Dg>(
         &mut self,
         t_eval: &[Eqn::T],
@@ -142,11 +171,59 @@ pub trait StepVjp<'a, Eqn: OdeEquationsImplicitAdjoint + 'a>: OdeSolverMethod<'a
         G: FnMut(usize, Eqn::T, &Eqn::V, &mut Eqn::V),
         Dg: FnMut(usize, Eqn::T, &Eqn::V, &mut Eqn::V),
         Eqn::M: DefaultSolver,
+        Eqn::V: DefaultDenseMatrix,
         Self: Sized,
     {
         if ndirections == 0 {
             return Err(ode_solver_error!(Other, "ndirections must be at least 1"));
         }
+        let (ys, tape) = self.solve_dense_vjp_fwd(t_eval)?;
+        let state_ctx = tape.start.as_ref().y.context().clone();
+        let ctx = state_ctx.clone_with_nbatch(state_ctx.nbatch() * ndirections)?;
+        let nout = ys.nrows();
+        let mut loss = Eqn::V::zeros(1, ctx.clone());
+        let mut dgdu_eval = ctx.dense_mat_zeros::<Eqn::V>(nout, t_eval.len());
+        let mut dgdu_i = Eqn::V::zeros(nout, ctx.clone());
+        for (i, &t) in t_eval.iter().enumerate() {
+            let u = ys.column(i).into_owned();
+            g(i, t, &u, &mut loss);
+            dgdu_i.fill(Eqn::T::zero());
+            dgdu(i, t, &u, &mut dgdu_i);
+            dgdu_eval.column_mut(i).copy_from(&dgdu_i);
+        }
+        let p_bar = self.solve_dense_vjp_bkwd(&tape, &dgdu_eval)?;
+        Ok((loss, p_bar))
+    }
+
+    /// The forward half of [Self::solve_dense_vjp]: solve forwards to the times `t_eval`, and
+    /// return the dense solution and a [DenseVjpTape] for [Self::solve_dense_vjp_bkwd].
+    ///
+    /// The dense solution is a `[nout, nt]` matrix with the lanes of the state, of the model
+    /// output `u` (the state `y` if the model has no output function) at each time.
+    ///
+    /// The solve starts from the solver's current state, at or before `t_eval[0]`, and takes the
+    /// steps [OdeSolverMethod::solve_dense] takes: it stops only at the last time, and
+    /// interpolates to the others, so the solution is that of [OdeSolverMethod::solve_dense].
+    /// The tape keeps the state after every step for the backward pass.
+    ///
+    /// Roots are not supported: a step that finds one is an error. Nor is a problem that
+    /// integrates its output ([crate::OdeSolverProblem::integrate_out]), whose dense solution
+    /// is the integral of the output rather than the output itself.
+    #[allow(clippy::type_complexity)]
+    fn solve_dense_vjp_fwd(
+        &mut self,
+        t_eval: &[Eqn::T],
+    ) -> Result<
+        (
+            <Eqn::V as DefaultDenseMatrix>::M,
+            DenseVjpTape<Eqn::V, Self::State>,
+        ),
+        DiffsolError,
+    >
+    where
+        Eqn::V: DefaultDenseMatrix,
+        Self: Sized,
+    {
         if t_eval.windows(2).any(|w| w[0] >= w[1]) {
             return Err(ode_solver_error!(
                 Other,
@@ -169,30 +246,24 @@ pub trait StepVjp<'a, Eqn: OdeEquationsImplicitAdjoint + 'a>: OdeSolverMethod<'a
                 "solve_dense_vjp does not support integrating the output"
             ));
         }
+        let starts_at_t0 = start_t == problem.t0;
         let eqn = &problem.eqn;
-        let (nstates, nparams) = (eqn.rhs().nstates(), eqn.rhs().nparams());
+        let nstates = eqn.rhs().nstates();
         let nout = eqn.out().map(|o| o.nout()).unwrap_or(nstates);
         let state_ctx = start.as_ref().y.context().clone();
-        let lanes = state_ctx.nbatch() * ndirections;
-        let ctx = state_ctx.clone_with_nbatch(lanes)?;
 
-        // forward: a checkpoint after every step, and the loss and its gradient at each time,
-        // interpolated within the step that reached it
+        // a checkpoint after every step, and u(t_i), interpolated within the step that reached it
         let mut checkpoints = Vec::new();
-        // (number of checkpoints when t_i was reached, t_i, y(t_i) if the model has an output
-        // function, dg_i/du)
         let mut records = Vec::with_capacity(t_eval.len());
-        let mut loss = Eqn::V::zeros(1, ctx.clone());
+        let mut ys = state_ctx.dense_mat_zeros::<Eqn::V>(nout, t_eval.len());
         let mut u = Eqn::V::zeros(nout, state_ctx.clone());
         let mut eval = |i: usize, t: Eqn::T, y: &Eqn::V, n: usize| {
             match eqn.out() {
                 Some(out) => out.call_inplace(y, t, &mut u),
                 None => u.copy_from(y),
             }
-            g(i, t, &u, &mut loss);
-            let mut dgdu_i = Eqn::V::zeros(nout, ctx.clone());
-            dgdu(i, t, &u, &mut dgdu_i);
-            records.push((n, t, eqn.out().map(|_| y.clone()), dgdu_i));
+            ys.column_mut(i).copy_from(&u);
+            records.push((n, eqn.out().map(|_| y.clone())));
         };
         let mut col = 0;
         while col < t_eval.len() && t_eval[col] <= start_t {
@@ -225,13 +296,83 @@ pub trait StepVjp<'a, Eqn: OdeEquationsImplicitAdjoint + 'a>: OdeSolverMethod<'a
                 }
             }
         }
+        let tape = DenseVjpTape {
+            start,
+            checkpoints,
+            t_eval: t_eval.to_vec(),
+            records,
+            starts_at_t0,
+        };
+        Ok((ys, tape))
+    }
 
-        // backward: pull the cotangent back through the steps, adding dg_i/dy through the
-        // interpolation of y(t_i) to the step that reached t_i
-        let mut cot = checkpoints
-            .last()
-            .unwrap_or(&start)
-            .zeros_like_with_directions(ndirections)?;
+    /// The backward half of [Self::solve_dense_vjp]: return the gradient with respect to the
+    /// parameters, `dG/dp`, of a loss `G` of the solution of [Self::solve_dense_vjp_fwd], given
+    /// the gradient of the loss with respect to that solution.
+    ///
+    /// `dgdu_eval` is a `[nout, nt]` matrix, with column `i` the gradient of `G` with respect to
+    /// `u(t_i)`, column `i` of the dense solution. It has `ndirections` lanes for each lane of
+    /// the state, with lane `b * ndirections + k` for loss `k` of batch `b` (see the
+    /// [module docs](self)); the returned gradient (of length `nparams`) has the same lanes.
+    ///
+    /// It pulls each `dg_i/du` back through the interpolation with [Self::interpolate_vjp], and
+    /// through every step with [Self::step_vjp]. If the forward solve started at the problem's
+    /// initial time, the dependence of the initial state (and of its time derivative, through
+    /// the consistent initialisation of the solver's constructor) on the parameters is included,
+    /// with [Self::initial_state_vjp]; otherwise the derivative with respect to the starting
+    /// state is not added.
+    ///
+    /// As for [Self::step_vjp], this is the derivative of the steps the solver took, and of the
+    /// interpolation within them, with their step sizes and orders fixed, and a mass matrix that
+    /// depends on the parameters is not differentiated.
+    ///
+    /// The solver must be of the type that made `tape`, for the same problem and parameters; its
+    /// own state is not used or changed. `tape` is not changed, so it can be used again, for
+    /// example for another loss. The transposed linear solves of an implicit solver use its
+    /// current Newton matrix as a preconditioner and converge to `derivative_solve_tolerance`
+    /// (see [crate::OdeSolverOptions]), so with another solver, or a second call, the gradient
+    /// agrees to that tolerance, not to rounding. To use a new solver, make it from
+    /// [DenseVjpTape::end].
+    fn solve_dense_vjp_bkwd(
+        &mut self,
+        tape: &DenseVjpTape<Eqn::V, Self::State>,
+        dgdu_eval: &<Eqn::V as DefaultDenseMatrix>::M,
+    ) -> Result<Eqn::V, DiffsolError>
+    where
+        Eqn::M: DefaultSolver,
+        Eqn::V: DefaultDenseMatrix,
+    {
+        let problem = self.problem();
+        let eqn = &problem.eqn;
+        let (nstates, nparams) = (eqn.rhs().nstates(), eqn.rhs().nparams());
+        let nout = eqn.out().map(|o| o.nout()).unwrap_or(nstates);
+        if dgdu_eval.nrows() != nout || dgdu_eval.ncols() != tape.t_eval.len() {
+            return Err(ode_solver_error!(
+                Other,
+                format!(
+                    "dgdu_eval should have {nout} rows and {} columns, got {} rows and {} columns",
+                    tape.t_eval.len(),
+                    dgdu_eval.nrows(),
+                    dgdu_eval.ncols()
+                )
+            ));
+        }
+        let state_lanes = tape.start.as_ref().y.context().nbatch();
+        let ctx = dgdu_eval.context().clone();
+        let lanes = ctx.nbatch();
+        if lanes == 0 || !lanes.is_multiple_of(state_lanes) {
+            return Err(ode_solver_error!(
+                Other,
+                format!(
+                    "dgdu_eval should have a multiple of {state_lanes} lanes (the lanes of the state), got {lanes}"
+                )
+            ));
+        }
+        let ndirections = lanes / state_lanes;
+
+        // pull the cotangent back through the steps, adding dg_i/dy through the interpolation
+        // of y(t_i) to the step that reached t_i
+        let mut cot = tape.end().zeros_like_with_directions(ndirections)?;
         let mut p_bar = Eqn::V::zeros(nparams, ctx.clone());
         let mut tmp_nstates = Eqn::V::zeros(nstates, ctx.clone());
         let mut tmp_nparams = Eqn::V::zeros(nparams, ctx.clone());
@@ -250,25 +391,33 @@ pub trait StepVjp<'a, Eqn: OdeEquationsImplicitAdjoint + 'a>: OdeSolverMethod<'a
                 _ => y_bar.copy_from(dgdu_i),
             }
         };
-        let mut records = records.into_iter().rev().peekable();
+        let mut records = tape
+            .records
+            .iter()
+            .zip(&tape.t_eval)
+            .enumerate()
+            .rev()
+            .peekable();
         let mut p_bar_steps = Eqn::V::zeros(nparams, ctx.clone());
-        for (k, checkpoint) in checkpoints.iter().enumerate().rev() {
-            while let Some((_, t, y_i, dgdu_i)) = records.next_if(|(n, ..)| *n == k + 1) {
-                dgdy(t, &y_i, &dgdu_i, &mut y_bar);
-                self.interpolate_vjp(checkpoint, t, &y_bar, &mut cot)?;
+        for (k, checkpoint) in tape.checkpoints.iter().enumerate().rev() {
+            while let Some((i, ((_, y_i), t))) = records.next_if(|(_, ((n, _), _))| *n == k + 1) {
+                let dgdu_i = dgdu_eval.column(i).into_owned();
+                dgdy(*t, y_i, &dgdu_i, &mut y_bar);
+                self.interpolate_vjp(checkpoint, *t, &y_bar, &mut cot)?;
             }
             self.step_vjp(checkpoint, &mut cot, &mut p_bar_steps)?;
         }
-        for (_, t, y_i, dgdu_i) in records {
-            dgdy(t, &y_i, &dgdu_i, &mut y_bar);
+        for (i, ((_, y_i), t)) in records {
+            let dgdu_i = dgdu_eval.column(i).into_owned();
+            dgdy(*t, y_i, &dgdu_i, &mut y_bar);
             cot.as_mut().y.add_assign(&y_bar);
         }
         p_bar.add_assign(&p_bar_steps);
 
-        if start_t == problem.t0 {
-            self.initial_state_vjp(&start, &mut cot, &mut p_bar)?;
+        if tape.starts_at_t0 {
+            self.initial_state_vjp(&tape.start, &mut cot, &mut p_bar)?;
         }
-        Ok((loss, p_bar))
+        Ok(p_bar)
     }
 
     /// Pull `cotangent`, a cotangent state at the problem's initial state `start`, back to the
@@ -1311,18 +1460,20 @@ mod tests {
             robertson_ode::robertson_ode,
         };
         use crate::{
-            Context, DenseMatrix, MatrixCommon, NalgebraLU, NalgebraMat, NalgebraVec, StepVjp,
-            Vector, VectorView,
+            Context, DefaultDenseMatrix, DenseMatrix, MatrixCommon, NalgebraLU, NalgebraMat,
+            NalgebraVec, StepVjp, Vector, VectorView, VectorViewMut,
         };
         use crate::{OdeEquationsImplicitSens, SensitivitiesOdeSolverMethod};
 
         type M = NalgebraMat<f64>;
         type V = NalgebraVec<f64>;
         type LS = NalgebraLU<f64>;
+        type SparseM = crate::FaerSparseMat<f64>;
+        type SparseLS = crate::FaerSparseLU<f64>;
 
         /// The loss of a dense solution, `1/2 sum_i |u(t_i)|^2`, in each lane.
-        fn dense_loss(soln: &M) -> V {
-            let ctx = *soln.column(0).into_owned().context();
+        fn dense_loss<V: Vector<T = f64> + DefaultDenseMatrix>(soln: &V::M) -> V {
+            let ctx = soln.column(0).into_owned().context().clone();
             let mut loss = V::zeros(1, ctx);
             for i in 0..soln.ncols() {
                 let u = soln.column(i).into_owned();
@@ -1334,34 +1485,36 @@ mod tests {
         }
 
         /// `g += 1/2 |u|^2`, in every lane
-        fn half_squares(_i: usize, _t: f64, u: &V, g: &mut V) {
+        fn half_squares<V: Vector<T = f64>>(_i: usize, _t: f64, u: &V, g: &mut V) {
             g.for_each_batch_host([u], |g, [u], _| {
                 g[0] += 0.5 * u.iter().map(|x| x * x).sum::<f64>()
             });
         }
 
         /// `dg/du = u`, in every lane
-        fn identity(_i: usize, _t: f64, u: &V, dgdu: &mut V) {
+        fn identity<V: Vector<T = f64>>(_i: usize, _t: f64, u: &V, dgdu: &mut V) {
             dgdu.for_each_batch_host([u], |d, [u], _| d.copy_from_slice(u));
         }
 
         /// The loss and its gradient by forward sensitivities, from `solver`.
-        fn sens_gradient<'a, Eqn, S>(t_eval: &[f64], mut solver: S) -> (V, V)
+        fn sens_gradient<'a, Eqn, S>(t_eval: &[f64], mut solver: S) -> (Eqn::V, Eqn::V)
         where
-            Eqn: OdeEquationsImplicitSens<T = f64, V = V, M = M> + 'a,
+            Eqn: OdeEquationsImplicitSens<T = f64> + 'a,
+            Eqn::V: DefaultDenseMatrix,
+            Eqn::M: crate::DefaultSolver,
             S: SensitivitiesOdeSolverMethod<'a, Eqn>,
         {
             let (soln, sens, _) = solver.solve_dense_sensitivities(t_eval).unwrap();
-            let ctx = *soln.column(0).into_owned().context();
+            let ctx = soln.column(0).into_owned().context().clone();
             // the entries of lane `k` of every column
-            let lane_entries = |m: &M, k: usize| {
+            let lane_entries = |m: &<Eqn::V as DefaultDenseMatrix>::M, k: usize| {
                 (0..m.ncols())
                     .flat_map(|i| lane(&m.column(i).into_owned(), k).clone_as_vec())
                     .collect::<Vec<_>>()
             };
             let lanes = ctx.nbatch();
             let ys: Vec<Vec<f64>> = (0..lanes).map(|k| lane_entries(&soln, k)).collect();
-            let loss = dense_loss(&soln);
+            let loss = dense_loss::<Eqn::V>(&soln);
             let grads: Vec<Vec<f64>> = (0..lanes)
                 .map(|k| {
                     sens.iter()
@@ -1375,13 +1528,13 @@ mod tests {
                         .collect()
                 })
                 .collect();
-            let mut grad = V::zeros(sens.len(), ctx);
+            let mut grad = Eqn::V::zeros(sens.len(), ctx);
             grad.for_each_batch_host([], |g, [], k| g.copy_from_slice(&grads[k]));
             (loss, grad)
         }
 
         /// Lane `k` of a batched vector.
-        fn lane(v: &V, k: usize) -> V {
+        fn lane<V: Vector>(v: &V, k: usize) -> V {
             v.get_batch(k).into_owned()
         }
 
@@ -1432,6 +1585,12 @@ mod tests {
                 robertson_t_eval(), bdf::<LS>, bdf_sens::<LS>, 15.0;
             robertson_esdirk34: robertson_adjoint::<M>().0, robertson_sens::<M>().0,
                 robertson_t_eval(), esdirk34::<LS>, esdirk34_sens::<LS>, 10.0;
+            robertson_bdf_faer_sparse: robertson_adjoint::<SparseM>().0,
+                robertson_sens::<SparseM>().0, robertson_t_eval(), bdf::<SparseLS>,
+                bdf_sens::<SparseLS>, 15.0;
+            robertson_esdirk34_faer_sparse: robertson_adjoint::<SparseM>().0,
+                robertson_sens::<SparseM>().0, robertson_t_eval(), esdirk34::<SparseLS>,
+                esdirk34_sens::<SparseLS>, 10.0;
             robertson_ode_bdf: robertson_ode::<M>(2).0,
                 robertson_ode::<M>(2).0, robertson_t_eval(), bdf::<LS>, bdf_sens::<LS>, 200.0;
             robertson_ode_esdirk34: robertson_ode::<M>(2).0,
@@ -1701,6 +1860,127 @@ mod tests {
                 .solve_dense_vjp(&[1.0], 1, half_squares, identity)
                 .unwrap_err();
             assert!(err.to_string().contains("integrating the output"), "{err}");
+        }
+
+        /// `dg_i/du` of `dgdu` at the columns of `ys`, as a `[nout, nt]` matrix with
+        /// `ndirections` lanes for each lane of `ys`.
+        fn dgdu_eval_of(
+            ys: &M,
+            t_eval: &[f64],
+            ndirections: usize,
+            mut dgdu: impl FnMut(usize, f64, &V, &mut V),
+        ) -> M {
+            let state_ctx = *ys.column(0).into_owned().context();
+            let ctx = state_ctx
+                .clone_with_nbatch(state_ctx.nbatch() * ndirections)
+                .unwrap();
+            let mut dgdu_eval = ctx.dense_mat_zeros::<V>(ys.nrows(), t_eval.len());
+            for (i, &t) in t_eval.iter().enumerate() {
+                let mut d = V::zeros(ys.nrows(), ctx);
+                dgdu(i, t, &ys.column(i).into_owned(), &mut d);
+                dgdu_eval.column_mut(i).copy_from(&d);
+            }
+            dgdu_eval
+        }
+
+        /// The forward and backward halves give the dense solution of `solve_dense` and the
+        /// gradient of `solve_dense_vjp`, and the tape can be used again.
+        macro_rules! split_tests {
+            ($($name:ident: $problem:expr, $t_eval:expr, $solver:ident $(::<$ls:ty>)?,
+               $factor:expr;)+) => {
+                $(
+                    #[test]
+                    fn $name() {
+                        use crate::OdeSolverMethod;
+                        let problem = with_tolerances($problem);
+                        let t_eval: Vec<f64> = $t_eval;
+                        let (_, grad) = problem
+                            .$solver$(::<$ls>)?()
+                            .unwrap()
+                            .solve_dense_vjp(&t_eval, 1, half_squares, identity)
+                            .unwrap();
+                        let (dense, _) = problem
+                            .$solver$(::<$ls>)?()
+                            .unwrap()
+                            .solve_dense(&t_eval)
+                            .unwrap();
+
+                        let mut solver = problem.$solver$(::<$ls>)?().unwrap();
+                        let (ys, tape) = solver.solve_dense_vjp_fwd(&t_eval).unwrap();
+                        assert_eq!(tape.t_eval(), t_eval.as_slice());
+                        assert!(tape.nsteps() > 0);
+                        for i in 0..t_eval.len() {
+                            ys.column(i)
+                                .into_owned()
+                                .assert_eq_st(&dense.column(i).into_owned(), 1e-14);
+                        }
+                        let dgdu_eval = dgdu_eval_of(&ys, &t_eval, 1, identity);
+                        // a new solver for the backward pass, as a host that keeps only the tape
+                        let mut bkwd_solver = problem.$solver$(::<$ls>)?().unwrap();
+                        // its transposed solves have another preconditioner, so they agree to
+                        // the derivative solve tolerance
+                        let split = bkwd_solver.solve_dense_vjp_bkwd(&tape, &dgdu_eval).unwrap();
+                        assert_close(&split, &grad, $factor);
+                        let again = bkwd_solver.solve_dense_vjp_bkwd(&tape, &dgdu_eval).unwrap();
+                        assert_close(&again, &grad, $factor);
+                        // the solver of the forward pass gives the same gradient, to rounding
+                        let same = solver.solve_dense_vjp_bkwd(&tape, &dgdu_eval).unwrap();
+                        same.assert_eq_st(&grad, 0.0);
+                    }
+                )+
+            };
+        }
+
+        split_tests! {
+            split_robertson_bdf: robertson_adjoint::<M>().0, robertson_t_eval(), bdf::<LS>, 15.0;
+            split_ad_test_dae_esdirk34: ad_test_problem::<M>(P, true, RTOL),
+                vec![1.0, 2.0, 5.0], esdirk34::<LS>, 1.0;
+            split_ad_test_ode_tr_bdf2: ad_test_problem::<M>(P, false, RTOL),
+                vec![0.0, 1.0, 5.0], tr_bdf2::<LS>, 1.0;
+            split_exponential_decay_tsit45: exponential_decay_problem_adjoint::<M>(false, false).0,
+                (1..10).map(f64::from).collect(), tsit45, 1.0;
+        }
+
+        /// Two losses in the lanes of `dgdu_eval` give the gradients of `solve_dense_vjp` with
+        /// two directions.
+        #[test]
+        fn split_two_directions() {
+            let problem = with_tolerances(robertson_adjoint::<M>().0);
+            let t_eval = robertson_t_eval();
+            let dgdu = |_: usize, _: f64, u: &V, d: &mut V| {
+                d.for_each_batch_host([u], |d, [u], lane| {
+                    if lane % 2 == 0 {
+                        d.copy_from_slice(u)
+                    } else {
+                        d[0] = 1.0
+                    }
+                })
+            };
+            let (_, grad) = problem
+                .bdf::<LS>()
+                .unwrap()
+                .solve_dense_vjp(&t_eval, 2, |_, _, _, _| {}, dgdu)
+                .unwrap();
+            let mut solver = problem.bdf::<LS>().unwrap();
+            let (ys, tape) = solver.solve_dense_vjp_fwd(&t_eval).unwrap();
+            let dgdu_eval = dgdu_eval_of(&ys, &t_eval, 2, dgdu);
+            let split = solver.solve_dense_vjp_bkwd(&tape, &dgdu_eval).unwrap();
+            assert_eq!(split.context().nbatch(), 2);
+            split.assert_eq_st(&grad, 0.0);
+        }
+
+        #[test]
+        fn split_rejects_bad_dgdu_eval() {
+            let problem = with_tolerances(robertson_adjoint::<M>().0);
+            let t_eval = vec![1.0, 10.0];
+            let mut solver = problem.bdf::<LS>().unwrap();
+            let (ys, tape) = solver.solve_dense_vjp_fwd(&t_eval).unwrap();
+            let ctx = *ys.column(0).into_owned().context();
+            for (rows, cols) in [(ys.nrows() + 1, 2), (ys.nrows(), 1)] {
+                let bad = ctx.dense_mat_zeros::<V>(rows, cols);
+                let err = solver.solve_dense_vjp_bkwd(&tape, &bad).unwrap_err();
+                assert!(err.to_string().contains("dgdu_eval should have"), "{err}");
+            }
         }
     }
 }

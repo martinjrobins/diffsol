@@ -17,6 +17,7 @@ use crate::{
     solution_wrapper::SolutionWrapper,
     solve::Solve,
     tensor::{Tensor, TensorView},
+    vjp_checkpoint::VjpCheckpointWrapper,
 };
 
 pub struct Ode {
@@ -519,6 +520,63 @@ impl OdeWrapper {
             t_eval.view(),
             dgdu_eval,
         )
+    }
+
+    /// Solve the forward problem at `t_eval` and keep the solver state after each step, for a
+    /// later reverse-mode pass back through the steps with [Self::solve_vjp_bkwd].
+    ///
+    /// The reverse-mode pass differentiates the steps that the solver took
+    /// ("discretise-then-optimise", see [`diffsol::StepVjp`]), with their step sizes and orders
+    /// fixed. The continuous adjoint of [Self::solve_adjoint_fwd] solves the adjoint equations
+    /// instead. The solution is the same as that of [Self::solve_dense].
+    ///
+    /// Models with a stop or reset condition, and the integration of the output, are not
+    /// supported.
+    ///
+    /// :param params: `[nparams, nlanes]` array of solver parameters
+    /// :type params: numpy.ndarray
+    /// :param t_eval: `[nt]` or `[nt, 1]` array of solver times
+    /// :type params: numpy.ndarray
+    /// :return: the solution (with a `[nout, nt, nbatch]` array of values at times `t_eval`) and
+    ///     the checkpoint for the backward pass
+    pub fn solve_vjp_fwd(
+        &self,
+        params: TensorView<'_>,
+        t_eval: TensorView<'_>,
+    ) -> Result<(SolutionWrapper, VjpCheckpointWrapper), DiffsolRtError> {
+        let mut self_guard = self.guard()?;
+        let linear_solver = self_guard.linear_solver;
+        let method = self_guard.ode_solver;
+        let (solution, checkpoint) =
+            self_guard
+                .solve
+                .solve_vjp_fwd(method, linear_solver, params, t_eval)?;
+        Ok((SolutionWrapper::new(solution), checkpoint))
+    }
+
+    /// Pull the gradient of a scalar objective with respect to the model outputs back through
+    /// the steps of a forward pass of [Self::solve_vjp_fwd], to the parameters.
+    ///
+    /// `dgdu_eval` is a `[nout, nt, nlanes]` array, with column `i` the gradient with respect to
+    /// the output at time `t_eval[i]` of the forward pass. `nlanes` is `ndirections * nbatch`,
+    /// for `ndirections` objectives (directions) in one backward pass: lane
+    /// `b * ndirections + k` is direction `k` of batch lane `b`. `nlanes` can also be 1, for
+    /// one direction with the same values in all the batch lanes. Returns a
+    /// `[nparams, ndirections, nbatch]` gradient array.
+    ///
+    /// With `ndirections > 1`, the adjoint callbacks get `P = ndirections` (see the lanes in
+    /// [crate::ode_callbacks]).
+    ///
+    /// The backward pass uses the method and the linear solver of the forward pass, not the
+    /// current ones of this object. The checkpoint does not change, so it can be used again, for
+    /// example for another objective.
+    pub fn solve_vjp_bkwd(
+        &self,
+        checkpoint: &VjpCheckpointWrapper,
+        dgdu_eval: TensorView<'_>,
+    ) -> Result<Tensor, DiffsolRtError> {
+        let mut self_guard = self.guard()?;
+        self_guard.solve.solve_vjp_bkwd(checkpoint, dgdu_eval)
     }
 }
 

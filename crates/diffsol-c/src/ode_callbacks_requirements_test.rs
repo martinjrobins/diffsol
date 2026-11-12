@@ -271,6 +271,7 @@ enum Operation {
     FwdSens,
     ContinuousAdjoint,
     SplitAdjoint,
+    Vjp,
 }
 
 impl Operation {
@@ -281,6 +282,7 @@ impl Operation {
             Operation::ContinuousAdjoint | Operation::SplitAdjoint => {
                 EqnRequirement::Adjoint(method)
             }
+            Operation::Vjp => EqnRequirement::Vjp(method),
         }
     }
 }
@@ -340,6 +342,27 @@ fn run(
                 .solve_adjoint_bkwd::<M, Eqn, LS>(&mut problem, checkpoint.as_ref(), &dgdu, &T_EVAL)
                 .is_ok()
         }
+        Operation::Vjp => {
+            let fwd = method.solve_vjp_fwd::<M, Eqn, LS>(
+                &mut problem,
+                &T_EVAL,
+                LinearSolverType::Default,
+            );
+            let error = problem.eqn.take_callback_error();
+            let checkpoint = match (fwd, error) {
+                (Ok((_, checkpoint)), None) => checkpoint,
+                (fwd, error) => return (fwd.is_ok(), error),
+            };
+            let nout = problem.eqn.nout();
+            let dgdu = M::from_vec(
+                nout,
+                T_EVAL.len(),
+                vec![1.0; nout * T_EVAL.len()],
+                NalgebraContext::default(),
+            );
+            OdeSolverType::solve_vjp_bkwd::<M, Eqn>(&mut problem, checkpoint.as_ref(), &dgdu)
+                .is_ok()
+        }
     };
     (ok, problem.eqn.take_callback_error())
 }
@@ -351,11 +374,12 @@ const METHODS: [OdeSolverType; 4] = [
     OdeSolverType::Tsit45,
 ];
 
-const OPERATIONS: [Operation; 4] = [
+const OPERATIONS: [Operation; 5] = [
     Operation::Solve,
     Operation::FwdSens,
     Operation::ContinuousAdjoint,
     Operation::SplitAdjoint,
+    Operation::Vjp,
 ];
 
 #[test]

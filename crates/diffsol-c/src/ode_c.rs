@@ -7,6 +7,7 @@ use crate::ode_solver_type_c::{ode_solver_from_i32, ode_solver_to_i32};
 use crate::scalar_type::ScalarType;
 use crate::solution_wrapper::SolutionWrapper;
 use crate::tensor::{Tensor, TensorView};
+use crate::vjp_checkpoint::VjpCheckpointWrapper;
 use crate::{c_error, c_invalid_arg};
 
 fn boxed_tensor(tensor: Tensor) -> *mut Tensor {
@@ -445,6 +446,125 @@ pub unsafe extern "C" fn diffsol_ode_solve_fwd_sens(
         Ok(new_solution) => {
             unsafe {
                 *out_solution = Box::into_raw(Box::new(new_solution));
+            }
+            DIFFSOL_OK
+        }
+        Err(err) => {
+            c_error!(&format!("{}", err));
+            DIFFSOL_ERR
+        }
+    }
+}
+
+/// Solve an ODE at requested times, and keep the solver state after each step for a later
+/// reverse-mode pass with `diffsol_ode_solve_vjp_bkwd`.
+///
+/// `params_ptr` holds lanes of parameters, as for `diffsol_ode_y0`. All the lanes use the same
+/// `t_eval` times. On success, `out_solution` receives a solution (free it with
+/// `diffsol_solution_wrapper_free`) and `out_checkpoint` a checkpoint (free it with
+/// `diffsol_vjp_checkpoint_free`).
+///
+/// # Safety
+/// `ode` must be a valid mutable pointer created by this library. `params_ptr`
+/// must point to `params_len * params_lanes` readable `f64` values and `t_eval_ptr`
+/// to `t_eval_len` readable `f64` values, unless the count is zero. `out_solution` and
+/// `out_checkpoint` must be writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn diffsol_ode_solve_vjp_fwd(
+    ode: *mut OdeWrapper,
+    params_ptr: *const f64,
+    params_len: usize,
+    params_lanes: usize,
+    t_eval_ptr: *const f64,
+    t_eval_len: usize,
+    out_solution: *mut *mut SolutionWrapper,
+    out_checkpoint: *mut *mut VjpCheckpointWrapper,
+) -> i32 {
+    if ode.is_null()
+        || out_solution.is_null()
+        || out_checkpoint.is_null()
+        || !valid_lanes_ptr(params_ptr, params_len, params_lanes)
+        || !valid_f64_ptr(t_eval_ptr, t_eval_len)
+    {
+        c_invalid_arg!("invalid arguments to diffsol_ode_solve_vjp_fwd");
+        return DIFFSOL_BAD_ARG;
+    }
+    // SAFETY: the C caller guarantees the values of each input, and the views live only during
+    // the call
+    let (params, t_eval) = unsafe {
+        (
+            lanes_view(params_ptr, params_len, params_lanes),
+            times_view(t_eval_ptr, t_eval_len),
+        )
+    };
+    let ode = unsafe { &mut *ode };
+    match ode.solve_vjp_fwd(params, t_eval) {
+        Ok((solution, checkpoint)) => {
+            unsafe {
+                *out_solution = Box::into_raw(Box::new(solution));
+                *out_checkpoint = Box::into_raw(Box::new(checkpoint));
+            }
+            DIFFSOL_OK
+        }
+        Err(err) => {
+            c_error!(&format!("{}", err));
+            DIFFSOL_ERR
+        }
+    }
+}
+
+/// Pull the gradient of a scalar objective with respect to the model outputs back through the
+/// steps of a forward pass of `diffsol_ode_solve_vjp_fwd`, to the parameters.
+///
+/// `dgdu_ptr` holds a column-major `[nout, nt, dgdu_lanes]` array: lane `l`, time `i`, output
+/// `k` is at index `(l * nt + i) * nout + k`, with `nt` the number of times of the forward
+/// pass. `dgdu_lanes` is `ndirections * nbatch`, for `ndirections` objectives (directions) in
+/// one backward pass: lane `l = b * ndirections + d` is direction `d` of batch lane `b`.
+/// `dgdu_lanes` can also be 1, for one direction with the same values in all the batch lanes.
+/// On success, `out_tensor` receives a `[nparams, ndirections, nbatch]` gradient array (free it
+/// with `diffsol_tensor_free`).
+///
+/// The backward pass uses the method and the linear solver of the forward pass. The checkpoint
+/// does not change, so it can be used again.
+///
+/// # Safety
+/// `ode` must be a valid mutable pointer created by this library and `checkpoint` a valid
+/// pointer returned by `diffsol_ode_solve_vjp_fwd` for this ODE. `dgdu_ptr` must point to
+/// `nout * nt * dgdu_lanes` readable `f64` values, unless the count is zero. `out_tensor` must
+/// be writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn diffsol_ode_solve_vjp_bkwd(
+    ode: *mut OdeWrapper,
+    checkpoint: *const VjpCheckpointWrapper,
+    dgdu_ptr: *const f64,
+    nout: usize,
+    nt: usize,
+    dgdu_lanes: usize,
+    out_tensor: *mut *mut Tensor,
+) -> i32 {
+    if ode.is_null()
+        || checkpoint.is_null()
+        || out_tensor.is_null()
+        || !nout
+            .checked_mul(nt)
+            .is_some_and(|len| valid_lanes_ptr(dgdu_ptr, len, dgdu_lanes))
+    {
+        c_invalid_arg!("invalid arguments to diffsol_ode_solve_vjp_bkwd");
+        return DIFFSOL_BAD_ARG;
+    }
+    // SAFETY: the C caller guarantees the values, and the view lives only during the call
+    let dgdu_eval = unsafe {
+        TensorView::new_col_major(
+            dgdu_ptr as *const u8,
+            &[nout, nt, dgdu_lanes],
+            ScalarType::F64,
+        )
+    };
+    let (ode, checkpoint) = unsafe { (&mut *ode, &*checkpoint) };
+    match ode.solve_vjp_bkwd(checkpoint, dgdu_eval) {
+        Ok(gradient) => {
+            unsafe {
+                *out_tensor = boxed_tensor(gradient);
             }
             DIFFSOL_OK
         }

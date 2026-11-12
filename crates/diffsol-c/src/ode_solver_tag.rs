@@ -3,7 +3,8 @@ use diffsol::{
     AdjointEquations, AdjointOdeSolverMethod, Bdf, BdfState, CheckpointingPath, DefaultDenseMatrix,
     DefaultSolver, DiffsolError, ExplicitRk, LinearSolver, Matrix, OdeEquations,
     OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverProblem,
-    OdeSolverState, RkState, Sdirk, SensEquations, SensitivitiesOdeSolverMethod, VectorRef,
+    OdeSolverState, RkState, Sdirk, SensEquations, SensitivitiesOdeSolverMethod, StepVjp,
+    VectorRef,
 };
 
 use crate::scalar_type::Scalar;
@@ -38,6 +39,16 @@ where
         S: OdeSolverMethod<'a, Eqn>,
         Eqn: OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>;
 
+    /// The solver of [Self::OdeSolverMethod], for a reverse-mode pass with [StepVjp]: the same
+    /// type, but its equations must give the adjoint operators.
+    type VjpOdeSolverMethod<'a, LS>: StepVjp<'a, Eqn>
+        + OdeSolverMethod<'a, Eqn, State = Self::State>
+    where
+        M: 'a,
+        Eqn: 'a,
+        LS: LinearSolver<M>,
+        Eqn: OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>;
+
     fn solver<'a, LS>(
         problem: &'a OdeSolverProblem<Eqn>,
     ) -> Result<Self::OdeSolverMethod<'a, LS>, DiffsolError>
@@ -45,6 +56,25 @@ where
         M: 'a,
         Eqn: 'a,
         LS: LinearSolver<M>;
+
+    fn solver_vjp<'a, LS>(
+        problem: &'a OdeSolverProblem<Eqn>,
+    ) -> Result<Self::VjpOdeSolverMethod<'a, LS>, DiffsolError>
+    where
+        M: 'a,
+        Eqn: 'a,
+        LS: LinearSolver<M>,
+        Eqn: OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>;
+
+    fn solver_vjp_with_state<'a, LS>(
+        problem: &'a OdeSolverProblem<Eqn>,
+        state: Self::State,
+    ) -> Result<Self::VjpOdeSolverMethod<'a, LS>, DiffsolError>
+    where
+        M: 'a,
+        Eqn: 'a,
+        LS: LinearSolver<M>,
+        Eqn: OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>;
 
     fn solver_with_state<'a, LS>(
         problem: &'a OdeSolverProblem<Eqn>,
@@ -141,6 +171,14 @@ where
         Eqn: 'a,
         LS: LinearSolver<M>;
 
+    type VjpOdeSolverMethod<'a, LS>
+        = Bdf<'a, Eqn, LS>
+    where
+        M: 'a,
+        Eqn: 'a,
+        LS: LinearSolver<M>,
+        Eqn: OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>;
+
     type AdjointOdeSolverMethod<'a, LS, S>
         = Bdf<'a, Eqn, LS, <M::V as DefaultDenseMatrix>::M, AdjointEquations<'a, Eqn, S>>
     where
@@ -194,6 +232,31 @@ where
         LS: LinearSolver<M>,
     {
         problem.bdf_solver_sens::<LS>(state)
+    }
+
+    fn solver_vjp<'a, LS>(
+        problem: &'a OdeSolverProblem<Eqn>,
+    ) -> Result<Self::VjpOdeSolverMethod<'a, LS>, DiffsolError>
+    where
+        M: 'a,
+        Eqn: 'a,
+        LS: LinearSolver<M>,
+        Eqn: OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>,
+    {
+        problem.bdf::<LS>()
+    }
+
+    fn solver_vjp_with_state<'a, LS>(
+        problem: &'a OdeSolverProblem<Eqn>,
+        state: BdfState<M::V>,
+    ) -> Result<Self::VjpOdeSolverMethod<'a, LS>, DiffsolError>
+    where
+        M: 'a,
+        Eqn: 'a,
+        LS: LinearSolver<M>,
+        Eqn: OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>,
+    {
+        problem.bdf_solver::<LS>(state)
     }
 
     fn solver_adjoint<'a, LS, S>(
@@ -252,6 +315,14 @@ where
         Eqn: 'a,
         LS: LinearSolver<M>;
 
+    type VjpOdeSolverMethod<'a, LS>
+        = Sdirk<'a, Eqn, LS, <M::V as DefaultDenseMatrix>::M>
+    where
+        M: 'a,
+        Eqn: 'a,
+        LS: LinearSolver<M>,
+        Eqn: OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>;
+
     type AdjointOdeSolverMethod<'a, LS, S>
         = Sdirk<'a, Eqn, LS, <M::V as DefaultDenseMatrix>::M, AdjointEquations<'a, Eqn, S>>
     where
@@ -305,6 +376,31 @@ where
         LS: LinearSolver<M>,
     {
         problem.esdirk34_solver_sens::<LS>(state)
+    }
+
+    fn solver_vjp<'a, LS>(
+        problem: &'a OdeSolverProblem<Eqn>,
+    ) -> Result<Self::VjpOdeSolverMethod<'a, LS>, DiffsolError>
+    where
+        M: 'a,
+        Eqn: 'a,
+        LS: LinearSolver<M>,
+        Eqn: OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>,
+    {
+        problem.esdirk34::<LS>()
+    }
+
+    fn solver_vjp_with_state<'a, LS>(
+        problem: &'a OdeSolverProblem<Eqn>,
+        state: RkState<M::V>,
+    ) -> Result<Self::VjpOdeSolverMethod<'a, LS>, DiffsolError>
+    where
+        M: 'a,
+        Eqn: 'a,
+        LS: LinearSolver<M>,
+        Eqn: OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>,
+    {
+        problem.esdirk34_solver::<LS>(state)
     }
 
     fn solver_adjoint<'a, LS, S>(
@@ -363,6 +459,14 @@ where
         Eqn: 'a,
         LS: LinearSolver<M>;
 
+    type VjpOdeSolverMethod<'a, LS>
+        = Sdirk<'a, Eqn, LS, <M::V as DefaultDenseMatrix>::M>
+    where
+        M: 'a,
+        Eqn: 'a,
+        LS: LinearSolver<M>,
+        Eqn: OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>;
+
     type AdjointOdeSolverMethod<'a, LS, S>
         = Sdirk<'a, Eqn, LS, <M::V as DefaultDenseMatrix>::M, AdjointEquations<'a, Eqn, S>>
     where
@@ -416,6 +520,31 @@ where
         LS: LinearSolver<M>,
     {
         problem.tr_bdf2_solver_sens::<LS>(state)
+    }
+
+    fn solver_vjp<'a, LS>(
+        problem: &'a OdeSolverProblem<Eqn>,
+    ) -> Result<Self::VjpOdeSolverMethod<'a, LS>, DiffsolError>
+    where
+        M: 'a,
+        Eqn: 'a,
+        LS: LinearSolver<M>,
+        Eqn: OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>,
+    {
+        problem.tr_bdf2::<LS>()
+    }
+
+    fn solver_vjp_with_state<'a, LS>(
+        problem: &'a OdeSolverProblem<Eqn>,
+        state: RkState<M::V>,
+    ) -> Result<Self::VjpOdeSolverMethod<'a, LS>, DiffsolError>
+    where
+        M: 'a,
+        Eqn: 'a,
+        LS: LinearSolver<M>,
+        Eqn: OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>,
+    {
+        problem.tr_bdf2_solver::<LS>(state)
     }
 
     fn solver_adjoint<'a, LS, S>(
@@ -474,6 +603,14 @@ where
         Eqn: 'a,
         LS: LinearSolver<M>;
 
+    type VjpOdeSolverMethod<'a, LS>
+        = ExplicitRk<'a, Eqn, <M::V as DefaultDenseMatrix>::M>
+    where
+        M: 'a,
+        Eqn: 'a,
+        LS: LinearSolver<M>,
+        Eqn: OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>;
+
     type AdjointOdeSolverMethod<'a, LS, S>
         = ExplicitRk<'a, Eqn, <M::V as DefaultDenseMatrix>::M, AdjointEquations<'a, Eqn, S>>
     where
@@ -527,6 +664,31 @@ where
         LS: LinearSolver<M>,
     {
         problem.tsit45_solver_sens(state)
+    }
+
+    fn solver_vjp<'a, LS>(
+        problem: &'a OdeSolverProblem<Eqn>,
+    ) -> Result<Self::VjpOdeSolverMethod<'a, LS>, DiffsolError>
+    where
+        M: 'a,
+        Eqn: 'a,
+        LS: LinearSolver<M>,
+        Eqn: OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>,
+    {
+        problem.tsit45()
+    }
+
+    fn solver_vjp_with_state<'a, LS>(
+        problem: &'a OdeSolverProblem<Eqn>,
+        state: RkState<M::V>,
+    ) -> Result<Self::VjpOdeSolverMethod<'a, LS>, DiffsolError>
+    where
+        M: 'a,
+        Eqn: 'a,
+        LS: LinearSolver<M>,
+        Eqn: OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>,
+    {
+        problem.tsit45_solver(state)
     }
 
     fn solver_adjoint<'a, LS, S>(

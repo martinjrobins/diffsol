@@ -2,14 +2,16 @@
 // stragegy like bdf or esdirk34 in diffsol.
 
 use diffsol::error::DiffsolError;
-use diffsol::ode_equations::{OdeEquationsImplicit, OdeEquationsImplicitSens};
+use diffsol::ode_equations::{
+    OdeEquationsImplicit, OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens,
+};
 use diffsol::{
     matrix::MatrixRef, DefaultDenseMatrix, DenseMatrix, LinearSolver, Matrix, OdeSolverProblem,
     OdeSolverState, VectorRef, VectorView,
 };
 use diffsol::{
     ode_solver_error, AdjointOdeSolverMethod, CheckpointingPath, DefaultSolver, OdeSolverMethod,
-    OdeSolverStopReason, SensitivitiesOdeSolverMethod, Solution,
+    OdeSolverStopReason, SensitivitiesOdeSolverMethod, Solution, StepVjp,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -17,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use crate::adjoint_checkpoint::{AdjointCheckpoint, AdjointCheckpointData};
 use crate::ode_solver_tag::{BdfTag, Esdirk34Tag, OdeSolverMethodTag, TrBdf2Tag, Tsit45Tag};
 use crate::scalar_type::Scalar;
+use crate::vjp_checkpoint::{VjpCheckpoint, VjpCheckpointData};
 use crate::{
     linear_solver_type::LinearSolverType,
     valid_linear_solver::{KluValidator, LuValidator},
@@ -400,6 +403,60 @@ where
     }
 }
 
+#[allow(clippy::type_complexity)]
+fn solve_vjp_fwd_with_tag<M, Eqn, LS, Tag>(
+    problem: &mut OdeSolverProblem<Eqn>,
+    t_eval: &[M::T],
+    method: OdeSolverType,
+    linear_solver: LinearSolverType,
+) -> Result<(Solution<M::V>, Box<dyn VjpCheckpoint>), DiffsolError>
+where
+    M: Matrix<T: Scalar> + DefaultSolver + 'static,
+    M::V: DefaultDenseMatrix + Send,
+    LS: LinearSolver<M>,
+    Eqn: OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C> + 'static,
+    Tag: OdeSolverMethodTag<M, Eqn> + 'static,
+    Tag::State: Send,
+{
+    // keep the parameters of all the lanes, so the backward pass can use them again
+    let mut params = M::V::zeros(problem.eqn.nparams(), problem.context().clone());
+    problem.eqn.get_params(&mut params);
+    let (ys, tape) = Tag::solver_vjp::<LS>(problem)?.solve_dense_vjp_fwd(t_eval)?;
+    let mut soln = Solution::new_dense(t_eval.to_vec())?;
+    soln.ys = ys;
+    soln.stop_reason = Some(OdeSolverStopReason::TstopReached);
+    Ok((
+        soln,
+        Box::new(VjpCheckpointData::<M, Eqn, Tag>::new(
+            tape,
+            params,
+            method,
+            linear_solver,
+        )),
+    ))
+}
+
+fn solve_vjp_bkwd_with_tag<M, Eqn, LS, Tag>(
+    problem: &mut OdeSolverProblem<Eqn>,
+    checkpoint: &dyn VjpCheckpoint,
+    dgdu_eval: &<M::V as DefaultDenseMatrix>::M,
+) -> Result<M::V, DiffsolError>
+where
+    M: Matrix<T: Scalar> + DefaultSolver + 'static,
+    M::V: DefaultDenseMatrix,
+    LS: LinearSolver<M>,
+    Eqn: OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C> + 'static,
+    Tag: OdeSolverMethodTag<M, Eqn> + 'static,
+{
+    let data = checkpoint.data::<M, Eqn, Tag>()?;
+    // use the parameters of the forward pass
+    problem.eqn.set_params(&data.params);
+    // a solver at the end of the forward pass, where the backward pass starts, so that its
+    // Newton matrix is a good preconditioner for the first transposed solves
+    let mut solver = Tag::solver_vjp_with_state::<LS>(problem, data.tape.end().clone())?;
+    solver.solve_dense_vjp_bkwd(&data.tape, dgdu_eval)
+}
+
 impl OdeSolverType {
     pub(crate) fn solve<M, Eqn, LS>(
         &self,
@@ -712,6 +769,94 @@ impl OdeSolverType {
                     }
                 }
             }
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn solve_vjp_fwd<M, Eqn, LS>(
+        &self,
+        problem: &mut OdeSolverProblem<Eqn>,
+        t_eval: &[M::T],
+        linear_solver: LinearSolverType,
+    ) -> Result<(Solution<M::V>, Box<dyn VjpCheckpoint>), DiffsolError>
+    where
+        M: Matrix<T: Scalar> + DefaultSolver + 'static,
+        M::V: DefaultDenseMatrix + Send,
+        <M::V as DefaultDenseMatrix>::M: Send,
+        LS: LinearSolver<M>,
+        Eqn: OdeEquationsImplicitSens<M = M, T = M::T, V = M::V, C = M::C>
+            + OdeEquationsImplicitAdjoint
+            + 'static,
+        for<'b> &'b M::V: VectorRef<M::V>,
+        for<'b> &'b M: MatrixRef<M>,
+    {
+        match self {
+            OdeSolverType::Bdf => {
+                solve_vjp_fwd_with_tag::<M, Eqn, LS, BdfTag>(problem, t_eval, *self, linear_solver)
+            }
+            OdeSolverType::Esdirk34 => solve_vjp_fwd_with_tag::<M, Eqn, LS, Esdirk34Tag>(
+                problem,
+                t_eval,
+                *self,
+                linear_solver,
+            ),
+            OdeSolverType::TrBdf2 => solve_vjp_fwd_with_tag::<M, Eqn, LS, TrBdf2Tag>(
+                problem,
+                t_eval,
+                *self,
+                linear_solver,
+            ),
+            OdeSolverType::Tsit45 => solve_vjp_fwd_with_tag::<M, Eqn, LS, Tsit45Tag>(
+                problem,
+                t_eval,
+                *self,
+                linear_solver,
+            ),
+        }
+    }
+
+    /// The backward pass of a VJP. It uses the method and the linear solver of the forward
+    /// pass that made `checkpoint`, because the tape holds states of that solver.
+    pub(crate) fn solve_vjp_bkwd<M, Eqn>(
+        problem: &mut OdeSolverProblem<Eqn>,
+        checkpoint: &dyn VjpCheckpoint,
+        dgdu_eval: &<M::V as DefaultDenseMatrix>::M,
+    ) -> Result<M::V, DiffsolError>
+    where
+        M: Matrix<T: Scalar> + DefaultSolver + LuValidator<M> + KluValidator<M> + 'static,
+        M::V: DefaultDenseMatrix,
+        Eqn: OdeEquationsImplicitSens<M = M, T = M::T, V = M::V, C = M::C>
+            + OdeEquationsImplicitAdjoint
+            + 'static,
+        for<'b> &'b M::V: VectorRef<M::V>,
+        for<'b> &'b M: MatrixRef<M>,
+    {
+        macro_rules! with_ls {
+            ($tag:ty) => {
+                match checkpoint.linear_solver() {
+                    LinearSolverType::Default => {
+                        solve_vjp_bkwd_with_tag::<M, Eqn, <M as DefaultSolver>::LS, $tag>(
+                            problem, checkpoint, dgdu_eval,
+                        )
+                    }
+                    LinearSolverType::Lu => {
+                        solve_vjp_bkwd_with_tag::<M, Eqn, <M as LuValidator<M>>::LS, $tag>(
+                            problem, checkpoint, dgdu_eval,
+                        )
+                    }
+                    LinearSolverType::Klu => {
+                        solve_vjp_bkwd_with_tag::<M, Eqn, <M as KluValidator<M>>::LS, $tag>(
+                            problem, checkpoint, dgdu_eval,
+                        )
+                    }
+                }
+            };
+        }
+        match checkpoint.method() {
+            OdeSolverType::Bdf => with_ls!(BdfTag),
+            OdeSolverType::Esdirk34 => with_ls!(Esdirk34Tag),
+            OdeSolverType::TrBdf2 => with_ls!(TrBdf2Tag),
+            OdeSolverType::Tsit45 => with_ls!(Tsit45Tag),
         }
     }
 }
@@ -1116,6 +1261,70 @@ mod tests {
         assert!(gradient.get_index(0).is_finite());
     }
 
+    /// A VJP with `dg/du = 1` at each time gives `sum_i dy/dr(t_i)`, for each method and
+    /// linear solver.
+    #[cfg(feature = "diffsl-llvm")]
+    fn test_all_vjp_solver_variants() {
+        type Eqn = diffsol::DiffSl<M, diffsol::LlvmModule>;
+        let t_eval = [0.0, 0.25, 0.5, 1.0];
+        let expected: f64 = t_eval
+            .iter()
+            .map(|&t| logistic_state_dr(LOGISTIC_X0, 2.0, t))
+            .sum();
+        for method in [
+            OdeSolverType::Bdf,
+            OdeSolverType::Esdirk34,
+            OdeSolverType::TrBdf2,
+            OdeSolverType::Tsit45,
+        ] {
+            for linear_solver in [LinearSolverType::Default, LinearSolverType::Lu] {
+                let mut problem = build_problem::<diffsol::LlvmModule>(logistic_diffsl_code());
+                let (soln, checkpoint) = match linear_solver {
+                    LinearSolverType::Lu => method
+                        .solve_vjp_fwd::<M, Eqn, <M as LuValidator<M>>::LS>(
+                            &mut problem,
+                            &t_eval,
+                            linear_solver,
+                        ),
+                    _ => method.solve_vjp_fwd::<M, Eqn, <M as DefaultSolver>::LS>(
+                        &mut problem,
+                        &t_eval,
+                        linear_solver,
+                    ),
+                }
+                .unwrap();
+                for (i, &t) in t_eval.iter().enumerate() {
+                    assert_close(
+                        soln.ys.get_index(0, i),
+                        logistic_state(LOGISTIC_X0, 2.0, t),
+                        5e-4,
+                        &format!("{method:?}/{linear_solver:?} y[{i}]"),
+                    );
+                }
+                let nout = problem.eqn.nout();
+                let dgdu = <<M as MatrixCommon>::V as DefaultDenseMatrix>::M::from_vec(
+                    nout,
+                    t_eval.len(),
+                    vec![1.0; nout * t_eval.len()],
+                    problem.context().to_owned(),
+                );
+                let gradient = OdeSolverType::solve_vjp_bkwd::<M, Eqn>(
+                    &mut problem,
+                    checkpoint.as_ref(),
+                    &dgdu,
+                )
+                .unwrap();
+                assert_eq!(gradient.len(), 1);
+                assert_close(
+                    gradient.get_index(0),
+                    expected,
+                    5e-4,
+                    &format!("{method:?}/{linear_solver:?} VJP gradient"),
+                );
+            }
+        }
+    }
+
     #[cfg(feature = "diffsl-llvm")]
     fn test_all_adjoint_solver_variants() {
         let t_eval = [0.0, 0.25, 0.5, 1.0];
@@ -1205,5 +1414,11 @@ mod tests {
     fn runtime_dispatch_solves_all_adjoint_variants_for_llvm() {
         test_all_adjoint_solver_variants();
         test_adjoint_backwards_methods_and_klu_branch();
+    }
+
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn runtime_dispatch_solves_all_vjp_variants_for_llvm() {
+        test_all_vjp_solver_variants();
     }
 }
