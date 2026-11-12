@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0](https://github.com/martinjrobins/diffsol/compare/diffsol-c-v0.8.0...diffsol-c-v0.9.0) - 2026-11-12
+
+### Added
+
+- *(diffsol-c)* [**breaking**] expose vjp from diffsol ([#452](https://github.com/martinjrobins/diffsol/pull/452))
+- *(diffsol-c)* [**breaking**] ode callbacks use TensorView, TensorViewMut and operate over all lanes ([#448](https://github.com/martinjrobins/diffsol/pull/448))
+- *(diffsol-c)* [**breaking**] HostArray -> Tensor, and add TensorView ([#447](https://github.com/martinjrobins/diffsol/pull/447))
+- *(diffsol-c)* [**breaking**] expose batching ([#446](https://github.com/martinjrobins/diffsol/pull/446))
+
+### Fixed
+
+- *(diffsol-c)* mem leak in test ([#450](https://github.com/martinjrobins/diffsol/pull/450))
+
 ## [0.8.0](https://github.com/martinjrobins/diffsol/compare/diffsol-c-v0.7.0...diffsol-c-v0.8.0) - 2026-11-07
 
 ### Added

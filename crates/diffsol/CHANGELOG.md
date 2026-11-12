@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0](https://github.com/martinjrobins/diffsol/compare/diffsol-v0.19.0...diffsol-v0.20.0) - 2026-11-12
+
+### Added
+
+- *(diffsol-c)* [**breaking**] expose vjp from diffsol ([#452](https://github.com/martinjrobins/diffsol/pull/452))
+- *(diffsol)* fixed time step ([#444](https://github.com/martinjrobins/diffsol/pull/444))
+
 ## [0.19.0](https://github.com/martinjrobins/diffsol/compare/diffsol-v0.18.0...diffsol-v0.19.0) - 2026-11-07
 
 ### Added
