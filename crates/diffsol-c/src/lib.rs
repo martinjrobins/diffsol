@@ -584,6 +584,8 @@ pub mod vjp_checkpoint;
 pub mod vjp_checkpoint_c;
 
 #[cfg(test)]
+mod ode_callbacks_lanes_test;
+#[cfg(test)]
 mod test_support;
 
 #[cfg(test)]

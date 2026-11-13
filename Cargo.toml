@@ -12,7 +12,7 @@ default-members = [
   "crates/diffsol",
   "crates/diffsol-c",
 ]
-exclude = ["book"]
+exclude = ["book", "examples/diffsol-jax"]
 resolver = "2"
 
 [workspace.package]

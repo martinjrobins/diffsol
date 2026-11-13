@@ -1,0 +1,7 @@
+# CMake build, Python env, PJRT plugin copy, benchmark results and profile scripts
+build/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
