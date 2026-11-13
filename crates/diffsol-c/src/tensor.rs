@@ -135,7 +135,8 @@ fn faer_layout<T: Scalar + FaerScalar>(m: &faer::Mat<T>, ptr: *const T) -> RawLa
         m.col_stride() as usize * size,
     ];
     let shape = [m.nrows(), m.ncols()];
-    RawLayout::valid(ptr as *const u8, &shape, &strides, T::scalar_type())
+    // a faer matrix that owns its data obeys the layout rules
+    RawLayout::from_arrays(ptr as *const u8, shape, strides, T::scalar_type())
 }
 
 /// The layout of a nalgebra matrix, with the data pointer `ptr` of `m`.
@@ -147,10 +148,11 @@ fn nalgebra_layout<T: Scalar + NalgebraScalar>(
     let size = std::mem::size_of::<T>();
     let (rs, cs) = m.strides();
     let shape = [m.nrows(), m.ncols()];
-    RawLayout::valid(
+    // a nalgebra matrix that owns its data obeys the layout rules
+    RawLayout::from_arrays(
         ptr as *const u8,
-        &shape,
-        &[rs * size, cs * size],
+        shape,
+        [rs * size, cs * size],
         T::scalar_type(),
     )
 }
@@ -409,6 +411,38 @@ impl RawLayout {
         }
         Self::new(ptr, shape, &strides[..shape.len().min(MAX_NDIM)], dtype)
     }
+    /// A layout from fixed-size arrays, for a layout that this crate makes from data that obeys
+    /// the layout rules (a diffsol vector or matrix, or a layout made from one). The rules are
+    /// checked only in debug builds.
+    ///
+    /// The callbacks of [crate::ode_callbacks] make several layouts in each call, and a solve
+    /// can make thousands of calls. [RawLayout::new] checks the layout and copies slices of a
+    /// length known only at run time (calls to `memcpy`); for a small model this was most of
+    /// the time of a solve.
+    #[inline]
+    fn from_arrays<const N: usize>(
+        ptr: *const u8,
+        shape: [usize; N],
+        strides: [usize; N],
+        dtype: ScalarType,
+    ) -> Self {
+        const { assert!(N >= 1 && N <= MAX_NDIM) };
+        debug_assert!(
+            check_layout(ptr, &shape, &strides, dtype).is_ok(),
+            "invalid tensor layout: shape {shape:?}, strides {strides:?}"
+        );
+        let mut layout = Self {
+            ptr,
+            dtype,
+            ndim: N,
+            shape: [0; MAX_NDIM],
+            strides: [0; MAX_NDIM],
+        };
+        // `N` is a constant, so these copies have a known size and need no call to `memcpy`
+        layout.shape[..N].copy_from_slice(&shape);
+        layout.strides[..N].copy_from_slice(&strides);
+        layout
+    }
     /// As [RawLayout::new], for a layout that the caller knows obeys the layout rules.
     ///
     /// # Panics
@@ -479,8 +513,9 @@ impl RawLayout {
         } else {
             panic!("cannot broadcast {nlanes} lanes into {ninner} x {nouter} lanes");
         };
-        // each value of the new layout is a value of `self`, so the reads stay in the data
-        Self::valid(self.ptr, &[n, ninner, nouter], &strides, self.dtype)
+        // each value of the new layout is a value of `self`, so the reads stay in the data; the
+        // strides are those of `self` (or 0), so the new layout obeys the rules too
+        Self::from_arrays(self.ptr, [n, ninner, nouter], strides, self.dtype)
     }
     /// Check that no two indices of the layout give the same value, so that a mutable view can
     /// give each value one time. In column-major order, the stride of each axis must be at least
