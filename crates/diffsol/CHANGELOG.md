@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.1](https://github.com/martinjrobins/diffsol/compare/diffsol-v0.20.0...diffsol-v0.20.1) - 2026-11-14
+
+### Other
+
+- *(README)* update diffsol version number
+
 ## [0.20.0](https://github.com/martinjrobins/diffsol/compare/diffsol-v0.19.0...diffsol-v0.20.0) - 2026-11-12
 
 ### Added
