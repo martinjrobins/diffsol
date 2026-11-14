@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1](https://github.com/martinjrobins/diffsol/compare/diffsol-c-v0.9.0...diffsol-c-v0.9.1) - 2026-11-14
+
+### Other
+
+- *(diffsol-c)* speed up creation of TensorViews from diffsol Vectors ([#453](https://github.com/martinjrobins/diffsol/pull/453))
+
 ## [0.9.0](https://github.com/martinjrobins/diffsol/compare/diffsol-c-v0.8.0...diffsol-c-v0.9.0) - 2026-11-12
 
 ### Added
