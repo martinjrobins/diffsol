@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::fs::{self, File};
 use std::ops::MulAssign;
+use std::path::PathBuf;
 
 use csv::ReaderBuilder;
 use diffsol::{
@@ -30,6 +31,8 @@ type LS = NalgebraLU<T>;
 const BASE_MODEL_DIR: &str = "examples/neural-ode-weather-prediction/src/model/";
 const BASE_DATA_DIR: &str = "examples/neural-ode-weather-prediction/src/data/";
 const BASE_OUTPUT_DIR: &str = "examples/neural-ode-weather-prediction/";
+/// The training round (of 4 data points each) whose plot the book shows.
+const BOOK_PLOT_ROUND: usize = 5;
 
 // ANCHOR: neural_ode
 struct NeuralOde {
@@ -621,9 +624,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let plot_html = plot.to_inline_html(Some("neural-ode-weather-prediction"));
         fs::write(
             format!("{BASE_OUTPUT_DIR}neural-ode-weather_{i}").as_str(),
-            plot_html,
+            &plot_html,
         )
         .expect("Unable to write file");
+        // the book shows the plot after training on the first 20 data points
+        if i == BOOK_PLOT_ROUND {
+            let book_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../book/src/primer/images/neural-ode-weather.html");
+            fs::write(book_path, &plot_html).expect("Unable to write file");
+        }
     }
     Ok(())
 }

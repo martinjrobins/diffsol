@@ -18,4 +18,3 @@ nalgebra = { workspace = true }
 plotly = { workspace = true }
 argmin = { workspace = true }
 argmin-math = { workspace = true }
-argmin-observer-slog = { workspace = true }
