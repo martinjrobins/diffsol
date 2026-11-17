@@ -67,6 +67,6 @@ Finally, we can train the neural network to predict the weather. Following the e
 
 To give an indication of the results, we'll plot the results after we've used the first 20 data-points to train the model, and we'll predict the model solution to the entire dataset.
 
-{{#include ../../../examples/neural-ode-weather-prediction/neural-ode-weather_5}}
+{{#include images/neural-ode-weather.html}}
 
 This seems to work well, and is good at matching the data points a long way into the future. This has been a whirlwind description of both Neural ODEs and this particular analysis. For a more detailed explanation, please refer to the original blog post by Sebastian Callh. We've also skipped over many more boring parts of the code, and you can see the full code for this example in the [diffsol repository](https://github.com/martinjrobins/diffsol).
