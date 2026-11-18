@@ -231,6 +231,20 @@ jobs:
         cd examples/population-dynamics-wasm-yew
         mkdir -p ${{ github.workspace }}/book/book/examples/population-dynamics-wasm-yew
         trunk build --release --public-url /diffsol/examples/population-dynamics-wasm-yew/ --dist ${{ github.workspace }}/book/book/examples/population-dynamics-wasm-yew
+    - name: Install cargo-binstall
+      if: matrix.book == true
+      uses: cargo-bins/cargo-binstall@v1.27.0
+    - name: Install lychee
+      if: matrix.book == true
+      run: cargo binstall lychee@0.24.2 --no-confirm
+    - name: Check book links (internal)
+      if: matrix.book == true
+      run: book/check-links.sh --offline book/book
+    # warn only for external docs.rs links
+    - name: Check book links (docs.rs)
+      if: matrix.book == true
+      continue-on-error: true
+      run: book/check-links.sh book/book
     - name: Generate coverage report
       if: matrix.coverage == true
       run: cargo tarpaulin ${{ env.ADDITIONAL_FEATURES_FLAGS || '' }}

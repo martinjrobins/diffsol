@@ -66,7 +66,7 @@ the linear solver type (`nalgebra` LU, only used for the BDF solver below), and 
 {{#include ../../../examples/population-dynamics/src/main.rs:types}}
 ```
 
-The equations can be specified with either the [DiffSL](https://martinjrobins.github.io/diffsl/) domain-specific language or [Rust closures](/specify/closure/rust_closures.md). For the rust closure examples, we will defined a varient that is suitable for the implicit solvers (need to provide the Jacobian vector product), and one that is only suitable for explicit solvers. All definitions expose \\(y_0\\) as their single input parameter, which sets both initial populations. We'll use this input later on to generate a phase plane plot.
+The equations can be specified with either the [DiffSL](https://martinjrobins.github.io/diffsl/) domain-specific language or [Rust closures](../specify/closure/rust_closures.md). For the rust closure examples, we will defined a varient that is suitable for the implicit solvers (need to provide the Jacobian vector product), and one that is only suitable for explicit solvers. All definitions expose \\(y_0\\) as their single input parameter, which sets both initial populations. We'll use this input later on to generate a phase plane plot.
 
 {{#tabs}}
 {{#tab name="DiffSL"}}

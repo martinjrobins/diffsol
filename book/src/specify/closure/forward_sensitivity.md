@@ -10,7 +10,7 @@ The logistic growth equation is:
 \\[\frac{dy}{dt} = r y (1 - y/K),\\]
 \\[y(0) = 0.1\\]
 
-Recall from [ODE equations](ode_equations.md) that we also need to provide the jacobian of the right hand side of the ODE with respect to the state vector \\(y\\) and the gradient vector \\(v\\), which we will call \\(J\\). This is:
+Recall from [Implicit](./implicit.md) that we also need to provide the jacobian of the right hand side of the ODE with respect to the state vector \\(y\\) and the gradient vector \\(v\\), which we will call \\(J\\). This is:
 
 \\[J v = \begin{bmatrix} r v (1 - 2 y/K) \end{bmatrix}.\\]
 
@@ -39,4 +39,4 @@ Lets imagine we want to solve the sensitivity problem up to a time \\(t_o = 10\\
 
 We can then obtain the sensitivity vectors at time \\(t_o\\) using the `interpolate_sens` method on the `OdeSolverMethod` trait. 
 This method returns a single vector holding one sensitivity per parameter in its batch lanes: lane \\(b \\cdot n_p + i\\) is the sensitivity wrt parameter \\(i\\) for batch \\(b\\) of the problem, so for an unbatched problem `sens.get_batch(i)` is the sensitivity wrt parameter \\(i\\) at time \\(t_o\\).
-If we need the sensitivity at the current internal time step, we can get this from the `s` field of the [`OdeSolverState`](https://docs.rs/diffsol/latest/diffsol/ode_solver/method/struct.OdeSolverState.html) struct.
+If we need the sensitivity at the current internal time step, we can get this from the `s` field of the [`StateRef`](https://docs.rs/diffsol/latest/diffsol/ode_solver/state/struct.StateRef.html) struct that `solver.state()` returns.

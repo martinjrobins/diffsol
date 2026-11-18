@@ -7,7 +7,7 @@ pub struct MyEquations {
 impl MyEquations {
     pub fn new() -> Self {
         MyEquations {
-            p: V::zeros(2, C::default()),
+            p: V::from_vec(vec![1.0, 10.0], C::default()),
         }
     }
 }
