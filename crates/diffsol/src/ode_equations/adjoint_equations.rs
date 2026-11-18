@@ -26,6 +26,8 @@ where
     active_checkpointer: usize,
     solver: Option<RefCell<Method>>,
     x: Eqn::V,
+    /// scratch output for the rhs call in `set_state`
+    rhs_tmp: Eqn::V,
     max_index: usize,
     last_t: Option<Eqn::T>,
     aug_ctx: Eqn::C,
@@ -53,6 +55,7 @@ where
             .expect("adjoint checkpointing path must not be empty");
         let ctx = eqn.context();
         let x = <Eqn::V as Vector>::zeros(eqn.rhs().nstates(), ctx.clone());
+        let rhs_tmp = <Eqn::V as Vector>::zeros(eqn.rhs().nout(), ctx.clone());
         Self {
             eqn,
             t0,
@@ -66,6 +69,7 @@ where
                 RefCell::new(solver)
             }),
             x,
+            rhs_tmp,
             max_index,
             aug_ctx,
             last_t: None,
@@ -127,7 +131,9 @@ where
         // for diffsl, we need to set data for the adjoint state!
         // basically just involves calling the normal rhs function with the new self.x
         // todo: this seems a bit hacky, perhaps a dedicated function on the trait for this?
-        self.eqn.rhs().call(&self.x, t_interp);
+        self.eqn
+            .rhs()
+            .call_inplace(&self.x, t_interp, &mut self.rhs_tmp);
     }
 
     pub fn state(&self) -> &Eqn::V {

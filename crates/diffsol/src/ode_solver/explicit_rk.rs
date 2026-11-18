@@ -289,8 +289,7 @@ where
     }
 
     fn state_mut_back(&mut self, t: Eqn::T) -> Result<(), DiffsolError> {
-        let integrate_out = self.rk.problem().integrate_out;
-        self.rk.state_mut_back(t, integrate_out)
+        self.rk.state_mut_back(t)
     }
 }
 

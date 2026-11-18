@@ -1,12 +1,13 @@
 use std::cell::RefCell;
 
+use crate::jacobian::sparsity_and_coloring;
 use crate::{
     jacobian::{
         find_adjoint_non_zeros, find_jacobian_non_zeros, find_sens_adjoint_non_zeros,
         JacobianColoring,
     },
-    Matrix, MatrixSparsity, NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian,
-    NonLinearOpSensAdjoint, Op, Vector,
+    Matrix, NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSensAdjoint, Op,
+    Vector,
 };
 
 use super::{BuilderOp, OpStatistics, ParameterisedOp};
@@ -78,29 +79,19 @@ where
     pub fn calculate_jacobian_sparsity(&mut self, y0: &M::V, t0: M::T, p: &M::V) {
         let op = ParameterisedOp { op: self, p };
         let non_zeros = find_jacobian_non_zeros(&op, y0, t0);
-        self.sparsity = Some(
-            MatrixSparsity::try_from_indices(self.nout(), self.nstates(), non_zeros.clone())
-                .expect("invalid sparsity pattern"),
-        );
-        self.coloring = Some(JacobianColoring::new(
-            self.sparsity.as_ref().unwrap(),
-            &non_zeros,
-            self.ctx.clone(),
-        ));
+        let (sparsity, coloring) =
+            sparsity_and_coloring(self.nout(), self.nstates(), non_zeros, self.ctx.clone());
+        self.sparsity = Some(sparsity);
+        self.coloring = Some(coloring);
     }
 
     pub fn calculate_adjoint_sparsity(&mut self, y0: &M::V, t0: M::T, p: &M::V) {
         let op = ParameterisedOp { op: self, p };
         let non_zeros = find_adjoint_non_zeros(&op, y0, t0);
-        self.sparsity_adjoint = Some(
-            MatrixSparsity::try_from_indices(self.nstates, self.nout, non_zeros.clone())
-                .expect("invalid sparsity pattern"),
-        );
-        self.coloring_adjoint = Some(JacobianColoring::new(
-            self.sparsity_adjoint.as_ref().unwrap(),
-            &non_zeros,
-            self.ctx.clone(),
-        ));
+        let (sparsity, coloring) =
+            sparsity_and_coloring(self.nstates, self.nout, non_zeros, self.ctx.clone());
+        self.sparsity_adjoint = Some(sparsity);
+        self.coloring_adjoint = Some(coloring);
     }
 
     pub fn calculate_sens_adjoint_sparsity(&mut self, y0: &M::V, t0: M::T, p: &M::V) {
@@ -109,15 +100,10 @@ where
         let nparams = p.len();
         // `-g_p^T` maps outputs to parameters: the same as `nstates` for the rhs, but not for an
         // out operator
-        self.sens_sparsity = Some(
-            MatrixSparsity::try_from_indices(nparams, self.nout(), non_zeros.clone())
-                .expect("invalid sparsity pattern"),
-        );
-        self.coloring_sens_adjoint = Some(JacobianColoring::new(
-            self.sens_sparsity.as_ref().unwrap(),
-            &non_zeros,
-            self.ctx.clone(),
-        ));
+        let (sparsity, coloring) =
+            sparsity_and_coloring(nparams, self.nout(), non_zeros, self.ctx.clone());
+        self.sens_sparsity = Some(sparsity);
+        self.coloring_sens_adjoint = Some(coloring);
     }
 }
 

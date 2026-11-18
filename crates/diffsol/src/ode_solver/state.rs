@@ -14,7 +14,7 @@ use crate::{
     OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeSolverProblem, Op, SensEquations,
     Vector, VectorIndex, VectorView,
 };
-use crate::{non_linear_solver_error, BacktrackingLineSearch, NoLineSearch};
+use crate::{non_linear_solver_error, NoLineSearch};
 
 /// Zeros of `v`'s length with `ndirections` lanes for each of its lanes, lane
 /// `b * ndirections + k` holding direction `k` of batch `b`: one vector of a state from
@@ -103,6 +103,28 @@ pub struct StateRefMut<'a, V: Vector> {
     pub dsg: &'a mut V,
     pub t: &'a mut V::T,
     pub h: &'a mut V::T,
+}
+
+/// Check that the derivative of root `root_idx` along the flow, `r_y f + r_t`, is not zero in
+/// any batch lane. `what` names the event correction that divides by it.
+fn check_root_flow<V: Vector>(
+    root_flow: &V,
+    root_t: &V,
+    root_idx: usize,
+    what: &str,
+) -> Result<(), DiffsolError> {
+    let denom_tol = V::T::from_f64(100.0).unwrap() * V::T::EPSILON;
+    for b in 0..root_flow.context().nbatch() {
+        let denom =
+            root_flow.get_batch(b).get_index(root_idx) + root_t.get_batch(b).get_index(root_idx);
+        if denom.abs() <= denom_tol {
+            return Err(ode_solver_error!(
+                Other,
+                format!("{what} undefined: active root derivative along flow is zero")
+            ));
+        }
+    }
+    Ok(())
 }
 
 impl<V: Vector> StateRefMut<'_, V> {
@@ -317,6 +339,10 @@ impl<V: Vector> StateRefMut<'_, V> {
         Ok(())
     }
 
+    /// Apply a reset operator to the current state and propagate sensitivities through a
+    /// time-dependent root-triggered event correction (no mass matrix).
+    ///
+    /// If a mass matrix is present use [`Self::apply_reset_with_sens_mass`] instead.
     pub fn apply_reset_with_sens<Eqn>(
         &mut self,
         problem: &OdeSolverProblem<Eqn>,
@@ -325,98 +351,13 @@ impl<V: Vector> StateRefMut<'_, V> {
     where
         Eqn: OdeEquationsImplicitSens<T = V::T, V = V, C = V::C>,
     {
-        let eqn = &problem.eqn;
-        if eqn.mass().is_some() {
+        if problem.eqn.mass().is_some() {
             return Err(ode_solver_error!(
                 Other,
                 "apply_reset_with_sens cannot be used with a mass matrix; use apply_reset_with_sens_mass instead"
             ));
         }
-        let rhs = eqn.rhs();
-        let reset_op = eqn.reset().ok_or_else(|| {
-            ode_solver_error!(Other, "No reset operator configured for this problem")
-        })?;
-        let root_op = eqn.root().ok_or_else(|| {
-            ode_solver_error!(Other, "No root operator configured for this problem")
-        })?;
-
-        let nstates = rhs.nstates();
-        let nroots = root_op.nout();
-        if root_idx >= nroots {
-            return Err(ode_solver_error!(
-                Other,
-                format!(
-                    "root index {root_idx} out of bounds for root function with {nroots} outputs"
-                )
-            ));
-        }
-
-        let ctx = rhs.context().clone();
-        let t = *self.t;
-        let y_before = self.y.clone();
-        let f_minus = self.dy.clone();
-        let s_before = self.s.clone();
-        let nparams = rhs.nparams();
-        let reset_t = reset_op.time_derive(&y_before, t);
-        let root_t = root_op.time_derive(&y_before, t);
-
-        // Delegate reset of self.y and self.dy (no mass matrix path).
-        self.apply_reset::<Eqn>(problem)?;
-
-        let mut correction_dir = V::zeros(nstates, ctx.clone());
-        reset_op.jac_mul_inplace(&y_before, t, &f_minus, &mut correction_dir);
-        correction_dir += &reset_t;
-        correction_dir -= &*self.dy;
-
-        let mut root_flow = V::zeros(nroots, ctx.clone());
-        root_op.jac_mul_inplace(&y_before, t, &f_minus, &mut root_flow);
-        let denom_tol = V::T::from_f64(100.0).unwrap() * V::T::EPSILON;
-        let nbatch_denom = root_flow.context().nbatch();
-        for b in 0..nbatch_denom {
-            let denom = root_flow.get_batch(b).get_index(root_idx)
-                + root_t.get_batch(b).get_index(root_idx);
-            if denom.abs() <= denom_tol {
-                return Err(ode_solver_error!(
-                    Other,
-                    "reset sensitivity correction undefined: active root derivative along flow is zero"
-                ));
-            }
-        }
-
-        // apply reset to all sensitivitiy channels (shared reset/root Jacobians and `correction_dir`).
-        let aug_ctx = s_before.context().clone();
-        let mut reset_sens = V::zeros(nstates, aug_ctx.clone());
-        let mut root_jac_s = V::zeros(nroots, aug_ctx.clone());
-        let mut root_sens = V::zeros(nroots, aug_ctx.clone());
-        let mut tau_p = V::zeros(1, aug_ctx.clone());
-        let mut s_plus = V::zeros(nstates, aug_ctx);
-        let mut reset_sens_mat =
-            Eqn::M::new_from_sparsity(nstates, nparams, reset_op.sens_sparsity(), ctx.clone());
-        let mut root_sens_mat =
-            Eqn::M::new_from_sparsity(nroots, nparams, root_op.sens_sparsity(), ctx);
-
-        reset_op.jac_mul_inplace(&y_before, t, &s_before, &mut s_plus);
-        // parameter Jacobians are evaluated as matrices at the problem's own batch count and
-        // reshaped onto the lanes: column `p` belongs in lane `b * nparams + p`.
-        reset_op.sens_inplace(&y_before, t, &mut reset_sens_mat);
-        reset_sens_mat.add_columns_to_batched_vector(&mut reset_sens);
-        s_plus += &reset_sens;
-
-        root_op.jac_mul_inplace(&y_before, t, &s_before, &mut root_jac_s);
-        root_op.sens_inplace(&y_before, t, &mut root_sens_mat);
-        root_sens_mat.add_columns_to_batched_vector(&mut root_sens);
-
-        // tau = -(r_x s + r_p) / d, one scalar per parameter lane
-        tau_p.for_each_batch(
-            [&root_flow, &root_t, &root_jac_s, &root_sens],
-            |tau, [rflow, rt, rjac, rsens], _| {
-                tau[0] = -(rjac[root_idx] + rsens[root_idx]) / (rflow[root_idx] + rt[root_idx]);
-            },
-        );
-        s_plus.batched_axpy(&tau_p, &correction_dir, V::T::one());
-        self.s.copy_from(&s_plus);
-
-        Ok(())
+        self.reset_with_sens(problem, root_idx, |state| state.apply_reset::<Eqn>(problem))
     }
 
     /// Apply a reset operator to the current state and propagate sensitivities through a
@@ -433,6 +374,29 @@ impl<V: Vector> StateRefMut<'_, V> {
         Eqn: OdeEquationsImplicitSens<T = V::T, V = V, C = V::C>,
         LS: LinearSolver<Eqn::M>,
     {
+        self.reset_with_sens(problem, root_idx, |state| {
+            state.apply_reset_with_mass::<LS, Eqn>(problem)
+        })?;
+        if problem.eqn.mass().is_some() {
+            let mut augmented_eqn = SensEquations::new(problem)?;
+            let mut root_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
+            self.set_consistent_augmented(problem, &mut augmented_eqn, &mut root_solver)?;
+        }
+        Ok(())
+    }
+
+    /// The shared part of [`Self::apply_reset_with_sens`] and
+    /// [`Self::apply_reset_with_sens_mass`]: `reset_state` resets `y` and `dy`, and this function
+    /// applies the event correction to all sensitivity channels.
+    fn reset_with_sens<Eqn>(
+        &mut self,
+        problem: &OdeSolverProblem<Eqn>,
+        root_idx: usize,
+        reset_state: impl FnOnce(&mut Self) -> Result<(), DiffsolError>,
+    ) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquationsImplicitSens<T = V::T, V = V, C = V::C>,
+    {
         let eqn = &problem.eqn;
         let rhs = eqn.rhs();
         let reset_op = eqn.reset().ok_or_else(|| {
@@ -462,8 +426,7 @@ impl<V: Vector> StateRefMut<'_, V> {
         let reset_t = reset_op.time_derive(&y_before, t);
         let root_t = root_op.time_derive(&y_before, t);
 
-        // Delegate reset of self.y and self.dy (including set_consistent for mass matrices).
-        self.apply_reset_with_mass::<LS, Eqn>(problem)?;
+        reset_state(self)?;
 
         let mut correction_dir = V::zeros(nstates, ctx.clone());
         reset_op.jac_mul_inplace(&y_before, t, &f_minus, &mut correction_dir);
@@ -472,18 +435,12 @@ impl<V: Vector> StateRefMut<'_, V> {
 
         let mut root_flow = V::zeros(nroots, ctx.clone());
         root_op.jac_mul_inplace(&y_before, t, &f_minus, &mut root_flow);
-        let denom_tol = V::T::from_f64(100.0).unwrap() * V::T::EPSILON;
-        let nbatch_denom = root_flow.context().nbatch();
-        for b in 0..nbatch_denom {
-            let denom = root_flow.get_batch(b).get_index(root_idx)
-                + root_t.get_batch(b).get_index(root_idx);
-            if denom.abs() <= denom_tol {
-                return Err(ode_solver_error!(
-                    Other,
-                    "reset sensitivity correction undefined: active root derivative along flow is zero"
-                ));
-            }
-        }
+        check_root_flow(
+            &root_flow,
+            &root_t,
+            root_idx,
+            "reset sensitivity correction",
+        )?;
 
         // apply reset to all sensitivity channels (shared reset/root Jacobians and `correction_dir`).
         let aug_ctx = s_before.context().clone();
@@ -517,12 +474,6 @@ impl<V: Vector> StateRefMut<'_, V> {
         );
         s_plus.batched_axpy(&tau_p, &correction_dir, V::T::one());
         self.s.copy_from(&s_plus);
-
-        if eqn.mass().is_some() {
-            let mut augmented_eqn = SensEquations::new(problem)?;
-            let mut root_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
-            self.set_consistent_augmented(problem, &mut augmented_eqn, &mut root_solver)?;
-        }
 
         Ok(())
     }
@@ -615,18 +566,7 @@ impl<V: Vector> StateRefMut<'_, V> {
 
         let mut root_flow = V::zeros(nroots, ctx.clone());
         root_op.jac_mul_inplace(y_minus, t_event, f_minus, &mut root_flow);
-        let denom_tol = V::T::from_f64(100.0).unwrap() * V::T::EPSILON;
-        let nbatch_denom = root_flow.context().nbatch();
-        for b in 0..nbatch_denom {
-            let denom = root_flow.get_batch(b).get_index(root_idx)
-                + root_t.get_batch(b).get_index(root_idx);
-            if denom.abs() <= denom_tol {
-                return Err(ode_solver_error!(
-                    Other,
-                    "reset adjoint correction undefined: active root derivative along flow is zero"
-                ));
-            }
-        }
+        check_root_flow(&root_flow, &root_t, root_idx, "reset adjoint correction")?;
 
         // with no output function the integrated output is the identity on the state
         let (l_minus, l_plus) = if integrate_out {
@@ -765,18 +705,12 @@ impl<V: Vector> StateRefMut<'_, V> {
         let root_t = root_op.time_derive(forward.y, forward.t);
         let mut root_flow = V::zeros(nroots, ctx.clone());
         root_op.jac_mul_inplace(forward.y, forward.t, forward.dy, &mut root_flow);
-        let denom_tol = V::T::from_f64(100.0).unwrap() * V::T::EPSILON;
-        let nbatch_denom = root_flow.context().nbatch();
-        for b in 0..nbatch_denom {
-            let denom = root_flow.get_batch(b).get_index(root_idx)
-                + root_t.get_batch(b).get_index(root_idx);
-            if denom.abs() <= denom_tol {
-                return Err(ode_solver_error!(
-                    Other,
-                    "terminal root adjoint correction undefined: active root derivative along flow is zero"
-                ));
-            }
-        }
+        check_root_flow(
+            &root_flow,
+            &root_t,
+            root_idx,
+            "terminal root adjoint correction",
+        )?;
 
         let nstates = eqn.rhs().nstates();
         let nparams = eqn.rhs().nparams();
@@ -990,12 +924,10 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
         LS: LinearSolver<Eqn::M>,
     {
         let mut ret = Self::new_without_initialise(ode_problem)?;
-        if ode_problem.ic_options.use_linesearch {
-            let mut ls = BacktrackingLineSearch::default();
-            ls.c = ode_problem.ic_options.armijo_constant;
-            ls.max_iter = ode_problem.ic_options.max_linesearch_iterations;
-            ls.tau = ode_problem.ic_options.step_reduction_factor;
-            let mut root_solver = NewtonNonlinearSolver::new(LS::default(), ls);
+        let ic_options = &ode_problem.ic_options;
+        if ic_options.use_linesearch {
+            let mut root_solver =
+                NewtonNonlinearSolver::new(LS::default(), ic_options.line_search());
             ret.as_mut().set_consistent(ode_problem, &mut root_solver)?;
         } else {
             let mut root_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
@@ -1038,29 +970,22 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
     {
         let mut augmented_eqn = SensEquations::new(ode_problem)?;
         let mut ret = Self::new_without_initialise_augmented(ode_problem, &mut augmented_eqn)?;
-        if ode_problem.ic_options.use_linesearch {
-            let mut ls = BacktrackingLineSearch::default();
-            ls.c = ode_problem.ic_options.armijo_constant;
-            ls.max_iter = ode_problem.ic_options.max_linesearch_iterations;
-            ls.tau = ode_problem.ic_options.step_reduction_factor;
-            let mut root_solver = NewtonNonlinearSolver::new(LS::default(), ls);
+        // the sensitivities get their own root solver, so that the main solve does not change it
+        let ic_options = &ode_problem.ic_options;
+        if ic_options.use_linesearch {
+            let mut root_solver =
+                NewtonNonlinearSolver::new(LS::default(), ic_options.line_search());
             ret.as_mut().set_consistent(ode_problem, &mut root_solver)?;
-        } else {
-            let mut root_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
-            ret.as_mut().set_consistent(ode_problem, &mut root_solver)?;
-        }
-        if ode_problem.ic_options.use_linesearch {
-            let mut ls = BacktrackingLineSearch::default();
-            ls.c = ode_problem.ic_options.armijo_constant;
-            ls.max_iter = ode_problem.ic_options.max_linesearch_iterations;
-            ls.tau = ode_problem.ic_options.step_reduction_factor;
-            let mut root_solver_sens = NewtonNonlinearSolver::new(LS::default(), ls);
+            let mut root_solver_sens =
+                NewtonNonlinearSolver::new(LS::default(), ic_options.line_search());
             ret.as_mut().set_consistent_augmented(
                 ode_problem,
                 &mut augmented_eqn,
                 &mut root_solver_sens,
             )?;
         } else {
+            let mut root_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
+            ret.as_mut().set_consistent(ode_problem, &mut root_solver)?;
             let mut root_solver_sens = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
             ret.as_mut().set_consistent_augmented(
                 ode_problem,
@@ -1214,64 +1139,8 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
     ) where
         Eqn: OdeEquations<T = V::T, V = V, C = V::C>,
     {
-        let is_neg_h = h0 < Eqn::T::zero();
-        let (h0, h1) = {
-            let state = self.as_ref();
-            let y0 = state.y;
-            let t0 = state.t;
-            let f0 = state.dy;
-
-            let d0 = y0.squared_norm(y0, atol, rtol).sqrt();
-            let d1 = f0.squared_norm(y0, atol, rtol).sqrt();
-
-            let h0 = if d0 < Eqn::T::from_f64(1e-5).unwrap() || d1 < Eqn::T::from_f64(1e-5).unwrap()
-            {
-                Eqn::T::from_f64(1e-6).unwrap()
-            } else {
-                Eqn::T::from_f64(0.01).unwrap() * (d0 / d1)
-            };
-
-            // make sure we preserve the sign of h0
-            let f1 = if is_neg_h {
-                let y1 = f0.clone() * scale(-h0) + y0;
-                let t1 = t0 - h0;
-                eqn.rhs().call(&y1, t1)
-            } else {
-                let y1 = f0.clone() * scale(h0) + y0;
-                let t1 = t0 + h0;
-                eqn.rhs().call(&y1, t1)
-            };
-
-            let df = f1 - f0;
-            let d2 = df.squared_norm(y0, atol, rtol).sqrt() / h0.abs();
-
-            let mut max_d = d2;
-            if max_d < d1 {
-                max_d = d1;
-            }
-            let h1 = if max_d < Eqn::T::from_f64(1e-15).unwrap() {
-                let h1 = h0 * Eqn::T::from_f64(1e-3).unwrap();
-                if h1 < Eqn::T::from_f64(1e-6).unwrap() {
-                    Eqn::T::from_f64(1e-6).unwrap()
-                } else {
-                    h1
-                }
-            } else {
-                (Eqn::T::from_f64(0.01).unwrap() / max_d)
-                    .pow(Eqn::T::one() / Eqn::T::from_f64(1.0 + solver_order as f64).unwrap())
-            };
-            (h0, h1)
-        };
-
-        let state = self.as_mut();
-        *state.h = Eqn::T::from_f64(100.0).unwrap() * h0;
-        if *state.h > h1 {
-            *state.h = h1;
-        }
-
-        if is_neg_h {
-            *state.h = -*state.h;
-        }
+        self.as_mut()
+            .set_step_size(h0, atol, rtol, eqn, solver_order);
     }
 }
 

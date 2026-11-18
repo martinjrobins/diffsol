@@ -19,6 +19,9 @@ pub enum OdeSolverStopReason<T: Scalar> {
 
 /// Check that a vector handed to one of the `interpolate_*_inplace` methods has the same shape
 /// (batch count and length) as the state vector it is interpolating.
+/// Default for `max_steps_between_checkpoints` when the caller gives `None`.
+const DEFAULT_MAX_STEPS_BETWEEN_CHECKPOINTS: usize = 500;
+
 pub(crate) fn check_interpolate_shape<V: Vector>(
     ret: &V,
     state_val: &V,
@@ -477,7 +480,8 @@ where
         let nout = self.problem().eqn.nout();
         let nstates = self.problem().eqn.rhs().nstates();
         soln.ensure_ode_allocation(self.problem().context(), nrows, nout, nstates)?;
-        let max_steps_between_checkpoints = max_steps_between_checkpoints.unwrap_or(500);
+        let max_steps_between_checkpoints =
+            max_steps_between_checkpoints.unwrap_or(DEFAULT_MAX_STEPS_BETWEEN_CHECKPOINTS);
 
         let mut new_checkpointing = match soln.mode {
             SolutionMode::Tfinal(t_final) => {
@@ -624,7 +628,8 @@ where
     {
         let mut ret_t = Vec::new();
         let (mut ret_y, mut tmp_nout) = allocate_return(self)?;
-        let max_steps_between_checkpoints = max_steps_between_checkpoints.unwrap_or(500);
+        let max_steps_between_checkpoints =
+            max_steps_between_checkpoints.unwrap_or(DEFAULT_MAX_STEPS_BETWEEN_CHECKPOINTS);
         let (stop_reason, checkpointers) = solve(
             &mut ret_y,
             &mut ret_t,
@@ -684,7 +689,8 @@ where
         Self: Sized,
     {
         let (mut ret, mut tmp_nout, mut tmp_nstates) = dense_allocate_return(self, t_eval)?;
-        let max_steps_between_checkpoints = max_steps_between_checkpoints.unwrap_or(500);
+        let max_steps_between_checkpoints =
+            max_steps_between_checkpoints.unwrap_or(DEFAULT_MAX_STEPS_BETWEEN_CHECKPOINTS);
         let (stop_reason, _, checkpointers) = solve_dense(
             &mut ret,
             t_eval,
@@ -735,16 +741,23 @@ where
         self.checkpointers
     }
 
+    /// only the first `ts.len()` entries of `ys` and `ydots` are in use, and the
+    /// rest are kept so that later samples can overwrite them without an allocation.
     fn record_sample(&mut self, solver: &Method) {
-        self.ts.push(solver.state().t);
-        self.ys.push(solver.state().y.clone());
-        self.ydots.push(solver.state().dy.clone());
+        let i = self.ts.len();
+        let state = solver.state();
+        self.ts.push(state.t);
+        if i < self.ys.len() {
+            self.ys[i].copy_from(state.y);
+            self.ydots[i].copy_from(state.dy);
+        } else {
+            self.ys.push(state.y.clone());
+            self.ydots.push(state.dy.clone());
+        }
     }
 
     fn reset_samples_from_current(&mut self, solver: &Method) {
         self.ts.clear();
-        self.ys.clear();
-        self.ydots.clear();
         self.record_sample(solver);
     }
 
@@ -765,6 +778,8 @@ where
     }
 
     fn finish_segment(&mut self, terminal_reset_root_idx: Option<usize>) {
+        self.ys.truncate(self.ts.len());
+        self.ydots.truncate(self.ts.len());
         let last_segment = HermiteInterpolator::new(
             self.ys.split_off(0),
             self.ydots.split_off(0),
