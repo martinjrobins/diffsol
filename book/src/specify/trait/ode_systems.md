@@ -4,8 +4,8 @@ So far we've focused on using custom structs to specify individual equations, no
 
 ## Implementing the OdeEquations trait
 
-To specify the entire system of equations, you need to implement the `Op`, [`OdeEquations`](https://docs.rs/diffsol/latest/diffsol/ode_solver/equations/trait.OdeEquations.html)
-and [`OdeEquationsRef`](https://docs.rs/diffsol/latest/diffsol/ode_solver/equations/trait.OdeEquationsRef.html) traits for your struct.
+To specify the entire system of equations, you need to implement the `Op`, [`OdeEquations`](https://docs.rs/diffsol/latest/diffsol/ode_equations/trait.OdeEquations.html)
+and [`OdeEquationsRef`](https://docs.rs/diffsol/latest/diffsol/ode_equations/trait.OdeEquationsRef.html) traits for your struct.
 
 ## Getting all your traits in order
 
