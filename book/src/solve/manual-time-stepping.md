@@ -18,3 +18,5 @@ The `step` method returns an error if:
 - the step size becomes smaller than `ode_options.min_timestep` (`StepSizeTooSmall`).
 - the error test fails more than `ode_options.max_error_test_failures` times in one step (`TooManyErrorTestFailures`).
 - the nonlinear solver fails to converge more than `ode_options.max_nonlinear_solver_failures` times in one step (`TooManyNonlinearSolverFailures`, implicit solvers only).
+
+See [Error handling](./error_handling.md) for how to handle these errors, and [Solver options](../solver/options.md) for how to change the limits.

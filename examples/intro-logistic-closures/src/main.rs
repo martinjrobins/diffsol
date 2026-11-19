@@ -42,6 +42,10 @@ mod create_solvers_uninit;
 use create_solvers_uninit::create_solvers_uninit;
 mod create_solvers_tableau;
 use create_solvers_tableau::create_solvers_tableau;
+mod solver_options;
+use solver_options::solver_options;
+mod solve_error_handling;
+use solve_error_handling::solve_error_handling;
 type M = NalgebraMat<f64>;
 type V = NalgebraVec<f64>;
 type T = f64;
@@ -90,6 +94,7 @@ fn main() {
     create_solvers();
     create_solvers_uninit();
     create_solvers_tableau();
+    solver_options();
 
     //
     // SOLVING THE PROBLEM
@@ -102,4 +107,5 @@ fn main() {
     solve_step(&mut solver);
     let mut solver = problem.bdf::<LS>().unwrap();
     solve_interpolate(&mut solver);
+    solve_error_handling();
 }
