@@ -9,22 +9,24 @@ To choose the test problems we have used several of the examples provided in the
 
 - `robertson` : A stiff DAE system with 3 equations (2 differential and 1 algebraic). In Sundials this is part of the
 IDA examples and is contained in the file `ida/serial/idaRoberts_dns.c`. In Sundials the problem is solved using the
-Sundials dense linear solver and `Sunmatrix_Dense`, in diffsol we use the dense LU linear solver, dense matrices and
+Sundials dense linear solver and `SUNMatrix_Dense`, in diffsol we use the dense LU linear solver, dense matrices and
 vectors from the [nalgebra](https://nalgebra.rs) library.
 - `robertson_ode`: The same problem as `robertson` but in the form of an ODE. This problem has a variable size
 implemented by duplicating the 3 original equations \\(n^2\\) times, where \\(n\\) is the size input parameter. In
-Sundials problem is solved using the KLU sparse linear solver and the `Sunmatrix_Sparse` matrix, and in diffsol we use
-the the [faer](https://github.com/sarah-ek/faer-rs) sparse matrix an LU solver. This example is part of the Sundials
+Sundials the problem is solved using the KLU sparse linear solver and the `SUNMatrix_Sparse` matrix. For the results
+below (diffsol v0.13.0), diffsol used the [faer](https://github.com/sarah-ek/faer-rs) sparse matrix and LU solver. The
+current benchmark code (`crates/diffsol/benches/ode_solvers.rs`) is different: it solves the \\(n^2\\) copies of the 3
+equations as independent batch lanes, with the dense `NalgebraMat` matrix and the `NalgebraLU` linear solver. This example is part of the Sundials
 CVODE examples and is contained in the file `cvode/serial/cvRoberts_block_klu.c`.
 - `heat2d`: A 2D heat DAE problem with boundary conditions imposed via algebraic equations. The size \\(n\\) input
 parameter sets the number of grid points along each dimension, so the total number of equations is \\(n^2\\). This is
 part of the IDA examples and is contained in the file `ida/serial/idaHeat2D_klu.c`. In Sundials this problem is solved
-using the KLU sparse linear solver and the Sunmatrix_Sparse matrix, and in diffsol we use the faer sparse matrix and LU
+using the KLU sparse linear solver and the `SUNMatrix_Sparse` matrix, and in diffsol we use the faer sparse matrix and LU
 solver.
 - `foodweb`: A predator-prey problem with diffusion on a 2D grid. The size \\(n\\) input parameter sets the number of
 grid points along each dimension and we have 2 species, so the total number of equations is \\(2n^2\\) This is part of
 the IDA examples and is contained in the file `ida/serial/idaFoodWeb_bnd.c`. In Sundials the problem is solved using a
-banded linear solver and the `Sunmatrix_Band` matrix. diffsol does not have a banded linear solver, so we use the faer
+banded linear solver and the `SUNMatrix_Band` matrix. diffsol does not have a banded linear solver, so we use the faer
 sparse matrix and LU solver.
 
 ## Method
@@ -56,10 +58,10 @@ a vector, so diffsol needs to do additional work to generate a jacobian matrix f
 - Generally the types of matrices and linear solver are matched between the two implementations (see details in the
 "Test Problems" section above). However, the `foodweb` problem is slightly different in that it is solved in Sundials
 using a banded linear solver and banded matrices and the jacobian is calculated using finite differences. In diffsol we
-use the KLU sparse linear solver and sparse matrices, and the jacobian is calculated using the jacobian function
+use the faer sparse LU solver and sparse matrices, and the jacobian is calculated using the jacobian function
 provided by the user.
-- The Sundials implementations make heavy use of indexing into arrays, as does the diffsol implementations. In Rust
-these indexing is bounds checked, which affects performance slightly but was not found to be a significant factor.
+- The Sundials implementations make heavy use of indexing into arrays, as do the diffsol implementations. In Rust
+this indexing is bounds checked, which affects performance slightly but was not found to be a significant factor.
 
 Finally, we have also implemented the `robertson`, `heat2d` and `foodweb` problems in the DiffSl language. For the
 `heat2d` and `foodweb` problems we wrote out the diffusion matrix and mass matrix from the Rust implementations and
@@ -92,7 +94,7 @@ the performance improves significantly for larger problems until it is at about 
 systems is not seen in `foodweb` or `robertson_ode` problems, it is likely due to the fact that the `heat2d` problem has
 a constant jacobian matrix and the diffsol implementation has an advantage in this case.
 
-For the `foodweb` problem the diffsol implementation is roughly slower 2 times than Sundials. It is interesting that
+For the `foodweb` problem the diffsol implementation is roughly 2 times slower than Sundials. It is interesting that
 when the problem is implemented in the DiffSl language (see benchmark below) the slowdown reduces slightly to 1.6,
 indicating that much of the performance difference is likely due to the implementation details of the Rust code for the
 rhs, jacobian and mass matrix functions.
@@ -105,8 +107,9 @@ problem range, performing slightly worse for larger problems.
 ![Sdirk](./images/bench_tr_bdf2_esdirk.svg)
 
 The low-order `tr_bdf2` solver is slower than the Sundials `bdf` solver for all the problems, perhaps due to the
-generally tight tolerances used (`robertson` and `robertson_ode` have tolerances of 1e-6-1e-8, `heat2d` was 1e-7 and
-`foodweb` was 1e-5). The `esdirk34` solver is similar, still slower than sundials but improved over the `tr_bdf2`
+generally tight tolerances used. `robertson` and `robertson_ode` use `rtol` = 1e-4 with a vector `atol`
+(1e-8, 1e-6, 1e-6 for `robertson`, and 1e-8, 1e-14, 1e-6 for `robertson_ode` in the current code), `heat2d` uses
+`rtol` = `atol` = 1e-7 and `foodweb` uses `rtol` = `atol` = 1e-5. The `esdirk34` solver is similar, still slower than sundials but improved over the `tr_bdf2`
 solver.
 
 ### Bdf + DiffSl

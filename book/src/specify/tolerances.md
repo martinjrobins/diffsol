@@ -5,21 +5,21 @@ using the tolerances that have been set for that particular problem.
 
 The particular error norm that diffsol uses is a weighted mean squared error
 
-$$
+\\[
 |\delta| = \frac{1}{n} \sum_i^n \left ( \frac{\delta_i}{|y_i| \cdot rtol + atol_i} \right) ^2
-$$
+\\]
 
 So that the relative tolerance `rtol` defines the error tolerance relative to the current size of the state, and the absolute tolerance `atol` takes over when the state approaches zero.
-Note that `atol` is a vector since the scales of different state values might vary, but in practice is is common to set all the elements of `atol` to the same value,
-so the builder method [`OdeBuilder::atol`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html#method.atol) will accept a one-element collection, such as `[1e-6]`.
+Note that `atol` is a vector since the scales of different state values might vary, but in practice it is common to set all the elements of `atol` to the same value,
+so the builder method [`OdeBuilder::atol`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html#method.atol) will accept a one-element collection, such as `[1e-6]`. If you do not set the tolerances, the builder uses the default values `rtol = 1e-6` and `atol = [1e-6]`.
 
 ## Output error control
 
-When integrating an output function over time, as well as the ODE state, diffsol allows you to set the step size based on the both the error in the states and output integrals.
+When integrating an output function over time, as well as the ODE state, diffsol allows you to set the step size based on both the error in the states and output integrals.
 The same norm is used for the output error as the states, and the final error is calculated as the maximum of the two individual contributions.
 
 To enable output integrals, you need to provide an output function
-using one of the `OdeBuilder::out*` methods, and set [`OdeBuilder::integrate_out`] to `true`.
+using one of the `OdeBuilder::out*` methods, and set [`OdeBuilder::integrate_out`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html#method.integrate_out) to `true`.
 To enable output error control, you need to set the output error tolerances using [`OdeBuilder::out_rtol`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html#method.out_rtol)
 and [`OdeBuilder::out_atol`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html#method.out_atol).
 If these tolerances have previously been set and you wish to turn *off* the output error control you can use [`OdeBuilder::turn_off_output_error_control`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html#method.turn_off_output_error_control)
@@ -42,8 +42,8 @@ each `sens_atol` for that parameter will be divided by the absolute value of the
 
 ## Adjoint sensitivity error control
 
-Calculating the adjoint sensitivities requires both a forward pass, where only the base ODE equations are being solver, and a backwards
-pass where the adjoint equations are being solved and, if its a continuous loss function, a set of parameter gradient functions of length `n_p` are also being integrated.
+Calculating the adjoint sensitivities requires both a forward pass, where only the base ODE equations are being solved, and a backwards
+pass where the adjoint equations are being solved and, if it is a continuous loss function, a set of parameter gradient functions of length `n_p` are also being integrated.
 During the forward pass the base error norm and output error control are active, as described above.
 
 The adjoint state has the units of the loss divided by those of the state, so its natural scale depends on the scale of the loss.

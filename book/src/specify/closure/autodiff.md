@@ -7,19 +7,19 @@ Rust closures. This avoids manually writing `rhs_jac`, `rhs_adjoint`,
 
 As in the previous closure examples, consider the logistic equation
 
-$$\frac{dy}{dt} = r y (1 - y/K),$$
+\\[\frac{dy}{dt} = r y (1 - y/K),\\]
 
 with the parameterized initial state
 
-$$y(0) = y_0.$$
+\\[y(0) = y_0.\\]
 
 The parameter vector is \\(p = [r, K, y_0]\\), so the right-hand side is
 
-$$f(y, p, t) = p_0 y (1 - y/p_1),$$
+\\[f(y, p, t) = p_0 y (1 - y/p_1),\\]
 
 and the initial-condition function is
 
-$$y_0(p, t) = p_2.$$
+\\[y_0(p, t) = p_2.\\]
 
 Using the `autodiff` feature, we can simply supply these equations, and `std::autodiff` will
 automatically generate the required gradients for any type of solver in diffsol.
@@ -35,6 +35,13 @@ backend once for the nightly toolchain:
 
 ```bash
 rustup +nightly component add enzyme
+```
+
+You must also enable the `autodiff` feature of diffsol in your `Cargo.toml`, because the autodiff builder methods (e.g. `rhs_autodiff`) are only available with this feature:
+
+```toml
+[dependencies]
+diffsol = { version = "0.20", features = ["autodiff"] }
 ```
 
 You can then enable autodiff for a single crate with `RUSTFLAGS`:

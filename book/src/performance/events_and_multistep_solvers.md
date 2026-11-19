@@ -32,7 +32,7 @@ y_2' &= 999y_1 - 1000y_2,
 $$
 
 with \\(y(0)=(1,1)^T\\). Its eigenvalues are \\(-1\\) and \\(-1000\\), giving a
-stiffness ratio of \(1000\). The vector \((1,1)^T\) is the slow eigenvector.
+stiffness ratio of \\(1000\\). The vector \\((1,1)^T\\) is the slow eigenvector.
 
 At the event times
 

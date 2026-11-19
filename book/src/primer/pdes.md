@@ -1,6 +1,6 @@
 # Partial Differential Equations (PDEs)
 
-diffsol is an ODE solver, but it can also solve PDEs. The idea is to discretize the PDE in space and time, and then solve the resulting system of ODEs. This is called the method of lines.
+diffsol is an ODE solver, but it can also solve PDEs. The idea is to discretize the PDE in space only, and then solve the resulting system of ODEs. This is called the method of lines.
 
 Discretizing a PDE is a large topic, and there are many ways to do it. Common methods include finite difference, finite volume, finite element, and spectral methods. Finite difference methods are the simplest to understand and implement, so some of the examples in this book will demonstrate this method to give you a flavour of how to solve PDEs with diffsol. However, in general we recommend that you use another package to discretise your PDE, and then import the resulting ODE system into diffsol for solving.
 
@@ -10,7 +10,7 @@ There are many packages in the Python and Julia ecosystems that can help you dis
 
 Python
 - [FEniCS](https://fenicsproject.org/): A finite element package. Uses the Unified Form Language (UFL) to specify PDEs.
-- [FireDrake](https://firedrakeproject.org/): A finite element package, uses the same UFL as FEniCS.
+- [Firedrake](https://firedrakeproject.org/): A finite element package, uses the same UFL as FEniCS.
 - [FiPy](https://www.ctcms.nist.gov/fipy/): A finite volume package.
 - [scikit-fdiff](https://scikit-fdiff.readthedocs.io/en/latest/): A finite difference package.
 

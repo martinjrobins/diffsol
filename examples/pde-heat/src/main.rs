@@ -5,7 +5,7 @@ use plotly::{
     layout::{Axis, Layout},
     Plot, Surface,
 };
-use std::fs;
+use std::{fs, path::PathBuf};
 
 type M = FaerSparseMat<f64>;
 type LS = FaerSparseLU<f64>;
@@ -16,7 +16,7 @@ fn main() {
         .build_from_diffsl::<CG>(
             "
     D { 0.1 }
-    h { 1.0 / 21.0}
+    h { 1.0 / 22.0 }
     g { 0.0 }
     m { 1.0 }
     A_ij {
@@ -44,7 +44,7 @@ fn main() {
     let mut solver = problem.bdf::<LS>().unwrap();
     let (sol, _stop_reason) = solver.solve_dense(&times).unwrap();
 
-    let x = (1..=20).map(|i| i as f64 / 21.0).collect::<Vec<f64>>();
+    let x = (1..=21).map(|i| i as f64 / 22.0).collect::<Vec<f64>>();
     let y = times;
     let z = sol
         .inner()
@@ -60,6 +60,7 @@ fn main() {
         .z_axis(Axis::new().title("u"));
     plot.set_layout(layout);
     let plot_html = plot.to_inline_html(Some("heat-equation"));
-    fs::write("book/src/primer/images/heat-equation.html", plot_html)
-        .expect("Unable to write file");
+    let output_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../book/src/primer/images/heat-equation.html");
+    fs::write(output_path, plot_html).expect("Unable to write file");
 }

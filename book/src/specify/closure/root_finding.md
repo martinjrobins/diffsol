@@ -5,12 +5,12 @@ stop the solver or perform some action when a certain condition is met.
 
 ## Specifying the root finding function
 
-Using the logistic example, we can add a root finding function \\(r(y, p, t)\\) that will stop the solver when the value of \\(y\\) is such that \\(r(y, p, t) = 0\\).
-For this example we'll use the root finding function \\(r(y, p, t) = y - 0.5\\), which will stop the solver when the value of \\(y\\) is 0.5.
+Using the logistic example, we can add a root finding function \\(s(y, p, t)\\) that will stop the solver when the value of \\(y\\) is such that \\(s(y, p, t) = 0\\).
+For this example we'll use the root finding function \\(s(y, p, t) = y - 0.5\\), which will stop the solver when the value of \\(y\\) is 0.5.
 
 
 \\[\frac{dy}{dt} = r y (1 - y/K),\\] 
-\\[r(y, p, t) = y - 0.5,\\]
+\\[s(y, p, t) = y - 0.5,\\]
 
 This can be done using the [`OdeBuilder`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html) via the following code:
 
@@ -18,7 +18,7 @@ This can be done using the [`OdeBuilder`](https://docs.rs/diffsol/latest/diffsol
 {{#include ../../../../examples/intro-logistic-closures/src/problem_root.rs}}
 ```
 
-here we have added the root finding function \\(r(y, p, t) = y - 0.5\\), and also let diffsol know that we have one root function by passing `1` as the last argument to the `root` method.
+here we have added the root finding function \\(s(y, p, t) = y - 0.5\\), and also let diffsol know that we have one root function by passing `1` as the last argument to the `root` method.
 If we had specified more than one root function, the solver would stop when any of the root functions are zero.
 
 ## Detecting roots during the solve

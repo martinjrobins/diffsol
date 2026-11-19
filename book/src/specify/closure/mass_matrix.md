@@ -2,9 +2,9 @@
 
 In some cases, it is necessary to include a mass matrix in the problem, such that the problem is of the form
 
-\\[M(t) \frac{dy}{dt} = f(t, y, p).\\]
+\\[M(p, t) \frac{dy}{dt} = f(y, p, t).\\]
 
-A mass matrix is useful for PDE discretisation that lead to a non-identity mass matrix, or for DAE problems that can be transformed into ODEs with a singular mass matrix.
+A mass matrix is useful for PDE discretisations that lead to a non-identity mass matrix, or for DAE problems that can be transformed into ODEs with a singular mass matrix.
 diffsol can handle singular and non-singular mass matrices, and the mass matrix can be time-dependent.
 
 ## Example
@@ -15,9 +15,9 @@ This system is written as
 \\[\frac{dy}{dt} = r y (1 - y/K),\\]
 \\[0 = y - z,\\]
 
-where \\(z\\) is the additional variable with a solution \\(z = y\\). When this system is put in the form \\(M(t) \frac{dy}{dt} = f(t, y, p)\\), the mass matrix is
+where \\(z\\) is the additional variable with a solution \\(z = y\\). When this system is put in the form \\(M(p, t) \frac{dy}{dt} = f(y, p, t)\\), the mass matrix is
 
-\\[M(t) = \begin{bmatrix} 1 & 0 \\\\ 0 & 0 \end{bmatrix}.\\]
+\\[M(p, t) = \begin{bmatrix} 1 & 0 \\\\ 0 & 0 \end{bmatrix}.\\]
 
 Like the Jacobian, the diffsol builder does not require the full mass matrix, instead users can provide a function that gives a GEMV (General Matrix-Vector) product of the mass matrix with a vector.
 

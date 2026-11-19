@@ -28,7 +28,7 @@ Now we will implement the base [`Op`](https://docs.rs/diffsol/latest/diffsol/op/
 {{#include ../../../../examples/custom-ode-equations/src/my_rhs_impl_op.rs}}
 ```
 
-Next we implement the [`NonLinearOp`](https://docs.rs/diffsol/latest/diffsol/op/nonlinear_op/trait.NonLinearOp.html) and [`NonLinearOpJacobian`](https://docs.rs/diffsol/latest/diffsol/op/nonlinear_op/trait.NonLinearOpJacobian.html) trait for our struct. This trait specifies the functions that will be used to evaluate the rhs function and the jacobian multiplied by a vector.
+Next we implement the [`NonLinearOp`](https://docs.rs/diffsol/latest/diffsol/op/nonlinear_op/trait.NonLinearOp.html) and [`NonLinearOpJacobian`](https://docs.rs/diffsol/latest/diffsol/op/nonlinear_op/trait.NonLinearOpJacobian.html) trait for our struct. These traits specify the functions that evaluate the rhs function and the Jacobian multiplied by a vector. The parameter vector is \\(p = [r, K]\\), so the rhs is \\(f(y, p, t) = r y (1 - y/K)\\) and the Jacobian-vector product is \\(J v = r (1 - 2y/K) v\\).
 
 ```rust,ignore
 {{#include ../../../../examples/custom-ode-equations/src/my_rhs_impl_nonlinear.rs}}

@@ -2,9 +2,9 @@
 
 If we wish to train a neural network to predict the weather or any other time series dataset, we can use a Neural ODE. A Neural ODE replaces the rhs of an ODE with a neural network.
 
-$$
+\\[
 \frac{dy}{dt} = f(y, p)
-$$
+\\]
 
 Here, \\(y(t)\\) is the state of the system at time \\(t\\), and \\(f\\) is a neural network with parameters \\(p\\). The neural network is trained to predict the derivative of the state, and the ODE solver is used to integrate the state forward in time, and to calculate gradients of the loss function with respect to the parameters of the neural network.
 
@@ -41,7 +41,7 @@ Within rust now, we can define a diffsol system of equations by creating a struc
 {{#include ../../../examples/neural-ode-weather-prediction/src/main.rs:neural_ode}}
 ```
 
-We'll also implement the `OdeSystemAdjoint` trait for `NeuralOde`, which will allow us to use the adjoint method to calculate gradients of out loss function with respect to the parameters of the neural network. As an example, here is the implementation of the `NonLinearOp` trait:
+`NeuralOde` implements the `OdeEquations` trait. Its right-hand side operator implements the `NonLinearOp`, `NonLinearOpJacobian`, `NonLinearOpAdjoint` and `NonLinearOpSensAdjoint` traits, and its initial condition operator implements the `ConstantOp` and `ConstantOpSensAdjoint` traits. Together, these traits make `NeuralOde` satisfy the `OdeEquationsImplicitAdjoint` trait. This allows us to use the adjoint method to calculate gradients of our loss function with respect to the parameters of the neural network. As an example, here is the implementation of the `NonLinearOp` trait:
 
 ```rust,ignore
 {{#include ../../../examples/neural-ode-weather-prediction/src/main.rs:rhs}}

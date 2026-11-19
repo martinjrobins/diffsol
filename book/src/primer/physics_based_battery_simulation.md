@@ -19,10 +19,10 @@ The SPM model only needs to solve for the concentration of lithium ions in the p
 subject to the following boundary and initial conditions:
 
 \\[
-\left.\frac{\partial c_i}{\partial r}\right\vert_{r=0} = 0, \quad \left.\frac{\partial c}{\partial r}\right\vert_{r=R_i} = -j_i, \quad \left.c\right\vert_{t=0} = c^0_i
+\left.\frac{\partial c_i}{\partial r}\right\vert_{r=0} = 0, \quad \left.\frac{\partial c_i}{\partial r}\right\vert_{r=R_i} = -j_i, \quad \left.c_i\right\vert_{t=0} = c^0_i
 \\]
 
-where \\(c_i\\) is the concentration of lithium ions in the positive (\\(i=n\\)) or negative (\\(i=p\\)) electrode, \\(D_i\\) is the diffusion coefficient, \\(j_i\\) is the interfacial current density, and \\(c^0_i\\) is the concentration at the particle surface.
+where \\(c_i\\) is the concentration of lithium ions in the negative (\\(i=n\\)) or positive (\\(i=p\\)) electrode, \\(D_i\\) is the diffusion coefficient, \\(j_i\\) is the interfacial current density, and \\(c^0_i\\) is the initial concentration.
 
 The fluxes of lithium ions in the positive and negative electrodes \\(j_i\\) are dependent on the applied current \\(I\\):
 
@@ -68,9 +68,9 @@ V - V_{\text{min}} = 0,
 
 ## Solving the Single Particle Model using diffsol
 
-The equations above describe the Single Particle Model of a lithium-ion battery, but they are relativly complex and difficult to discretise compared with the simple heat equation PDE that we saw in the [Heat Equation](./heat_equation.md) section.
+The equations above describe the Single Particle Model of a lithium-ion battery, but they are relatively complex and difficult to discretise compared with the simple heat equation PDE that we saw in the [Heat Equation](./heat_equation.md) section.
 
-Rather than derive and write down the discretised equations outselves, we will instead rely on the [PyBaMM library](https://pybamm.org/) to generate the equations for us. PyBaMM is a Python library that can generate a wide variety of physics-based battery models, using different parameterisations, physics and operating conditions. Combined with [a tool](https://github.com/martinjrobins/pybamm2diffsl) that takes a PyBaMM model and writes it out in the DiffSL language, we can generate [a DiffSL file](src/spm.ds) that can be used to solve the equations of the SPM model described above. We can then use the diffsol crate to solve the model and calculate the terminal voltage of the battery over a range of current rates.
+Rather than derive and write down the discretised equations ourselves, we will instead rely on the [PyBaMM library](https://pybamm.org/) to generate the equations for us. PyBaMM is a Python library that can generate a wide variety of physics-based battery models, using different parameterisations, physics and operating conditions. Combined with [a tool](https://github.com/martinjrobins/pybamm2diffsl) that takes a PyBaMM model and writes it out in the DiffSL language, we can generate [a DiffSL file](src/spm.ds) that can be used to solve the equations of the SPM model described above. We can then use the diffsol crate to solve the model and calculate the terminal voltage of the battery over a range of current rates.
 
 The code below reads in the DiffSL file, compiles it, and then solves the equation for different current rates. We wish to stop the simulation when either the final time is reached, or when one of the stopping conditions is met. We will output the terminal voltage of the battery at regular intervals during the simulation, because the terminal voltage can change more rapidly than the state variables \\(c_n\\) and \\(c_p\\), particularly during the "knee" of the discharge curve.
 

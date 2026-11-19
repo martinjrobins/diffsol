@@ -26,6 +26,6 @@ impl Op for MyMass<'_> {
 
 impl LinearOp for MyMass<'_> {
     fn gemv_inplace(&self, x: &V, _t: T, beta: T, y: &mut V) {
-        y[0] = x[0] * beta;
+        y[0] = x[0] + beta * y[0];
     }
 }
