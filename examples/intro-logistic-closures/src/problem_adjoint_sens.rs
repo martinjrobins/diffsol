@@ -2,6 +2,7 @@ use crate::{C, M, T, V};
 use diffsol::{OdeBuilder, OdeEquationsImplicitAdjoint, OdeSolverProblem};
 
 pub fn problem_adjoint_sens(
+    integrate_out: bool,
 ) -> OdeSolverProblem<impl OdeEquationsImplicitAdjoint<M = M, V = V, T = T, C = C>> {
     OdeBuilder::<M>::new()
         .p(vec![1.0, 10.0])
@@ -22,6 +23,7 @@ pub fn problem_adjoint_sens(
             },
             1,
         )
+        .integrate_out(integrate_out)
         .build()
         .unwrap()
 }

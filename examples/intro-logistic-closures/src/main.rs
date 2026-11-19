@@ -30,14 +30,22 @@ mod solve_fwd_sens_step;
 use solve_fwd_sens_step::solve_fwd_sens_step;
 mod print_jacobian;
 mod solve_adjoint_sens;
+use solve_adjoint_sens::solve_adjoint_sens;
 mod solve_adjoint_sens_sum_squares;
 use print_jacobian::print_jacobian;
+use solve_adjoint_sens_sum_squares::solve_adjoint_sens_sum_squares;
+mod solve_discrete_adjoint_sens;
+use solve_discrete_adjoint_sens::solve_discrete_adjoint_sens;
 mod create_solvers;
 use create_solvers::create_solvers;
 mod create_solvers_uninit;
 use create_solvers_uninit::create_solvers_uninit;
 mod create_solvers_tableau;
 use create_solvers_tableau::create_solvers_tableau;
+mod solver_options;
+use solver_options::solver_options;
+mod solve_error_handling;
+use solve_error_handling::solve_error_handling;
 type M = NalgebraMat<f64>;
 type V = NalgebraVec<f64>;
 type T = f64;
@@ -63,7 +71,14 @@ fn main() {
     solve_fwd_sens(&mut solver);
     let mut solver = problem.bdf_sens::<LS>().unwrap();
     solve_fwd_sens_step(&mut solver);
-    let _problem = problem_adjoint_sens();
+    let problem = problem_adjoint_sens(false);
+    let mut solver = problem.bdf::<LS>().unwrap();
+    solve_adjoint_sens_sum_squares(&mut solver);
+    let mut solver = problem.bdf::<LS>().unwrap();
+    solve_discrete_adjoint_sens(&mut solver);
+    let problem = problem_adjoint_sens(true);
+    let mut solver = problem.bdf::<LS>().unwrap();
+    solve_adjoint_sens(&mut solver);
     let _problem = problem_root();
     let _problem = problem_mass();
     let _problem = problem_explicit();
@@ -79,6 +94,7 @@ fn main() {
     create_solvers();
     create_solvers_uninit();
     create_solvers_tableau();
+    solver_options();
 
     //
     // SOLVING THE PROBLEM
@@ -91,4 +107,5 @@ fn main() {
     solve_step(&mut solver);
     let mut solver = problem.bdf::<LS>().unwrap();
     solve_interpolate(&mut solver);
+    solve_error_handling();
 }
