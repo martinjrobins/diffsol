@@ -7,13 +7,13 @@ Each solver implements the [`OdeSolverMethod`](https://docs.rs/diffsol/latest/di
 
 If the equations define both a root function and a reset operator, these two methods apply the reset automatically and continue the forward solve.
 
-The following example shows how to solve a simple ODE problem up to \\(t=10\\) using the `solve` method on the `OdeSolverMethod` trait. The solver will return the solution at all the internal timesteps used by the solver (`_ys`), as well as the timesteps used by the solver (`_ts`). The solution is returned as a matrix whose columns are the solution at each timestep.
+The following example shows how to solve a simple ODE problem up to \\(t=10\\) using the `solve` method on the `OdeSolverMethod` trait. The `solve` method returns a tuple `(ys, ts, stop_reason)`: the solution at all the internal timesteps used by the solver (`_ys`), the timesteps used by the solver (`_ts`), and the reason that the solver stopped (`_stop_reason`). The solution is returned as a matrix whose columns are the solution at each timestep.
 
 ```rust,ignore
 {{#include ../../../examples/intro-logistic-closures/src/solve.rs}}
 ```
 
-`solve_dense` will solve a problem from an initial state, returning the solution as a matrix whose columns are the solution at each timestep in `times`.
+`solve_dense` will solve a problem from an initial state. It returns a tuple `(ys, stop_reason)`, where `ys` is a matrix whose columns are the solution at each timestep in `times`. If a root is found and the equations do not define a reset operator, the solver stops at the root. In this case, the last column of `ys` is the solution at the root time, and the columns for the remaining times in `times` are removed. See [Stopping](./stopping.md) for more information.
 
 ```rust,ignore
 {{#include ../../../examples/intro-logistic-closures/src/solve_dense.rs}}

@@ -35,7 +35,7 @@ We can then specify that, when this condition is met, the state of the system sh
 
 In DiffSL, the `stop` tensor stores one or more event functions, while the `reset` tensor stores the post-event state. The `reset` tensor must have the same shape as the state tensor `u`, while the `stop` tensor can contain any number of scalar event conditions. 
 
-When a stop condition fires, diffsol first locates the event time accurately. For forward solves with `solve`, `solve_dense`, or `solve_dense_sensitivities`, if a `reset` tensor is present then the reset is applied automatically and the integration continues. Manual time-stepping with `step`, staged solve APIs, and current adjoint workflows still expose the event to the caller so that custom event handling and derivative propagation remain explicit.
+When a stop condition fires, diffsol first locates the event time accurately. For forward solves with `solve`, `solve_dense`, or `solve_dense_sensitivities`, if a `reset` tensor is present then the reset is applied automatically and the integration continues. Manual time-stepping with `step` and the staged solve APIs expose the event to the caller, so you can handle the event yourself. The checkpointed solves (`solve_with_checkpointing` and `solve_dense_with_checkpointing`) apply the reset automatically, and the continuous adjoint applies the adjoint of the reset during the backward solve. The discrete gradients (`solve_dense_vjp` and the related methods) do not support roots, so you cannot use them with events.
 
 
 In the next two sections, we revisit compartmental models of drug delivery and bouncing-ball dynamics and show both the procedural and declarative versions side by side.

@@ -16,10 +16,10 @@ The circuit consists of a resistor \\(R\\), an inductor \\(L\\), and a capacitor
 V = R i_R
 \\]
 
-where \\(i_R\\) is the current flowing through the resistor. The voltage across the inductor is given by:
+where \\(i_R\\) is the current flowing through the resistor. The voltage across the inductor is \\(V_s - V\\), so the equation for an ideal inductor is:
 
 \\[
-\frac{di_L}{dt} = \frac{V_s - V}{L}
+L \frac{di_L}{dt} = V_s - V
 \\]
 
 where \\(di_L/dt\\) is the rate of change of current with respect to time. The voltage across the capacitor is the same as the voltage across the resistor and the equation for an ideal capacitor is:
@@ -34,7 +34,7 @@ where \\(i_C\\) is the current flowing through the capacitor. The sum of the cur
 i_L = i_R + i_C
 \\]
 
-Thus we have a system of two differential equations and two algebraic equation that describe the evolution of the currents through the resistor, inductor, and capacitor; and the voltage across the resistor. We can write these equations in the general form:
+Thus we have a system of two differential equations and two algebraic equations that describe the evolution of the currents through the resistor, inductor, and capacitor; and the voltage across the resistor. We can write these equations in the general form:
 
 \\[
 M \frac{d\mathbf{y}}{dt} = \mathbf{f}(\mathbf{y}, t)
@@ -52,7 +52,7 @@ and
 \mathbf{f}(\mathbf{y}, t) = \begin{bmatrix} V - R i_R \\\\ \frac{V_s - V}{L} \\\\ i_L - i_R - i_C \\\\ \frac{i_C}{C} \end{bmatrix}
 \\]
 
-The mass matrix \\(M\\) has one on the diagonal for the differential equations and zero for the algebraic equation.
+The mass matrix \\(M\\) has one on the diagonal for the differential equations and zero for the algebraic equations.
 
 \\[
 M = \begin{bmatrix} 0 & 0 & 0 & 0 \\\\ 0 & 1 & 0 & 0 \\\\ 0 & 0 & 0 & 0 \\\\ 0 & 0 & 0 & 1 \end{bmatrix}
@@ -76,9 +76,9 @@ The voltage source \\(V_s\\) acts as a forcing function for the system, and we c
     V_s(t) = V_0 \sin(\omega t)
 \\]
 
-where \\(\omega\\) is the angular frequency of the source. Since this is a low-pass filter, we will choose a high frequency for the source, say \\(\omega = 200\\), to demonstrate the filtering effect of the circuit.
+where \\(V_0\\) is the amplitude and \\(\omega\\) is the angular frequency of the source. The example uses \\(R = 100\\), \\(L = 1\\), \\(C = 10^{-3}\\), \\(V_0 = 10\\) and \\(\omega = 100\\). The cut-off frequency of this filter is approximately \\(1/\sqrt{LC} \approx 31.6\\) rad/s. The source frequency is higher than the cut-off frequency, so the circuit filters the source signal.
 
-We can solve this system of equations using diffsol and plot the current and voltage across the resistor as a function of time.
+We can solve this system of equations using diffsol and plot the current \\(i_R\\) through the resistor as a function of time.
 
 ```rust,ignore
 {{#include ../../../examples/electrical-circuits/src/main.rs}}

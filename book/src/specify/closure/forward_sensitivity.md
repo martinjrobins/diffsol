@@ -31,7 +31,7 @@ We can then use the `OdeBuilder` struct to specify the sensitivity problem. The 
 ## Solving the sensitivity problem
 
 Once the sensitivity problem has been specified, we can solve it using the [`OdeSolverMethod`](https://docs.rs/diffsol/latest/diffsol/ode_solver/method/trait.OdeSolverMethod.html) trait. 
-Lets imagine we want to solve the sensitivity problem up to a time \\(t_o = 10\\). We can use the `OdeSolverMethod` trait to solve the problem as normal, stepping forward in time until we reach \\(t_o\\).
+Let's imagine we want to solve the sensitivity problem up to a time \\(t_o = 5\\). We can use the `OdeSolverMethod` trait to solve the problem as normal, stepping forward in time until we reach \\(t_o\\).
 
 ```rust,ignore
 {{#include ../../../../examples/intro-logistic-closures/src/solve_fwd_sens_step.rs}}

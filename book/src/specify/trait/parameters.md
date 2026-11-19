@@ -25,16 +25,16 @@ struct MyModel {
 
 These parameters could then be used in your implementation of [`NonLinearOp`](https://docs.rs/diffsol/latest/diffsol/op/nonlinear_op/trait.NonLinearOp.html), or any other diffsol trait. However,
 it is *entirely up to you* if you report these to diffsol as parameters or not. You could
-set `nparams` in the [`Op`](https://docs.rs/diffsol/latest/diffsol/op/trait.Op.html) trait to
-2 and implement the `set_params` and `get_params` methods to set/get both `parameter_a` and
-`parameter_b`, or you can set `nparams` to 0 and just set `parameter_a` and `parameter_b` manually
-via their `pub` fields on the struct, its up to you. This also gives you flexibility to
-use parameter types that ain't supported by diffsol, for example `int`, `bool`, or arbitrary structs.
+return 2 from `nparams` in the [`Op`](https://docs.rs/diffsol/latest/diffsol/op/trait.Op.html) trait
+and implement the `set_params` and `get_params` methods of the [`OdeEquations`](https://docs.rs/diffsol/latest/diffsol/ode_equations/trait.OdeEquations.html) trait to set/get both `parameter_a` and
+`parameter_b`, or you can return 0 from `nparams` and just set `parameter_a` and `parameter_b` manually
+via their `pub` fields on the struct, it's up to you. This also gives you flexibility to
+use parameter types that aren't supported by diffsol, for example `int`, `bool`, or arbitrary structs.
 
 ```rust,ignore
 struct MyModel {
   pub parameter_a: f64,
-  pub parameter_b: Hashmap<String, f64>,
+  pub parameter_b: HashMap<String, f64>,
 }
 ```
 
@@ -54,7 +54,7 @@ consistent on the number and ordering of the parameters that you are reporting t
 
 ## Varying parameters
 
-The rust borrow checker governs any change to your model. Any change in a parameter of your model, whether its a parameter you have reported to diffsol or otherwise, requires a mutation of your `OdeEquations` struct. Each solver that you create takes a reference to
+The rust borrow checker governs any change to your model. Any change in a parameter of your model, whether it's a parameter you have reported to diffsol or otherwise, requires a mutation of your `OdeEquations` struct. Each solver that you create takes a reference to
 [`OdeSolverProblem`](https://docs.rs/diffsol/latest/diffsol/ode_solver/problem/struct.OdeSolverProblem.html), and therefore to your custom `OdeEquations` struct, so you won't
-be able to mutate it until you drop all the solvers with that reference. Given any instance of `OdeSolverProblem`, you can get a mutable reference to you custom `OdeEquations` struct using
+be able to mutate it until you drop all the solvers with that reference. Given any instance of `OdeSolverProblem`, you can get a mutable reference to your custom `OdeEquations` struct using
 [`OdeSolverProblem::eqn_mut`](https://docs.rs/diffsol/latest/diffsol/ode_solver/problem/struct.OdeSolverProblem.html#method.eqn_mut).

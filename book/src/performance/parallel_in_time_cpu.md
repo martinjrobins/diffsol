@@ -1,6 +1,6 @@
 # Parallel-in-Time (DEER)
 
-Here we will illustrate the application of diffsol to a parallel-in-time method for solving a nonlinear ODE, the DEER algorithm introduced in [Lim et. al.](https://proceedings.iclr.cc/paper_files/paper/2024/hash/f3bfbd65743e60c685a3845bd61ce15f-Abstract-Conference.html). The example will use the forced the forced Duffing oscillator, a nonlinear second order ODE, and utilize the DEER algorithm to solve it in parallel across multiple time chunks using CPU threads and the `rayon` crate.
+Here we will illustrate the application of diffsol to a parallel-in-time method for solving a nonlinear ODE. The method is based on the DEER algorithm introduced in [Lim et al.](https://proceedings.iclr.cc/paper_files/paper/2024/hash/f3bfbd65743e60c685a3845bd61ce15f-Abstract-Conference.html). DEER linearises the ODE at each time step of the discretised solution, but the DEER-style method in this example applies Newton's method only to the states at the boundaries of time chunks (multiple shooting), and uses an ODE solver with forward sensitivities in each chunk. In both methods, a parallel scan solves the resulting linear recurrence. The example will use the forced Duffing oscillator, a nonlinear second order ODE, and solve it in parallel across multiple time chunks using CPU threads and the `rayon` crate.
 
 First we will define a few types, we will use the nalgebra backend and matrix/vector types, and a f64 scalar type.
 
@@ -137,12 +137,12 @@ We do not expect perfect linear scaling with the number of threads, since:
 
 - the parallel scan requires \\(O(\log N)\\) rounds of combining
 - the initial coarse solve is serial
-- each solve chuck is an adaptive solve, so slower solves will hold up the faster ones
+- each chunk solve is an adaptive solve, so slower solves will hold up the faster ones
 
-Here we see a maximum speedup of just over 5x with 25-30 threads and a total of 96 chunks. Some possible improvements that we could make to this example are:
+The plot below shows the speedup compared to a sequential solve, and compared to the same method on 1 thread. With a total of 96 chunks, the maximum speedup compared to the sequential solve is approximately 5.2x with 30 threads (and approximately 4.8x with 24 threads). On 1 thread, the method is approximately 2.5 times slower than the sequential solve, because it solves every chunk at each Newton iteration and also computes the sensitivities. Some possible improvements that we could make to this example are:
 
-- We are not getting much advantage out of the parallel scan, since its only 96 compositions of 2x2 matrices. A more expensive composition (more states or more chunks) could help here.
-- The coarse solve is serial so is limiting the speedup, could investigate an even looser tolerance, or if the solve was more expensive (see first point), could try removing this rely on more newton iterations.
+- We are not getting much advantage out of the parallel scan, since it's only 96 compositions of 2x2 matrices. A more expensive composition (more states or more chunks) could help here.
+- The coarse solve is serial, so it limits the speedup. We could try an even looser tolerance. Or, if the solve was more expensive (see first point), we could remove the coarse solve and rely on more Newton iterations.
 - We solve every chunk at each newton iteration, but the chunks that have already converged could be skipped in later iterations (e.g. the first chunk is always exact)
 - Each chunk solve creates a new solver, but we could reuse the solvers between iterations and reset them to the new initial condition, which would save some setup time.
 - Could reuse the first iteration's jacobians, since these only need to be approximate.

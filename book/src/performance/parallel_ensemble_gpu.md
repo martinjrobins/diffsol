@@ -2,9 +2,9 @@
 
 The model used in this example represents `nbuses` electrical generators, each tied to all the others through a network of transmission lines. Each generator bus is described by the swing equation, a second-order ODE describing the dynamics of the generator's rotor angle and frequency. The implementation writes this as a system of first-order ODEs.
 
-We introduce uncertainty into the model by adding an uncertain additional demand at bus 0, drawn from a normal distribution. The goal is to solve many instances of the model and obtain the maximum speed deviation for each ensemble member.
+We introduce uncertainty into the model by adding an uncertain additional demand at bus 0, drawn from a normal distribution. The goal is to solve many instances of the model and obtain the maximum frequency deviation (Hz) for each ensemble member.
 
-We will solve this ensemble of models in parallel, both with the GPU and CPU, using diffsol's batching features and using the `cuda-oxide` and `nalgebra` backends.
+We will solve this ensemble of models in parallel on both the GPU and the CPU. The GPU version uses diffsol's batching features with the `cuda-oxide` backend, and solves all samples in one batched solve. The CPU version uses the `nalgebra` backend and the `rayon` crate, and solves one unbatched problem per sample.
 
 The swing equation is a non-linear ODE, and is given by:
 
@@ -21,7 +21,7 @@ where:
 - \\(\omega_i\\): speed deviation at bus \\(i\\) from the reference frame, radians per second
 - \\(B\\): pairwise line susceptance (how strongly each transmission line transfers power between two buses)
 - \\(d\\): uncertain additional demand at bus \\(0\\)
-- \\(\mathbf{1}_{i=0}\\): equals \(1\) at bus \\(0\\), otherwise \\(0\\)
+- \\(\mathbf{1}_{i=0}\\): equals \\(1\\) at bus \\(0\\), otherwise \\(0\\)
 
 First, we write the model using diffsol's `OdeEquations` trait. We cannot use the easier builder and closures API because it is not supported for GPU models.
 
@@ -53,25 +53,27 @@ We can then solve the ensemble of ODEs on the GPU using the standard diffsol sol
 {{#include ../../../examples/performance-gpu-ensemble/src/ensemble.rs:solve_gpu}}
 ```
 
-We want to display the distribution of maximum speed deviation across the ensemble of ODEs, so we use the lower-level `step` API to advance the equations in time. At each time step, `reduce_elem` computes one maximum speed deviation per batch lane, avoiding the need to hold the entire trajectory in memory.
+We want to display the distribution of the maximum frequency deviation across the ensemble of ODEs, so we use the lower-level `step` API to advance the equations in time. At each time step, `reduce_elem` computes one maximum speed deviation per batch lane, avoiding the need to hold the entire trajectory in memory. At the end, we convert each value from radians per second to a frequency deviation in Hz.
 
 ```rust,ignore
 {{#include ../../../examples/performance-gpu-ensemble/src/ensemble.rs:reduce}}
 ```
 
-We can then plot the histogram of the maximum speed deviation across the ensemble, which is shown below:
+We can then plot the histogram of the maximum frequency deviation (Hz) across the ensemble, which is shown below:
 
 {{#include images/gpu_ensemble_frequency.html}}
 
 ## GPU versus CPU
 
-It is useful to compare the GPU batch solves against a CPU parallel implementation using the `rayon` crate. The CPU version uses `map_init` to create a `SwingEqn` problem for each worker, then solves one ODE per sample in parallel using the thread pool.
+It is useful to compare the GPU batch solves against a CPU parallel implementation using the `rayon` crate. The CPU version uses `map_init` to create a `SwingEqn` problem, then solves one ODE per sample in parallel using the thread pool. Rayon calls the `map_init` initialiser once for each piece of work that it splits off, not once for each thread, so it can create more problems than there are threads.
 
 ```rust,ignore
 {{#include ../../../examples/performance-gpu-ensemble/src/ensemble.rs:solve_cpu}}
 ```
 
-To show the relative performance, we loop over different ensemble sizes and, for each size, time the GPU and CPU solves. We take the median of 15 runs to reduce noise. The results are plotted below.
+To show the relative performance, we loop over different ensemble sizes and, for each size, time the GPU and CPU solves. We take the median of 15 runs to reduce noise. The plot below shows the results for both double precision (f64) and single precision (f32).
+
+{{#include images/gpu_ensemble_scaling.html}}
 
 ### Double precision
 
@@ -79,6 +81,4 @@ Below an ensemble size of 100, fixed costs such as kernel launches, allocation, 
 
 ### Single precision
 
-Here we run the solves with lower tolerances that can be resolved using f32 (`rtol = 1e-4` and `atol = 1e-6` for f32 versus `rtol = 1e-6` and `atol = 1e-8` for f64), so the solver takes fewer steps and is faster than the f64 results for both CPU and GPU. Below an ensemble size of 50 the relative performance of both hardware is similar, but above this value the CPUs are saturated and the scaling moves into the linear regime. The GPU is able to maintain its flat profile at significantly higher ensemble sizes than with f64, and so when it transitions to the linear regime it is almost an order of magnitude faster than the CPU solves, reflecting the A40's much higher FP32 throughput.
-
-{{#include images/gpu_ensemble_scaling.html}}
+Here we run the solves with looser tolerances that can be resolved using f32 (`rtol = 1e-4` and `atol = 1e-6` for f32 versus `rtol = 1e-6` and `atol = 1e-8` for f64), so the solver takes fewer steps and is faster than the f64 results for both CPU and GPU. Below an ensemble size of 50 the relative performance of both hardware is similar, but above this value the CPUs are saturated and the scaling moves into the linear regime. The GPU is able to maintain its flat profile at significantly higher ensemble sizes than with f64, and so when it transitions to the linear regime it is almost an order of magnitude faster than the CPU solves, reflecting the A40's much higher FP32 throughput.

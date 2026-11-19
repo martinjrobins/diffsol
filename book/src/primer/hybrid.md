@@ -2,7 +2,7 @@
 
 Thus far we have considered ODEs that have a single behaviour over time and have introduced discrete events as a way to model systems that have sudden changes in behaviour. However, many systems have multiple modes of behaviour that are active at different times, which we will refer to as hybrid ODEs. These modes could be different discrete events (e.g. dosing protocols) or could be entirely different ODE dynamics (e.g. an epidemic model with policy switching).
 
-In order to model these systems, we will extend our first order ODE formulation to encompass a *set* of ODEs that are indexed by a discrete variable \(N\). This variable can be thought of as a "model index" that determines which ODE is active at any given time. The dynamics of the system are then governed by the following equations:
+In order to model these systems, we will extend our first order ODE formulation to encompass a *set* of ODEs that are indexed by a discrete variable \\(N\\). This variable can be thought of as a "model index" that determines which ODE is active at any given time. The dynamics of the system are then governed by the following equations:
 
 \\[
 \begin{align*}

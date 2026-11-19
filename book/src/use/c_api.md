@@ -11,7 +11,7 @@ On Debian 12 (bookworm) and 13 (trixie), and on Ubuntu 22.04 (jammy) and 24.04 (
 amd64 and arm64, you can install the library with apt. You do not need Rust. There are two
 packages:
 
-- `libdiffsol<version>`, for example `libdiffsol0.7`: the shared library `libdiffsol.so`. The
+- `libdiffsol<soversion>`, for example `libdiffsol0.9` for diffsol-c 0.9.x: the shared library `libdiffsol.so`. Before version 1.0, the soversion is the major and minor version of diffsol-c. The
   library has the Cranelift and LLVM JIT backends, and it can load DiffSL code that was compiled
   before. It uses the LLVM library of the distribution: `libllvm19` on Debian 12, Debian 13 and
   Ubuntu 24.04, and `libllvm15` on Ubuntu 22.04. apt installs it as a dependency.
@@ -28,11 +28,11 @@ sudo apt install libdiffsol-dev
 You can also get the packages from the assets of the diffsol-c
 [GitHub release](https://github.com/martinjrobins/diffsol/releases). There are packages for each
 distribution: the codename of the distribution is part of the package version, for example
-`libdiffsol0.7_0.7.0-1~noble_amd64.deb`. Install the two packages of your distribution and
+`libdiffsol0.9_0.9.0-1~noble_amd64.deb`. Install the two packages of your distribution and
 architecture, for example on Ubuntu 24.04:
 
 ```sh
-sudo apt install ./libdiffsol0.7_*~noble_amd64.deb ./libdiffsol-dev_*~noble_amd64.deb
+sudo apt install ./libdiffsol0.9_*~noble_amd64.deb ./libdiffsol-dev_*~noble_amd64.deb
 ```
 
 Then compile and link a program with pkg-config:
@@ -201,7 +201,7 @@ callbacks, and the ownership rules of `user_data`.
 ```
 
 Put the callbacks in a `DiffsolOdeCallbacksF64` descriptor, and create the solver. Only `rhs`
-and `init` are necessary for an explict solver like Tsit45. A `NULL` callback is not given. If a solve needs a callback that is
+and `init` are necessary for an explicit solver like Tsit45. A `NULL` callback is not given. If a solve needs a callback that is
 not given, the solve returns an error that gives the name of the callback. For example, the
 implicit methods (such as BDF) need `rhs_jac`.
 
@@ -231,6 +231,8 @@ Select a JIT backend that the library has, and create the solver:
 ```c
 {{#include ../../../examples/diffsol-c-logistic/c/logistic_diffsl_jit.c:create}}
 ```
+
+The DiffSL constructors (`diffsol_ode_new_jit`, `diffsol_ode_new_external` and `diffsol_ode_new_external_dynamic`) do not have a scalar type argument. They always use `f64`.
 
 The solve is the same as in the callbacks example.
 

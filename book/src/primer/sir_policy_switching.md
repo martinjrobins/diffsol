@@ -38,23 +38,20 @@ N^+ =
 \end{cases}
 \\]
 
-This can be encoded with a single mode-dependent stopping condition,
+We encode this with a vector of two stopping conditions. Both conditions are active in both modes:
 
 \\[
-\mathbf{s}(\mathbf{y}) = I - \mathbf{h},
-\\]
-
-where
-
-\\[
-h =
-\begin{bmatrix}
-I_\text{low} \\\\
-I_\text{high}
+\mathbf{s}(\mathbf{y}, t) = \begin{bmatrix}
+I - I_\text{low} \\\\
+I - I_\text{high}
 \end{bmatrix}
 \\]
 
-In DiffSL we write the two transmission rates and two thresholds as vectors indexed by `N`. We implement the changes in model index \\(N\\) by setting the model index to whichever root index is true for \\(\mathbf{s}\\). As for the dosing model, we use a [`Solution`](https://docs.rs/diffsol/latest/diffsol/ode_solver/solution/struct.Solution.html) struct and [`solve_soln`](https://docs.rs/diffsol/latest/diffsol/ode_solver/method/trait.OdeSolverMethod.html#method.solve_soln) methods to stop through the different segments of the hybrid model, after each segment using the root index found (`root_idx`) to set the value for \\(N\\).
+When a stopping condition is satisfied, we set \\(N\\) to the index of that condition (the root index). Thus \\(I = I_\text{low}\\) (index 0) sets the open-policy mode, and \\(I = I_\text{high}\\) (index 1) sets the lockdown mode. If the infected population crosses a threshold that gives the current mode, \\(N\\) does not change. This gives the hysteresis above.
+
+The example uses \\(P = 1000\\), \\(\gamma = 0.1\\), \\(\beta_\text{open} = 0.3\\), \\(\beta_\text{lockdown} = 0.08\\), \\(I_\text{low} = 20\\) and \\(I_\text{high} = 100\\). The initial state is \\(S = 999\\), \\(I = 1\\) and \\(R = 0\\), and the simulation ends at \\(t = 300\\) days.
+
+In DiffSL we write the two transmission rates and two thresholds as vectors. The transmission rate uses the index `N`. As for the dosing model, we use a [`Solution`](https://docs.rs/diffsol/latest/diffsol/ode_solver/solution/struct.Solution.html) struct and [`solve_soln`](https://docs.rs/diffsol/latest/diffsol/ode_solver/method/trait.OdeSolverMethod.html#method.solve_soln) methods to step through the different segments of the hybrid model. After each segment, we use the root index found (`root_idx`) to set the value for \\(N\\).
 
 ```rust,ignore
 {{#include ../../../examples/epidemic-sir-policy-switching/src/main.rs}}

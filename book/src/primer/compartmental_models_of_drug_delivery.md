@@ -11,7 +11,7 @@ PK enables the following processes to be quantified:
 - Metabolism
 - Excretion
 
-These are often referred to as ADME, and taken together describe the drug concentration in the body when medicine is prescribed. These ADME processes are typically described by zeroth-order or first-order *rate* reactions modelling the dynamics of the quantity of drug $q$, with a given rate parameter $k$, for example:
+These are often referred to as ADME, and taken together describe the drug concentration in the body when medicine is prescribed. These ADME processes are typically described by zeroth-order or first-order *rate* reactions modelling the dynamics of the quantity of drug \\(q\\), with a given rate parameter \\(k\\), for example:
 
 \\[
 \frac{dq}{dt} = -k^*,
@@ -25,7 +25,7 @@ The body itself is modelled as one or more *compartments*, each of which is defi
 
 ![Fig 2](images/pk2.svg)
 
-The following example PK model describes the two-compartment model shown diagrammatically in the figure above. The time-dependent variables to be solved are the drug quantity in the central and peripheral compartments, $q_c$ and $q_{p1}$ (units: [ng]) respectively.
+The following example PK model describes the two-compartment model shown diagrammatically in the figure above. The time-dependent variables to be solved are the drug quantity in the central and peripheral compartments, \\(q_c\\) and \\(q_{p1}\\) (units: [ng]) respectively.
 
 \\[
 \frac{dq_c}{dt} = \text{Dose}(t) - \frac{q_c}{V_c} CL - Q_{p1} \left ( \frac{q_c}{V_c} - \frac{q_{p1}}{V_{p1}} \right ),
@@ -35,7 +35,7 @@ The following example PK model describes the two-compartment model shown diagram
 \frac{dq_{p1}}{dt} =  Q_{p1} \left ( \frac{q_c}{V_c} - \frac{q_{p1}}{V_{p1}} \right ).
 \\]
 
-This model describes an *intravenous bolus* dosing protocol, with a linear clearance from the central compartment (non-linear clearance processes are also possible, but not considered here). The dose function $\text{Dose}(t)$ will consist of instantaneous doses of $X$ ng of the drug at one or more time points. The other input parameters to the model are:
+This model describes an *intravenous bolus* dosing protocol, with a linear clearance from the central compartment (non-linear clearance processes are also possible, but not considered here). The dose function \\(\text{Dose}(t)\\) will consist of instantaneous doses of \\(X\\) ng of the drug at one or more time points. The other input parameters to the model are:
 
 - \\(V_c\\) [mL], the volume of the central compartment
 - \\(V_{p1}\\) [mL], the volume of the first peripheral compartment
@@ -68,7 +68,7 @@ We will also need to specify the initial conditions for the system:
 \mathbf{y}(0) = \begin{bmatrix} 0 \\\\ 0 \end{bmatrix}
 \\]
 
-For the dose function, we will specify a dose of 1000 ng at regular intervals of 6 hours. We will also specify the other parameters of the model:
+For the dose function, we will specify a dose of 1000 ng at regular intervals of 6 hours, at \\(t = 0\\), \\(6\\), \\(12\\) and \\(18\\) hours. The simulation ends at \\(t = 24\\) hours. We will also specify the other parameters of the model:
 
 \\[
 V_c = 1000 \text{ mL}, \quad V_{p1} = 1000 \text{ mL}, \quad CL = 100 \text{ mL/h}, \quad Q_{p1} = 50 \text{ mL/h}
@@ -76,7 +76,7 @@ V_c = 1000 \text{ mL}, \quad V_{p1} = 1000 \text{ mL}, \quad CL = 100 \text{ mL/
 
 ## Procedural approach
 
-To implement the discrete dose events procedurally, we set a stop time for the simulation at each dose event using the [OdeSolverMethod::set_stop_time](https://docs.rs/diffsol/latest/diffsol/ode_solver/method/trait.OdeSolverMethod.html#tymethod.set_stop_time) method. During time-stepping we can check the return value of the [OdeSolverMethod::step](https://docs.rs/diffsol/latest/diffsol/ode_solver/method/trait.OdeSolverMethod.html#tymethod.step) method to see if the solver has reached the stop time. If it has, we apply the dose directly to the state and continue the simulation.
+To implement the discrete dose events procedurally, we set a stop time for the simulation at each dose event using the [OdeSolverMethod::set_stop_time](https://docs.rs/diffsol/latest/diffsol/ode_solver/method/trait.OdeSolverMethod.html#tymethod.set_stop_time) method. During time-stepping we can check the return value of the [OdeSolverMethod::step](https://docs.rs/diffsol/latest/diffsol/ode_solver/method/trait.OdeSolverMethod.html#tymethod.step) method to see if the solver has reached the stop time. If it has, we apply the dose directly to the state and continue the simulation. After the last dose, we solve to the final time of 24 hours.
 
 ```rust,ignore
 {{#include ../../../examples/compartmental-models-drug-delivery/src/main.rs}}

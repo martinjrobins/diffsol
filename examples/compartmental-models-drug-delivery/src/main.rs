@@ -1,6 +1,6 @@
 use diffsol::{CraneliftJitModule, OdeBuilder, OdeSolverMethod, OdeSolverStopReason};
 use plotly::{common::Mode, layout::Axis, layout::Layout, Plot, Scatter};
-use std::fs;
+use std::{fs, path::PathBuf};
 type M = diffsol::NalgebraMat<f64>;
 type CG = CraneliftJitModule;
 type LS = diffsol::NalgebraLU<f64>;
@@ -34,8 +34,14 @@ fn main() {
     peripheral_amount.push(solver.state().y[1]);
     time.push(0.0);
 
-    // solve and apply the remaining doses
-    for (t, dose) in doses.into_iter().skip(1) {
+    // solve to each remaining dose time and apply the dose,
+    // then solve to the final time (a zero dose at t = 24 h)
+    let final_time = 24.0;
+    let segments = doses
+        .into_iter()
+        .skip(1)
+        .chain(std::iter::once((final_time, 0.0)));
+    for (t, dose) in segments {
         solver.set_stop_time(t).unwrap();
         loop {
             let ret = solver.step();
@@ -64,6 +70,8 @@ fn main() {
         .x_axis(Axis::new().title("t [h]"))
         .y_axis(Axis::new().title("amount [ng]"));
     plot.set_layout(layout);
+    let output_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../book/src/primer/images/drug-delivery.html");
     let plot_html = plot.to_inline_html(Some("drug-delivery"));
-    fs::write("../src/primer/images/drug-delivery.html", plot_html).expect("Unable to write file");
+    fs::write(output_path, plot_html).expect("Unable to write file");
 }
