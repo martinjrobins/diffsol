@@ -101,21 +101,34 @@ where
     {
         let state0_ref = state0.as_ref();
         let state1_ref = state1.as_ref();
-        self.ys.clear();
-        self.ydots.clear();
+        // overwrite the stored vectors in place and allocate only when the segment is longer
         self.ts.clear();
-        self.ys.push(state0_ref.y.clone());
-        self.ydots.push(state0_ref.dy.clone());
-        self.ts.push(state0_ref.t);
+        self.store(0, state0_ref.y, state0_ref.dy, state0_ref.t);
 
         solver.set_state(state0.clone());
+        let mut result = Ok(());
         while solver.state().t < state1_ref.t {
-            solver.step()?;
-            self.ys.push(solver.state().y.clone());
-            self.ydots.push(solver.state().dy.clone());
-            self.ts.push(solver.state().t);
+            if let Err(e) = solver.step() {
+                result = Err(e);
+                break;
+            }
+            let state = solver.state();
+            self.store(self.ts.len(), state.y, state.dy, state.t);
         }
-        Ok(())
+        self.ys.truncate(self.ts.len());
+        self.ydots.truncate(self.ts.len());
+        result
+    }
+
+    fn store(&mut self, i: usize, y: &V, dy: &V, t: V::T) {
+        if i < self.ys.len() {
+            self.ys[i].copy_from(y);
+            self.ydots[i].copy_from(dy);
+        } else {
+            self.ys.push(y.clone());
+            self.ydots.push(dy.clone());
+        }
+        self.ts.push(t);
     }
 
     /// Interpolate the solution at a given time point.
@@ -137,11 +150,11 @@ where
             y.copy_from(&self.ys[0]);
             return Some(());
         }
+        // ts is strictly increasing, so a binary search gives the first t0 > t
         let idx = self
             .ts
-            .iter()
-            .position(|&t0| t0 > t)
-            .unwrap_or(self.ts.len() - 1);
+            .partition_point(|&t0| t0 <= t)
+            .min(self.ts.len() - 1);
         let t0 = self.ts[idx - 1];
         let t1 = self.ts[idx];
         let h = t1 - t0;

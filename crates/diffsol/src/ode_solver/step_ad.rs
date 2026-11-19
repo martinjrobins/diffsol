@@ -42,8 +42,7 @@ use crate::{
     ode_solver_error, ConstantOpSensAdjoint, Context, DefaultDenseMatrix, DefaultSolver,
     DenseMatrix, LinearOp, LinearSolver, Matrix, MatrixCommon, MatrixOp, NonLinearOp,
     NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSensAdjoint, OdeEquationsImplicitAdjoint,
-    OdeSolverMethod, OdeSolverState, OdeSolverStopReason, Op, Vector, VectorIndex, VectorView,
-    VectorViewMut,
+    OdeSolverMethod, OdeSolverState, OdeSolverStopReason, Op, Vector, VectorIndex, VectorViewMut,
 };
 use diffsol_la::LinearSolver as LaLinearSolver;
 use num_traits::Zero;
@@ -184,8 +183,9 @@ pub trait StepVjp<'a, Eqn: OdeEquationsImplicitAdjoint + 'a>: OdeSolverMethod<'a
         let mut loss = Eqn::V::zeros(1, ctx.clone());
         let mut dgdu_eval = ctx.dense_mat_zeros::<Eqn::V>(nout, t_eval.len());
         let mut dgdu_i = Eqn::V::zeros(nout, ctx.clone());
+        let mut u = Eqn::V::zeros(nout, ys.context().clone());
         for (i, &t) in t_eval.iter().enumerate() {
-            let u = ys.column(i).into_owned();
+            u.copy_from_view(&ys.column(i));
             g(i, t, &u, &mut loss);
             dgdu_i.fill(Eqn::T::zero());
             dgdu(i, t, &u, &mut dgdu_i);
@@ -399,16 +399,17 @@ pub trait StepVjp<'a, Eqn: OdeEquationsImplicitAdjoint + 'a>: OdeSolverMethod<'a
             .rev()
             .peekable();
         let mut p_bar_steps = Eqn::V::zeros(nparams, ctx.clone());
+        let mut dgdu_i = Eqn::V::zeros(nout, ctx.clone());
         for (k, checkpoint) in tape.checkpoints.iter().enumerate().rev() {
             while let Some((i, ((_, y_i), t))) = records.next_if(|(_, ((n, _), _))| *n == k + 1) {
-                let dgdu_i = dgdu_eval.column(i).into_owned();
+                dgdu_i.copy_from_view(&dgdu_eval.column(i));
                 dgdy(*t, y_i, &dgdu_i, &mut y_bar);
                 self.interpolate_vjp(checkpoint, *t, &y_bar, &mut cot)?;
             }
             self.step_vjp(checkpoint, &mut cot, &mut p_bar_steps)?;
         }
         for (i, ((_, y_i), t)) in records {
-            let dgdu_i = dgdu_eval.column(i).into_owned();
+            dgdu_i.copy_from_view(&dgdu_eval.column(i));
             dgdy(*t, y_i, &dgdu_i, &mut y_bar);
             cot.as_mut().y.add_assign(&y_bar);
         }

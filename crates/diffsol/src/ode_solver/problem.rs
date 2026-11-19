@@ -3,11 +3,11 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     error::DiffsolError, vector::Vector, AdjointContext, AdjointEquations, AugmentedOdeEquations,
-    AugmentedOdeEquationsImplicit, Bdf, BdfState, CheckpointingPath, Context, DefaultDenseMatrix,
-    DenseMatrix, ExplicitRk, LinearSolver, MatrixRef, NewtonNonlinearSolver, NoLineSearch,
-    OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
-    OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverState, RkState, Scalar, Sdirk,
-    SensEquations, Tableau, VectorRef,
+    AugmentedOdeEquationsImplicit, BacktrackingLineSearch, Bdf, BdfState, CheckpointingPath,
+    Context, DefaultDenseMatrix, DenseMatrix, ExplicitRk, LinearSolver, MatrixRef,
+    NewtonNonlinearSolver, NoLineSearch, OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit,
+    OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverState,
+    RkState, Scalar, Sdirk, SensEquations, Tableau, VectorRef,
 };
 
 /// Options for the initial condition solver used to find consistent initial conditions
@@ -39,6 +39,17 @@ impl<T: Scalar> Default for InitialConditionSolverOptions<T> {
             step_reduction_factor: T::from_f64(0.5).unwrap(),
             armijo_constant: T::from_f64(1e-4).unwrap(),
         }
+    }
+}
+
+impl<T: Scalar> InitialConditionSolverOptions<T> {
+    /// The backtracking line search for the initial condition solve, set from these options.
+    pub(crate) fn line_search<V: Vector<T = T>>(&self) -> BacktrackingLineSearch<V> {
+        let mut ls = BacktrackingLineSearch::default();
+        ls.c = self.armijo_constant;
+        ls.max_iter = self.max_linesearch_iterations;
+        ls.tau = self.step_reduction_factor;
+        ls
     }
 }
 
@@ -760,7 +771,6 @@ where
         let t = augmented_eqn.last_t();
         let mut newton_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
         let mut state = BdfState::new_without_initialise_augmented_at(self, augmented_eqn, t)?;
-        *state.as_mut().t = t;
         if let Some(h) = h {
             *state.as_mut().h = -h;
         }
@@ -1022,7 +1032,6 @@ where
         let t = augmented_eqn.last_t();
         let h = augmented_eqn.last_h();
         let mut state = RkState::new_without_initialise_augmented_at(self, augmented_eqn, t)?;
-        *state.as_mut().t = t;
         if let Some(h) = h {
             *state.as_mut().h = -h;
         }
@@ -1036,7 +1045,7 @@ where
         let rtol = self.rtol;
         state
             .as_mut()
-            // see the comment in `bdf_state_adjoint_from_state`
+            // see the comment in `bdf_state_adjoint`
             .set_step_size(h, atol, rtol, &self.eqn, tableau.order());
         Ok(state)
     }
@@ -1187,7 +1196,6 @@ where
         let t = augmented_eqn.last_t();
         let h = augmented_eqn.last_h();
         let mut state = RkState::new_without_initialise_augmented_at(self, augmented_eqn, t)?;
-        *state.as_mut().t = t;
         if let Some(h) = h {
             *state.as_mut().h = -h;
         }
@@ -1197,7 +1205,7 @@ where
         let rtol = self.rtol;
         state
             .as_mut()
-            // see the comment in `bdf_state_adjoint_from_state`
+            // see the comment in `bdf_state_adjoint`
             .set_step_size(h, atol, rtol, &self.eqn, tableau.order());
         Ok(state)
     }

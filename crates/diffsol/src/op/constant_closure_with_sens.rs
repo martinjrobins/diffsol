@@ -1,6 +1,6 @@
+use crate::jacobian::sparsity_and_coloring;
 use crate::{
     jacobian::{find_constant_sens_non_zeros, JacobianColoring},
-    matrix::sparsity::MatrixSparsity,
     ConstantOp, ConstantOpSens, Matrix, Op, Vector,
 };
 
@@ -43,15 +43,10 @@ where
     pub fn calculate_sens_sparsity(&mut self, t0: M::T, p: &M::V) {
         let op = ParameterisedOp { op: self, p };
         let non_zeros = find_constant_sens_non_zeros(&op, t0);
-        self.sens_sparsity = Some(
-            MatrixSparsity::try_from_indices(self.nout(), p.len(), non_zeros.clone())
-                .expect("invalid sparsity pattern"),
-        );
-        self.sens_coloring = Some(JacobianColoring::new(
-            self.sens_sparsity.as_ref().unwrap(),
-            &non_zeros,
-            self.ctx.clone(),
-        ));
+        let (sparsity, coloring) =
+            sparsity_and_coloring(self.nout(), p.len(), non_zeros, self.ctx.clone());
+        self.sens_sparsity = Some(sparsity);
+        self.sens_coloring = Some(coloring);
     }
 }
 

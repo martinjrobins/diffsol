@@ -1,9 +1,7 @@
 use std::cell::RefCell;
 
-use crate::{
-    find_matrix_non_zeros, jacobian::JacobianColoring, matrix::sparsity::MatrixSparsity, LinearOp,
-    Matrix, Op, Vector,
-};
+use crate::jacobian::sparsity_and_coloring;
+use crate::{find_matrix_non_zeros, jacobian::JacobianColoring, LinearOp, Matrix, Op, Vector};
 
 use super::{BuilderOp, OpStatistics, ParameterisedOp};
 
@@ -43,15 +41,10 @@ where
     pub fn calculate_sparsity(&mut self, t0: M::T, p: &M::V) {
         let op = ParameterisedOp { op: self, p };
         let non_zeros = find_matrix_non_zeros(&op, t0);
-        self.sparsity = Some(
-            MatrixSparsity::try_from_indices(self.nout(), self.nstates(), non_zeros.clone())
-                .expect("invalid sparsity pattern"),
-        );
-        self.coloring = Some(JacobianColoring::new(
-            self.sparsity.as_ref().unwrap(),
-            &non_zeros,
-            self.ctx.clone(),
-        ));
+        let (sparsity, coloring) =
+            sparsity_and_coloring(self.nout(), self.nstates(), non_zeros, self.ctx.clone());
+        self.sparsity = Some(sparsity);
+        self.coloring = Some(coloring);
     }
 }
 

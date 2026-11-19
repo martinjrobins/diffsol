@@ -1,8 +1,9 @@
 use std::cell::RefCell;
 
+use crate::jacobian::sparsity_and_coloring;
 use crate::{
     jacobian::{find_jacobian_non_zeros, find_sens_non_zeros, JacobianColoring},
-    Matrix, MatrixSparsity, NonLinearOp, NonLinearOpJacobian, NonLinearOpSens, Op, Vector,
+    Matrix, NonLinearOp, NonLinearOpJacobian, NonLinearOpSens, Op, Vector,
 };
 
 use super::{BuilderOp, OpStatistics, ParameterisedOp};
@@ -60,29 +61,19 @@ where
     pub fn calculate_jacobian_sparsity(&mut self, y0: &M::V, t0: M::T, p: &M::V) {
         let op = ParameterisedOp { op: self, p };
         let non_zeros = find_jacobian_non_zeros(&op, y0, t0);
-        self.sparsity = Some(
-            MatrixSparsity::try_from_indices(self.nout(), self.nstates(), non_zeros.clone())
-                .expect("invalid sparsity pattern"),
-        );
-        self.coloring = Some(JacobianColoring::new(
-            self.sparsity.as_ref().unwrap(),
-            &non_zeros,
-            self.ctx.clone(),
-        ));
+        let (sparsity, coloring) =
+            sparsity_and_coloring(self.nout(), self.nstates(), non_zeros, self.ctx.clone());
+        self.sparsity = Some(sparsity);
+        self.coloring = Some(coloring);
     }
     pub fn calculate_sens_sparsity(&mut self, y0: &M::V, t0: M::T, p: &M::V) {
         let op = ParameterisedOp { op: self, p };
         let non_zeros = find_sens_non_zeros(&op, y0, t0);
         let nparams = p.len();
-        self.sens_sparsity = Some(
-            MatrixSparsity::try_from_indices(self.nout(), nparams, non_zeros.clone())
-                .expect("invalid sparsity pattern"),
-        );
-        self.sens_coloring = Some(JacobianColoring::new(
-            self.sens_sparsity.as_ref().unwrap(),
-            &non_zeros,
-            self.ctx.clone(),
-        ));
+        let (sparsity, coloring) =
+            sparsity_and_coloring(self.nout(), nparams, non_zeros, self.ctx.clone());
+        self.sens_sparsity = Some(sparsity);
+        self.sens_coloring = Some(coloring);
     }
 }
 

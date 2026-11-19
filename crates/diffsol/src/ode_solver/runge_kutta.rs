@@ -436,11 +436,8 @@ where
         &mut self.state
     }
 
-    pub(crate) fn state_mut_back(
-        &mut self,
-        t: M::T,
-        integrate_out: bool,
-    ) -> Result<(), DiffsolError> {
+    pub(crate) fn state_mut_back(&mut self, t: M::T) -> Result<(), DiffsolError> {
+        let integrate_out = self.problem.integrate_out;
         let nstates = self.state.y.len();
         let ctx = self.state.y.context().clone();
         let mut y = Eqn::V::zeros(nstates, ctx.clone());

@@ -158,6 +158,20 @@ pub struct JacobianColoring<M: Matrix> {
     scratch_col: RefCell<M::V>,
 }
 
+/// Build the sparsity pattern of a `nrows` x `ncols` Jacobian from its non-zero entries, and the
+/// [JacobianColoring] that computes it.
+pub(crate) fn sparsity_and_coloring<M: Matrix>(
+    nrows: usize,
+    ncols: usize,
+    non_zeros: Vec<(usize, usize)>,
+    ctx: M::C,
+) -> (M::Sparsity, JacobianColoring<M>) {
+    let sparsity = M::Sparsity::try_from_indices(nrows, ncols, non_zeros.clone())
+        .expect("invalid sparsity pattern");
+    let coloring = JacobianColoring::new(&sparsity, &non_zeros, ctx);
+    (sparsity, coloring)
+}
+
 impl<M: Matrix> Clone for JacobianColoring<M> {
     fn clone(&self) -> Self {
         Self {
