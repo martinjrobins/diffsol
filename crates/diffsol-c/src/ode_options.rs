@@ -6,6 +6,8 @@ use crate::{error::DiffsolRtError, ode::Ode, solve::Solve};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct OdeSolverOptionsSnapshot {
+    #[serde(default = "default_max_number_timesteps")]
+    pub max_number_timesteps: usize,
     pub max_nonlinear_solver_iterations: usize,
     pub max_error_test_failures: usize,
     #[serde(default = "default_max_nonlinear_solver_failures")]
@@ -19,6 +21,10 @@ pub struct OdeSolverOptionsSnapshot {
     pub derivative_solve_tolerance: f64,
     #[serde(default = "default_derivative_solve_max_iter")]
     pub derivative_solve_max_iter: usize,
+}
+
+fn default_max_number_timesteps() -> usize {
+    diffsol::OdeSolverOptions::<f64>::default().max_number_timesteps
 }
 
 fn default_max_nonlinear_solver_failures() -> usize {
@@ -36,6 +42,7 @@ fn default_derivative_solve_max_iter() -> usize {
 impl OdeSolverOptionsSnapshot {
     pub(crate) fn from_solve(solve: &dyn Solve) -> Self {
         Self {
+            max_number_timesteps: solve.ode_max_number_timesteps(),
             max_nonlinear_solver_iterations: solve.ode_max_nonlinear_solver_iterations(),
             max_error_test_failures: solve.ode_max_error_test_failures(),
             max_nonlinear_solver_failures: solve.ode_max_nonlinear_solver_failures(),
@@ -50,6 +57,7 @@ impl OdeSolverOptionsSnapshot {
     }
 
     pub(crate) fn apply_to_solve(&self, solve: &mut dyn Solve) {
+        solve.set_ode_max_number_timesteps(self.max_number_timesteps);
         solve.set_ode_max_nonlinear_solver_iterations(self.max_nonlinear_solver_iterations);
         solve.set_ode_max_error_test_failures(self.max_error_test_failures);
         solve.set_ode_max_nonlinear_solver_failures(self.max_nonlinear_solver_failures);
@@ -81,6 +89,13 @@ impl OdeSolverOptions {
 }
 
 impl OdeSolverOptions {
+    pub fn get_max_number_timesteps(&self) -> Result<usize, DiffsolRtError> {
+        Ok(self.guard()?.solve.ode_max_number_timesteps())
+    }
+    pub fn set_max_number_timesteps(&self, value: usize) -> Result<(), DiffsolRtError> {
+        self.guard()?.solve.set_ode_max_number_timesteps(value);
+        Ok(())
+    }
     pub fn get_max_nonlinear_solver_iterations(&self) -> Result<usize, DiffsolRtError> {
         Ok(self.guard()?.solve.ode_max_nonlinear_solver_iterations())
     }
@@ -210,6 +225,7 @@ mod tests {
     fn ode_solver_options_roundtrip_and_serialize() {
         for jit_backend in available_jit_backends() {
             let options = make_options(jit_backend);
+            options.set_max_number_timesteps(12_000).unwrap();
             options.set_max_nonlinear_solver_iterations(17).unwrap();
             options.set_max_error_test_failures(19).unwrap();
             options.set_max_nonlinear_solver_failures(7).unwrap();
@@ -224,6 +240,7 @@ mod tests {
             options.set_derivative_solve_tolerance(1e-6).unwrap();
             options.set_derivative_solve_max_iter(31).unwrap();
 
+            assert_eq!(options.get_max_number_timesteps().unwrap(), 12_000);
             assert_eq!(options.get_max_nonlinear_solver_iterations().unwrap(), 17);
             assert_eq!(options.get_max_error_test_failures().unwrap(), 19);
             assert_eq!(options.get_max_nonlinear_solver_failures().unwrap(), 7);
@@ -239,6 +256,7 @@ mod tests {
             assert_eq!(options.get_derivative_solve_max_iter().unwrap(), 31);
 
             let mut value = serde_json::to_value(&options).unwrap();
+            assert_eq!(value["max_number_timesteps"], 12_000);
             assert_eq!(value["max_nonlinear_solver_iterations"], 17);
             assert_eq!(value["max_error_test_failures"], 19);
             assert_eq!(value["max_nonlinear_solver_failures"], 7);
