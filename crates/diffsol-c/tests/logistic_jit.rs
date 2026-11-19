@@ -81,6 +81,7 @@ fn configure_serialized_ode(ode: &OdeWrapper, matrix_type: MatrixType) {
     ic_options.set_armijo_constant(1e-4).unwrap();
 
     let options = ode.get_options();
+    options.set_max_number_timesteps(12_000).unwrap();
     options.set_max_nonlinear_solver_iterations(23).unwrap();
     options.set_max_error_test_failures(29).unwrap();
     options.set_max_nonlinear_solver_failures(7).unwrap();
@@ -207,6 +208,7 @@ fn assert_serialization_roundtrip(
     );
 
     let options = decoded.get_options();
+    assert_eq!(options.get_max_number_timesteps().unwrap(), 12_000);
     assert_eq!(options.get_max_nonlinear_solver_iterations().unwrap(), 23);
     assert_eq!(options.get_max_error_test_failures().unwrap(), 29);
     assert_eq!(options.get_max_nonlinear_solver_failures().unwrap(), 7);

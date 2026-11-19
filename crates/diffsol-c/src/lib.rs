@@ -397,6 +397,7 @@ pub mod ode_diffsl_c;
 ///   [OdeSolverOptions::get_threshold_to_update_jacobian],
 ///   [OdeSolverOptions::get_threshold_to_update_rhs_jacobian].
 /// - Step size: [OdeSolverOptions::get_min_timestep].
+/// - Step budget: [OdeSolverOptions::get_max_number_timesteps].
 /// - BDF derivative solves (forward sensitivities, VJPs):
 ///   [OdeSolverOptions::get_derivative_solve_tolerance],
 ///   [OdeSolverOptions::get_derivative_solve_max_iter].

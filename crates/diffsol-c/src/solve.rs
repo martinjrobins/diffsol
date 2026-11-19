@@ -163,6 +163,7 @@ pub(crate) trait Solve: Send {
         armijo_constant: f64
     }
     generate_trait_ode_option_accessors! {
+        max_number_timesteps: usize,
         max_nonlinear_solver_iterations: usize,
         max_error_test_failures: usize,
         max_nonlinear_solver_failures: usize,
@@ -509,6 +510,7 @@ where
     }
 
     generate_ode_option_accessors! {
+        max_number_timesteps: usize,
         max_nonlinear_solver_iterations: usize,
         max_error_test_failures: usize,
         max_nonlinear_solver_failures: usize,

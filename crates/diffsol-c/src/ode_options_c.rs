@@ -21,6 +21,20 @@ c_getter_simple!(
     diffsol_ode_options,
     OdeSolverOptions,
     usize,
+    max_number_timesteps
+);
+
+c_setter_simple!(
+    diffsol_ode_options,
+    OdeSolverOptions,
+    usize,
+    max_number_timesteps
+);
+
+c_getter_simple!(
+    diffsol_ode_options,
+    OdeSolverOptions,
+    usize,
     max_nonlinear_solver_iterations
 );
 
