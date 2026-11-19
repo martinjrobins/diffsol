@@ -34,5 +34,12 @@ zero.
 {{#include ../../../../examples/intro-logistic-closures/src/problem_adjoint_sens.rs}}
 ```
 
-The resulting problem implements `OdeEquationsImplicitAdjoint` and can be used
-to create an adjoint solver after a checkpointed forward solve.
+The function takes the value of
+[`integrate_out`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html#method.integrate_out)
+as an argument. An adjoint solve with a cost function that is the integral of
+the output needs `integrate_out(true)`, and a cost function that is a sum over
+data times does not.
+
+The resulting problem implements `OdeEquationsImplicitAdjoint`. You can use it
+to make an adjoint solver after a checkpointed forward solve, see
+[Adjoint Sensitivities](../../solve/adjoint_sens.md).

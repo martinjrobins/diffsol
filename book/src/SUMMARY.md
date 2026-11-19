@@ -1,5 +1,7 @@
 # Summary
 
+[Introduction](./introduction.md)
+
 - [Modelling with diffsol](./primer/modelling_with_diffsol.md)
   - [Explicit First Order ODEs](./primer/first_order_odes.md)
     - [Example: Population Dynamics](./primer/population_dynamics.md)
@@ -51,6 +53,7 @@
   - [Interpolation](./solve/interpolation.md)
   - [Stopping](./solve/stopping.md)
   - [Forward Sensitivities](./solve/forward_sens.md)
+  - [Adjoint Sensitivities](./solve/adjoint_sens.md)
 - [Performance](./performance/performance.md)
   - [Stiff vs Non-Stiff](./performance/stiff_vs_non_stiff.md)
   - [Events and Multistep Solvers](./performance/events_and_multistep_solvers.md)

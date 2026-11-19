@@ -1,1 +1,0 @@
-# Example: Spatial Population Dynamics
