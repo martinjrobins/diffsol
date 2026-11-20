@@ -65,7 +65,7 @@ We can then plot the histogram of the maximum frequency deviation (Hz) across th
 
 ## GPU versus CPU
 
-It is useful to compare the GPU batch solves against a CPU parallel implementation using the `rayon` crate. The CPU version uses `map_init` to create a `SwingEqn` problem, then solves one ODE per sample in parallel using the thread pool. Rayon calls the `map_init` initialiser once for each piece of work that it splits off, not once for each thread, so it can create more problems than there are threads.
+It is useful to compare the GPU batch solves against a CPU parallel implementation using the `rayon` crate. The CPU version uses a `ThreadLocal` to give each worker thread its own `SwingEqn` problem, then solves one ODE per sample in parallel using the thread pool. Each thread builds its problem once and reuses it for all of its samples.
 
 ```rust,ignore
 {{#include ../../../examples/performance-gpu-ensemble/src/ensemble.rs:solve_cpu}}

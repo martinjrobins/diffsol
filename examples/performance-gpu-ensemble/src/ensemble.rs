@@ -16,9 +16,11 @@ use rand::SeedableRng;
 use rand_chacha::ChaCha12Rng;
 use rand_distr::{Distribution, Normal};
 use rayon::prelude::*;
+use std::cell::RefCell;
 use std::f64::consts::PI;
 use std::time::Instant;
 use std::{fs, path::PathBuf};
+use thread_local::ThreadLocal;
 
 // ANCHOR: types
 /// number of samples for input demand parameter
@@ -100,18 +102,22 @@ fn solve_cpu<T: NalgebraScalar>(
     rtol: f64,
     atol: f64,
 ) -> Vec<f64> {
+    // one problem for each worker thread, built the first time that thread needs it
+    let problems = ThreadLocal::new();
     demands
         .par_iter()
-        .map_init(
-            || swing_problem::<NalgebraMat<T>>(nbuses, &[0.0], rtol, atol),
-            |problem, &d| {
-                let d = T::from_f64(d).unwrap();
-                let p = NalgebraVec::from_vec(vec![d], *problem.eqn.context());
-                problem.eqn_mut().set_params(&p);
-                let mut solver = problem.tsit45().unwrap();
-                max_deviation_hz(&mut solver, nbuses, t_final)[0]
-            },
-        )
+        .map(|&d| {
+            let mut problem = problems
+                .get_or(|| {
+                    RefCell::new(swing_problem::<NalgebraMat<T>>(nbuses, &[0.0], rtol, atol))
+                })
+                .borrow_mut();
+            let d = T::from_f64(d).unwrap();
+            let p = NalgebraVec::from_vec(vec![d], *problem.eqn.context());
+            problem.eqn_mut().set_params(&p);
+            let mut solver = problem.tsit45().unwrap();
+            max_deviation_hz(&mut solver, nbuses, t_final)[0]
+        })
         .collect()
 }
 // ANCHOR_END: solve_cpu
