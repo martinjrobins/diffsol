@@ -1,8 +1,35 @@
+<style>
+.diffsol-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 500px;
+  color: #666;
+}
+.diffsol-spinner {
+  width: 48px;
+  height: 48px;
+  border: 4px solid #ddd;
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: diffsol-spin 1s linear infinite;
+}
+@keyframes diffsol-spin {
+  to { transform: rotate(360deg); }
+}
+</style>
+
+<div id="solver" style="background-color: white; border-radius: 10px; padding: 20px;">
+  <div class="diffsol-loading">
+    <div class="diffsol-spinner"></div>
+    <p>Loading interactive solver…</p>
+  </div>
+</div>
+
 <script src="https://cdn.plot.ly/plotly-2.26.0.min.js"></script>
 <script src="https://diffsol-js.fly.dev/diffsol.min.js"></script>
 <link rel="stylesheet" href="https://diffsol-js.fly.dev/interactive-solver.css" />
-
-<div id="solver" style="background-color: white; border-radius: 10px; padding: 20px;"></div>
 
 <script>
 const { createInteractiveSolver, MatrixType, LinearSolverType, OdeSolverType } = window.diffsol;
