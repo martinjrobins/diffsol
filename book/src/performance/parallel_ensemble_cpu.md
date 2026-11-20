@@ -19,7 +19,7 @@ Now we define an `ensemble` function that draws the random growth rates and solv
 
 Both the solve and reduce stages run on the Rayon thread pool. A single random number generator cannot be shared across threads, but `ChaCha12Rng` offers independent streams from one seed, so each sample uses the stream matching its index.
 
-Similarly, the diffsol `Problem` cannot be shared across threads as it needs to be mutated in order to set the growth rate for each sample. It also uses a `RefCell` to store operator statistics, so in Rust terms it is `Send` but not `Sync` (please raise an issue on the repo if `Sync` is required for your work). So that the `Problem` is not shared between worker threads, we will use `map_init` to create a problem for each piece of work that Rayon splits off. Rayon calls the initialiser once for each of these pieces, not once for each thread, so there can be more problems than threads. Each problem is reused for all the samples in its piece of work, and is never shared between threads.
+Similarly, the diffsol `Problem` cannot be shared across threads as it needs to be mutated in order to set the growth rate for each sample. It also uses a `RefCell` to store operator statistics, so in Rust terms it is `Send` but not `Sync` (please raise an issue on the repo if `Sync` is required for your work). So that the `Problem` is not shared between worker threads, we use a `ThreadLocal` from the [`thread_local`](https://docs.rs/thread_local) crate to give each worker thread its own problem. A thread builds its problem the first time it needs one, then reuses it for all the samples it solves. The problem is wrapped in a `RefCell` so that the thread can mutate it.
 
 ```rust,ignore
 {{#include ../../../examples/performance-cpu-ensemble/src/main.rs:ensemble}}
@@ -47,7 +47,6 @@ We use Plotly to plot the results and compare them against a reference line indi
 
 Ideal speed-up would be linear with the number of threads, but several factors reduce the measured scaling below the ideal line:
 
-- problem setup: `map_init` builds a new `OdeSolverProblem` for each piece of work that Rayon splits off, and Rayon splits the work into more pieces at higher thread counts.
 - reducing the solutions: This requires `N_TIMES` sorts which are `O(N log N)` each.
 - memory bandwidth: here we need to allocate, write then read `N_SAMPLES` solution trajectories.
 - scheduling overhead: Rayon uses a thread pool and schedules work across it, this creates more work at higher thread counts.

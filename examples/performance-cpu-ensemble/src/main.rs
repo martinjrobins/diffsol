@@ -10,7 +10,8 @@ use rand::SeedableRng;
 use rand_chacha::ChaCha12Rng;
 use rand_distr::{Distribution, LogNormal};
 use rayon::prelude::*;
-use std::{fs, path::PathBuf, time::Instant};
+use std::{cell::RefCell, fs, path::PathBuf, time::Instant};
+use thread_local::ThreadLocal;
 
 // ANCHOR: types
 type M = NalgebraMat<f64>;
@@ -31,27 +32,33 @@ const BENCH_REPEATS: usize = 3;
 
 // ANCHOR: ensemble
 fn ensemble(n_samples: usize, t_eval: &[f64]) -> Vec<[f64; 3]> {
+    // one problem for each worker thread, built the first time that thread needs it
+    let problems = ThreadLocal::new();
     let solutions: Vec<M> = (0..n_samples)
         .into_par_iter()
-        .map_init(
-            || {
-                OdeBuilder::<M>::new()
-                    .p([1.0, K])
-                    .rhs(|y, p, _t, dy| dy[0] = p[0] * y[0] * (1.0 - y[0] / p[1]))
-                    .init(|_p, _t, y| y[0] = Y0, 1)
-                    .build()
-                    .unwrap()
-            },
-            |problem, i| {
-                let mut rng = ChaCha12Rng::seed_from_u64(SEED);
-                rng.set_stream(i as u64);
-                let r = LogNormal::new(0.5_f64.ln(), 0.3).unwrap().sample(&mut rng);
+        .map(|i| {
+            let mut problem = problems
+                .get_or(|| {
+                    RefCell::new(
+                        OdeBuilder::<M>::new()
+                            .p([1.0, K])
+                            .rhs(|y, p, _t, dy| dy[0] = p[0] * y[0] * (1.0 - y[0] / p[1]))
+                            .init(|_p, _t, y| y[0] = Y0, 1)
+                            .build()
+                            .unwrap(),
+                    )
+                })
+                .borrow_mut();
 
-                let p = V::from_vec(vec![r, K], *problem.eqn.context());
-                problem.eqn_mut().set_params(&p);
-                problem.tsit45().unwrap().solve_dense(t_eval).unwrap().0
-            },
-        )
+            let mut rng = ChaCha12Rng::seed_from_u64(SEED);
+            rng.set_stream(i as u64);
+            let r = LogNormal::new(0.5_f64.ln(), 0.3).unwrap().sample(&mut rng);
+
+            let p = V::from_vec(vec![r, K], *problem.eqn.context());
+            problem.eqn_mut().set_params(&p);
+            let mut solver = problem.tsit45().unwrap();
+            solver.solve_dense(t_eval).unwrap().0
+        })
         .collect();
 
     (0..t_eval.len())
