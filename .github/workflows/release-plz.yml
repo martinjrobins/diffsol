@@ -99,9 +99,43 @@ jobs:
           chmod +x "$RUNNER_TEMP/semver-shim/cargo-semver-checks"
           echo "$RUNNER_TEMP/semver-shim" >> "$GITHUB_PATH"
       - name: Run release-plz
+        id: release-plz
         uses: release-plz/action@v0.5
         with:
           command: release-pr
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      # release-plz does not update the diffsol version in the install instructions of the docs.
+      # This step writes the new version to these files and pushes a commit to the release PR.
+      - name: Sync the diffsol version in the docs
+        env:
+          PR: ${{ steps.release-plz.outputs.pr }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pr=${PR:-"{}"}
+          branch=$(echo "$pr" | jq -r '.head_branch // empty')
+          version=$(echo "$pr" | jq -r '.releases[]? | select(.package_name == "diffsol") | .version')
+          if [ -z "$branch" ] || [ -z "$version" ]; then
+            echo "No release PR for diffsol, nothing to do"
+            exit 0
+          fi
+          # the cargo version requirement: "0.21" for 0.x versions, "1" for 1.0 and later
+          IFS=. read -r major minor _ <<< "$version"
+          if [ "$major" = 0 ]; then req="$major.$minor"; else req="$major"; fi
+
+          git fetch origin "$branch"
+          git checkout "$branch"
+          files="README.md book/src/use/webassembly.md book/src/specify/closure/autodiff.md"
+          sed -i -E \
+            -e "s/^(diffsol = )\"[0-9.]+\"/\1\"$req\"/" \
+            -e "s/^(diffsol = \{ version = )\"[0-9.]+\"/\1\"$req\"/" \
+            $files
+          if git diff --quiet; then
+            echo "The docs already use diffsol $req"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898333+github-actions[bot]@users.noreply.github.com"
+          git commit -am "docs: update the diffsol version in the docs to $req"
+          git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$branch"
