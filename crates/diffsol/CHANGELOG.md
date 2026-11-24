@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.1](https://github.com/martinjrobins/diffsol/compare/diffsol-v0.20.0...diffsol-v0.20.1) - 2026-11-24
+
+### Added
+
+- *(docs)* add release-plz workflow to update readme version ([#465](https://github.com/martinjrobins/diffsol/pull/465))
+
+### Other
+
+- *(diffsol)* reduce duplicated code ([#457](https://github.com/martinjrobins/diffsol/pull/457))
+- *(diffsol)* reverse-mode AD ([#455](https://github.com/martinjrobins/diffsol/pull/455))
+- *(README)* update diffsol version number
+
 ## [0.20.0](https://github.com/martinjrobins/diffsol/compare/diffsol-v0.19.0...diffsol-v0.20.0) - 2026-11-12
 
 ### Added
