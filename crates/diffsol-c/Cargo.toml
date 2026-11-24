@@ -8,6 +8,7 @@ authors.workspace = true
 repository.workspace = true
 keywords = ["ode", "solver", "math", "simulation", "science"]
 readme = "README.md"
+links = "diffsol_c"
 
 [lib]
 # a static library is made only on request:
