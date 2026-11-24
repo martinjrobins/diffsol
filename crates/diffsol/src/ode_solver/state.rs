@@ -906,7 +906,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
         Eqn: OdeEquations<T = V::T, V = V, C = V::C>,
     {
         let mut ret = Self::new_without_initialise(ode_problem)?;
-        ret.set_initial_step_size(ode_problem, solver_order);
+        ret.set_initial_step_size(ode_problem, solver_order)?;
         Ok(ret)
     }
 
@@ -933,7 +933,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
             let mut root_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
             ret.as_mut().set_consistent(ode_problem, &mut root_solver)?;
         }
-        ret.set_initial_step_size(ode_problem, solver_order);
+        ret.set_initial_step_size(ode_problem, solver_order)?;
         Ok(ret)
     }
 
@@ -955,7 +955,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
         augmented_eqn
             .rhs()
             .call_inplace(state.s, *state.t, state.ds);
-        ret.set_initial_step_size(ode_problem, solver_order);
+        ret.set_initial_step_size(ode_problem, solver_order)?;
         Ok(ret)
     }
 
@@ -993,7 +993,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
                 &mut root_solver_sens,
             )?;
         }
-        ret.set_initial_step_size(ode_problem, solver_order);
+        ret.set_initial_step_size(ode_problem, solver_order)?;
         Ok(ret)
     }
 
@@ -1103,25 +1103,51 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
         Ok(())
     }
 
-    /// Set the step size of a new state made from `ode_problem`. With a fixed step size this is
-    /// `h0` exactly (the step size of a state made by [Self::new_without_initialise]), else it
-    /// is from the heuristic in [Self::set_step_size], starting at `h0`.
+    /// Set the step size of a new state. A fixed step retains the configured size.
     fn set_initial_step_size<Eqn>(
         &mut self,
-        ode_problem: &OdeSolverProblem<Eqn>,
+        problem: &OdeSolverProblem<Eqn>,
         solver_order: usize,
-    ) where
+    ) -> Result<(), DiffsolError>
+    where
         Eqn: OdeEquations<T = V::T, V = V, C = V::C>,
     {
-        if !ode_problem.ode_options.fixed_step {
-            self.set_step_size(
-                ode_problem.h0,
-                &ode_problem.atol,
-                ode_problem.rtol,
-                &ode_problem.eqn,
-                solver_order,
-            );
+        if problem.ode_options.fixed_step {
+            return Ok(());
         }
+        self.estimate_initial_step_size(problem, problem.h0, solver_order)
+    }
+
+    /// Estimate the initial step size and apply the problem's timestep bounds.
+    fn estimate_initial_step_size<Eqn>(
+        &mut self,
+        problem: &OdeSolverProblem<Eqn>,
+        h0: Eqn::T,
+        solver_order: usize,
+    ) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquations<T = V::T, V = V, C = V::C>,
+    {
+        self.as_mut()
+            .set_step_size(h0, &problem.atol, problem.rtol, &problem.eqn, solver_order);
+        if problem.ode_options.fixed_step {
+            return Ok(());
+        }
+        let state = self.as_mut();
+        let minimum = problem.ode_options.min_timestep;
+        let h = if state.h.abs() < minimum {
+            state.h.signum() * minimum
+        } else {
+            *state.h
+        };
+        *state.h = super::config::limit_timestep(
+            h,
+            Eqn::T::one(),
+            minimum,
+            problem.ode_options.max_timestep,
+            *state.t,
+        )?;
+        Ok(())
     }
 
     /// compute size of first step based on alg in Hairer, Norsett, Wanner
@@ -1363,6 +1389,17 @@ mod test {
         s.as_ref()
             .dy
             .assert_eq_norm(&from([-1.0, 0.0]), &problem.atol, problem.rtol, tol);
+    }
+
+    #[test]
+    fn initial_step_respects_minimum() {
+        for direction in [1.0, -1.0] {
+            let (mut problem, _) = exponential_decay_problem::<NalgebraMat<f64>>(false);
+            problem.h0 = direction;
+            problem.ode_options.min_timestep = 1.0;
+            let state = BdfState::<crate::NalgebraVec<f64>>::new(&problem, 1).unwrap();
+            assert_eq!(state.h, direction);
+        }
     }
 
     #[test]

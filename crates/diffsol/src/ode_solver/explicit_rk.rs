@@ -1,5 +1,4 @@
 use super::adjoint::AdjointOdeSolverMethod;
-use super::config::OdeSolverConfig;
 use super::method::AugmentedOdeSolverMethod;
 use super::runge_kutta::Rk;
 use super::sensitivities::SensitivitiesOdeSolverMethod;
@@ -19,7 +18,7 @@ use crate::{
     OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, StateRef, StateRefMut,
 };
 use log::debug;
-use num_traits::{One, ToPrimitive};
+use num_traits::{One, ToPrimitive, Zero};
 
 impl<'a, Eqn, M, AugEqn> AugmentedOdeSolverMethod<'a, Eqn, AugEqn>
     for ExplicitRk<'a, Eqn, M, AugEqn>
@@ -204,7 +203,7 @@ where
             }
             .into());
         }
-        let mut h = self.rk.start_step(self.config.as_base_ref())?;
+        let mut h = self.rk.start_step(self.config.maximum_timestep)?;
         debug!(
             "Starting Explicit RK step at t = {:?} with h = {:?}",
             self.state().t,
@@ -243,23 +242,47 @@ where
             self.rk.reset_prev_error();
             self.rk
                 .error_test_fail(nattempts, self.config.maximum_error_test_failures)?;
-            h = self
-                .rk
-                .update_step_size(h, factor, self.config.as_base_ref())?;
+            h = super::config::limit_timestep(
+                h,
+                factor,
+                self.config.minimum_timestep,
+                self.config.maximum_timestep,
+                self.rk.state().t,
+            )?;
             debug!(
                 "Step rejected with error norm = {:?}, reducing h to {:?}",
                 error_norm, h
             );
         };
-        let new_h = self
-            .rk
-            .update_step_size(h, factor, self.config.as_base_ref())?;
+        let new_h = if fixed_step {
+            h
+        } else {
+            let next_h = super::config::limit_timestep(
+                h,
+                factor,
+                Eqn::T::zero(),
+                self.config.maximum_timestep,
+                self.rk.state().t,
+            )?;
+            // A successful terminal step does not need a usable next step size.
+            if !self.rk.is_at_stop_time(self.rk.state().t + h, next_h) {
+                super::config::limit_timestep(
+                    next_h,
+                    Eqn::T::one(),
+                    self.config.minimum_timestep,
+                    self.config.maximum_timestep,
+                    self.rk.state().t,
+                )?;
+            }
+            next_h
+        };
         self.rk.set_prev_error(error_norm);
-        self.rk.step_accepted(h, new_h, false)
+        self.rk
+            .step_accepted(h, new_h, false, self.config.maximum_timestep)
     }
 
     fn set_stop_time(&mut self, tstop: <Eqn as Op>::T) -> Result<(), DiffsolError> {
-        self.rk.set_stop_time(tstop)
+        self.rk.set_stop_time(tstop, self.config.maximum_timestep)
     }
 
     fn interpolate_sens_inplace(

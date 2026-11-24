@@ -21,7 +21,6 @@ use log::info;
 use log::trace;
 use num_traits::{abs, FromPrimitive, One, ToPrimitive, Zero};
 
-use super::config::OdeSolverConfigRef;
 use super::jacobian_update::SolverState;
 use super::method::{check_interpolate_bounds, check_interpolate_shape, check_interpolate_time};
 use super::pi_controller::pi_controller_raw;
@@ -475,23 +474,26 @@ where
         Ok(())
     }
 
-    pub(crate) fn set_stop_time(&mut self, tstop: <Eqn as Op>::T) -> Result<(), DiffsolError> {
+    pub(crate) fn set_stop_time(
+        &mut self,
+        tstop: <Eqn as Op>::T,
+        maximum_timestep: Eqn::T,
+    ) -> Result<(), DiffsolError> {
         if self.problem.ode_options.fixed_step {
             return Err(DiffsolError::from(OdeSolverError::StopTimeWithFixedStep));
         }
-        self.tstop = Some(tstop);
-        if let Some(OdeSolverStopReason::TstopReached) = self.handle_tstop(tstop)? {
+        if let Some(OdeSolverStopReason::TstopReached) =
+            self.handle_tstop(tstop, maximum_timestep)?
+        {
             let error = OdeSolverError::StopTimeAtCurrentTime;
             self.tstop = None;
             return Err(DiffsolError::from(error));
         }
+        self.tstop = Some(tstop);
         Ok(())
     }
 
-    pub(crate) fn start_step(
-        &mut self,
-        config: OdeSolverConfigRef<'_, Eqn::T>,
-    ) -> Result<Eqn::T, DiffsolError> {
+    pub(crate) fn start_step(&mut self, maximum_timestep: Eqn::T) -> Result<Eqn::T, DiffsolError> {
         if self.is_state_mutated {
             // reinitalise root finder if needed
             if let (Some(root_fn), Some(root_finder)) =
@@ -502,28 +504,13 @@ where
             }
             // reinitialise tstop if needed
             if let Some(t_stop) = self.tstop {
-                self.set_stop_time(t_stop)?;
+                self.set_stop_time(t_stop, maximum_timestep)?;
             }
 
             self.is_state_mutated = false;
         }
 
-        self.state.h = self.update_step_size(self.state.h, Eqn::T::one(), config)?;
         Ok(self.state.h)
-    }
-
-    pub(crate) fn update_step_size(
-        &self,
-        current_h: Eqn::T,
-        factor: Eqn::T,
-        config: OdeSolverConfigRef<'_, Eqn::T>,
-    ) -> Result<Eqn::T, DiffsolError> {
-        super::config::limit_timestep(
-            current_h * factor,
-            *config.minimum_timestep,
-            *config.maximum_timestep,
-            self.state.t,
-        )
     }
 
     pub(crate) fn factor(
@@ -836,14 +823,23 @@ where
         Ok(())
     }
 
+    fn time_roundoff(t: Eqn::T, h: Eqn::T) -> Eqn::T {
+        Eqn::T::from_f64(100.0).unwrap() * Eqn::T::EPSILON * (abs(t) + abs(h))
+    }
+
+    pub(crate) fn is_at_stop_time(&self, t: Eqn::T, h: Eqn::T) -> bool {
+        self.tstop
+            .is_some_and(|tstop| abs(t - tstop) <= Self::time_roundoff(t, h))
+    }
+
     fn handle_tstop(
         &mut self,
         tstop: Eqn::T,
+        maximum_timestep: Eqn::T,
     ) -> Result<Option<OdeSolverStopReason<Eqn::T>>, DiffsolError> {
         let state = &mut self.state;
         // check if the we are at tstop
-        let troundoff =
-            Eqn::T::from_f64(100.0).unwrap() * Eqn::T::EPSILON * (abs(state.t) + abs(state.h));
+        let troundoff = Self::time_roundoff(state.t, state.h);
         if abs(state.t - tstop) <= troundoff {
             state.t = tstop;
             return Ok(Some(OdeSolverStopReason::TstopReached));
@@ -863,7 +859,13 @@ where
             || (state.h < Eqn::T::zero() && state.t + state.h < tstop - troundoff)
         {
             let factor = (tstop - state.t) / state.h;
-            state.h.mul_assign(factor);
+            state.h = super::config::limit_timestep(
+                state.h,
+                factor,
+                Eqn::T::zero(),
+                maximum_timestep,
+                state.t,
+            )?;
         }
         Ok(None)
     }
@@ -992,6 +994,7 @@ where
         h: Eqn::T,
         new_h: Eqn::T,
         rescale_dy: bool,
+        maximum_timestep: Eqn::T,
     ) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError> {
         let s = self.tableau.s();
         // step accepted, so integrate output functions
@@ -1052,7 +1055,9 @@ where
 
         // check if the we are at tstop
         if let Some(tstop) = self.tstop {
-            if let Some(OdeSolverStopReason::TstopReached) = self.handle_tstop(tstop)? {
+            if let Some(OdeSolverStopReason::TstopReached) =
+                self.handle_tstop(tstop, maximum_timestep)?
+            {
                 self.tstop = None; // reset tstop
                 return Ok(OdeSolverStopReason::TstopReached);
             }

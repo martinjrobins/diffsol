@@ -1,7 +1,8 @@
 use crate::{error::OdeSolverError, DiffsolError, OdeSolverOptions, Scalar};
 
 pub(crate) fn limit_timestep<T: Scalar>(
-    h: T,
+    current_h: T,
+    factor: T,
     minimum: T,
     maximum: T,
     time: T,
@@ -9,6 +10,7 @@ pub(crate) fn limit_timestep<T: Scalar>(
     if maximum.is_nan() || maximum <= T::zero() {
         return Err(DiffsolError::Other("max_timestep must be positive".into()));
     }
+    let h = current_h * factor;
     let h = if h.abs() > maximum {
         h.signum() * maximum
     } else {
@@ -233,9 +235,11 @@ mod tests {
     #[test]
     fn timestep_limits() {
         for maximum in [0.0, -1.0, f64::NAN] {
-            assert!(limit_timestep(1.0, 0.1, maximum, 0.0).is_err());
+            assert!(limit_timestep(1.0, 1.0, 0.1, maximum, 0.0).is_err());
         }
-        assert!(limit_timestep(0.05, 0.1, f64::INFINITY, 0.0).is_err());
-        assert_eq!(limit_timestep(0.1, 0.1, 1.0, 0.0).unwrap(), 0.1);
+        assert!(limit_timestep(0.1, 0.5, 0.1, f64::INFINITY, 0.0).is_err());
+        assert_eq!(limit_timestep(0.1, 1.0, 0.1, 1.0, 0.0).unwrap(), 0.1);
+        assert_eq!(limit_timestep(-0.5, 3.0, 0.1, 1.0, 0.0).unwrap(), -1.0);
+        assert!(limit_timestep(0.1, 1.0, 0.1, 0.05, 0.0).is_err());
     }
 }

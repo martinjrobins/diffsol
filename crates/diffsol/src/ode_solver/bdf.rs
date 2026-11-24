@@ -578,28 +578,41 @@ where
     }
 
     fn _update_step_size(&mut self, factor: Eqn::T) -> Result<Eqn::T, DiffsolError> {
+        self._update_step_size_and_order(factor, self.state.order, self.config.minimum_timestep)
+    }
+
+    fn _update_step_size_and_order(
+        &mut self,
+        factor: Eqn::T,
+        order: usize,
+        minimum_timestep: Eqn::T,
+    ) -> Result<Eqn::T, DiffsolError> {
         //If step size h is changed then also need to update the terms in
         //the first equation of page 9 of [1]:
         //
         //- constant c = h / (1-kappa) gamma_k term
         //- lu factorisation of (M - c * J) used in newton iteration (same equation)
 
-        let proposed_h = factor * self.state.h;
         let new_h = super::config::limit_timestep(
-            proposed_h,
-            self.config.minimum_timestep,
+            self.state.h,
+            factor,
+            minimum_timestep,
             self.config.maximum_timestep,
             self.state.t,
         )?;
-        let factor = if new_h == proposed_h {
+        // Preserve the original factor when uncapped to avoid roundoff in the history update.
+        let factor = if new_h == self.state.h * factor {
             factor
         } else {
             new_h / self.state.h
         };
+        if order != self.state.order {
+            self.state.order = order;
+            self.u = Self::_compute_r(order, Eqn::T::one());
+        }
         self.n_equal_steps = 0;
 
         // update D using equations in section 3.2 of [1]
-        let order = self.state.order;
         let ru = Self::_compute_r(order, factor).mat_mul(&self.u);
         {
             if self.op.is_some() {
@@ -777,7 +790,7 @@ where
             || (state.h < M::T::zero() && tstop > state.t + troundoff)
         {
             let error = OdeSolverError::StopTimeBeforeCurrentTime {
-                stop_time: self.tstop.unwrap().to_f64().unwrap(),
+                stop_time: tstop.to_f64().unwrap(),
                 state_time: state.t.to_f64().unwrap(),
             };
             self.tstop = None;
@@ -809,7 +822,8 @@ where
         };
         if let Some(factor) = factor {
             let n_equal_steps = self.n_equal_steps;
-            self._update_step_size(factor)?;
+            // Stop-time adjustments may go below the minimum timestep.
+            self._update_step_size_and_order(factor, self.state.order, Eqn::T::zero())?;
             // landing on tstop is not a controller decision, so keep the equal-step count
             self.n_equal_steps = n_equal_steps;
         }
@@ -1433,19 +1447,6 @@ where
             );
         }
 
-        // The initial step estimate may be below the minimum; resizing enforces the floor.
-        let h = super::config::limit_timestep(
-            self.state.h,
-            Eqn::T::zero(),
-            self.config.maximum_timestep,
-            self.state.t,
-        )?;
-        if h != self.state.h {
-            self._update_step_size(h / self.state.h)?;
-            let c = self.state.h * self.alpha[self.state.order];
-            self._jacobian_updates_at(c, SolverState::StepSuccess, None);
-        }
-
         // if root or tstop occured in the last step, this check was skipped.
         // do the check now that h is known
         if std::mem::take(&mut self.jacobian_check_pending) {
@@ -1725,20 +1726,11 @@ where
                 .unwrap()
                 .0;
 
-            // update order and update the U matrix
-            let order = {
-                let old_order = self.state.order;
-                let new_order = match max_index {
-                    0 => old_order - 1,
-                    1 => old_order,
-                    2 => old_order + 1,
-                    _ => unreachable!(),
-                };
-                self.state.order = new_order;
-                if max_index != 1 {
-                    self.u = Self::_compute_r(new_order, Eqn::T::one());
-                }
-                new_order
+            let order = match max_index {
+                0 => self.state.order - 1,
+                1 => self.state.order,
+                2 => self.state.order + 1,
+                _ => unreachable!(),
             };
 
             let mut factor = safety * factors[max_index];
@@ -1755,7 +1747,7 @@ where
             {
                 // Keep the accepted step record consistent if the next step size is too small.
                 let new_h = self
-                    ._update_step_size(factor)
+                    ._update_step_size_and_order(factor, order, self.config.minimum_timestep)
                     .inspect_err(|_| self.record_h_end())?;
                 debug!(
                     "Changing step size to {:.6} and order to {}",
@@ -1807,12 +1799,12 @@ where
         if self.ode_problem.ode_options.fixed_step {
             return Err(DiffsolError::from(OdeSolverError::StopTimeWithFixedStep));
         }
-        self.tstop = Some(tstop);
         if let Some(OdeSolverStopReason::TstopReached) = self.handle_tstop(tstop)? {
             let error = OdeSolverError::StopTimeAtCurrentTime;
             self.tstop = None;
             return Err(DiffsolError::from(error));
         }
+        self.tstop = Some(tstop);
         Ok(())
     }
 }
@@ -2180,17 +2172,49 @@ mod test {
     }
 
     #[test]
-    fn bdf_tstop_respects_min_timestep() {
-        let (mut problem, _) = exponential_decay_problem::<M>(false);
-        problem.ode_options.min_timestep = 1e-3;
+    fn bdf_tstop_allows_steps_below_min_timestep() {
+        for (stop_steps, expected_steps) in [(0.5, 0.5), (1.5, 0.75)] {
+            let (problem, _) = exponential_decay_problem::<M>(false);
+            let mut solver = problem.bdf::<LS>().unwrap();
+            let h = solver.state().h;
+            solver.config.minimum_timestep = 2.0 * h;
+            solver.set_stop_time(stop_steps * h).unwrap();
+            assert!((solver.state().h / h - expected_steps).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn bdf_failed_order_resize_can_resume() {
+        let (problem, _) = exponential_decay_problem::<M>(false);
         let mut solver = problem.bdf::<LS>().unwrap();
-        let result = solver.set_stop_time(1e-4);
-        assert_matches!(
-            result,
-            Err(crate::DiffsolError::OdeSolverError(
-                crate::error::OdeSolverError::StepSizeTooSmall { .. }
-            ))
-        );
+        for _ in 0..50 {
+            let mut control = solver.clone();
+            control.step().unwrap();
+            let order = solver.state.order;
+            if control.state.order != order {
+                let minimum = solver.config.minimum_timestep;
+                solver.config.minimum_timestep = 100.0 * solver.state.h.abs();
+                let result = solver.step();
+                assert_matches!(
+                    result,
+                    Err(crate::DiffsolError::OdeSolverError(
+                        crate::error::OdeSolverError::StepSizeTooSmall { .. }
+                    ))
+                );
+                assert_eq!(solver.state.t, control.state.t);
+                assert_eq!(solver.state.order, order);
+                assert_eq!(
+                    solver.op.as_ref().unwrap().c,
+                    solver.state.h * solver.alpha[order]
+                );
+                solver.config.minimum_timestep = minimum;
+                solver.solve(1.0).unwrap();
+                assert!((solver.state.y[0] - (-0.1_f64).exp()).abs() < 1e-4);
+                return;
+            }
+            solver = control;
+        }
+        panic!("No order transition");
     }
 
     #[test]
