@@ -56,6 +56,7 @@ fn main() {
 
     let path = include_dir().join("diffsol.h");
     write_if_changed(&path, &header);
+    println!("cargo:include={}", include_dir().display());
     // Builds with different features write the same file. If a build with other features
     // changes it, run this script again in the next build with these features, so that the
     // header agrees with the library that this build makes.
