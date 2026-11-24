@@ -14,12 +14,12 @@ use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, AugmentedOdeEquations,
     AugmentedOdeEquationsImplicit, Convergence, DefaultDenseMatrix, DenseMatrix, JacobianUpdate,
     Matrix, NoLineSearch, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
-    OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, SensEquations,
-    StateRef, StateRefMut, Vector,
+    OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, Scalar,
+    SensEquations, StateRef, StateRefMut, Vector,
 };
 use log::debug;
 use log::trace;
-use num_traits::{FromPrimitive, One, Signed, ToPrimitive, Zero};
+use num_traits::{FromPrimitive, One, ToPrimitive, Zero};
 
 use super::adjoint::AdjointOdeSolverMethod;
 use super::config::SdirkConfig;
@@ -533,19 +533,17 @@ where
             self.rk.state().t,
             self.rk.state().h
         );
-        let mut h = self.rk.start_step()?;
+        let mut h = self.rk.start_step(self.config.maximum_timestep)?;
         let fixed_step = self.problem().ode_options.fixed_step;
-        // a fixed step size is never too small, as it is never reduced
-        let min_timestep = if fixed_step {
-            Eqn::T::zero()
-        } else {
-            self.config.minimum_timestep
-        };
-
-        if h.abs() < min_timestep {
-            return Err(DiffsolError::from(OdeSolverError::StepSizeTooSmall {
-                time: self.rk.state().t.to_f64().unwrap(),
-            }));
+        // Preserve SDIRK's minimum for the step that lands on a stop time.
+        if self.rk.is_at_stop_time(self.rk.state().t + h, h) {
+            super::config::limit_timestep(
+                h,
+                Eqn::T::one(),
+                self.config.minimum_timestep,
+                Eqn::T::INFINITY,
+                self.rk.state().t,
+            )?;
         }
 
         // setup the operators for the step
@@ -585,17 +583,28 @@ where
                     false
                 };
                 if failed {
+                    self.rk.reset_prev_error();
+                    nonlinear_failures += 1;
+                    if fixed_step && updated_jacobian {
+                        // The step size is fixed, so there is no retry after a Jacobian update.
+                        return Err(self.rk.last_solve_fail(nonlinear_failures));
+                    }
+                    self.rk
+                        .solve_fail(nonlinear_failures, self.config.maximum_newton_fails)?;
                     if !updated_jacobian {
                         // newton iteration did not converge, so update jacobian and try again
                         debug!("First convergence failure, updating Jacobian and trying again",);
                         updated_jacobian = true;
                         self.jacobian_updates_at(h, SolverState::FirstConvergenceFail, None);
-                    } else if fixed_step {
-                        // the step size is fixed, so there is no retry once the Jacobian is updated
-                        return Err(self.rk.last_solve_fail(nonlinear_failures + 1));
                     } else {
                         // newton iteration did not converge and jacobian has been updated, so we reduce step size and try again
-                        h *= Eqn::T::from_f64(0.3).unwrap();
+                        h = super::config::limit_timestep(
+                            h,
+                            Eqn::T::from_f64(0.3).unwrap(),
+                            self.config.minimum_timestep,
+                            self.config.maximum_timestep,
+                            self.rk.state().t,
+                        )?;
                         debug!(
                             "Second convergence failure, reducing step size to {:.3e} and trying again",
                             h.to_f64().unwrap()
@@ -604,14 +613,6 @@ where
                         self.update_op_step_size(h);
                         self.jacobian_updates_at(h, SolverState::SecondConvergenceFail, None);
                     }
-                    self.rk.reset_prev_error();
-                    nonlinear_failures += 1;
-                    self.rk.solve_fail(
-                        h,
-                        nonlinear_failures,
-                        min_timestep,
-                        self.config.maximum_newton_fails,
-                    )?;
                     // try again....
                     continue 'step;
                 }
@@ -659,7 +660,17 @@ where
                 debug!("Step accepted with error norm {}", error_norm,);
                 break (factor, error_norm);
             }
-            h *= factor;
+            nattempts += 1;
+            self.rk.reset_prev_error();
+            self.rk
+                .error_test_fail(nattempts, self.config.maximum_error_test_failures)?;
+            h = super::config::limit_timestep(
+                h,
+                factor,
+                self.config.minimum_timestep,
+                self.config.maximum_timestep,
+                self.rk.state().t,
+            )?;
             debug!(
                 "Step rejected with error norm {}, reducing step size to {} and trying again",
                 error_norm, h,
@@ -668,25 +679,40 @@ where
             self.reset_etas_timestep_change();
             self.update_op_step_size(h);
             self.jacobian_updates_at(h, SolverState::ErrorTestFail, None);
-            nattempts += 1;
-            self.rk.reset_prev_error();
-            self.rk.error_test_fail(
-                h,
-                nattempts,
-                self.config.maximum_error_test_failures,
-                self.config.minimum_timestep,
-            )?;
         };
 
         // accept the step
-        let new_h = h * factor;
-        if factor != Eqn::T::one() {
+        let new_h = if fixed_step {
+            h
+        } else {
+            let next_h = super::config::limit_timestep(
+                h,
+                factor,
+                Eqn::T::zero(),
+                self.config.maximum_timestep,
+                self.rk.state().t,
+            )?;
+            // A successful terminal step does not need a usable next step size.
+            if !self.rk.is_at_stop_time(self.rk.state().t + h, next_h) {
+                super::config::limit_timestep(
+                    next_h,
+                    Eqn::T::one(),
+                    self.config.minimum_timestep,
+                    self.config.maximum_timestep,
+                    self.rk.state().t,
+                )?;
+            }
+            next_h
+        };
+        if new_h != h {
             self.reset_etas_timestep_change();
         }
 
         self.update_op_step_size(new_h);
         self.rk.set_prev_error(error_norm);
-        let result = self.rk.step_accepted(h, new_h, true);
+        let result = self
+            .rk
+            .step_accepted(h, new_h, true, self.config.maximum_timestep);
         // update the Jacobian for the next step if due, at the new state, then advance the
         // schedule, so that a Jacobian evaluated here is a step old by the next one
         self.jacobian_updates_at(new_h, SolverState::StepSuccess, None);
@@ -695,7 +721,7 @@ where
     }
 
     fn set_stop_time(&mut self, tstop: <Eqn as Op>::T) -> Result<(), DiffsolError> {
-        self.rk.set_stop_time(tstop)
+        self.rk.set_stop_time(tstop, self.config.maximum_timestep)
     }
 
     fn interpolate_sens_inplace(
@@ -907,6 +933,42 @@ mod test {
     #[test]
     fn sdirk_config() {
         test_config(robertson_ode::<M>(1).0.esdirk34::<LS>().unwrap());
+    }
+
+    #[test]
+    fn tr_bdf2_capped_step_resets_convergence_history() {
+        let (mut problem, _) = exponential_decay_problem::<M>(false);
+        problem.ode_options.max_timestep = 0.001;
+        problem.ode_options.max_timestep_growth = Some(1.0);
+        let mut solver = problem.tr_bdf2::<LS>().unwrap();
+        let mut expected = solver.convergence.clone();
+        expected.reset_eta_timestep_change();
+        *solver.state_mut().h = 0.00101;
+        solver.step().unwrap();
+        assert_eq!(solver.state().h, 0.001);
+        assert_eq!(solver.convergence.eta(), expected.eta());
+        assert_eq!(solver.s_convergence.eta(), expected.eta());
+    }
+
+    #[test]
+    fn tr_bdf2_stop_step_below_minimum_is_rejected() {
+        for direction in [1.0, -1.0] {
+            let (mut problem, _) = exponential_decay_problem::<M>(false);
+            problem.h0 = direction;
+            problem.ode_options.min_timestep = 0.001;
+            let mut solver = problem.tr_bdf2::<LS>().unwrap();
+            *solver.state_mut().h = direction * 0.001;
+            solver.set_stop_time(direction * 0.0005).unwrap();
+            let result = solver.step();
+            assert_matches!(
+                result,
+                Err(crate::DiffsolError::OdeSolverError(
+                    crate::error::OdeSolverError::StepSizeTooSmall { .. }
+                ))
+            );
+            assert_eq!(solver.state().t, 0.0);
+            assert_eq!(solver.get_statistics().number_of_steps, 0);
+        }
     }
 
     #[test]

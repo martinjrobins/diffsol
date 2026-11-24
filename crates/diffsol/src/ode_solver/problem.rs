@@ -150,6 +150,10 @@ pub struct OdeSolverOptions<T: Scalar> {
     ///
     /// Must be greater than or equal to `Scalar::EPSILON` so that each step advances `t`.
     pub min_timestep: T,
+    /// Maximum solver-selected step size (absolute value, default: infinity, meaning no limit).
+    ///
+    /// Must be positive. User-supplied step sizes are not limited.
+    pub max_timestep: T,
     /// Upper bound on step-size growth `h_new/h_old` (default: solver-specific when `None`).
     pub max_timestep_growth: Option<T>,
     /// Lower bound for step-size growth dead-zone (default: solver-specific when `None`).
@@ -194,6 +198,7 @@ impl<T: Scalar> Default for OdeSolverOptions<T> {
             derivative_solve_tolerance: T::from_f64(0.2).unwrap(),
             derivative_solve_max_iter: 10,
             min_timestep: T::EPSILON,
+            max_timestep: T::INFINITY,
             max_timestep_growth: None,
             min_timestep_growth: None,
             max_timestep_shrink: None,
@@ -779,13 +784,8 @@ where
             .as_mut()
             .set_consistent_augmented(self, augmented_eqn, &mut newton_solver)?;
         let h = state.h;
-        let atol = &self.atol;
-        let rtol = self.rtol;
-        state
-            .as_mut()
-            // the heuristic works on the main state and the main tolerances, so it is the main
-            // equations that are evaluated (the augmented rhs writes one channel per batch lane)
-            .set_step_size(h, atol, rtol, &self.eqn, 1);
+        // The initial-step heuristic evaluates the main equations and tolerances.
+        state.estimate_initial_step_size(self, h, 1)?;
 
         Ok(state)
     }
@@ -1041,12 +1041,7 @@ where
             .as_mut()
             .set_consistent_augmented(self, augmented_eqn, &mut newton_solver)?;
         let h = state.h;
-        let atol = &self.atol;
-        let rtol = self.rtol;
-        state
-            .as_mut()
-            // see the comment in `bdf_state_adjoint`
-            .set_step_size(h, atol, rtol, &self.eqn, tableau.order());
+        state.estimate_initial_step_size(self, h, tableau.order())?;
         Ok(state)
     }
 
@@ -1201,12 +1196,7 @@ where
         }
 
         let h = state.h;
-        let atol = &self.atol;
-        let rtol = self.rtol;
-        state
-            .as_mut()
-            // see the comment in `bdf_state_adjoint`
-            .set_step_size(h, atol, rtol, &self.eqn, tableau.order());
+        state.estimate_initial_step_size(self, h, tableau.order())?;
         Ok(state)
     }
 
@@ -1368,7 +1358,7 @@ mod tests {
     use super::OdeSolverOptions;
 
     #[test]
-    fn min_timestep_default_is_scalar_epsilon() {
+    fn timestep_defaults() {
         assert_eq!(
             OdeSolverOptions::<f64>::default().min_timestep,
             f64::EPSILON
@@ -1376,6 +1366,14 @@ mod tests {
         assert_eq!(
             OdeSolverOptions::<f32>::default().min_timestep,
             f32::EPSILON
+        );
+        assert_eq!(
+            OdeSolverOptions::<f64>::default().max_timestep,
+            f64::INFINITY
+        );
+        assert_eq!(
+            OdeSolverOptions::<f32>::default().max_timestep,
+            f32::INFINITY
         );
     }
 }

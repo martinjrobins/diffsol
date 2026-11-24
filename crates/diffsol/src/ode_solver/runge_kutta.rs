@@ -474,20 +474,26 @@ where
         Ok(())
     }
 
-    pub(crate) fn set_stop_time(&mut self, tstop: <Eqn as Op>::T) -> Result<(), DiffsolError> {
+    pub(crate) fn set_stop_time(
+        &mut self,
+        tstop: <Eqn as Op>::T,
+        maximum_timestep: Eqn::T,
+    ) -> Result<(), DiffsolError> {
         if self.problem.ode_options.fixed_step {
             return Err(DiffsolError::from(OdeSolverError::StopTimeWithFixedStep));
         }
-        self.tstop = Some(tstop);
-        if let Some(OdeSolverStopReason::TstopReached) = self.handle_tstop(tstop)? {
+        if let Some(OdeSolverStopReason::TstopReached) =
+            self.handle_tstop(tstop, maximum_timestep)?
+        {
             let error = OdeSolverError::StopTimeAtCurrentTime;
             self.tstop = None;
             return Err(DiffsolError::from(error));
         }
+        self.tstop = Some(tstop);
         Ok(())
     }
 
-    pub(crate) fn start_step(&mut self) -> Result<Eqn::T, DiffsolError> {
+    pub(crate) fn start_step(&mut self, maximum_timestep: Eqn::T) -> Result<Eqn::T, DiffsolError> {
         if self.is_state_mutated {
             // reinitalise root finder if needed
             if let (Some(root_fn), Some(root_finder)) =
@@ -498,7 +504,7 @@ where
             }
             // reinitialise tstop if needed
             if let Some(t_stop) = self.tstop {
-                self.set_stop_time(t_stop)?;
+                self.set_stop_time(t_stop, maximum_timestep)?;
             }
 
             self.is_state_mutated = false;
@@ -817,14 +823,23 @@ where
         Ok(())
     }
 
+    fn time_roundoff(t: Eqn::T, h: Eqn::T) -> Eqn::T {
+        Eqn::T::from_f64(100.0).unwrap() * Eqn::T::EPSILON * (abs(t) + abs(h))
+    }
+
+    pub(crate) fn is_at_stop_time(&self, t: Eqn::T, h: Eqn::T) -> bool {
+        self.tstop
+            .is_some_and(|tstop| abs(t - tstop) <= Self::time_roundoff(t, h))
+    }
+
     fn handle_tstop(
         &mut self,
         tstop: Eqn::T,
+        maximum_timestep: Eqn::T,
     ) -> Result<Option<OdeSolverStopReason<Eqn::T>>, DiffsolError> {
         let state = &mut self.state;
         // check if the we are at tstop
-        let troundoff =
-            Eqn::T::from_f64(100.0).unwrap() * Eqn::T::EPSILON * (abs(state.t) + abs(state.h));
+        let troundoff = Self::time_roundoff(state.t, state.h);
         if abs(state.t - tstop) <= troundoff {
             state.t = tstop;
             return Ok(Some(OdeSolverStopReason::TstopReached));
@@ -844,7 +859,13 @@ where
             || (state.h < Eqn::T::zero() && state.t + state.h < tstop - troundoff)
         {
             let factor = (tstop - state.t) / state.h;
-            state.h.mul_assign(factor);
+            state.h = super::config::limit_timestep(
+                state.h,
+                factor,
+                Eqn::T::zero(),
+                maximum_timestep,
+                state.t,
+            )?;
         }
         Ok(None)
     }
@@ -929,10 +950,8 @@ where
 
     pub(crate) fn error_test_fail(
         &mut self,
-        h: Eqn::T,
         nattempts: usize,
         max_error_test_fails: usize,
-        min_timestep: Eqn::T,
     ) -> Result<(), DiffsolError> {
         self.statistics.number_of_error_test_failures += 1;
         // if too many error test failures, then fail
@@ -943,12 +962,6 @@ where
                     num_failures: nattempts,
                 },
             ));
-        }
-        // if step size too small, then fail
-        if abs(h) < min_timestep {
-            return Err(DiffsolError::from(OdeSolverError::StepSizeTooSmall {
-                time: self.state.t.to_f64().unwrap(),
-            }));
         }
         Ok(())
     }
@@ -965,9 +978,7 @@ where
 
     pub(crate) fn solve_fail(
         &mut self,
-        h: Eqn::T,
         nonlinear_failures: usize,
-        min_timestep: Eqn::T,
         max_nonlinear_solver_fails: usize,
     ) -> Result<(), DiffsolError> {
         // if too many nonlinear solver failures, then fail
@@ -975,12 +986,6 @@ where
             return Err(self.last_solve_fail(nonlinear_failures));
         }
         self.statistics.number_of_nonlinear_solver_fails += 1;
-        // if step size too small, then fail
-        if abs(h) < min_timestep {
-            return Err(DiffsolError::from(OdeSolverError::StepSizeTooSmall {
-                time: self.state.t.to_f64().unwrap(),
-            }));
-        }
         Ok(())
     }
 
@@ -989,6 +994,7 @@ where
         h: Eqn::T,
         new_h: Eqn::T,
         rescale_dy: bool,
+        maximum_timestep: Eqn::T,
     ) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError> {
         let s = self.tableau.s();
         // step accepted, so integrate output functions
@@ -1049,7 +1055,9 @@ where
 
         // check if the we are at tstop
         if let Some(tstop) = self.tstop {
-            if let Some(OdeSolverStopReason::TstopReached) = self.handle_tstop(tstop)? {
+            if let Some(OdeSolverStopReason::TstopReached) =
+                self.handle_tstop(tstop, maximum_timestep)?
+            {
                 self.tstop = None; // reset tstop
                 return Ok(OdeSolverStopReason::TstopReached);
             }

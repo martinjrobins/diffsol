@@ -1018,6 +1018,145 @@ pub(crate) mod tests {
         check(problem.tsit45().unwrap());
     }
 
+    #[test]
+    fn max_timestep() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_problem;
+        use crate::NalgebraMat;
+
+        fn check<'a, Eqn: OdeEquations<T = f64> + 'a>(mut solver: impl OdeSolverMethod<'a, Eqn>) {
+            let cap = *solver.config().as_base_ref().maximum_timestep;
+            assert!(solver.state().h.abs() <= cap);
+            let direction = solver.state().h.signum();
+            let y0 = solver.state().y.get_index(0);
+            let tstop = solver.state().t + direction * 0.505;
+            solver.set_stop_time(tstop).unwrap();
+            loop {
+                let t = solver.state().t;
+                let reason = solver.step().unwrap();
+                let dt = direction * (solver.state().t - t);
+                assert!(dt > 0.0 && dt <= cap * (1.0 + 1e-10));
+                assert!(solver.state().h.abs() <= cap);
+                if matches!(reason, OdeSolverStopReason::TstopReached) {
+                    break;
+                }
+            }
+            let expected = y0 * (-0.1 * tstop).exp();
+            assert!((solver.state().y.get_index(0) - expected).abs() < 1e-4);
+        }
+
+        for direction in [1.0, -1.0] {
+            for cap in [0.01, 0.002] {
+                let (mut problem, _) = exponential_decay_problem::<NalgebraMat<f64>>(false);
+                problem.h0 = direction;
+                problem.ode_options.max_timestep = cap;
+                check(problem.bdf::<NalgebraLU<f64>>().unwrap());
+                check(problem.tr_bdf2::<NalgebraLU<f64>>().unwrap());
+                check(problem.tsit45().unwrap());
+            }
+        }
+    }
+
+    #[test]
+    fn user_timestep_outside_bounds() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_problem;
+        use crate::NalgebraMat;
+
+        fn check<'a, Eqn: OdeEquations<T = f64> + 'a>(
+            mut solver: impl OdeSolverMethod<'a, Eqn>,
+            h: f64,
+        ) {
+            let t = solver.state().t;
+            *solver.state_mut().h = h;
+            solver.step().unwrap();
+            assert!((solver.state().t - t - h).abs() < 1e-15);
+        }
+
+        for direction in [1.0, -1.0] {
+            let (mut problem, _) = exponential_decay_problem::<NalgebraMat<f64>>(false);
+            problem.h0 = direction;
+            problem.ode_options.min_timestep = 0.001;
+            problem.ode_options.max_timestep = 0.001;
+            for h in [direction * 0.0005, direction * 0.002] {
+                check(problem.bdf::<NalgebraLU<f64>>().unwrap(), h);
+                check(problem.tr_bdf2::<NalgebraLU<f64>>().unwrap(), h);
+                check(problem.tsit45().unwrap(), h);
+            }
+        }
+    }
+
+    #[test]
+    fn stop_time_respects_max_timestep() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_problem;
+        use crate::NalgebraMat;
+
+        fn check<'a, Eqn: OdeEquations<T = f64> + 'a>(mut solver: impl OdeSolverMethod<'a, Eqn>) {
+            let direction = solver.state().h.signum();
+            *solver.state_mut().h = direction * 0.01;
+            *solver.config_mut().as_base_mut().maximum_timestep = 0.001;
+            solver.set_stop_time(direction * 0.005).unwrap();
+            assert!(solver.state().h.abs() <= 0.001);
+            // A rejected replacement must leave the original stop active.
+            let closer_stop = solver.state().t + solver.state().h / 2.0;
+            *solver.config_mut().as_base_mut().maximum_timestep = 0.0;
+            let result = solver.set_stop_time(closer_stop);
+            assert_matches!(result, Err(DiffsolError::Other(_)));
+            *solver.config_mut().as_base_mut().maximum_timestep = 0.001;
+            loop {
+                let t = solver.state().t;
+                let reason = solver.step().unwrap();
+                assert!((solver.state().t - t).abs() <= 0.001 * (1.0 + 1e-10));
+                if matches!(reason, OdeSolverStopReason::TstopReached) {
+                    break;
+                }
+            }
+            assert_eq!(solver.state().t, direction * 0.005);
+        }
+        for direction in [1.0, -1.0] {
+            let (mut problem, _) = exponential_decay_problem::<NalgebraMat<f64>>(false);
+            problem.h0 = direction;
+            check(problem.bdf::<NalgebraLU<f64>>().unwrap());
+            check(problem.tr_bdf2::<NalgebraLU<f64>>().unwrap());
+            check(problem.tsit45().unwrap());
+        }
+    }
+
+    #[test]
+    fn rk_terminal_step_allows_small_next_timestep() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_problem;
+        use crate::NalgebraMat;
+
+        fn check<'a, Eqn: OdeEquations<T = f64> + 'a>(
+            mut solver: impl OdeSolverMethod<'a, Eqn>,
+            tstop: f64,
+        ) {
+            solver.set_stop_time(tstop).unwrap();
+            let result = solver.step();
+            assert_matches!(result, Ok(OdeSolverStopReason::TstopReached));
+            assert_eq!(solver.state().t, tstop);
+            let result = solver.step();
+            assert_matches!(
+                result,
+                Err(DiffsolError::OdeSolverError(
+                    OdeSolverError::StepSizeTooSmall { .. }
+                ))
+            );
+            assert_eq!(solver.state().t, tstop);
+        }
+        for direction in [1.0, -1.0] {
+            let (mut problem, _) = exponential_decay_problem::<NalgebraMat<f64>>(false);
+            problem.h0 = direction;
+            problem.ode_options.min_timestep = 0.001;
+            check(problem.tsit45().unwrap(), direction * 1e-9);
+            problem.ode_options.max_timestep_growth = Some(0.5);
+            let mut explicit = problem.tsit45().unwrap();
+            *explicit.state_mut().h = direction * 0.001;
+            check(explicit, direction * 0.001);
+            let mut sdirk = problem.tr_bdf2::<NalgebraLU<f64>>().unwrap();
+            *sdirk.state_mut().h = direction * 0.001;
+            check(sdirk, direction * 0.001);
+        }
+    }
+
     pub fn test_config<'a, Eqn: OdeEquations + 'a, Method: OdeSolverMethod<'a, Eqn>>(
         mut s: Method,
     ) {
@@ -2086,6 +2225,7 @@ pub(crate) mod tests {
         let (mut problem, _soln) = exponential_decay_problem::<M>(false);
         problem.h0 = h;
         problem.ode_options.fixed_step = true;
+        problem.ode_options.max_timestep = h / 2.0;
 
         let mut tsit45 = problem.tsit45().unwrap();
         tsit45.step().unwrap();
